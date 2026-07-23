@@ -1,0 +1,80 @@
+schema: spec-driven
+project: CerebroIA
+artifact_store: openspec
+execution_mode: interactive
+
+context: |
+  Tech stack: Python 3.12 MCP server using FastMCP, SQLite/FTS5, sqlite-vec, and FastEmbed; Bash reindex automation; Obsidian Markdown vault.
+  Architecture: single-file hybrid BM25/vector retrieval service with a local SQLite index and stdio MCP transport.
+  Dependency management: repository has a local virtualenv but no committed package manifest or lockfile.
+  Testing: no automated test runner, test suite, coverage, CI, linter, formatter, or type checker is configured.
+  Style: existing Python is procedural and compact; repository documentation and comments are primarily Spanish.
+  Safety: preserve the vault, generated databases, backups, and all uncommitted work during the MCP rebuild.
+
+strict_tdd: false
+
+testing:
+  detected: 2026-07-23
+  strict_tdd: false
+  reason: No test runner or automated test suite is configured; enable strict TDD after the planning change bootstraps a runner.
+  test_runner:
+    framework: null
+    command: null
+  layers:
+    unit:
+      available: false
+      tool: null
+    integration:
+      available: false
+      tool: null
+    e2e:
+      available: false
+      tool: null
+  coverage:
+    available: false
+    command: null
+  quality:
+    linter:
+      available: false
+      command: null
+    type_checker:
+      available: false
+      command: null
+    formatter:
+      available: false
+      command: null
+  smoke_checks:
+    - "cerebro-retrieval/.venv/bin/python -c '<parse cerebro.py with ast>'"
+    - "sh -n cerebro-retrieval/reindex.sh"
+
+delivery:
+  chained_pr_strategy: ask-always
+  review_budget_lines: 400
+
+rules:
+  proposal:
+    - Treat preservation of existing repository data and uncommitted work as a hard constraint.
+    - Include rollback and migration safety for index or storage changes.
+  specs:
+    - Use Given/When/Then for scenarios.
+    - Use RFC 2119 keywords for normative requirements.
+    - Include explicit non-destructive and backward-compatibility scenarios.
+  design:
+    - Document architecture decisions and tradeoffs.
+    - Define atomic index replacement and recovery behavior before implementation.
+  tasks:
+    - Group work into reviewable units that target at most 400 changed lines.
+    - Keep tests and implementation in the same work unit.
+  apply:
+    instructions:
+      - Follow existing repository patterns unless the approved design changes them.
+      - Do not delete or overwrite the live index, vault content, backups, or uncommitted files.
+      - Bootstrap a test runner before enabling RED-GREEN-REFACTOR.
+    tdd: false
+    test_command: ""
+  verify:
+    test_command: ""
+    build_command: ""
+    coverage_threshold: 0
+  archive:
+    - Warn before merging destructive deltas.
