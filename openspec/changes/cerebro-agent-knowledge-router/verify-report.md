@@ -1,3 +1,128 @@
+## Verification Report — Slice 6A
+
+**Change**: cerebro-agent-knowledge-router
+**Verification boundary**: Slice 6A only — snapshot-bound local retrieval (`retrieval.py`, `tests/test_retrieval.py`, `evals/local-routing.jsonl`)
+**Mode**: Standard (`strict_tdd: false`) · **Delivery**: interactive OpenSpec, ask-always, feature-branch-chain
+**Date**: 2026-07-23
+**Run**: two independent fresh-context passes plus continuous orchestrator re-execution and adversarial probing
+
+### Verdict
+
+**PASS.** 97 tests pass. Six defects were found and closed. Not one was found by the pass that wrote the code.
+
+The final `scorable = passages[: len(tokenized)]` fix received its own independent confirmation (verify #3): a 22,230-case sweep found zero untyped escapes, the regression test was proven falsifiable (1,800 crashes against the reverted code), and the disputed reachability of D6 was settled by proof — the pre-fix bug was unreachable under the default `time.monotonic` and required a caller-supplied non-monotonic clock. No coverage gap remains.
+
+### Verification Sequencing
+
+| Pass | Verdict | Found |
+|---|---|---|
+| Apply | — | Implemented `retrieval.py`, tests, eval fixtures |
+| Orchestrator probes | FAIL | `max_bytes` capped local retrieval at **14.6% of the corpus** |
+| Orchestrator probes | FAIL | `max_elapsed_ms` guarded ~0.03% of the request cost |
+| Independent verify #1 | **FAIL** | CRITICAL silent degradation; CRITICAL malformed `heading_path`; corrupt vector killing the whole leg; eval file never read |
+| Independent verify #2 | **FAIL** | CRITICAL: untyped `ValueError` introduced by the deadline restructuring |
+| Independent verify #3 | **PASS** | Confirmed the D6 fix; 22,230-case sweep clean; D6 reachability settled by proof |
+
+### Defects Found and Closed
+
+**D1 — retrieval saw 14.6% of the corpus.** `Budgets.max_bytes` — a *network transfer* ceiling per design.md's Network boundary — was applied to the local snapshot scan. Measured against the live corpus: 7,659,512 bytes across 6,574 passages against a 1,000,000-byte default, so the scan stopped at passage 963. Because the scan is `ORDER BY ref`, the same ~85% was invisible on every query: a fixed blind spot, not a sample. Independent verify #1 was asked to challenge the fix and confirmed it, including proving the new regression test goes red against the pre-fix logic.
+
+**D2 — `max_extracted_chars` was declared and enforced nowhere.** A hard-coded `_SNIPPET_CHARS = 500` ignored it.
+
+**D3 — `max_elapsed_ms` bounded almost nothing.** The deadline guarded only the row scan, measured at ~0.1 ms of a ~330 ms request; tokenization (113 ms), document frequency (94 ms) and cosine scoring (120 ms) ran unguarded. A caller asking for `max_elapsed_ms=1` still paid ~328 ms. After the fix, measured on the real corpus: **266 ms → 7.7 ms**.
+
+**D4 — silent unreported degradation (CRITICAL).** The scoring functions returned `{}` when a leg ran but matched nothing, while `search()` only tested `is None`. Embedding-dimension drift therefore produced zero vector ranks with an empty `degradation` tuple — a dead leg, reported as nothing at all.
+
+**D5 — malformed `heading_path` (CRITICAL).** Broader than first reported. `5` and `null` raised a bare `TypeError`; `"5"` silently became `("5",)` and `{"a": 1}` silently became `("a",)`. Since `heading_path` feeds the citation locator, the silent cases were provenance corruption — worse than the crash, because a crash is visible.
+
+**D6 — untyped `ValueError` introduced by the D3 fix (CRITICAL).** `zip(passages, tokenized, lengths, strict=True)` assumed all three stayed the same length, but the deadline can truncate `tokenized` independently. `strict=` raises during the iterator advance, *before* the loop body's own deadline check runs.
+
+Reachability, stated precisely: with the default `time.monotonic` this is **not** reachable — ten deadline values across a 4,000-passage corpus never triggered it, because once the deadline passes the scoring loop breaks at position 0. It requires a caller-supplied `clock` that reports expired and then unexpired. Independent verify #2's claim that it was reachable "on any corpus over ~65 passages" overstates it. But `clock` is a public documented parameter, a bare exception escaping violates the module's own typed-error contract regardless of route, and the correctness of the unfixed code rested on an implicit ordering invariant that any later edit could break.
+
+### Remediation
+
+| Fix | Closes |
+|---|---|
+| `max_bytes` removed from the local scan; budget mapping documented in the module header | D1 |
+| Snippets bounded by `max_extracted_chars` with explicit `max_extracted_chars_exceeded` | D2 |
+| `_expired()` re-checked every 64 items inside every scan and scoring loop | D3 |
+| `_leg_state()` distinguishes `None` (`*_leg_unavailable`) from `{}` (`*_leg_no_matches`) | D4 |
+| `_heading_path()` requires a JSON list of strings, raising typed `corrupt_snapshot_metadata` | D5 |
+| `scorable = passages[: len(tokenized)]` | D6 |
+| Broad `except` narrowed to the `embed_query` call; per-candidate `_floats()` returning `None` | one corrupt vector no longer kills the leg |
+| `test_eval_fixtures_are_bilingual_and_reference_real_corpus_notes` | eval file had no reader |
+
+**Budget mapping, now explicit**: local scan bounded by `max_elapsed_ms`; results by `max_candidates`; returned text by `max_extracted_chars`. `max_bytes` is the network ceiling and Slice 9's fetch layer owns it.
+
+### Orchestrator Probe Evidence (post-remediation)
+
+| Probe | Result |
+|---|---|
+| Embedding-dimension drift | `vector_leg_no_matches` reported |
+| Lexical leg matching nothing | `lexical_leg_no_matches` reported |
+| `heading_path` = `"5"`, `5`, `{"a":1}`, `null`, `[1,2]`, `[[]]` | typed `corrupt_snapshot_metadata`, all six |
+| Valid `heading_path` | still parses to `("A", "B")` |
+| One corrupt vector among three | only its own candidate lost; leg survives |
+| `max_elapsed_ms=1` on 6,574 real passages | 266 ms → 7.7 ms, reported |
+| Full budget on 6,574 real passages | all 6,574 scanned |
+| 200 clock-expiry combinations × 4 corpus sizes × with/without embedder | **zero untyped escapes** |
+| Determinism across `PYTHONHASHSEED` 0/1/42/2026 | identical ordering |
+
+### Performance and Cost, Measured
+
+Full-corpus BM25 on 6,574 real passages: 119 ms tokenize + 92 ms document frequency + 67 ms score = **279 ms**, against a 10,000 ms budget. The full-scan architecture is viable and the candidate index does **not** need an FTS5 table added — which would have meant reopening frozen Slice 3.
+
+The candidate schema (`index_meta`, `manifest`, `documents`, `passages`) genuinely has no FTS5 and no vec0 table, unlike the legacy `cerebro.db`. Pure-Python BM25 was a forced and correct choice for a `mode=ro&immutable=1` snapshot with `query_only=ON`.
+
+Memory is ~17.8 MB per call (7.7 MB text + 10.1 MB vectors) with no caching; independent verify #2 measured ~86 MB peak allocation at production scale. In-boundary for 6A, but a real load question for Slice 7 under concurrency.
+
+### Issues Found
+
+**CRITICAL**: None outstanding. D4, D5 and D6 were CRITICAL and are closed.
+
+**WARNING**:
+
+1. **No per-request caching.** Every call re-scans, re-tokenizes and re-parses the whole snapshot. Not a 6A acceptance failure; a real design question for Slice 7's MCP server under concurrency.
+2. **The eval fixtures are still not executed at production scale.** The new test parses `evals/local-routing.jsonl` and confirms all nine referenced vault notes exist, closing the literal "never read" defect. But no harness runs those bilingual queries against the real 370-note corpus, so 6A's bilingual recall claim rests on synthetic 3-passage fixtures. The evaluation harness is Slice 12 scope; this is tracked, not resolved.
+
+**SUGGESTION**:
+
+1. Independent verify #2 judged the `size:exception` the wrong call, noting that `retrieval.py` bundles at least four concerns and that D6 lives inside its densest function. That judgment is recorded. The counter-evidence is that the exception was granted *because* compression had already hidden two CRITICALs at 383 lines. Slice 6B should be split by concern from the start rather than compressed to fit.
+
+### Review Boundary
+
+| File | Lines |
+|---|---:|
+| `retrieval.py` | 335 |
+| `tests/test_retrieval.py` | 219 |
+| `evals/local-routing.jsonl` | 9 |
+| **Total** | **563** |
+
+Against a 400-line budget with a `size:exception` approved by the user on 2026-07-23. The original estimate given when requesting the exception was ~450; the delivered unit is 563, **25% above that estimate** — the module grew more when spacing was restored (221 → 335) and the adversarial tests grew more than projected (153 → 219). Density is now 47 blank lines with a maximum column of 109, between `packs.py` (2 blanks) and `index.py` (75 blanks).
+
+No tracked file was modified: `git diff --numstat d413d08 -- cerebro-retrieval/` is empty. The frozen Slice 1–5B modules are untouched.
+
+### Preservation
+
+Baseline verified before and after every phase; every run returned `"status": "pass"` with `"errors": []`.
+
+| Asset | Evidence | Result |
+|---|---|---|
+| Corpus | 370 notes; manifest `8cbcb107…42745` | ✅ unchanged |
+| Live DB | `03e9f3c5…3c10d`; 34,770,944 bytes; 6,574 chunk/FTS/vector rows | ✅ unchanged |
+| `cerebro.py` / `reindex.sh` | `a05a8c25…` / `8beb3dc0…` | ✅ unchanged |
+| `uv.lock` / `pyproject.toml` | `4e40f608…` / `59f5d4ec…`; no dependency added | ✅ unchanged |
+| LaunchAgent plist | `2421b8a4…` | ✅ unchanged |
+| Registrations, Graphify, `.gitignore` mod, Higgsfield note | as before | ✅ unchanged |
+
+### Next Recommendation
+
+6A is verified and committed on `feature/cerebro-agent-knowledge-router`; task 6A is marked complete. Proceed to Slice 6B (routing), split by concern up front, on the normal ≤400 budget.
+
+Per interactive mode: **stop here and await explicit user approval.**
+
+---
+
 ## Verification Report — Slice 5B
 
 **Change**: cerebro-agent-knowledge-router
