@@ -9,7 +9,7 @@
 
 ### Verdict
 
-**PASS**, with one documented coverage gap (see *Verification Sequencing* below) and 2 WARNING / 1 SUGGESTION.
+**PASS** — no open coverage gaps; 1 WARNING / 1 SUGGESTION, neither blocking.
 
 Slice 5B is functionally complete against its acceptance criteria. Three separate defects were found and closed during verification — each by a different pass, none by the pass that wrote the code.
 
@@ -23,8 +23,11 @@ Slice 5B is functionally complete against its acceptance criteria. Three separat
 | Orchestrator probes | FAIL | Duplicate mapping keys silently downgraded a security control |
 | Independent verify #2 | **PASS** | Confirmed both fixes closed under ~30 self-authored probes |
 | Orchestrator probes | FAIL | YAML-1.1 implicit typing broke declared JSON/YAML determinism |
+| Independent verify #3 | **PASS** | Confirmed the JSON-core resolver hardening; 0 CRITICAL / 0 WARNING / 0 SUGGESTION |
 
-**Documented gap**: the final JSON-core resolver hardening landed *after* independent verify #2. It is covered by the 73-test suite and by orchestrator adversarial probes recorded below, but has **not** been reviewed by an independent fresh-context pass. This should be independently confirmed before archive.
+Every fix received independent fresh-context review. Verify #3 was commissioned specifically because the resolver hardening landed after verify #2, so no change in this slice rests on a single pair of eyes.
+
+Verify #3 enumerated the resulting resolver map directly: `_StrictYamlLoader.yaml_implicit_resolvers` is confirmed present in the class `__dict__` and not identical to `SafeLoader`'s, holding **25 entries across 14 first-char buckets versus SafeLoader's 54 across 30**. No YAML-1.1 resolver survived. It further confirmed that with the `''` bucket now empty, a bare `key:` yields `''` rather than `None`, and judged this safe: every field in `DomainPack`, `SourcePolicy`, and `CapabilityPolicy` is required and strictly typed, so `''` and `None` fail identically — verified against `regulated_domain`, `freshness_days`, `expires_at`, `provenance`, `domains`, and a bare list item in `jurisdictions`.
 
 ### Defects Found and Closed
 
@@ -147,9 +150,7 @@ Independent verify #2 separately ran roughly 30 further probes — nested duplic
 
 **WARNING**:
 
-1. **The `cerebro-retrieval` module is entirely untracked by git.** `git log --all --full-history` returns nothing for `src`, `tests`, `pyproject.toml`, or `uv.lock`. No `git diff --numstat` is possible, so every changed-line and review-budget claim across Slices 1–5B is an estimate rather than a measurement, and there is no history for a security-critical module. Raised by independent verify #2. Committing this module is a decision for the user; it was not performed.
-
-2. **`EvidenceRecord.uncertainty` placement is arguable.** Spec A assigns "uncertainty reason" to claims, not evidence records; `ClaimRecord` currently has no such field and does not yet separate source text, extracted claim, assessment, and recommendation. That separation is Slice 10's scope (`evidence.py`). Tracked so it is not silently dropped.
+1. **`EvidenceRecord.uncertainty` placement is arguable.** Spec A assigns "uncertainty reason" to claims, not evidence records; `ClaimRecord` currently has no such field and does not yet separate source text, extracted claim, assessment, and recommendation. That separation is Slice 10's scope (`evidence.py`). Tracked so it is not silently dropped.
 
 **SUGGESTION**:
 
@@ -189,17 +190,30 @@ Baseline verified before and after every phase of this work; every run returned 
 
 No reindex process was running during any measurement. `claude mcp list` was never invoked; registrations were read from configuration only.
 
+### Version Control (resolved 2026-07-23)
+
+The `cerebro-retrieval` module was previously untracked, so no changed-line claim across Slices 1–5B could be measured rather than estimated, and a security-critical module had no history. On user approval this was closed **on a branch, without touching `main`**:
+
+```text
+$ git checkout -b feature/cerebro-agent-knowledge-router
+3e9e2f3 feat(cerebro-router): add reproducible baseline, corpus evidence model and atomic index
+c4b38eb feat(cerebro-router): add closed contracts, registries and signed domain packs
+6ccff6b docs(openspec): add SDD artifacts for cerebro-agent-knowledge-router
+31 files changed, 5733 insertions(+)
+```
+
+`cerebro.db` and `.venv` are excluded by the pre-existing `.gitignore`; `cerebro.py` and `reindex.sh` were already tracked. The unrelated `.gitignore` modification and the untracked Higgsfield note were deliberately left out and remain dirty, as the mandatory controls require. Nothing was pushed and no PR was opened.
+
+Slices 5A and 5B share one commit because both units evolved the same files and only their final state exists on disk; splitting them would require fabricating intermediate history. Their separate review boundaries remain recorded here. **From Slice 6 onward, per-slice diffs are measurable with `git diff --numstat` and must no longer be estimated.**
+
 ### Risks
 
-- The JSON-core resolver hardening has not been independently reviewed (see *Verification Sequencing*). It is the smallest of the four changes and is covered by tests and probes, but the dual-verification standard that caught D1–D4 has not yet been applied to it.
-- Every changed-line and budget claim for this change rests on estimates while the module stays untracked (WARNING 1).
 - This PASS authorizes no Slice 6 work, no MCP surface, no network capability, no registration change, and no client cutover.
+- Slice 5B has no budget headroom left (~325 of 400 estimated). Nothing further may be absorbed into this unit.
 
 ### Next Recommendation
 
-Accept Slice 5B as verified, subject to a short independent confirmation of the JSON-core resolver change.
-
-Before Slice 6, decide WARNING 1 — whether to commit the `cerebro-retrieval` module so future slices can measure their diffs instead of estimating them. Slice 6 must start from a fresh review unit; 5B has no budget headroom left.
+Accept Slices 5A and 5B as verified. Proceed to Slice 6 (local retrieval and routing) as a **fresh review unit**, measuring its diff against commit `6ccff6b` rather than estimating it.
 
 Per interactive mode: **stop here and await explicit user approval.**
 
