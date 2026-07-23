@@ -1,3 +1,40 @@
+## Verification Report — Slice 7A (service composition)
+
+**Change**: cerebro-agent-knowledge-router · **Boundary**: 7A only — `service.py` local composition + `test_service.py`. First of three units splitting Phase 7 (7A local composition, 7A-2 capability evidence, 7B MCP protocol).
+**Date**: 2026-07-23 · **Run**: one independent pass (FAIL, 2 CRITICAL), remediation of one + re-scoping of the other, then an independent re-verification (PASS).
+
+### Verdict
+
+**PASS** within 7A's re-scoped boundary. 213 tests. `size:exception` 429.
+
+### Sequencing and Defects
+
+| Pass | Verdict | Found |
+|---|---|---|
+| Apply | — | `investigate()`/`read()` composition, deps injected, request_id content hash |
+| Orchestrator probe | — | `investigate()` never surfaces `lookup.capabilities` → raised as central question |
+| Independent verify #1 | **FAIL** | CRITICAL A: `max_evidence` unenforced (4th synthetic-fixture recurrence); CRITICAL B: capability evidence dropped (central question → verdict A) |
+| Orchestrator + user | — | Fixed A in 7A; re-scoped B to a new unit **7A-2** (user chose the split) |
+| Independent verify #2 | **PASS** | A closed and falsifiable; re-scoping honest; zero regression |
+
+**CRITICAL A — `max_evidence` unenforced.** `retrieval.search` bounds by `max_candidates` (scan ceiling, default 50), not `max_evidence` (result-item ceiling, default 20), so `investigate()` could return up to 50 evidence items against a 20 budget. Invisible to the 2-note fixture — the 4th time a synthetic fixture hid a real-data defect. Fix: cap evidence to `request.budgets.max_evidence`, append `max_evidence_exceeded` degradation, set status `partial`. Regression test builds a 30-note real snapshot; independent re-verify confirmed falsifiable (revert → red) across `max_evidence ∈ {1,3,5,10,20,50}`.
+
+**CRITICAL B — capability evidence dropped (verdict A, re-scoped to 7A-2).** Against the real bundled pack, the only path reaching `route()=="proceed"` is a `capability_recommendation` query, yet `investigate()` returns local retrieval evidence and discards the capability that justified proceeding — violating "Method and tool discovery". The frozen `EvidenceRecord(kind="capability")` exists precisely to carry it. Full disclosure also needs `read()` to resolve capability refs (permissions/limitations have no `EvidenceRecord` field). This is genuine composition work; with 7A at 400/400, the user chose to split it into unit **7A-2** rather than a larger single exception. Recorded in `tasks.md` as a known gap with its spec citation — not a hidden omission. 7A within its boundary (local investigation + reads + budget enforcement) is coherent; no other output is silently dropped.
+
+### Coverage (re-verified, no regression)
+
+request_id determinism (content hash, cursor excluded to fix a cursor-circularity bug the apply found); routing authority (abstained/route_only don't retrieve or fabricate); exact reads + working continuation cursor; forged cursor → `invalid_cursor`; `cursor_not_supported` on investigate (judged honest — `retrieval.search` has no offset, so a facade cursor would be a false promise); `max_output_chars`/`max_extracted_chars` enforced; typed-and-total (no 6th untyped escape from the added `len()`/slice); injection inertness end-to-end. Deps injected via `ServiceDeps`; the real-pipeline test discipline held (real snapshot + real registry).
+
+### Gates & Preservation
+
+213 passed; `pip_audit` clean; `uv.lock` `4e40f608…` unchanged; frozen Slices 1–6B zero-diff vs `5717f6d`; baseline `pass`/`errors: []` before and after; corpus/DB/registrations unchanged. Boundary `service.py` 218 + `test_service.py` 211 = **429**, approved `size:exception`.
+
+### Next Recommendation
+
+7A closes within its boundary. Proceed to **7A-2** (capability evidence in investigate + `resolve_capability` in read, with its own real-pipeline regression test), then 7B (MCP protocol). Per interactive mode: **stop and await approval.**
+
+---
+
 ## Verification Report — Slice 6B-3 (route-or-abstain decision)
 
 **Change**: cerebro-agent-knowledge-router
