@@ -1,3 +1,75 @@
+## Verification Report — Slice 6B-3 (route-or-abstain decision)
+
+**Change**: cerebro-agent-knowledge-router
+**Verification boundary**: Slice 6B-3 only — the route-or-abstain decision (`route.py`, `tests/test_route.py`). Last of the three units splitting the routing phase; completes Phase 6.
+**Mode**: Standard (`strict_tdd: false`) · **Delivery**: interactive OpenSpec, ask-always, feature-branch-chain
+**Date**: 2026-07-23
+**Run**: one independent fresh-context pass (FAIL, 3 CRITICAL), remediation, then an independent confirmation of the fixes
+
+### Verdict
+
+**PASS** (on the remediated tree; the fix's independent confirmation is the final gate). 198 tests. Pure, deterministic decision consuming classification + lookup. Approved `size:exception` at 458 lines. **Both binding constraints satisfied.**
+
+### Verification Sequencing
+
+| Pass | Verdict | Found |
+|---|---|---|
+| Apply | — | Implemented `route.py` (5-rule precedence: consequential > no-evidence > regulated-missing-context > jurisdiction-mismatch > proceed) |
+| Orchestrator probe | — | A caller-declared `regulated` produced `proceed` when assessed risk was `unknown` → raised as central question |
+| Independent verify #1 | **FAIL** | 3 CRITICAL: binding-constraint-2 hole (verdict A); 5th untyped escape (`KeyError`); no real-pipeline test (3rd occurrence of the pattern) |
+| Orchestrator confirm | PASS | Rank-swap fix correct across all 20 risk pairs; no over-gating regression |
+
+### Defects Found and Closed (3 CRITICAL)
+
+**D1 — binding constraint 2 violated (the caller's `risk_class` floor had zero effect).** `_RISK_RANK` ranked `unknown` above `regulated`, and Rule 3 (the regulated-context gate) keys on `effective_risk == "regulated"` exactly. Since the classifier only produces `risk="unknown"` for `domain=="unsupported"`, a caller declaring `risk_class="regulated"` on any unsupported-domain request got `effective_risk="unknown"` → Rule 3 skipped → `proceed`. Declaring `regulated` was *less* protective than declaring `low`. Reproduced end-to-end through the real `classify → discover → route` pipeline: "what tool helps with medical diagnosis" + `risk_class="regulated"` → `proceed`.
+
+Fix (candidate ii, not i): `_RISK_RANK = {"low":0,"medium":1,"high":2,"unknown":3,"regulated":4}` — `regulated` is the ceiling; `unknown` still outranks low/medium/high. `unknown` is an epistemic state, not a severity above a caller-declared `regulated`, so it must not absorb the declaration. Candidate (i) — firing Rule 3 on `unknown` — was rejected because it would over-gate benign default-declared unsupported-domain lookups. Only the `unknown`+`regulated` combination changes behavior; all 19 other pairs are provably unchanged.
+
+**D2 — 5th untyped escape.** `_RISK_RANK[assessed]` was an unguarded dict lookup; `RequestClassification` is a plain dataclass with no runtime Literal enforcement, so `risk="critical"` raised a bare `KeyError` (unlike `request.risk_class`, which pydantic validates at construction). Fix: `_effective_risk` raises typed `RouteError("invalid_risk_level")` for any out-of-range level.
+
+**D3 — synthetic-fixture-masks-real-data (3rd occurrence).** No test exercised `route()` against a `LookupResult` from the real `discover()` over the real bundled pack — the same pattern that hid a CRITICAL in 6A and 6B-2, and exactly what let D1 ship. Fix: `test_real_pipeline_medical_tool_request_declared_regulated_does_not_proceed` runs the full pipeline over the real signed pack; plus `test_caller_declared_regulated_is_never_swallowed_by_unknown_assessed_risk` and `test_out_of_domain_assessed_risk_fails_typed_not_bare_keyerror`.
+
+### Binding Constraints — Both Satisfied
+
+1. **Domain-agnostic abstention**: `has_evidence` never reads `classification.domain`; general and unsupported (and all seven domains) with no evidence reach an identical `abstained`/`no_approved_pack_or_local_evidence` outcome. Consequential-action abstains identically across domains too.
+2. **`risk_class` is a floor**: `effective_risk = max(assessed, declared)` by rank, with `regulated` the ceiling. A caller declaring higher than the classifier assessed always wins; the D1 fix ensures a declared `regulated` is never swallowed by an epistemic `unknown`.
+
+### Decision Vocabulary and Precedence
+
+`RouteOutcome = proceed | route_only | abstained` (the latter two are exactly `InvestigationResult.status` values; `proceed` signals later stages may continue). Closed `RouteReason` (5) and `Gap` (4) literals; no free-text field. Precedence: (1) consequential action → route_only/abstained; (2) domain-agnostic no-evidence → abstained; (3) regulated + missing jurisdiction/date → route_only with named gaps; (4) sources present but none jurisdiction-applicable → route_only; (5) default → proceed. The three evidence-normalization scenarios (cyber authorization, programming version, UX standards) are documented as Slice 10 duties, not routing triggers — structurally unreachable here since the decision has no conclusion field.
+
+### Issues Found
+
+**CRITICAL**: None outstanding. All three are closed and their regression tests are falsifiable.
+
+**WARNING**: None new.
+
+**SUGGESTION** (carried, for a future unit): expose the caller's original declared `risk_class` on `RouteDecision` (not only the collapsed `effective_risk`) so a later stage can audit the floor was honored; and consider whether `Intent.unclear` should gate more conservatively than `investigate` (currently treated identically) — a note for the evidence/context assembler.
+
+### Mechanical Gates
+
+```text
+$ <ext>/bin/python -m pytest tests -q          → 198 passed  (was 195; +3)
+$ <ext>/bin/python -m pip_audit                → No known vulnerabilities found
+$ UV_PROJECT_ENVIRONMENT=<ext> uv lock --check → Resolved 78 packages
+uv.lock SHA-256 4e40f608… unchanged; pyproject.toml unmodified; no dependency added
+git diff --check clean; AST parse clean
+```
+
+Frozen Slices 1–6B-2 (`classify.py`, `lookup.py`, `registries.py`, `packs.py`, `contracts.py`, `retrieval.py`, `index.py`, `corpus.py`, `models.py`, `pyproject.toml`, `uv.lock`) show zero diff versus `c7428bb`; only `route.py` and `test_route.py` changed. Determinism confirmed across `PYTHONHASHSEED`. Purity by AST: imports limited to `dataclasses`, `typing`, `.classify`, `.contracts`, `.lookup` — no I/O, clock, randomness, or network. Baseline `"status": "pass"`, `"errors": []` before and after; corpus, DB, legacy runtime, registrations unchanged.
+
+### Review Boundary
+
+`route.py` 157 + `test_route.py` 301 = **458 lines**, under a `size:exception` approved 2026-07-23. Third exception on the routing sub-slices (6B-2 435, 6B-3 458). The unit's real decision logic is ~90 lines; the overage is the adversarial test suite that this change's defect history demands — including the three regression tests that close the three CRITICALs. The 400 budget was kept unchanged; each exception is judged on merits. Tests confirmed uncompressed and reviewable.
+
+### Next Recommendation
+
+6B-3 is verified and committed on `feature/cerebro-agent-knowledge-router`. **All three routing units (6B-1, 6B-2, 6B-3) have landed and verified — task 6B is complete.** Proceed to Slice 7 (two-tool local MCP: `investigate_work`, `read_evidence`), which will compose the frozen classify → lookup → route → retrieve stages behind the public contract.
+
+Per interactive mode: **stop here and await explicit user approval.**
+
+---
+
 ## Verification Report — Slice 6B-2 (source/capability lookup)
 
 **Change**: cerebro-agent-knowledge-router
