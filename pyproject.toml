@@ -1,0 +1,27 @@
+[project]
+name = "cerebro-router"
+version = "0.1.0"
+description = "Read-only MCP knowledge router for the Cerebro corpus"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+  "fastembed==0.8.0",
+  "markdown-it-py>=4.0.0,<5",
+  "mcp>=1.28.1,<2",
+  "pydantic>=2.13.4,<3",
+  "pyyaml>=6.0.3,<7",
+  "sqlite-vec==0.1.9",
+]
+
+[dependency-groups]
+dev = [
+  "pip-audit>=2.10.0,<3",
+  "pytest>=9.0.2,<10",
+]
+
+[tool.pytest.ini_options]
+addopts = "-ra"
+pythonpath = ["src"]
+testpaths = ["tests"]
+
+[tool.uv]
+package = false
