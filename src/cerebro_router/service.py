@@ -16,12 +16,17 @@ from collections.abc import Callable
 from dataclasses import dataclass
 
 from .classify import classify
-from .contracts import InvestigationRequest, InvestigationResult, ReadItem, ReadRequest, ReadResult
+from .contracts import (
+    EvidenceRecord, InvestigationRequest, InvestigationResult, ReadItem, ReadRequest, ReadResult,
+)
 from .index import ActiveSnapshot
-from .lookup import discover
+from .lookup import discover, resolve_capability
+from .packs import CapabilityPolicy
 from .registries import Registry
 from .retrieval import EmbedQuery, search, to_evidence_records
 from .route import route
+
+_CAPABILITY_REF_PREFIX = "capability:"
 
 
 class ServiceError(ValueError):
@@ -80,6 +85,56 @@ def _validate_deps(deps: object) -> ServiceDeps:
     return deps
 
 
+def _capability_digest(capability: CapabilityPolicy) -> str:
+    # CapabilityPolicy.integrity is a prose instruction ("Verify the pinned distribution digest
+    # against the release index."), not a literal sha256 -- EvidenceRecord/ReadItem require the
+    # closed `sha256:<64 hex>` pattern, so this hashes the capability's own declared identity
+    # fields instead. Deterministic: the same capability always yields the same digest.
+    canonical = _canonical_json({
+        "capability_id": capability.capability_id, "canonical_distribution": capability.canonical_distribution,
+        "version": capability.version, "integrity": capability.integrity,
+    })
+    return f"sha256:{hashlib.sha256(canonical.encode('utf-8')).hexdigest()}"
+
+
+def _capability_evidence_record(capability: CapabilityPolicy) -> EvidenceRecord:
+    # Capability identity only: ref, canonical distribution, version, and digest. The frozen
+    # EvidenceRecord has no field for permissions/limitations, so that disclosure happens on
+    # read() (below) -- the investigate-emits / read-discloses split recorded for 7A-2 in tasks.md,
+    # consistent with design.md "Architecture" ("read_evidence only resolves immutable refs").
+    # authority/freshness/license/conflict are honestly "unknown" -- a capability record carries
+    # registry-declared identity, never an authority assessment, and this module must never
+    # fabricate one ("never concludes").
+    return EvidenceRecord(
+        ref=f"{_CAPABILITY_REF_PREFIX}{capability.capability_id}",
+        kind="capability",
+        publisher=capability.canonical_distribution,
+        locator=capability.canonical_distribution,
+        citation_locator=f"{capability.capability_id}@{capability.version}",
+        digest=_capability_digest(capability),
+        authority="unknown",
+        authority_rationale="Capability identity only; permissions and limitations are disclosed on read.",
+        freshness="unknown", license="unknown", conflict="unknown",
+    )
+
+
+def _window_text(
+    text: str, requested_range: object, cursor_start: int | None, item_cap: int, remaining_total: int,
+) -> tuple[str, int, int, bool] | None:
+    # Shared exact-window/truncation logic for both local passages and capability disclosure
+    # text: 1-indexed start, budget-capped window, and honest truncation reporting. `None` signals
+    # an out-of-range start (`invalid_range`), never a fabricated substitute.
+    length = len(text)
+    start = cursor_start if cursor_start is not None else (requested_range.start if requested_range else 1)
+    if start < 1 or start > length:
+        return None
+    wanted_end = min(requested_range.end, length) if requested_range else length
+    cap = max(min(item_cap, remaining_total), 0)
+    window = text[start - 1: wanted_end][:cap]
+    actual_end = start - 1 + len(window)
+    return window, start, actual_end, actual_end < wanted_end
+
+
 def investigate(request: InvestigationRequest, deps: ServiceDeps) -> InvestigationResult:
     """Compose classify -> discover -> route, then, only on `proceed`, retrieve over the
     snapshot. `route_only`/`abstained` carry the route decision's gaps and never retrieve or
@@ -107,19 +162,30 @@ def investigate(request: InvestigationRequest, deps: ServiceDeps) -> Investigati
 
     evidence, warnings, degradation, status = [], [], [], decision.outcome
     if decision.outcome == "proceed":
+        # Capability evidence (Slice 7A-2): one EvidenceRecord per matched `lookup.capabilities`
+        # entry -- "Method and tool discovery" requires capability refs alongside knowledge, not
+        # local retrieval alone. `lookup` was already computed above for route()'s has_evidence
+        # gate; nothing here re-queries the registry.
+        capability_evidence = [_capability_evidence_record(capability) for capability in lookup.capabilities]
         outcome = search(
             deps.snapshot, request.task, request.budgets,
             embed_query=deps.embed_query, clock=deps.clock,
         )
-        evidence = to_evidence_records(outcome)
+        local_evidence = to_evidence_records(outcome)
         warnings = list(outcome.warnings)
         degradation = list(outcome.degradation)
         truncated = outcome.truncated
-        # Enforce the declared `max_evidence` ceiling. retrieval.search bounds by `max_candidates`
-        # (a scan ceiling), not by `max_evidence` (the result-item ceiling), so without this an
-        # investigation could return up to `max_candidates` evidence items against a smaller
-        # `max_evidence` budget -- "Bounded Investigation": every request MUST enforce the declared
-        # evidence-items ceiling. Truncation is reported, never silent.
+        # Combine capabilities first, then local retrieval, in each side's own deterministic order
+        # (registry pack_id-then-id order; retrieval's own ranking). Capabilities lead because they
+        # most directly answer "which tool/library" -- the reason `route()` proceeded on a
+        # capability_recommendation claim -- and are typically the smaller, most specific set;
+        # local passages fill the remaining budget. This ordering is the truncation preference below.
+        evidence = capability_evidence + local_evidence
+        # Enforce the declared `max_evidence` ceiling over the COMBINED set. retrieval.search bounds
+        # by `max_candidates` (a scan ceiling), not by `max_evidence` (the result-item ceiling), so
+        # without this an investigation could return more evidence items than the smaller declared
+        # budget -- "Bounded Investigation": every request MUST enforce the declared evidence-items
+        # ceiling. Truncation is reported, never silent.
         if len(evidence) > request.budgets.max_evidence:
             evidence = evidence[: request.budgets.max_evidence]
             degradation.append("max_evidence_exceeded")
@@ -144,17 +210,11 @@ def _read_one(
     if row is None:
         return ReadItem(ref=ref, status="missing_ref"), remaining_total
     relative_path, start_line, end_line, text, source_hash = row
-    length = len(text)
 
-    start = cursor_start if cursor_start is not None else (requested_range.start if requested_range else 1)
-    if start < 1 or start > length:
+    windowed = _window_text(text, requested_range, cursor_start, item_cap, remaining_total)
+    if windowed is None:
         return ReadItem(ref=ref, status="invalid_range"), remaining_total
-    wanted_end = min(requested_range.end, length) if requested_range else length
-
-    cap = max(min(item_cap, remaining_total), 0)
-    window = text[start - 1: wanted_end][:cap]
-    actual_end = start - 1 + len(window)
-    truncated = actual_end < wanted_end
+    window, start, actual_end, truncated = windowed
     next_cursor = _encode_cursor(request_id, ref, actual_end + 1) if truncated else None
 
     item = ReadItem(
@@ -167,15 +227,52 @@ def _read_one(
     return item, remaining_total - len(window)
 
 
+def _read_capability_one(
+    registry: Registry, ref: str, requested_range: object, cursor_start: int | None,
+    item_cap: int, remaining_total: int, request_id: str,
+) -> tuple[ReadItem, int]:
+    # Resolves a `capability:<id>` ref via the frozen `resolve_capability` (6B-2) -- never a
+    # fabricated or nearest-match record; not-found is a typed `missing_ref`, exactly like local
+    # refs. Content is the capability's own registry-declared metadata as canonical JSON: disclosure
+    # of what the pack states, never a recommendation to run the tool and never a conclusion.
+    capability = resolve_capability(ref[len(_CAPABILITY_REF_PREFIX):], registry)
+    if capability is None:
+        return ReadItem(ref=ref, status="missing_ref"), remaining_total
+    disclosure = _canonical_json({
+        "canonical_distribution": capability.canonical_distribution, "version": capability.version,
+        "integrity": capability.integrity, "advisories": capability.advisories,
+        "permissions": capability.permissions, "network_access": capability.network_access,
+        "data_access": capability.data_access, "limitations": capability.limitations,
+    })
+
+    windowed = _window_text(disclosure, requested_range, cursor_start, item_cap, remaining_total)
+    if windowed is None:
+        return ReadItem(ref=ref, status="invalid_range"), remaining_total
+    window, start, actual_end, truncated = windowed
+    next_cursor = _encode_cursor(request_id, ref, actual_end + 1) if truncated else None
+
+    item = ReadItem(
+        ref=ref, status="ok", content=window, start=start, end=actual_end,
+        digest=_capability_digest(capability), truncated=truncated, next_cursor=next_cursor,
+        evidence_kind="capability", locator=capability.canonical_distribution,
+        citation_locator=f"{capability.capability_id}@{capability.version}",
+        authority="unknown", freshness="unknown", license="unknown", conflict="unknown",
+    )
+    return item, remaining_total - len(window)
+
+
 def read(request: ReadRequest, deps: ServiceDeps) -> ReadResult:
-    """Resolve each `refs` entry to immutable local evidence and return exact, budget-bounded
-    content. Missing or out-of-range refs get typed per-ref failures -- never another ref's
-    content and never a fabricated substitute. `stale_ref`/`expired_ref`/`ineligible_ref` are
-    structurally supported statuses but unreachable from 7A's deps: a single active snapshot has
-    no history to compare a ref against, so that limitation is stated explicitly rather than
-    silently folded into `missing_ref`. Local refs only -- `resolve_source`/`resolve_capability`
-    (6B-2) exist for source/capability-kind evidence a later slice may surface; wiring them here
-    now would resolve refs `investigate()` never actually emits in 7A, i.e. untested surface.
+    """Resolve each `refs` entry to immutable local or capability evidence and return exact,
+    budget-bounded content. Missing or out-of-range refs get typed per-ref failures -- never
+    another ref's content and never a fabricated substitute. `stale_ref`/`expired_ref`/
+    `ineligible_ref` are structurally supported statuses but unreachable from 7A's deps: a single
+    active snapshot has no history to compare a ref against, so that limitation is stated
+    explicitly rather than silently folded into `missing_ref`. A `capability:<id>` ref (7A-2)
+    resolves via `resolve_capability` (6B-2) and discloses the registry's declared
+    canonical_distribution/version/integrity/advisories/permissions/network_access/data_access/
+    limitations in `content` -- the frozen `EvidenceRecord`/`ReadItem` have no dedicated fields
+    for permissions/limitations. `resolve_source` (6B-2) exists for source-kind evidence a later
+    slice may surface; wiring it here now would resolve refs `investigate()` never emits.
     """
     if not isinstance(request, ReadRequest):
         raise ServiceError("invalid_request_type")
@@ -198,8 +295,10 @@ def read(request: ReadRequest, deps: ServiceDeps) -> ReadResult:
     items: list[ReadItem] = []
     try:
         for ref in request.refs:
-            item, remaining = _read_one(
-                deps.snapshot.database, ref, ranges_by_ref.get(ref),
+            reader = _read_capability_one if ref.startswith(_CAPABILITY_REF_PREFIX) else _read_one
+            source = deps.registry if ref.startswith(_CAPABILITY_REF_PREFIX) else deps.snapshot.database
+            item, remaining = reader(
+                source, ref, ranges_by_ref.get(ref),
                 cursor_start if ref == cursor_ref else None,
                 request.budgets.max_extracted_chars, remaining, request_id,
             )
