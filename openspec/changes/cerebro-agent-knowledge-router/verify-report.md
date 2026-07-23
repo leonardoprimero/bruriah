@@ -1,3 +1,80 @@
+## Verification Report — Slice 6B-1 (classification)
+
+**Change**: cerebro-agent-knowledge-router
+**Verification boundary**: Slice 6B-1 only — deterministic request classification (`classify.py`, `tests/test_classify.py`). Slice 6B was split into 6B-1 classification / 6B-2 lookup / 6B-3 route-abstain to avoid the compression that hid defects in 6A.
+**Mode**: Standard (`strict_tdd: false`) · **Delivery**: interactive OpenSpec, ask-always, feature-branch-chain
+**Date**: 2026-07-23
+**Run**: one independent fresh-context pass (FAIL, CRITICAL found), remediation, then an independent confirmation of the fix (PASS)
+
+### Verdict
+
+**PASS.** 132 tests. One CRITICAL and two comment-level defects found and closed. The classifier is pure, deterministic, typed, and total.
+
+### Verification Sequencing
+
+| Pass | Verdict | Found |
+|---|---|---|
+| Apply | — | Implemented `classify.py` (intent, domain, claim type, risk, jurisdiction) |
+| Orchestrator probe | — | Six real regulated professions classify as `general`/`low`, bucketed with trivia — raised as the central question |
+| Independent verify #1 | **FAIL** | CRITICAL: NFC/NFD Unicode gap; overclaimed rationale; undocumented domain priority; central question resolved (B) |
+| Independent verify #2 | **PASS** | Confirmed the NFC fix; normalize/casefold order sound over all 140 keywords; 0 CRITICAL/WARNING |
+
+### The central question — resolved (B)
+
+The classifier detects `unsupported` via a fixed ~12-word list; unlisted professions (commercial pilot, funeral director, food-truck permits, peluquería) fall to `general`/`low`, identical to "capital of France". Verify #1 ruled this **acceptable, not a 6B-1 defect**: whether a domain is *supported* depends on approved-pack availability, which is a registry question owned by 6B-2/6B-3. The design's Routing/retrieval row is explicitly "classifies … never concludes"; abstention lives in the Packs and Evidence rows. The closed 7-value `Domain` literal cannot represent arbitrary professions by construction, and that is correct.
+
+**Binding constraint recorded for 6B-3** (in `tasks.md`, to be checked at its verify — CRITICAL if violated): the abstention gate MUST be domain-agnostic ("no approved pack / no local evidence") and run identically for `general` and `unsupported`. If 6B-3 keys abstention off `domain == "unsupported"` alone, the unlisted regulated professions will be answered instead of abstained. Also recorded: 6B-3 should treat the caller's `risk_class` as a floor.
+
+### Defect Found and Closed (CRITICAL)
+
+**NFC/NFD Unicode normalization gap.** `_words()` tokenized and casefolded but never Unicode-normalized. The keyword literals are NFC (Python source is), but macOS text fields and APFS filenames emit NFD, where an accented letter is a base plus a combining mark. NFD input silently failed to match every accented keyword. Reproduced: 6 of 8 Spanish queries misclassified on byte form alone — `auditoría` lost `accounting`, `médico` lost the medical safety net, all dropping to `general`/`low`. This is a real production trigger on the maintainer's own platform.
+
+Fix: `unicodedata.normalize("NFC", text)` in `_words()` before tokenizing, plus a parametrized regression test. Verify #2 exhaustively confirmed all 140 keyword literals are already NFC and round-trip from NFD input, and that the `normalize→casefold` order is sound for this lexicon (checked against ß, Turkish I, Greek final sigma, ligatures).
+
+Two comment-only defects also closed: the `_UNSUPPORTED_PROFESSION_WORDS` rationale no longer claims to satisfy "arbitrary unsupported profession" (it catches only explicitly-named professions; the real backstop is downstream), and the first-match domain priority is now documented as a deterministic tie-break, not a confidence judgment.
+
+### Value Sets (with spec citations)
+
+- `Domain` = law, accounting, cybersecurity, programming, ux_design, general, unsupported — the five professional families from "Domain-Sensitive Outcomes and Unsupported-Domain Abstention".
+- `Intent` = investigate, consequential_action, unclear — `consequential_action` from "Read-Only Informational Boundary and Host Actions".
+- `ClaimType` = factual, capability_recommendation, professional_conclusion — from "Local Knowledge and Capability Discovery" and the Read-Only boundary.
+- `RiskLevel` = low, medium, high, regulated, unknown — derived from domain, deliberately independent of the caller's `risk_class` (reconciliation deferred to 6B-3 as a floor).
+- `jurisdiction` — read verbatim from the structured field, else `"unknown"`; never guessed from `task` text.
+
+### Issues Found
+
+**CRITICAL / WARNING**: None outstanding.
+
+**SUGGESTION**: Verify #2 proposes NFKC over NFC — a strict superset that also folds fullwidth Latin (`ｃｏｄｅ` → `code`) and compatibility forms. The risk asymmetry favors it (a missed keyword silently degrades to `general`/`low`; a spurious match fails safe by raising risk). Not adopted in 6B-1: the module targets bilingual EN/ES, for which NFC is confirmed sufficient, and NFKC is robustness against CJK/fullwidth input outside this unit's stated scope. Tracked as a one-word future change should the input surface widen.
+
+### Mechanical Gates
+
+```text
+$ <ext>/bin/python -m pytest tests -q          → 132 passed  (was 125; +7)
+$ <ext>/bin/python -m pip_audit                → No known vulnerabilities found
+$ UV_PROJECT_ENVIRONMENT=<ext> uv lock --check → Resolved 78 packages
+uv.lock SHA-256 4e40f608… unchanged; pyproject.toml unmodified; no dependency added
+git diff --check clean; AST parse of all 16 files clean
+```
+
+Frozen Slices 1–6A (`contracts.py`, `packs.py`, `registries.py`, `index.py`, `corpus.py`, `models.py`, `retrieval.py`, `pyproject.toml`, `uv.lock`) show zero diff versus `c0c2ef8`. Determinism confirmed across `PYTHONHASHSEED` values. Adversarial inputs — lone/repeated combining marks, NFD at the 4096 bound, mixed NFC/NFD, ZWJ, RTL — all yield a typed result or `ClassificationError`; no bare exception. Purity confirmed by AST: imports limited to `re`, `unicodedata`, `dataclasses`, `typing`, `.contracts` — no I/O, clock, randomness, network, or registry.
+
+### Review Boundary
+
+`classify.py` 179 + `test_classify.py` 194 = **373 lines**, within the 400 budget (no exception needed). Density is genuinely reviewable — 26 blank lines, max column 116. Splitting 6B into three units up front, rather than compressing, kept this unit under budget on the first try.
+
+### Preservation
+
+Baseline `"status": "pass"`, `"errors": []` before and after. Corpus 370 notes / `8cbcb107…`; DB `03e9f3c5…`, 34,770,944 bytes, 6,574 rows; `cerebro.py`, `reindex.sh`, `uv.lock`, LaunchAgent, both registrations, `.gitignore`/Higgsfield dirty state — all unchanged.
+
+### Next Recommendation
+
+6B-1 is verified and committed on `feature/cerebro-agent-knowledge-router`. Proceed to 6B-2 (source/capability lookup against the deterministic registries), then 6B-3 (route-or-abstain) — where the binding constraint above must be honored and checked. Mark the 6B checkbox complete only when all three units land and the combined unit verifies.
+
+Per interactive mode: **stop here and await explicit user approval.**
+
+---
+
 ## Verification Report — Slice 6A
 
 **Change**: cerebro-agent-knowledge-router
