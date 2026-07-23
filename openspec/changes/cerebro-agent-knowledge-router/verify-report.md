@@ -1,3 +1,78 @@
+## Verification Report — Slice 6B-2 (source/capability lookup)
+
+**Change**: cerebro-agent-knowledge-router
+**Verification boundary**: Slice 6B-2 only — deterministic source/capability lookup (`lookup.py`, `tests/test_lookup.py`). Second of the three units splitting the routing phase.
+**Mode**: Standard (`strict_tdd: false`) · **Delivery**: interactive OpenSpec, ask-always, feature-branch-chain
+**Date**: 2026-07-23
+**Run**: one independent fresh-context pass (FAIL, CRITICAL), remediation, then an independent confirmation of the fix
+
+### Verdict
+
+**PASS** (on the remediated tree; the fix's independent confirmation is the final gate). 163 tests. Pure, deterministic, read-only over the loaded `Registry`. Approved `size:exception` at 435 lines.
+
+### Verification Sequencing
+
+| Pass | Verdict | Found |
+|---|---|---|
+| Apply | — | Implemented `lookup.py` (`discover`, `resolve_source`, `resolve_capability`) |
+| Orchestrator probe | — | classifier `Domain` enum and pack `domains` have empty intersection → raised as central question |
+| Independent verify #1 | **FAIL** | CRITICAL: no test pins `discover()` against the real bundled pack; central question resolved (B) |
+| Orchestrator confirm | PASS | Falsifiability shown: an aligned pack (`domains=["programming"]`) → `domain_supported=True` |
+
+### The central question — resolved (B)
+
+`lookup.py` gates source matching on exact set membership (`domain in pack.domains`). The classifier's closed `Domain` enum (law, accounting, cybersecurity, programming, ux_design, general, unsupported) and the open `DomainPack.domains` have an **empty intersection today** — the only shipped pack declares `domains=["software-research"]`. Verify #1 ruled the exact-match logic **correct**: it mirrors the frozen `load_pack(..., domain=...)` membership test; `DomainPack.domains` was deliberately an open field predating the classifier enum; and a synonym map inside `lookup.py` would fabricate a correspondence only a pack author may assert. Proven by bypassing the (unenforced) Literal at runtime: an aligned pack resolves sources correctly. The dead-on-arrival state is a **vocabulary-authoring gap, not a lookup defect**.
+
+**Constraint recorded (in `tasks.md`)**: reconciliation must live in future pack authoring — packs declaring classifier-domain identifiers, or an explicit documented domain contract — never in `lookup.py`. Today, source discovery is empty for ALL seven domains against the real registry, which is spec-compliant ("no applicable approved pack → abstain") and is the precondition 6B-3's binding constraint relies on.
+
+### Defect Found and Closed (CRITICAL)
+
+**No test pinned `discover()` against the real bundled pack.** Every fixture in `test_lookup.py` was synthetic; the one domain-gating "works" test used `domains=("general",)`, a value the real pack can never hold. So the fact that source discovery is empty for all seven domains against production data was unverified, and an accidental edit to `research-policy.json`'s `domains` would change routing with no failing test — the identical pattern to 6A's `max_bytes` defect (a fixture too small to see production behavior).
+
+Fix: `test_real_bundled_pack_resolves_no_domain_sources_for_any_classifier_domain` loads the real signed pack through `load_pack`, builds a `Registry`, and asserts `domain_supported is False` and `sources == ()` for all seven `Domain` values, plus that capabilities still surface for `capability_recommendation`. Orchestrator confirmed falsifiability: mutating the pack to `domains=["programming"]` yields `domain_supported=True, sources=1`, so the test pins real behavior rather than a tautology.
+
+The misleading header comment (WARNING) was also corrected: rule 1 now states plainly that all seven domains — not just general/unsupported — are empty against the real pack, cites the pinning test, and locates reconciliation in pack authoring.
+
+### Match Rules (with spec citations)
+
+1. Sources are domain-gated by exact `Identifier` membership — mirrors `load_pack(..., domain=...)`. Cites "Domain-Sensitive Outcomes and Unsupported-Domain Abstention".
+2. Jurisdiction is disclosed via `jurisdiction_applicable`, never silently collapsed: `GLOBAL` or exact match → true; mismatch and `unknown` → false. Cites "Accounting authority is jurisdiction-sensitive" ("preserves those refs as non-applicable").
+3. Capabilities are claim-type gated (`capability_recommendation`), not domain-gated — `CapabilityPolicy` has no domain field, and most tool/library questions classify as `general`. Cites "Local Knowledge and Capability Discovery".
+4. `authority` and source-level `claim_types` are disclosed but never filter — filtering by authority would be a forbidden trust judgment.
+5. No ranking: the registry's own deterministic order is preserved; match is boolean set membership.
+
+### Issues Found
+
+**CRITICAL / WARNING**: None outstanding. The CRITICAL and the header-comment WARNING are closed.
+
+**WARNING (carried, non-blocking, for a future unit)**: all-or-nothing capability return will surface unrelated capabilities once the registry holds more than one — a `CapabilityPolicy` has no domain/scope field. Structurally correct today; flag for whoever next touches that frozen contract or a downstream relevance stage.
+
+**SUGGESTION**: none material.
+
+### Mechanical Gates
+
+```text
+$ <ext>/bin/python -m pytest tests -q          → 163 passed  (was 162; +1)
+$ <ext>/bin/python -m pip_audit                → No known vulnerabilities found
+$ UV_PROJECT_ENVIRONMENT=<ext> uv lock --check → Resolved 78 packages
+uv.lock SHA-256 4e40f608… unchanged; pyproject.toml unmodified; no dependency added
+git diff --check clean; AST parse clean
+```
+
+Frozen Slices 1–6B-1 (`classify.py`, `registries.py`, `packs.py`, `contracts.py`, `retrieval.py`, `index.py`, `corpus.py`, `models.py`, `pyproject.toml`, `uv.lock`) show zero diff versus `f807b9a`; only `lookup.py` and `test_lookup.py` are new. Determinism confirmed across `PYTHONHASHSEED`. Purity confirmed by AST: imports limited to `.classify`, `.packs`, `.registries`, `dataclasses` — no I/O, clock, randomness, network, install, or execution. No fifth untyped-escape found. Baseline `"status": "pass"`, `"errors": []` before and after; corpus, DB, legacy runtime, registrations all unchanged.
+
+### Review Boundary
+
+`lookup.py` 166 + `test_lookup.py` 269 = **435 lines**, under a `size:exception` approved by the user on 2026-07-23. Unlike 6A's exception (compression had hidden defects), verify #1 confirmed the code is uncompressed and reviewable; the overage is the required real-pack pinning test that closes the CRITICAL plus honest documentation, not hidden complexity. Trimming adversarial coverage to hit 400 was rejected as the inverse anti-pattern.
+
+### Next Recommendation
+
+6B-2 is verified and committed on `feature/cerebro-agent-knowledge-router`. Proceed to 6B-3 (route-or-abstain), which MUST honor the binding constraint: a domain-agnostic abstention gate ("no approved pack / no local evidence"), run identically for `general` and `unsupported`; and treat the caller's `risk_class` as a floor. Given today's empty source discovery for all domains, `route_only`/`abstained` is the only currently-reachable source-backed outcome — 6B-3's tests must reflect that.
+
+Per interactive mode: **stop here and await explicit user approval.**
+
+---
+
 ## Verification Report — Slice 6B-1 (classification)
 
 **Change**: cerebro-agent-knowledge-router
