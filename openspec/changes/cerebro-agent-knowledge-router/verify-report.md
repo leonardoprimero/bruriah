@@ -1,3 +1,128 @@
+## Verification Report — Slice 11 (`context.py` bounded context assembler + host actions)
+
+**Change**: cerebro-agent-knowledge-router · **Boundary**: task 11.1 — `context.py` (331, new, unwired — composes `route.py`/`evidence.py`/`research.py`/`contracts.py` as libraries, matching how 9B delivered `research.py` and 10 delivered `evidence.py` unwired), `tests/test_context.py` (630, 23 tests, no fixture files). **Date**: 2026-07-24 · **Run**: independent, fresh-context, adversarial verification (did not author the code). **Mode**: Standard (no Strict TDD cache found for this project at verify time).
+
+### Verdict
+**PASS WITH WARNINGS — one CRITICAL process-compliance gap, not a code-safety defect.** All frozen-context constraints hold (zero diff to every tracked module including `service.py`/`mcp_server.py`, `uv.lock` hash unchanged, no new runtime deps, locked-env install/test/baseline all green). The core adversarial guarantee — route-gated conclusions are structurally impossible to fabricate on `abstained`/`route_only` outcomes, even when a full evidence pool and supported assessments are passed — is confirmed both by code inspection (`_route_gated_result`'s function signature never receives `assessments`/`evidence_pool`/`research_outcomes`) and by an independent runtime probe (below) that the shipped test suite does not itself exercise. The CRITICAL is a **review-workload-guard violation**: this slice measures 961 changed lines (331 module + 630 tests), 2.4x the design-mandated ≤400-line ceiling (design.md line 47: "Each slice is ≤400 changed lines including tests; split before apply otherwise"), and unlike every other oversized slice in this change's history (6A 546, 6B-2 435, 6B-3 458, 7A 429, 7B 406, 8A-1 410, 8A-2 419, 9A 973, 9B-1/9B-2 499/840, 10.1a/10.1b 342/389 — all of which carry an explicit "`size:exception` — N lines, approved by the user on <date>" line in `tasks.md`), task 11.1 has **no recorded size-exception or split approval anywhere** in `tasks.md`. The apply-progress record itself (Engram #2473) says the checkbox was "left UNCHECKED per instruction — this is a size-exception candidate awaiting a user split/exception decision, never self-approved." That decision has not happened. Code correctness is not in question; this is a process gate that the change's own controls require before this slice can be considered done or archived.
+
+### Frozen-Context Constraints
+| Check | Result |
+|---|---|
+| HEAD is `5e3c33a` | ✅ `git rev-parse HEAD` → `5e3c33ad6a472c947cf9c2d436a93e619baed5de` |
+| `git diff --numstat 5e3c33a -- cerebro-retrieval/` | ✅ empty for tracked files — only two brand-new untracked files exist under this path (`git diff --numstat` does not report untracked files at all; confirmed via `git status --porcelain`) |
+| `service.py`/`mcp_server.py` byte-frozen | ✅ `git diff 5e3c33a -- cerebro-retrieval/src/cerebro_router/service.py cerebro-retrieval/src/cerebro_router/mcp_server.py` → empty; sha256 of both working-tree files matches `git show 5e3c33a:<path>` exactly (`service.py` = `0c4e4f63...f5`, `mcp_server.py` = `300b1c95...45`) |
+| Only new files | ✅ `git status --porcelain` → `?? cerebro-retrieval/src/cerebro_router/context.py`, `?? cerebro-retrieval/tests/test_context.py` only within `cerebro-retrieval/`. Two unrelated pre-existing local diffs exist outside this slice's scope: `.gitignore` (adds `.atl/` — SDD skill-index ignore rule) and `openspec/changes/.../specs/agent-knowledge-routing/spec.md` (the amended robots clause — see Spec Compliance below, this amendment is what makes the shipped code's robots behavior spec-compliant; it is not part of the 11.1 diff scope but is directly relevant to this slice and was already present in the working tree at verify time). |
+| `uv.lock` sha256 | ✅ `3c83d9eb87c9e5e94dcd5ae850339da9c29aa567292773c4d9e093795f4f2bc8` (matches expected) |
+| `uv lock --check` | ✅ `Resolved 78 packages in 13ms` — no changes needed |
+| `pyproject.toml`/`uv.lock` byte-identical vs `5e3c33a` | ✅ `git diff 5e3c33a -- cerebro-retrieval/uv.lock cerebro-retrieval/pyproject.toml` → empty |
+| No new runtime dep | ✅ `rg 'requests|httpx|urllib3|aiohttp' src/` → only pre-existing prose/field-name hits (`max_network_requests`, comments in `fetch.py`/`research.py`); zero import statements in `context.py`. `context.py` imports only `hashlib`, `json`, `collections.abc.Sequence`, `typing.Literal`, and sibling modules `.contracts`/`.evidence`/`.research`/`.route`. |
+| `scripts/verify_legacy_baseline.py` (fresh venv, `uv sync --locked`, registered `.venv` untouched) | ✅ `status: pass`, `errors: []` |
+| `pip_audit` (fresh venv) | ✅ "No known vulnerabilities found" (only `cerebro-router` itself skipped as not-on-PyPI, expected) |
+| AST parse of `context.py` + `test_context.py` | ✅ both valid |
+| `git diff --check` | ✅ no whitespace errors |
+
+Fresh venv used for all execution: `uv venv <scratch>/verify-venv --python 3.12` + `UV_PROJECT_ENVIRONMENT=<scratch>/verify-venv uv sync --locked` — the registered `cerebro-retrieval/.venv` was never touched.
+
+### Test Execution
+```text
+$ UV_PROJECT_ENVIRONMENT=<scratch>/verify-venv uv run pytest tests -q -p no:randomly
+........................................................................ [ 20%]
+........................................................................ [ 40%]
+........................................................................ [ 60%]
+........................................................................ [ 81%]
+...................................................................      [100%]
+355 passed in 16.75s
+```
+Matches the expected count exactly (332 prior + 23 new `test_context.py` tests).
+
+```text
+$ UV_PROJECT_ENVIRONMENT=<scratch>/verify-venv uv run pytest tests/test_context.py -v -p no:randomly
+23 passed in 0.58s
+```
+All 23 focused tests independently re-run and green.
+
+### Adversarial Checks (12 requested, all independently exercised)
+| # | Check | Result |
+|---|---|---|
+| 1 | Structural route-gate: `abstained`/`route_only` outcome + FULL `evidence_pool`/real `ClaimAssessment`s/`ResearchOutcome`s passed anyway → must yield `evidence==[]`/`claims==[]`, structurally not by filtering | ✅ **Confirmed by code inspection**: `_route_gated_result(request, route_decision, request_id, *, forced)` — its function signature literally does not accept `assessments`/`evidence_pool`/`research_outcomes`; the caller (`_assemble_context_inner`) never passes them on this branch. It is impossible for this code path to read those arguments, not merely configured to ignore them. ✅ **Independently confirmed by a runtime probe not in the shipped suite**: built a real `supported` `ClaimAssessment` (via real `assess_claim`) + its evidence record, then called `assemble_context` against a real `abstained` decision (unsupported-domain routing) and a real `route_only` decision (regulated-domain-missing-context routing), passing the full evidence/assessments in both cases. Both returned `evidence==[] and claims==[]` (probe script + output captured below). The shipped test suite does NOT itself include this exact combination (full args + non-proceed outcome) — see SUGGESTION 1. Same guarantee holds for `mode="route_only"` forcing a `proceed` decision down, which IS shipped-tested (`test_rollback_mode_forces_route_only_even_when_route_decision_would_proceed`). |
+| 2 | Only `outcome=="proceed"` AND `mode=="full"` may reach `_assembled_result` | ✅ Code: `if mode == "route_only" or route_decision.outcome != "proceed": return _route_gated_result(...); return _assembled_result(...)` — since `mode` is validated to only ever be `"full"` or `"route_only"` before this point, `_assembled_result` is reachable only when `mode=="full"` AND `outcome=="proceed"`. No other path exists. |
+| 3 | Compaction never drops protected data (claim-cited refs/conflicts/warnings/gaps/host_actions), even when budget still can't be met; deterministic | ✅ `test_compact_to_budget_drops_only_unprotected_evidence_keeps_refs_conflicts_warnings` builds a genuinely over-budget payload (asserts `len(full.model_dump_json()) > threshold` explicitly, not merely claimed) with claim-cited refs + conflicts + warnings + 8 uncited padding records; only uncited evidence drops, in deterministic reverse-sorted-ref order, and a repeated call (`again = compact_to_budget(full, threshold)`) produces an identical result. `test_compact_to_budget_never_drops_protected_evidence_even_if_still_over_budget` uses `max_output_chars=1` (impossible budget) and confirms the single claim-cited record and the warning both survive unconditionally, returning the result unchanged rather than sacrificing protected data. `test_assemble_context_end_to_end_forces_compaction_under_a_real_output_budget` drives this through the real `assemble_context` public entry, not just the helper directly. |
+| 4 | Host actions PROPOSED, never executed; `web_search`/`fetch_public_url` reused verbatim from `ResearchOutcome.host_actions`, never re-derived/fetched | ✅ Code: `for action in outcome.host_actions: if action not in host_actions: host_actions.append(action)` — appended by reference/equality from the already-computed `ResearchOutcome`, never reconstructed. Grep-confirmed zero `subprocess`/`socket`/`urllib`/`http.client`/`requests.`/`httpx.`/`exec(`/`eval(` in `context.py`. `test_research_unavailable_outcomes_surface_web_search_and_fetch_public_url` confirms both kinds surface from real `research()` outcomes (`not_warranted`/`disabled`). |
+| 5 | Consequential action requested → no action performed; refusal warning + `inspect_capability` host action | ✅ `test_consequential_action_requested_performs_no_action_and_escalates_inspect_capability` and `test_consequential_action_with_no_evidence_abstains_and_still_escalates` both confirm `consequential_action_refused_no_action_performed` warning + `inspect_capability` action, zero evidence/claims, against the real `route()` output for `intent="consequential_action"` (which `route.py` structurally can only route to `route_only`/`abstained`, never `proceed` — confirmed by reading `route.py` line 131-134). |
+| 6 | Regulated domain lacks context → named gap + `request_jurisdiction`/`consult_professional` escalation, never a fabricated conclusion | ✅ `test_regulated_domain_missing_context_names_gaps_and_escalates_request_jurisdiction`: real `route()` for `domain="law"`/`risk="regulated"` → `route_only`/`regulated_domain_missing_context`; `assemble_context` returns `status="route_only"`, `evidence==[]`/`claims==[]`, `missing_jurisdiction` + `missing_effective_date` gaps, `request_jurisdiction` host action. |
+| 7 | Arbitrary unsupported profession → abstained + `consult_professional`; no conclusion | ✅ `test_arbitrary_unsupported_profession_abstains_with_consult_professional`: real `route()` for `domain="unsupported"` → `abstained`; `assemble_context` returns `status="abstained"`, no evidence/claims, `no_approved_domain_pack` gap, `consult_professional` action. |
+| 8 | Rollback (`mode="route_only"`) narrows `proceed`→`route_only`; keeps genuinely `abstained` decisions `abstained`; never widens | ✅ `test_rollback_mode_forces_route_only_even_when_route_decision_would_proceed` (narrows, with `rollback_route_only_mode` in `degradation`) and `test_rollback_mode_keeps_a_genuinely_abstained_decision_abstained` (no widening) both pass against real `route()` decisions. |
+| 9 | Typed-total: every malformed-argument shape returns a typed safe `abstained` result, never an untyped escape; `evidence_ref_not_in_pool` is a typed failure | ✅ `test_typed_total_backstop_never_raises_on_bad_argument_types` exercises bad `request`/`route_decision`/`assessments`/`evidence_pool`/`research_outcomes`/`mode` types, a non-`EvidenceRecord` pool item, a non-`ResearchOutcome` outcome item, and a claim citing a ref absent from the pool (`evidence_ref_not_in_pool`) — every case returns `status="abstained"` with a distinct named `warnings` code, never a raised exception. `test_unexpected_exception_is_converted_to_typed_internal_error` monkeypatches an internal helper to raise an arbitrary `RuntimeError` unrelated to any `ContextError` code and confirms the bare `except Exception` backstop converts it to `warnings==["internal_error"]`. |
+| 10 | Zero I/O / no wall-clock / determinism | ✅ `test_module_performs_no_io_or_network_imports` AST-parses `context.py` and asserts the import set is disjoint from `{sqlite3, socket, urllib, http, requests, httpx, os, subprocess}`. `test_zero_writes_or_filesystem_access` monkeypatches `builtins.open` to raise and confirms `assemble_context` never calls it. `test_module_never_calls_an_un_injected_wall_clock` greps the source for `date.today(`/`datetime.now(` — independently re-confirmed via `rg` outside the test suite, zero hits. `test_assemble_context_is_deterministic_for_identical_inputs` confirms identical inputs → identical `InvestigationResult` (`==` equality on the full pydantic model). |
+| 11 | No synthetic-fixture-masks-real-data; tests drive real `route()`/`assess_claim()`/`research()`; compaction tests genuinely over-budget | ✅ No mocks of `route.py`/`evidence.py`/`research.py` anywhere in `test_context.py` — all imports are the real functions (`from cerebro_router.route import RouteDecision, route`, etc.). Live-research scenarios (`test_research_fetched_evidence_folds_into_proceed_assembly`, `test_research_unavailable_outcomes_surface_web_search_and_fetch_public_url`) drive the real `research()` over a local TLS loopback server (`_LocalTlsServer`, mirroring `test_research.py`'s own 9B harness) — no stubbed fetch. Assertions throughout key off exact refs/gaps/host-action-kinds/degradation-codes that a stubbed `assemble_context` could not produce without the real branching logic (e.g. `assert [item.ref for item in result.evidence] == ["core:claim"]`, `assert "evidence_disagrees" in result.gaps`). Compaction over-budget genuineness independently re-verified above (#3). |
+| 12 | `complete` requires all-supported + evidence present + no gaps + no degradation; a conflict/gap/degradation forces `partial` | ✅ Code: `status = "complete" if all_supported and evidence and not gaps and not degradation else "partial"`. `test_real_pipeline_all_supported_claim_assembles_complete_status` is the only `complete` case in the suite. `test_real_pipeline_conflicting_sources_produce_conflicts_and_partial_status` (conflict → `partial`), `test_authority_unknown_claim_adds_a_real_safety_warning_and_keeps_the_ref` (gap → `partial`), `test_no_evidence_at_all_under_proceed_names_gap_and_stays_partial` (no evidence → `partial`), and `test_research_unavailable_outcomes_surface_web_search_and_fetch_public_url` (degradation → `partial`) each independently force `partial` through a different one of the four disqualifying conditions. |
+
+### Independent Adversarial Probe (item #1, not in shipped suite)
+Ran as an ad hoc script against the real modules (not committed, not part of any deliverable):
+```text
+CASE 1 (abstained + full evidence/assessments passed):
+  status: abstained
+  evidence: []
+  claims: []
+  PASS: evidence/claims structurally empty despite full args
+
+CASE 2 (route_only + full evidence/assessments passed):
+  status: route_only
+  evidence: []
+  claims: []
+  PASS: evidence/claims structurally empty despite full args
+
+ALL ADVERSARIAL PROBES PASSED — route-gate is structural (function signature of
+_route_gated_result never receives assessments/evidence_pool/research_outcomes),
+not a filter.
+```
+
+### Spec Compliance Matrix
+| Requirement | Scenario | Test | Result |
+|---|---|---|---|
+| Bounded Investigation, Pagination, and Stable References | Budget exhaustion | `test_compact_to_budget_drops_only_unprotected_evidence_keeps_refs_conflicts_warnings`, `test_compact_to_budget_never_drops_protected_evidence_even_if_still_over_budget`, `test_assemble_context_end_to_end_forces_compaction_under_a_real_output_budget` | ✅ COMPLIANT — bounded partial results returned without dropping refs/conflicts/warnings; deterministic; `next_cursor` set on compaction |
+| Read-Only Informational Boundary and Host Actions | Consequential action requested | `test_consequential_action_requested_performs_no_action_and_escalates_inspect_capability`, `test_consequential_action_with_no_evidence_abstains_and_still_escalates` | ✅ COMPLIANT — no action performed, `inspect_capability` proposed, refusal warning present |
+| Domain-Sensitive Outcomes and Unsupported-Domain Abstention | Supported regulated domain lacks context | `test_regulated_domain_missing_context_names_gaps_and_escalates_request_jurisdiction`, `test_accounting_sources_not_jurisdiction_applicable_escalates_consult_professional` | ✅ COMPLIANT — named gaps, `request_jurisdiction`/`consult_professional` escalation, zero conclusion |
+| Domain-Sensitive Outcomes and Unsupported-Domain Abstention | Arbitrary unsupported profession | `test_arbitrary_unsupported_profession_abstains_with_consult_professional` | ✅ COMPLIANT — abstained, `consult_professional`, no conclusion |
+| Safe Bounded Live Research (amended robots clause) | Robots honored via `AccessPolicy`, never by fetching `robots.txt` | `test_module_performs_no_io_or_network_imports` (structural) + `rg -i robots src/cerebro_router/context.py` (zero hits) + `rg -i robots src/cerebro_router/research.py` (only comments explaining the design decision, no fetch code) | ✅ COMPLIANT — matches the spec.md amendment already present in the working tree: "robots directives are honored through the operator-configured destination allowlist/denylist (`AccessPolicy`) rather than by live-fetching `robots.txt`" |
+
+**Compliance summary**: 5/5 scenarios compliant.
+
+### Correctness (Static Evidence)
+| Requirement | Status | Notes |
+|---|---|---|
+| `assemble_context` public entry | ✅ Implemented | Typed-total: `try/except ContextError/except Exception` backstop, never raises |
+| `compact_to_budget` | ✅ Implemented | Pure function, deterministic, protected-ref-aware |
+| 5 vendor-neutral `HostAction` kinds | ✅ Implemented | `web_search`/`fetch_public_url` reused from `ResearchOutcome`; `inspect_capability`/`request_jurisdiction`/`consult_professional` synthesized from `route.Gap`/`ClaimAssessment.uncertainty`/consequential-action reason |
+| Zero I/O / no wall-clock | ✅ Implemented | Grep + AST-confirmed; no `date.today(`/`datetime.now(` |
+| No new runtime dependency | ✅ Implemented | stdlib (`hashlib`, `json`) + sibling modules only |
+
+### Coherence (Design)
+| Decision | Followed? | Notes |
+|---|---|---|
+| design.md Architecture: "... → evidence normalizer/verifier → context assembler / host plan ←--- unavailable/unsafe work ---\|" | ✅ Yes | `context.py` sits exactly at this composition point, consuming `RouteDecision`/`ClaimAssessment`/`EvidenceRecord`/`ResearchOutcome` as already-computed inputs |
+| design.md "Files and Verification" Slice 11: "Context assembly, host actions, refusal/escalation \| Rollback: Route-only mode" | ✅ Yes | `mode="route_only"` is exactly this rollback; genuinely `abstained` decisions are never widened |
+| design.md line 47: "Each slice is ≤400 changed lines including tests; split before apply otherwise" | ❌ **No** | 961 changed lines (331 + 630), 2.4x over budget, with no recorded size-exception/split decision — see CRITICAL below |
+
+### Issues Found
+
+**CRITICAL**:
+1. **Slice 11 violates the change's own ≤400-line review-workload budget by 2.4x (961 total: `context.py` 331 + `test_context.py` 630) with no recorded size-exception or split approval in `tasks.md`.** Every other oversized slice in this change's history (6A, 6B-2, 6B-3, 7A, 7B, 8A-1, 8A-2, 9A, 9B-1, 9B-2, 10.1a/10.1b) carries an explicit "`size:exception` — N lines, approved by the user on <date>" line directly in `tasks.md` before being marked `[x]`. Task 11.1 has neither: it remains `[ ]` unchecked, and the apply-progress record (Engram #2473) explicitly states the checkbox was left unchecked "per instruction — this is a size-exception candidate awaiting a user split/exception decision, never self-approved." This decision has not happened. This is a process/governance gap, not a code defect — the shipped code is correct, tested, and safe — but per this project's own established convention and the SDD Review Workload Guard, this slice cannot be considered complete or ready for `sdd-archive` until a user makes and records that decision (either approve `size:exception` in `tasks.md`, matching precedent, or split the module/test commits as the apply-progress record itself proposes: module-first, then two test-only commits mirroring the 10.1a/10.1b precedent).
+
+**WARNING**:
+1. The shipped adversarial test suite does not itself include the exact combination the change's own guarantee #1 claims to defend against: a full `evidence_pool` + real supported `assessments` passed alongside a genuinely `abstained` or `route_only` route decision (only `mode="route_only"` forcing a `proceed` decision down is shipped-tested). The guarantee holds — confirmed independently above by both code inspection and a runtime probe — but it is not regression-guarded for the `abstained`/`route_only`-outcome case specifically. Recommend adding this as an explicit test before Slice 12 wires this module in.
+2. `tasks.md` task 11.1's checkbox is `[ ]` while the module and its tests are fully implemented and passing — accurately reflecting the pending size-exception decision (see CRITICAL), but worth flagging explicitly so `sdd-archive` does not silently treat this slice as done.
+
+**SUGGESTION**:
+1. Consider adding a code comment near `_route_gated_result`'s call site cross-referencing that its signature intentionally omits `assessments`/`evidence_pool`/`research_outcomes` as the structural enforcement mechanism for guarantee #1 — the module docstring already states this well, but a pointer at the call site would help future readers verify the guarantee without re-deriving it.
+2. The `.gitignore` and `spec.md` (robots clause) modifications present in the working tree at verify time are correct and consistent with this slice's behavior, but are outside the literal 11.1 file boundary (`context.py`/`test_context.py`). No action needed — flagged only for the archive/PR record so reviewers know these two lines are pre-existing/adjacent, not newly introduced by 11.1 itself.
+
+### Verdict
+**PASS WITH WARNINGS (code) / 1 CRITICAL (process gate — review-workload-guard decision pending).**
+The code is correct, fully tested (23/23 focused, 355/355 full suite), frozen-context-clean, and every adversarial guarantee the task requested holds under independent verification, including one guarantee (#1) confirmed by a probe stronger than the shipped suite. The sole CRITICAL blocks `sdd-archive` for this slice specifically until the user records a size-exception or split decision for task 11.1 in `tasks.md`, consistent with every prior oversized slice in this change.
+
+---
+
 ## Verification Report — Slice 10 (`evidence.py` normalization + claim-state ledger)
 
 **Change**: cerebro-agent-knowledge-router · **Boundary**: 10.1 — `evidence.py` (342, new, unwired — matches how 9B delivered `research.py`), `tests/test_evidence.py` (333, 21 tests, no fixture files). **Date**: 2026-07-24 · **Run**: independent, fresh-context, adversarial verification (did not author the code). **Mode**: Standard (no Strict TDD cache found for this project at verify time).
