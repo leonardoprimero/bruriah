@@ -5,6 +5,17 @@
 # `ServiceDeps`, never loaded here, so composition stays testable against real or fixture deps
 # alike -- design.md "Architecture": "investigate_work composes tested stages; read_evidence only
 # resolves immutable refs."
+#
+# Slice 12A-1: the first authorized edit of this frozen module. `investigate()`'s non-`proceed`
+# outcomes (`route_only`/`abstained`) now delegate to `context.assemble_context` (Slice 11,
+# standalone until now) instead of hand-building the route-gated `InvestigationResult` inline --
+# `assemble_context`'s `_route_gated_result` adds escalation `host_actions`
+# (`_escalation_host_actions(decision.gaps)`), the consequential-action refusal warning plus
+# `inspect_capability` action, and output-budget compaction, none of which the old manual
+# construction had. The `proceed` path is untouched: `assemble_context` discards evidence not
+# cited by a claim, which would destroy the capability + local retrieval catalog this module
+# still builds directly -- wiring `proceed` through the assembler is a later sub-slice's job, not
+# this one's.
 from __future__ import annotations
 
 import base64
@@ -16,6 +27,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 
 from .classify import classify
+from .context import assemble_context
 from .contracts import (
     EvidenceRecord, InvestigationRequest, InvestigationResult, ReadItem, ReadRequest, ReadResult,
 )
@@ -137,12 +149,14 @@ def _window_text(
 
 def investigate(request: InvestigationRequest, deps: ServiceDeps) -> InvestigationResult:
     """Compose classify -> discover -> route, then, only on `proceed`, retrieve over the
-    snapshot. `route_only`/`abstained` carry the route decision's gaps and never retrieve or
-    fabricate evidence -- design.md "Routing/retrieval": "Generic discovery only routes or
-    abstains." Deterministic: identical `request`/`deps` state always yields an identical result.
-    Errors raised by the frozen stages (`ClassificationError`/`LookupError`/`RouteError`/
-    `RetrievalError`) are already typed `ValueError` subclasses with a `.code` and propagate
-    unwrapped; `ServiceError` is reserved for this module's own request/deps validation.
+    snapshot. `route_only`/`abstained` delegate to `context.assemble_context` (Slice 12A-1),
+    which carries the route decision's gaps, escalation `host_actions`, and safety `warnings`,
+    and never retrieves or fabricates evidence -- design.md "Routing/retrieval": "Generic
+    discovery only routes or abstains." Deterministic: identical `request`/`deps` state always
+    yields an identical result. Errors raised by the frozen stages (`ClassificationError`/
+    `LookupError`/`RouteError`/`RetrievalError`) are already typed `ValueError` subclasses with a
+    `.code` and propagate unwrapped; `ServiceError` is reserved for this module's own
+    request/deps validation.
     """
     if not isinstance(request, InvestigationRequest):
         raise ServiceError("invalid_request_type")
@@ -159,6 +173,14 @@ def investigate(request: InvestigationRequest, deps: ServiceDeps) -> Investigati
     classification = classify(request)
     lookup = discover(classification, deps.registry)
     decision = route(classification, lookup, request)
+
+    if decision.outcome != "proceed":
+        # `assemble_context`'s `_request_id` recomputes the identical content-hash formula this
+        # module uses above (both: model_dump(mode="json", exclude={"cursor"}) -> canonical JSON
+        # -> sha256:), so delegating here keeps `request_id` byte-identical to a manually built
+        # result -- `mode="full"` still routes to the route-gated branch because `assemble_context`
+        # gates on `decision.outcome`, not on `mode`, whenever it isn't already "proceed".
+        return assemble_context(request, decision, mode="full")
 
     evidence, warnings, degradation, status = [], [], [], decision.outcome
     if decision.outcome == "proceed":

@@ -7,7 +7,7 @@ from datetime import date
 from pathlib import Path
 
 import pytest
-from cerebro_router.contracts import Budgets, InvestigationRequest, ReadRange, ReadRequest
+from cerebro_router.contracts import Budgets, HostAction, InvestigationRequest, ReadRange, ReadRequest
 from cerebro_router.corpus import CorpusPolicy
 from cerebro_router.index import BuildConfig, build_candidate, promote_candidate, snapshot_active
 from cerebro_router.packs import load_pack
@@ -132,6 +132,9 @@ def test_real_pipeline_abstained_when_no_local_evidence_or_pack(deps) -> None:
     assert result.status == "abstained"
     assert result.evidence == [] and result.warnings == [] and result.degradation == []
     assert "no_approved_domain_pack" in result.gaps
+    # Slice 12A-1: non-proceed outcomes now compose `context.assemble_context`, which escalates a
+    # named gap to a vendor-neutral host action instead of leaving the host with only the gap string.
+    assert result.host_actions == [HostAction(kind="consult_professional", reason="no_approved_domain_pack")]
 
 
 def test_real_pipeline_route_only_when_regulated_domain_missing_context(deps) -> None:
@@ -139,6 +142,27 @@ def test_real_pipeline_route_only_when_regulated_domain_missing_context(deps) ->
     assert result.status == "route_only"
     assert result.evidence == []
     assert "missing_jurisdiction" in result.gaps
+    # Slice 12A-1: both named gaps for this regulated-domain outcome (missing jurisdiction and
+    # missing effective date) each escalate to their own `request_jurisdiction` host action.
+    assert result.host_actions == [
+        HostAction(kind="request_jurisdiction", reason="missing_jurisdiction"),
+        HostAction(kind="request_jurisdiction", reason="missing_effective_date"),
+    ]
+
+
+def test_real_pipeline_consequential_action_refused_with_inspect_capability_host_action(deps) -> None:
+    # Slice 12A-1: `classify` maps "install" to intent="consequential_action"; with a matching
+    # capability in lookup (has_evidence=True), route() returns route_only with reason
+    # "consequential_action_requires_host_action" -- assemble_context must refuse the action
+    # (never execute it) and tell the host to inspect the capability itself instead.
+    task = "install a python schema validation library, apple pie baking recipe"
+    result = investigate(InvestigationRequest(task=task), deps)
+    assert result.status == "route_only"
+    assert result.evidence == [] and result.claims == []
+    assert "consequential_action_refused_no_action_performed" in result.warnings
+    assert HostAction(kind="inspect_capability", reason="consequential_action_requires_host_execution") in (
+        result.host_actions
+    )
 
 
 def test_investigate_determinism_same_request_and_deps(deps) -> None:

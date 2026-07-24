@@ -1,3 +1,131 @@
+## Verification Report — Slice 12A-1 (`service.py` non-`proceed` cutover to `context.assemble_context`)
+
+**Change**: cerebro-agent-knowledge-router · **Boundary**: task 12A-1 — `cerebro-retrieval/src/cerebro_router/service.py` (+28/-6, first authorized edit of the previously frozen module), `cerebro-retrieval/tests/test_service.py` (+25/-1). **Date**: 2026-07-24 · **Run**: independent, fresh-context, adversarial verification (did not author the code). **Mode**: Standard (no Strict TDD cache found for this project at verify time).
+
+### Verdict
+**PASS.** The un-freeze is surgical: only `service.py` and `test_service.py` changed; every other tracked `cerebro-retrieval/` module (`context.py`, `platform.py`, `mcp_server.py`, `route.py`, `evidence.py`, `research.py`) and both `pyproject.toml`/`uv.lock` are byte-identical to `bf7cf44`. `investigate()`'s `route_only`/`abstained` branches now delegate to `context.assemble_context(request, decision, mode="full")`; the `proceed` branch is functionally untouched. `request_id` determinism is provably preserved (formula-identical, not just documented-identical). The strengthened/new tests genuinely exercise the real pipeline — confirmed by reverting `service.py` to `bf7cf44` in an isolated copy and observing all three fail. The two forbidden-pattern anchor assertions (`test_service.py` proceed test, `test_mcp_contract.py` `claims==[]`/`host_actions==[]`) are byte-unchanged. Full suite 359/359 passed, legacy baseline `pass`/`[]` before and after, lockfile hash unchanged, no new dependency, no wall-clock added.
+
+### Frozen-Context Constraints
+| Check | Result |
+|---|---|
+| `git diff --numstat bf7cf44 -- cerebro-retrieval/` shows ONLY these two files | ✅ `service.py` 28+/6-, `test_service.py` 25+/1- — no other file under `cerebro-retrieval/` appears |
+| `context.py`/`platform.py`/`mcp_server.py`/`route.py`/`evidence.py`/`research.py` byte-frozen | ✅ `git diff bf7cf44 -- <all six paths>` → empty (exit 0) |
+| `uv.lock` sha256 unchanged | ✅ `shasum -a 256 uv.lock` → `3c83d9eb87c9e5e94dcd5ae850339da9c29aa567292773c4d9e093795f4f2bc8` — matches expected |
+| `uv lock --check` | ✅ `Resolved 78 packages in 2ms` — no changes needed |
+| `pyproject.toml`/`uv.lock` byte-identical vs `bf7cf44` | ✅ `git diff bf7cf44 -- uv.lock pyproject.toml` → empty |
+| `scripts/verify_legacy_baseline.py` (service.py NOT in preservation baseline, but ran before+after regardless) | ✅ `status: "pass"`, `errors: []` |
+| No new dependency / no wall-clock | ✅ `service.py`'s only new import is `from .context import assemble_context` (sibling module, already a dependency of the package); no new stdlib/third-party import; `context.py` itself performs no I/O or `time`/`datetime` access (module docstring guarantee #7, unchanged) |
+
+Locked external interpreter used for all execution: fresh `uv sync --locked` under `UV_PROJECT_ENVIRONMENT=<scratchpad>/verify12a1-venv` — the registered `cerebro-retrieval/.venv` was never touched.
+
+### Adversarial Check 1 — `request_id` byte-equality proof (CRITICAL if broken; NOT broken)
+Read both formulas directly, side by side:
+
+`service.py::_content_hash` (unchanged, still used on the `proceed` path):
+```python
+def _canonical_json(payload: object) -> str:
+    return json.dumps(payload, sort_keys=True, separators=(",", ":"))
+
+def _content_hash(request: InvestigationRequest | ReadRequest) -> str:
+    canonical = _canonical_json(request.model_dump(mode="json", exclude={"cursor"}))
+    return f"sha256:{hashlib.sha256(canonical.encode('utf-8')).hexdigest()}"
+```
+
+`context.py::_request_id` (Slice 11, now reached via delegation on non-`proceed`):
+```python
+def _request_id(request: InvestigationRequest) -> str:
+    canonical = json.dumps(
+        request.model_dump(mode="json", exclude={"cursor"}), sort_keys=True, separators=(",", ":"),
+    )
+    return f"sha256:{hashlib.sha256(canonical.encode('utf-8')).hexdigest()}"
+```
+Identical: same `model_dump(mode="json", exclude={"cursor"})` input, same `json.dumps(..., sort_keys=True, separators=(",", ":"))` canonicalization, same `sha256:` prefix + hexdigest. No adapter/rehash code was added, and none is needed. `service.py` still computes `request_id = _content_hash(request)` into a local variable before the route decision (used verbatim on `proceed`), but for non-`proceed` that local variable is discarded in favor of `assemble_context`'s own internally-recomputed `request_id` — since the two formulas are provably identical, the returned `request_id` is byte-identical to what the old manual construction produced. `test_investigate_determinism_same_request_and_deps` (unmodified, part of the untouched determinism suite) still asserts `first.request_id == second.request_id` and passes.
+
+Also verified `mode="full"` cannot accidentally widen or misroute: `_assemble_context_inner` checks `mode == "route_only" or route_decision.outcome != "proceed"` — since `decision.outcome != "proceed"` is already true at the call site in `service.py`, the route-gated branch (`_route_gated_result`) is taken regardless of `mode`, and `forced=False` (because `mode != "route_only"`), so no spurious `rollback_route_only_mode` degradation is introduced.
+
+### Adversarial Check 2 — anti-regression anchors NOT weakened (CRITICAL if violated; NOT violated)
+| Anchor | File:line (bf7cf44) | Diff vs bf7cf44 | Result |
+|---|---|---|---|
+| Proceed test asserts `claims==[]` AND `host_actions==[]` | `test_service.py:92` `test_real_pipeline_proceed_retrieves_and_assembles_local_evidence` | Not in the changed-line ranges of the `test_service.py` diff (diff only touches the abstained/route_only tests at ~132-142 and appends a new test after them) | ✅ byte-unchanged, still passes |
+| `test_mcp_contract.py` proceed/injection tests assert `claims==[]`/`host_actions==[]` | `test_mcp_contract.py:223` `assert result.structuredContent["host_actions"] == []` | `git diff bf7cf44 -- cerebro-retrieval/tests/test_mcp_contract.py` → empty | ✅ byte-unchanged, 10/10 tests in this file pass |
+
+No assertion was removed, loosened, or replaced with a synthetic fixture to force a pass — the forbidden "test rewritten to pass" pattern was hunted for and not found.
+
+### Adversarial Check 3 — proceed path byte-unchanged (confirmed)
+The `proceed` branch (capability + local retrieval catalog assembly, `max_evidence` ceiling enforcement, `claims=[]`, `host_actions=[]`, final `InvestigationResult(...)` construction) is untouched line-for-line versus `bf7cf44` — the diff only inserts a new early-return block *before* this branch (`if decision.outcome != "proceed": return assemble_context(...)`) and updates comments/docstrings. `test_real_pipeline_proceed_retrieves_and_assembles_local_evidence` and `test_real_pipeline_investigate_emits_capability_evidence_with_provenance` (both unmodified) confirm this at runtime.
+
+### Adversarial Check 4 — strengthened/new tests are REAL, not synthetic (proven by revert test)
+Reverted `service.py` to the exact `bf7cf44` content in an isolated filesystem copy (repo working tree untouched) and re-ran the three tests against the real pipeline:
+```text
+$ pytest tests/test_service.py -k "abstained_when_no_local_evidence or route_only_when_regulated or consequential_action_refused"
+FAILED test_real_pipeline_abstained_when_no_local_evidence_or_pack
+FAILED test_real_pipeline_route_only_when_regulated_domain_missing_context
+  AssertionError: assert [] == [HostAction(kind='request_jurisdiction', reason='missing_jurisdiction'), ...]
+FAILED test_real_pipeline_consequential_action_refused_with_inspect_capability_host_action
+  AssertionError: assert 'consequential_action_refused_no_action_performed' in []
+3 failed, 19 deselected in 0.21s
+```
+All three fail against the pre-delegation code and pass against the current code — they drive the real `classify -> discover -> route -> assemble_context` pipeline against the real bundled registry/pack (`ServiceDeps(registry=_real_registry(), snapshot=active)`), not a synthetic fixture, and would catch a revert of the delegation.
+
+This slice is also what makes `investigate()` finally satisfy spec.md's "Read-Only Informational Boundary and Host Actions" requirement's own text — "Needed work SHALL be expressed as vendor-neutral typed host actions" — and the "Supported regulated domain lacks context" scenario ("returns a named gap **and professional escalation** rather than a conclusion"): prior to 12A-1, `investigate()`'s manually-built non-`proceed` result always returned `host_actions=[]`, so the escalation half of that requirement was implemented in `context.py` but never reachable through the live `investigate_work` entry point. This slice closes that gap.
+
+### Adversarial Check 5 — typed-total / no untyped exception path (confirmed)
+`assemble_context` is `try`/`except`-wrapped internally (guarantee #6 in its own module docstring) and never raises; `service.py`'s new call site adds no additional `try`/`except` and needs none. `ServiceError` (the module's own request/deps-validation exception) is raised only before the route decision is computed, unaffected by this change.
+
+### Adversarial Check 6 — no new dependency / determinism / wall-clock (confirmed)
+Only new import is the sibling `.context` module. `context.py` (unchanged, previously verified for Slice 11) performs no filesystem/network/subprocess/wall-clock I/O of its own.
+
+### Build & Tests Execution
+**Build**: ✅ N/A (no compiled build step; `uv sync --locked` succeeded cleanly under a fresh venv)
+
+**Tests**: ✅ 359 passed / ❌ 0 failed / ⚠️ 0 skipped
+```text
+$ UV_PROJECT_ENVIRONMENT=<scratchpad>/verify12a1-venv uv run --locked pytest tests -q -p no:randomly
+........................................................................ [ 20%]
+........................................................................ [ 40%]
+........................................................................ [ 60%]
+........................................................................ [ 80%]
+.......................................................................  [100%]
+359 passed in 17.32s
+```
+`test_mcp_contract.py` isolated: 10/10 passed. `test_service.py` targeted subset (abstained/route_only/consequential_action/determinism): 6/6 passed.
+
+**Coverage**: ➖ Not configured for this project (no coverage tool in `pyproject.toml`/CI config observed).
+
+Additional commands run:
+```text
+$ uv lock --check                          -> Resolved 78 packages in 2ms
+$ shasum -a 256 uv.lock                    -> 3c83d9eb87c9e5e94dcd5ae850339da9c29aa567292773c4d9e093795f4f2bc8
+$ git diff --check bf7cf44 -- cerebro-retrieval/   -> (empty, exit 0)
+$ python -c "ast.parse(...)" service.py test_service.py -> both OK
+$ pip-audit --strict                       -> only "cerebro-router: Dependency not found on PyPI"
+                                               (expected/benign: the local editable package itself
+                                               is not published; no CVEs reported for any dependency)
+```
+
+### Spec Compliance Matrix (scoped to 12A-1)
+| Requirement | Scenario | Test | Result |
+|-------------|----------|------|--------|
+| Read-Only Informational Boundary and Host Actions | Consequential action requested | `test_service.py::test_real_pipeline_consequential_action_refused_with_inspect_capability_host_action` | ✅ COMPLIANT |
+| Domain-Sensitive Outcomes | Supported regulated domain lacks context | `test_service.py::test_real_pipeline_route_only_when_regulated_domain_missing_context` | ✅ COMPLIANT |
+| Domain-Sensitive Outcomes | Arbitrary unsupported profession (no approved domain pack) | `test_service.py::test_real_pipeline_abstained_when_no_local_evidence_or_pack` | ✅ COMPLIANT |
+| Bounded Investigation, Pagination, and Stable References | Determinism (`request_id` stability across delegation) | `test_service.py::test_investigate_determinism_same_request_and_deps` | ✅ COMPLIANT |
+
+### Task Completion Cross-Check
+`tasks.md:131` marks `12A-1` as `(done, 28+/6- lines, no exception)`. Independently re-measured `git diff --numstat bf7cf44 -- cerebro-retrieval/src/cerebro_router/service.py cerebro-retrieval/tests/test_service.py` → `28 6` / `25 1` — matches exactly. No size-exception was needed (well under the 400-line review budget). Apply-progress (Engram `sdd/cerebro-agent-knowledge-router/apply-progress`, id 2473) claims are corroborated by this independent re-execution, not merely trusted.
+
+### Issues Found
+**CRITICAL**: None.
+**WARNING**: None.
+**SUGGESTION**:
+- `pip-audit --strict` reports `cerebro-router` itself as "not found on PyPI and could not be audited" — this is expected for an unpublished local package and not a defect, but consider adding `--skip-editable` (or documenting the expected stderr line) to `scripts/verify_legacy_baseline.py` or a CI wrapper so future automated runs don't need a human to re-derive that this is benign.
+- Remaining Slice 12 scope (client adapters/manifest/evaluation/cutover docs, and any future `proceed`-path wiring through `assemble_context`) is unstarted and `12.1` in `tasks.md` stays unchecked — not a defect in 12A-1, just a reminder this slice is intentionally partial.
+
+### Verdict
+**PASS** — the frozen-context un-freeze was surgical, `request_id` determinism is formula-provably preserved, the anti-regression anchors are untouched, and the strengthened/new tests are proven to exercise the real pipeline via an independent revert test. No CRITICAL or WARNING issues found. Safe to proceed toward archiving this sub-slice or continuing Slice 12's remaining scope.
+
+---
+
 ## Verification Report — Slice 11 (`context.py` bounded context assembler + host actions)
 
 **Change**: cerebro-agent-knowledge-router · **Boundary**: task 11.1 — `context.py` (331, new, unwired — composes `route.py`/`evidence.py`/`research.py`/`contracts.py` as libraries, matching how 9B delivered `research.py` and 10 delivered `evidence.py` unwired), `tests/test_context.py` (630, 23 tests, no fixture files). **Date**: 2026-07-24 · **Run**: independent, fresh-context, adversarial verification (did not author the code). **Mode**: Standard (no Strict TDD cache found for this project at verify time).
