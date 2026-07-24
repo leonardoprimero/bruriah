@@ -1,3 +1,36 @@
+## Verification Report — Slice 7B (MCP protocol server) — completes Phase 7
+
+**Change**: cerebro-agent-knowledge-router · **Boundary**: 7B only — `mcp_server.py` + `test_mcp_contract.py`. Third of three units; on PASS completes Phase 7 (two-tool local MCP).
+**Date**: 2026-07-23 · **Run**: apply, one orchestrator pre-verify probe (found + fixed a stage-error gap), then one independent pass — **PASS on the first independent attempt** (0 CRITICAL, 0 WARNING, 1 cosmetic SUGGESTION), the first slice in the change to do so.
+
+### Verdict
+
+**PASS.** 229 tests. `build_server(deps) -> Server` exposes exactly `investigate_work`/`read_evidence`. `size:exception` 406.
+
+### Central Question — FastMCP vs lowlevel Server (verdict A: deviation correct)
+
+design.md says "FastMCP publishes `outputSchema`", but the apply used `mcp.server.lowlevel.Server`. The independent pass PROVED the deviation is correct, not just asserted it: it built a real FastMCP tool and drove it through a real session — an unknown top-level field (`{"task": "hello", "unknown_field": "malicious"}`) was **silently dropped** (FastMCP's `ArgModelBase` has no `extra="forbid"`, so pydantic's default `extra="ignore"` applies to every `create_model`-derived argument model). That would defeat "server validation remains authoritative". The lowlevel Server with `validate_input=False` + direct pydantic construction of the raw arguments correctly rejects unknown/invalid/out-of-bounds/cross-field-invalid input (`isError=True`, `structuredContent=None`, no work), publishes `outputSchema` on both tools at the wire level (satisfying the design intent), and keeps the flat `{"task": ...}` contract instead of a nested `{"request": {...}}` wrapper.
+
+### The stage-error fix (orchestrator, pre-verify)
+
+The apply's handlers caught only `ServiceError`; `investigate()` documents that stage errors propagate unwrapped, and a broken/closed snapshot raises `RetrievalError("snapshot_unreadable")` — reachable — which would reach the client as the mcp SDK's generic exception format instead of the module's typed `{"error":{"code":...}}` envelope. Orchestrator widened the handlers to `except _STAGE_ERRORS` (ServiceError + the four composition stage errors, all `ValueError`-subclasses with `.code`) and added a falsifiable regression. The independent pass confirmed falsifiability (narrowing back → the test hard-crashes with an unhandled `ExceptionGroup`) and reachability (only `ServiceError`/`RetrievalError` are reachable in practice; the other three are safe defense-in-depth). This +6-line fix took the unit to 406, the approved `size:exception`.
+
+### Coverage (all against the real in-memory `mcp` server + real deps)
+
+Exactly two tools, deterministic across `PYTHONHASHSEED`; authoritative rejection of unknown field, missing required, wrong type, out-of-range `max_evidence`, and cross-field violations (`range_ref_missing`, `range_reversed`, `duplicate_ref`) — proving the pydantic path, not a declarative pre-check, is the gate; text fallback deserializes to `structuredContent` for both tools; malformed `tools/call` (nonexistent name → typed `unknown_tool`, `None`/non-dict arguments → clean protocol error) never crashes the session; stdout stays clean (verified, not superficial); injection inert through the protocol; `initialize` exercised every test; deps injected; the contract tests drive a real Server+client session with a real snapshot + real signed registry, never a mocked service.
+
+### Gates & Preservation
+
+229 passed; `pip_audit` clean; `uv.lock` `4e40f608…` unchanged; frozen Slices 1–7A-2 zero-diff vs `78506e6`; baseline `pass`/`errors: []` before and after; corpus/DB (`03e9f3c5…`), `cerebro.py`, `reindex.sh`, LaunchAgent, registrations all unchanged. Boundary `mcp_server.py` 164 + `test_mcp_contract.py` 242 = **406**, approved `size:exception`; genuinely reviewable.
+
+**SUGGESTION** (cosmetic, addressed): the `tasks.md` 7A-2 line read "(TODO)" though the code had landed — corrected when marking 7.1 complete.
+
+### Next Recommendation
+
+**Phase 7 (7A + 7A-2 + 7B) is complete and independently verified — task 7.1 marked done.** Cerebro is now invocable by an MCP client through the two-tool contract, entirely as a local candidate; the legacy MCP runs untouched. Proceed to Slice 8 (packaging, `platformdirs` private directories, and the `cerebro-mcp {init,serve,index,doctor}` CLI that wires the real `ServiceDeps`). Per interactive mode: **stop and await approval.**
+
+---
+
 ## Verification Report — Slice 7A (service composition)
 
 **Change**: cerebro-agent-knowledge-router · **Boundary**: 7A only — `service.py` local composition + `test_service.py`. First of three units splitting Phase 7 (7A local composition, 7A-2 capability evidence, 7B MCP protocol).
