@@ -1,3 +1,17 @@
+## Verification Report — Slice 8B (packaging + lock rebaseline) — completes Phase 8
+
+**Boundary**: `pyproject.toml`, `uv.lock`, `recovery/legacy-baseline-v1.json`, `src/cerebro_router/__init__.py` (new), `tests/test_packaging.py` (new), `tasks.md`. **Date**: 2026-07-24. **Run**: orchestrator prepared + inspected the lock diff, user approved the rebaseline, then an independent dual-appropriate pass (it touched the preservation baseline).
+
+**Verdict: PASS.** 249 tests. ~80 changed lines, no `size:exception`.
+
+The most delicate slice of the change — the FIRST authorized modification to the `uv.lock` hash the preservation baseline pins. Made the project buildable (`package=true`, `uv_build` backend, `platformdirs` declared as a direct dep, a `cerebro-mcp` console script, a new `__init__.py` so the PEP-420 namespace package builds as a regular package) and rebaselined the lock. **The lock diff is exactly the intended minimal change**: only the `cerebro-router` entry changed (`source virtual→editable`, `+platformdirs`); the independent pass re-derived both hashes from scratch and diffed all 78 packages — **zero runtime version drift**, so the DB/embeddings/goldens are provably unaffected. Rebaseline `4e40f608… → 3c83d9eb…` (metadata `e6505381… → c17cbd89…`) recorded consistently in `recovery/legacy-baseline-v1.json` AND `tasks.md`; the baseline's other sections (corpus, DB, model, runtime, goldens) byte-identical.
+
+The wheel is real and self-contained: independently built, it carries `cerebro_router/*.py` + bundled `data/*.json` + the `cerebro-mcp = cerebro_router.cli:cerebro_mcp_main` entry point + `platformdirs`/`mcp` in Requires-Dist, and NOT `cerebro.py` (legacy). A fresh-venv clean install proved `cerebro-mcp --help` and `load_registry` work from the installed wheel. `test_packaging.py` builds and inspects the real wheel (skips if `uv` absent), leaving no artifact in the tree. No frozen source module's logic changed (only the new `__init__.py`). Preservation intact (cerebro.py/reindex.sh/LaunchAgent/DB/registrations unchanged; real vault never read; two stray empty Caches/Logs dirs from an earlier session were cleaned up).
+
+**Phase 8 complete (8A-1 + 8A-2 + 8B); task 8.1 done.** The candidate is an installable wheel; the legacy MCP is untouched (cutover is Slice 12).
+
+---
+
 ## Verification Report — Slice 8A-2 (`cerebro-mcp` CLI)
 
 **Change**: cerebro-agent-knowledge-router · **Boundary**: 8A-2 — `cli.py` (extended) + `test_cli.py`. Second of three units in Phase 8.
