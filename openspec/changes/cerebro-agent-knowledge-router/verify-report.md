@@ -1,3 +1,32 @@
+## Verification Report — Slice 8A-2 (`cerebro-mcp` CLI)
+
+**Change**: cerebro-agent-knowledge-router · **Boundary**: 8A-2 — `cli.py` (extended) + `test_cli.py`. Second of three units in Phase 8.
+**Date**: 2026-07-24 · **Run**: apply → verify #1 (FAIL, 7th escape) → fix → confirm (FAIL, 8th escape) → **backstop** → confirm #2 (PASS). `size:exception` 419.
+
+### Verdict
+
+**PASS.** 246 tests. The `cerebro-mcp {init,serve,index,doctor}` CLI over `platform.py`'s loader — the candidate is now operable end to end.
+
+### Two untyped escapes (7th and 8th of the change) → one class-closing backstop
+
+- **7th**: a malformed-but-existing `--policy` YAML raises `yaml.YAMLError` (neither `ValueError` nor `OSError`), escaping `_cmd_index` as a bare traceback. Fixed by catching `yaml.YAMLError` (targeted).
+- **8th**: `_cmd_init`'s `run_init → ensure_private_dirs → mkdir` (and `write_text`) raises a bare `OSError` (e.g. `NotADirectoryError`/`FileExistsError`) when a path segment is a file — `_cmd_init` had no guard and `cerebro_mcp_main` caught only `CliError`. Found independently by both the verifier and the orchestrator's parallel sweep.
+- **The fix** (user chose it over an 8th per-command patch): a **backstop** — `cerebro_mcp_main` now catches `Exception` after `except CliError`, converting any unenumerated failure to a typed nonzero exit, never a bare traceback. `SystemExit` (argparse) and `KeyboardInterrupt` (serve shutdown) are `BaseException`s and correctly still propagate. Verify confirmed this is **structural class closure**: every `_cmd_*` path funnels through the one try, so no 9th untyped escape is possible via the CLI. An 11-case adversarial sweep (corpus-root a file, policy a dir, corrupt/mistyped config, malformed build-config/active.json, each dir as a file, unwritable parent) all exit typed. Both escapes have falsifiable regressions.
+
+### Coverage (independently confirmed)
+
+No regression to the Slice-3 `main`/`_embedding_fingerprint` (byte-identical; the `__main__` guard change breaks nothing — nothing invoked the old interface). `init` idempotent, registers nothing, real user dirs never created. `index` requires `--corpus-root`/`--policy`, calls `ensure_private_dirs` first (closing 8A-1's WARNING), builds only under the private data dir, never `cerebro.db`; embedder injectable. `serve` wiring never blocks a test, stdout stays the JSON-RPC channel. `doctor` read-only + a 7-day pack-staleness warning. Real-pipeline test drives init→index→doctor→serve-wiring over the mcp in-memory transport with a real index + fake embedder. Carried WARNINGs (`_cmd_serve` OSError-only catch; broad `_cmd_index` catch) and the SUGGESTION (`uuid4` candidate filename) judged acceptable across all three passes.
+
+### Gates & Preservation
+
+246 passed; `pip_audit` clean; `uv.lock` `4e40f608…` and `pyproject.toml` byte-identical (8A-2 touches no lock — that is 8B); frozen modules zero-diff; baseline `pass`/`errors: []` before and after; corpus/DB/registrations unchanged; real `~/…/cerebro-router` dirs never created. Boundary `cli.py` delta 243 + `test_cli.py` 176 = **419**, approved `size:exception`. Note: a transient `test_legacy` failure under `pytest-randomly` ordering (WAL churn on the live DB from an unrelated subprocess test) is pre-existing test-ordering flakiness, not a code defect; `-p no:randomly` is a clean 246/246 and the DB is byte-identical before/after.
+
+### Next Recommendation
+
+8A-2 verified. Proceed to **8B** (packaging: `package=true`, declare `platformdirs`/`mcp` as direct deps, regenerate `uv.lock`, **LOCK REBASELINE** — the first authorized change to the preservation baseline — build wheel/sdist, verify clean private-default install). 8B needs a user decision: it touches the preservation mechanism. Per interactive mode: **stop and await approval.**
+
+---
+
 ## Verification Report — Slice 7B (MCP protocol server) — completes Phase 7
 
 **Change**: cerebro-agent-knowledge-router · **Boundary**: 7B only — `mcp_server.py` + `test_mcp_contract.py`. Third of three units; on PASS completes Phase 7 (two-tool local MCP).
