@@ -3,17 +3,26 @@ from __future__ import annotations
 import json
 from array import array
 from contextlib import contextmanager
-from datetime import date
+from dataclasses import replace
+from datetime import date, datetime, timezone
 from pathlib import Path
 
 import pytest
-from cerebro_router.contracts import Budgets, HostAction, InvestigationRequest, ReadRange, ReadRequest
+from cerebro_router.contracts import (
+    Budgets, CandidateMaterial, HostAction, InvestigationRequest, ReadRange, ReadRequest,
+)
 from cerebro_router.corpus import CorpusPolicy
 from cerebro_router.index import BuildConfig, build_candidate, promote_candidate, snapshot_active
 from cerebro_router.packs import load_pack
 from cerebro_router.registries import Registry
 from cerebro_router.retrieval import RetrievalError
-from cerebro_router.service import ServiceDeps, ServiceError, investigate, read
+from cerebro_router.service import ServiceDeps, ServiceError, _candidate_urls, investigate, read
+# Slice 12A-2: reuse test_research.py's real TLS-loopback harness (no test in this file ever
+# makes a real external network connection either) instead of re-implementing it -- same
+# discipline as test_research.py's own module docstring.
+from test_research import _Clock, _LocalTlsServer, _ok_responder
+from test_research import _deps as _research_deps
+from test_research import _url as _research_url
 
 FINGERPRINT = (
     '{"artifact":"model.onnx","artifact_sha256":"' + "a" * 64
@@ -23,6 +32,7 @@ _SRC = Path(__file__).resolve().parents[1] / "src"
 _DATA = _SRC / "cerebro_router" / "data"
 _FILLER = "Unrelated filler sentence for padding purposes only. " * 6
 _TASK = "Find a python schema validation library, apple pie baking recipe"
+_CANDIDATE_DIGEST = "sha256:" + "c" * 64
 
 
 def _real_registry() -> Registry:
@@ -169,6 +179,144 @@ def test_investigate_determinism_same_request_and_deps(deps) -> None:
     request = InvestigationRequest(task=_TASK)
     first, second = investigate(request, deps), investigate(request, deps)
     assert first == second and first.request_id == second.request_id
+
+
+# --- Slice 12A-2: bounded live research wired into the `proceed` path ---------------------------
+
+
+def test_investigate_proceed_research_none_stays_byte_identical_to_no_research(deps) -> None:
+    # The critical invariant: `deps.research is None` (the default -- and what frozen
+    # `platform.load_deps` builds) must leave the `proceed` result byte-identical to 12A-1's,
+    # even when `candidate_material` names a fetchable URL -- `_run_research` returns `[]` before
+    # ever consulting `_candidate_urls`. `request_id` legitimately differs between the two calls
+    # below (`candidate_material` is part of the request's own content hash, by design); every
+    # OTHER field must be untouched by candidate_material's mere presence.
+    without_candidate = investigate(InvestigationRequest(task=_TASK), deps)
+    with_candidate = investigate(
+        InvestigationRequest(
+            task=_TASK,
+            candidate_material=[CandidateMaterial(locator="https://example.test/page", digest=_CANDIDATE_DIGEST)],
+        ),
+        deps,
+    )
+    assert with_candidate.model_copy(update={"request_id": without_candidate.request_id}) == without_candidate
+    assert with_candidate.claims == [] and with_candidate.host_actions == []
+
+
+def test_investigate_proceed_research_present_network_off_folds_disabled_host_action(deps, tmp_path: Path) -> None:
+    # `deps.research` IS provisioned but `request.network_policy="off"` -- research.py's own first
+    # gate (module docstring #1) refuses before any canonicalization/allowlist/connect attempt, so
+    # this must never actually connect; the `connect` override below asserts that.
+    server = _LocalTlsServer(_ok_responder())
+    try:
+        clock = _Clock(datetime(2026, 7, 24, 12, 0, 0, tzinfo=timezone.utc))
+        research_deps = _research_deps(
+            tmp_path, server, clock,
+            connect=lambda *_a: (_ for _ in ()).throw(
+                AssertionError("must never connect when request.network_policy == off"),
+            ),
+        )
+        deps_with_research = replace(deps, research=research_deps)
+        url = _research_url(server)
+        request = InvestigationRequest(
+            task=_TASK, network_policy="off",
+            candidate_material=[CandidateMaterial(locator=url, digest=_CANDIDATE_DIGEST)],
+        )
+        result = investigate(request, deps_with_research)
+
+        assert result.status == "partial"
+        assert "research_unavailable:network_disabled" in result.degradation
+        assert HostAction(kind="fetch_public_url", reason="network_disabled", target=url) in result.host_actions
+        # Capability + local evidence from the existing pipeline survive untouched.
+        assert {item.kind for item in result.evidence} == {"local", "capability"}
+        assert result.claims == []
+    finally:
+        server.close()
+
+
+def test_investigate_proceed_research_present_network_on_fetches_and_folds_live_evidence(
+    deps, tmp_path: Path,
+) -> None:
+    # Drives the REAL research()/fetch() pipeline over the real TLS loopback server -- never
+    # mocked -- exactly as test_research.py's own "ON path" tests do.
+    body = b"Real captured content from the local TLS loopback server for Slice 12A-2."
+    server = _LocalTlsServer(_ok_responder(body))
+    try:
+        clock = _Clock(datetime(2026, 7, 24, 12, 0, 0, tzinfo=timezone.utc))
+        research_deps = _research_deps(tmp_path, server, clock)
+        deps_with_research = replace(deps, research=research_deps)
+        url = _research_url(server)
+        request = InvestigationRequest(
+            task=_TASK, network_policy="public_https",
+            candidate_material=[CandidateMaterial(locator=url, digest=_CANDIDATE_DIGEST)],
+            budgets=Budgets(max_network_requests=5),
+        )
+        result = investigate(request, deps_with_research)
+
+        fetched = [item for item in result.evidence if item.kind == "captured_live"]
+        assert len(fetched) == 1
+        assert fetched[0].locator == url
+        assert not any(entry.startswith("research_unavailable:") for entry in result.degradation)
+        # Local + capability evidence from the existing pipeline are still present alongside it.
+        assert {item.kind for item in result.evidence} == {"local", "capability", "captured_live"}
+        assert result.claims == []
+    finally:
+        server.close()
+
+
+def test_investigate_proceed_research_determinism_same_request_and_deps(deps, tmp_path: Path) -> None:
+    body = b"Deterministic content for the loopback fetch."
+    server = _LocalTlsServer(_ok_responder(body))
+    try:
+        clock = _Clock(datetime(2026, 7, 24, 12, 0, 0, tzinfo=timezone.utc))
+        research_deps = _research_deps(tmp_path, server, clock)
+        deps_with_research = replace(deps, research=research_deps)
+        request = InvestigationRequest(
+            task=_TASK, network_policy="public_https",
+            candidate_material=[
+                CandidateMaterial(locator=_research_url(server), digest=_CANDIDATE_DIGEST),
+            ],
+        )
+        first = investigate(request, deps_with_research)
+        second = investigate(request, deps_with_research)
+        assert first == second
+    finally:
+        server.close()
+
+
+def test_candidate_urls_rejects_unfetchable_schemes_dedupes_and_truncates() -> None:
+    # Slice 12A-2 hardening (verify-report WARNING): dedicated unit coverage for _candidate_urls's
+    # SSRF-adjacent scheme filter -- independently confirmed correct during verification but never
+    # unit-tested there. One mixed-scheme list mirrors the verifier's 9-item probe and exercises all
+    # four properties (accept, reject, dedup, truncate) plus order preservation in a single request.
+    material = [
+        CandidateMaterial(locator="http://example.test/one", digest=_CANDIDATE_DIGEST),
+        CandidateMaterial(locator="https://example.test/two", digest=_CANDIDATE_DIGEST),
+        CandidateMaterial(locator="file:///etc/passwd", digest=_CANDIDATE_DIGEST),
+        CandidateMaterial(locator="capability:some-cap-id", digest=_CANDIDATE_DIGEST),
+        CandidateMaterial(locator="ftp://example.test/three", digest=_CANDIDATE_DIGEST),
+        CandidateMaterial(locator="not-a-url-locator", digest=_CANDIDATE_DIGEST),
+        CandidateMaterial(locator="http://example.test/one", digest=_CANDIDATE_DIGEST),  # duplicate of #1
+        CandidateMaterial(locator="https://example.test/four", digest=_CANDIDATE_DIGEST),
+        CandidateMaterial(locator="https://example.test/two", digest=_CANDIDATE_DIGEST),  # duplicate of #2
+        CandidateMaterial(locator="https://example.test/five", digest=_CANDIDATE_DIGEST),
+    ]
+    request = InvestigationRequest(
+        task=_TASK, candidate_material=material, budgets=Budgets(max_network_requests=3),
+    )
+
+    urls = _candidate_urls(request)
+
+    # http:// and https:// locators are accepted, in original order; file://, capability:, ftp://,
+    # and the bare non-URL locator are never returned (the anti-SSRF guarantee: these must never
+    # become live fetch targets); the two duplicates are deduped; the result is truncated to the
+    # declared max_network_requests=3 ceiling even though 4 unique fetchable URLs were offered.
+    assert urls == ["http://example.test/one", "https://example.test/two", "https://example.test/four"]
+    assert "file:///etc/passwd" not in urls
+    assert "capability:some-cap-id" not in urls
+    assert "ftp://example.test/three" not in urls
+    assert "not-a-url-locator" not in urls
+    assert "https://example.test/five" not in urls  # would be the 4th unique URL, past the cap
 
 
 def test_max_evidence_ceiling_is_enforced_with_explicit_degradation(tmp_path: Path) -> None:

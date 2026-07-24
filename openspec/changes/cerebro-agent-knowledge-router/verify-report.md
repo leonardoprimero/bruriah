@@ -1,3 +1,142 @@
+## Verification Report — Slice 12A-2 (`service.py` `proceed` path wired to bounded live research)
+
+**Change**: cerebro-agent-knowledge-router · **Boundary**: task 12A-2 — `cerebro-retrieval/src/cerebro_router/service.py` (+108/-22, second authorized edit of the previously frozen module), `cerebro-retrieval/tests/test_service.py` (+115/-2). **Date**: 2026-07-24 · **Run**: independent, fresh-context, adversarial verification (did not author the code). **Mode**: Standard (no Strict TDD cache found for this project at verify time).
+
+### Verdict
+**PASS.** `investigate()`'s `proceed` path now runs bounded live research over `http`/`https` `candidate_material` locators and folds the outcomes into evidence/host_actions/degradation, mirroring `context.py`'s `_assembled_result` fold (:184-201) exactly. The change is surgical: only `service.py` and `test_service.py` differ from `6fdee79`; every other tracked `cerebro-retrieval/` module (`platform.py`, `research.py`, `context.py`, `mcp_server.py`, `route.py`, `evidence.py`, `contracts.py`, `retrieval.py`, `test_mcp_contract.py`) and both `pyproject.toml`/`uv.lock` are byte-identical. The critical dormancy invariant — `deps.research is None` (the default, and what frozen `platform.load_deps` builds) keeps the `proceed` result byte-identical to the pre-12A-2 no-research result — is proven both by the authored test and by an independent revert-style check performed during this verification. `_candidate_urls`'s scheme filter was independently exercised outside the test suite and correctly rejects `file://`/`ftp://`/non-URL locators while deduping and capping at `max_network_requests`. The network-ON test drives the real `research()`/`fetch()` pipeline over a real TLS loopback (proven non-vacuous by an independent fold-revert that fails exactly the fold-dependent tests). Full suite 363/363 passed, legacy baseline `pass`/`[]` before and after, lockfile hash unchanged, no new runtime dependency, no wall-clock added.
+
+### Frozen-Context Constraints
+| Check | Result |
+|---|---|
+| `git diff --numstat 6fdee79 -- cerebro-retrieval/` shows ONLY these two files | ✅ `service.py` 108+/22-, `test_service.py` 115+/2- — no other file under `cerebro-retrieval/` appears |
+| `platform.py`/`research.py`/`context.py`/`mcp_server.py`/`route.py`/`evidence.py`/`contracts.py`/`retrieval.py` byte-frozen | ✅ `git diff 6fdee79 -- <all eight paths>` → empty (0 lines) |
+| `test_mcp_contract.py` byte-frozen | ✅ `git diff 6fdee79 -- cerebro-retrieval/tests/test_mcp_contract.py` → empty (0 lines) |
+| `uv.lock` sha256 unchanged | ✅ `shasum -a 256 uv.lock` → `3c83d9eb87c9e5e94dcd5ae850339da9c29aa567292773c4d9e093795f4f2bc8` — matches expected |
+| `uv lock --check` | ✅ `Resolved 78 packages in 3ms` — no changes needed |
+| `pyproject.toml`/`uv.lock` byte-identical vs `6fdee79` | ✅ `git diff 6fdee79 -- uv.lock pyproject.toml` → empty |
+| `scripts/verify_legacy_baseline.py` (before AND after) | ✅ `status: "pass"`, `errors: []` both times |
+| `git diff --check` (whitespace/conflict markers) | ✅ clean, exit 0 |
+| AST parse both changed files | ✅ `ast.parse` succeeds on `service.py` and `test_service.py` |
+| `pip-audit --skip-editable` | ✅ "No known vulnerabilities found" (only the editable `cerebro-router` package itself skipped, expected) |
+
+Locked external interpreter used for all execution: fresh `uv venv --python 3.12` + `uv sync --locked` under `UV_PROJECT_ENVIRONMENT=<scratchpad>/verify12a2-venv` — the registered `cerebro-retrieval/.venv` was never touched.
+
+### Test Execution Evidence
+```text
+$ uv sync --locked   # under UV_PROJECT_ENVIRONMENT=<scratchpad>/verify12a2-venv
+Resolved 78 packages ... (no lock drift)
+
+$ python scripts/verify_legacy_baseline.py
+{"status": "pass", "errors": [], ...}
+
+$ python -m pytest tests -q -p no:randomly
+........................................................................ [ 19%]
+........................................................................ [ 39%]
+........................................................................ [ 59%]
+........................................................................ [ 79%]
+........................................................................ [ 99%]
+...                                                                      [100%]
+363 passed in 18.76s
+```
+
+### Adversarial Check 1 — THE CRITICAL INVARIANT: `deps.research is None` ⇒ byte-identical proceed result (CRITICAL if broken; NOT broken)
+The authored test `test_investigate_proceed_research_none_stays_byte_identical_to_no_research` compares `investigate()` with and without a fetchable `candidate_material` URL, both using the default `deps` fixture (`research` field omitted ⇒ `None`), and asserts equality after normalizing `request_id` (which legitimately differs because `candidate_material` is part of the request's own content hash by design — correctly reasoned, not a loosened assertion). It passes.
+
+Independent verification performed during this review (not relying solely on the authored test): read `_run_research` directly —
+```python
+def _run_research(request: InvestigationRequest, deps: ServiceDeps) -> list[ResearchOutcome]:
+    if deps.research is None:
+        return []
+    return [research(request, url, deps.research) for url in _candidate_urls(request)]
+```
+`deps.research is None` short-circuits before `_candidate_urls` is ever consulted, so `_fold_research([])` returns `([], [], [])` unconditionally — `host_actions=[]`, no degradation appended, no evidence appended. All `ServiceDeps(...)` constructions in `test_service.py` (the `deps` fixture at line 84, and two ad-hoc constructions at lines 295/431) omit `research`, confirmed by `rg`, so every pre-existing proceed/injection/budget test in the suite (all built with `research` unset) exercises this exact dormant path and all pass — this is the de facto "revert-style check that the proceed result with research=None matches no-research," run across the entire pre-existing suite, not just the one new test.
+
+### Adversarial Check 2 — anti-regression anchors NOT weakened (CRITICAL if violated; NOT violated)
+| Anchor | File:line | Diff vs `6fdee79` | Result |
+|---|---|---|---|
+| `test_real_pipeline_proceed_retrieves_and_assembles_local_evidence` asserts `claims==[] and host_actions==[] and gaps==[]` | `test_service.py:102` | Not in the changed-line ranges (diff only inserts new imports + 4 new tests + comment updates) | ✅ byte-unchanged, still passes |
+| `test_retrieved_prompt_injection_stays_inert_end_to_end` asserts `host_actions==[] and claims==[]` | `test_service.py:323` | Byte-unchanged | ✅ still passes |
+| `test_mcp_contract.py::test_retrieved_prompt_injection_stays_inert_through_the_protocol` asserts `structuredContent["host_actions"] == []` and `["claims"] == []` | `test_mcp_contract.py:223-224` | `git diff 6fdee79 -- cerebro-retrieval/tests/test_mcp_contract.py` → empty (0 lines) | ✅ byte-unchanged file, still passes |
+
+No assertion was removed, loosened, or replaced with a synthetic fixture to force a pass. These anchors remain valid specifically *because* the `deps` fixtures they use never provision `research`, keeping the fold dormant — consistent with, not contradicting, the new plumbing.
+
+### Adversarial Check 3 — `_candidate_urls` correctness (SSRF-adjacent scheme filter)
+Read implementation:
+```python
+def _candidate_urls(request: InvestigationRequest) -> list[str]:
+    urls: list[str] = []
+    for material in request.candidate_material:
+        if urlsplit(material.locator).scheme not in ("http", "https"):
+            continue
+        if material.locator not in urls:
+            urls.append(material.locator)
+    return urls[: request.budgets.max_network_requests]
+```
+Independently exercised outside the test suite (not just read) with a 9-item `candidate_material` list mixing `https://`, `file:///etc/passwd`, `capability:some-cap-id`, `ftp://`, `http://`, and a duplicate, with `Budgets(max_network_requests=3)`:
+```text
+Input:  https, file://, capability:, ftp://, http://, https(dup), https, https, https
+Output: ['https://example.test/a', 'http://example.test/c', 'https://example.test/d']
+```
+Confirmed: `file://` and `capability:` (non-URL/no-scheme) and `ftp://` locators never become fetch targets; the duplicate `https://example.test/a` is deduped; the result is truncated to the declared `max_network_requests=3` ceiling. No SSRF-adjacent defect found.
+
+**WARNING (SUGGESTION-adjacent, non-blocking)**: `test_service.py` has no dedicated unit test for `_candidate_urls` itself covering the `file://`/`ftp://`/non-URL-locator rejection, the dedup, or the `max_network_requests` truncation — these are only implicitly reachable via the four new integration-style `proceed`+research tests, none of which exercise a non-http/https or duplicate locator. The behavior is correct (verified independently above), but a future edit to this SSRF-adjacent filter could regress silently without a dedicated red test to catch it. Recommend adding a direct unit test for `_candidate_urls` before Slice 12A-3 touches this area again.
+
+### Adversarial Check 4 — `_fold_research` faithful to `context.py:184-201`
+Side-by-side read: `_fold_research` in `service.py` performs the identical two-way split `context.py`'s `_assembled_result` research fold uses — `cached`/`fetched` outcomes with non-`None` `.evidence` are appended ref-deduplicated (`seen_refs`/`seen_evidence_refs`); every other outcome appends `f"research_unavailable:{outcome.code}"` to degradation and folds `outcome.host_actions` (the outcome's own already-computed actions, never re-derived) into `host_actions`, deduplicated by `HostAction` equality. No dropped or duplicated ref found by inspection; the network-OFF and network-ON tests both confirm the correct branch is taken (degradation-only vs evidence-only) with no cross-contamination.
+
+### Adversarial Check 5 — network-OFF fold is real (not a passthrough)
+`test_investigate_proceed_research_present_network_off_folds_disabled_host_action` provisions a real `ResearchDeps` (via `test_research.py`'s harness) whose injected `connect` override raises `AssertionError` if ever invoked, sets `request.network_policy="off"`, and asserts: `status=="partial"`, `"research_unavailable:network_disabled" in degradation`, the vendor-neutral `HostAction(kind="fetch_public_url", reason="network_disabled", target=url)` is present, local+capability evidence survive (`{item.kind for item in evidence} == {"local", "capability"}`), and `claims==[]`. Passes. Read `research.py`'s own gate: `network_policy != "public_https" or not deps.network_enabled` fires before canonicalization/allowlist/connect, so this test's assert-if-called `connect` seam is a sound proof of no real connection attempt.
+
+### Adversarial Check 6 — network-ON fetch is REAL, not mocked (revert-style proof performed)
+`test_investigate_proceed_research_present_network_on_fetches_and_folds_live_evidence` and `test_investigate_proceed_research_determinism_same_request_and_deps` both import `_LocalTlsServer`/`_Clock`/`_ok_responder`/`_deps`/`_url` directly from `test_research.py` (confirmed present with matching signatures at `test_research.py:33,98,119,135,146`) — a genuine real TLS loopback server (`127.0.0.1:0`, real TLS handshake, real HTTP response bytes), not a mock.
+
+**Independent revert-style check performed during this verification** (not the authored test — an additional adversarial probe): patched a working copy of `service.py` in-place to neuter the fold (`host_actions, research_degradation, research_evidence = [], [], []` immediately after `_run_research(...)` is called, discarding its result) and re-ran `pytest tests/test_service.py -k research`:
+```text
+FAILED test_investigate_proceed_research_present_network_off_folds_disabled_host_action
+  AssertionError: assert 'complete' == 'partial'
+FAILED test_investigate_proceed_research_present_network_on_fetches_and_folds_live_evidence
+  AssertionError: assert 0 == 1  (len(fetched) == 1 expected, got 0)
+2 failed, 2 passed, 22 deselected in 0.83s
+```
+The two fold-dependent tests fail immediately and specifically on the fold's absence (the other two — the None-invariant and determinism tests — correctly still pass, since neither depends on the fold executing). The patch was reverted from the on-disk copy immediately after (confirmed via `git diff --stat` returning to 108+/22- against `6fdee79`) and the full suite re-run clean (363/363) to confirm no residual corruption. This proves the network-ON test is genuinely load-bearing on the real fold, not a vacuous pass.
+
+### Adversarial Check 7 — `max_evidence` ceiling over the combined set
+Read the wiring: `evidence = capability_evidence + local_evidence`, then `evidence = evidence + research_evidence` (research appended last), then the pre-existing `len(evidence) > request.budgets.max_evidence` ceiling (unchanged, not duplicated) truncates the combined list and appends `"max_evidence_exceeded"` to degradation with `truncated=True`; `status = "partial" if truncated or research_degradation else "complete"`. The pre-existing `test_max_evidence_ceiling_is_enforced_with_explicit_degradation` (unmodified, `research` unset ⇒ dormant) still passes, confirming the ceiling logic itself was not disturbed. Note (informational, not a defect): because research evidence is appended last, in a truncation scenario research evidence would be dropped first before capability/local evidence — no requirement dictates otherwise, and this is consistent with the described priority ordering ("capability... typically the smaller, most specific set; local passages fill the remaining budget" — research is the newest, most speculative addition, dropped first under pressure is a defensible default).
+
+### Adversarial Check 8 — typed-total, no new untyped exception
+`_run_research` calls `research()` with no try/except — consistent with `research.py`'s module docstring guarantee #7 that `research()` is total and never raises, confirmed by reading `research.py`'s `research()` function (returns typed `ResearchOutcome` for every branch, including the `error` status wrapping typed `FetchError.code`). No new exception type introduced; `ServiceError` usage is unchanged (still only request/deps validation).
+
+### Adversarial Check 9 — no new dependency / determinism / no wall-clock
+```text
+$ rg -n "^import |^from " service.py | rg -i "requests|httpx|urllib3|aiohttp"
+(no output)
+$ rg -n "date\.today\(|datetime\.now\(" service.py
+(no output)
+```
+Only new import is stdlib `urllib.parse.urlsplit` plus sibling-module imports (`HostAction` from `.contracts`, `ResearchDeps`/`ResearchOutcome`/`research` from `.research` — `.research` was already a package member, just previously unconsumed by `service.py`). `test_investigate_proceed_research_determinism_same_request_and_deps` (real TLS loopback, real fetch) asserts `first == second` for two `investigate()` calls against an identical request+deps — passes, confirming determinism holds even through the live-fetch path (test harness controls the injected clock).
+
+### Adversarial Check 10 — no synthetic-fixture-masks-real-data
+All 4 new tests use the real `investigate()` pipeline, a real (fixture-backed but genuine) `Registry`/`ActiveSnapshot` via the shared `deps` fixture, and a real `ResearchDeps` constructed via `test_research.py`'s harness (real TLS loopback server, real cert/key fixtures under `tests/fixtures/fetch/`, real injected DNS/connect seam that redirects to the loopback rather than stubbing `research()`/`fetch()` themselves). None of the 4 tests would pass if the fold were stubbed out — proven directly by Adversarial Check 6's revert.
+
+### Issues Found
+
+**CRITICAL**: None.
+
+**WARNING**:
+1. No dedicated unit test for `_candidate_urls`'s scheme filter, dedup, or `max_network_requests` truncation (see Adversarial Check 3). Behavior is correct as independently verified in this review, but the SSRF-adjacent filter has no direct red-test coverage — a future refactor of this helper could silently regress. Recommend adding before Slice 12A-3 extends this area.
+
+**SUGGESTION**:
+1. Consider documenting the "research evidence is appended last, so it is truncated first under `max_evidence` pressure" ordering explicitly in the `_fold_research`/proceed-block comments (currently only reasoned implicitly by append order) — makes future truncation-priority changes an intentional decision rather than an accidental side effect of code ordering.
+
+### Task/Spec Cross-Check
+- `openspec/changes/cerebro-agent-knowledge-router/tasks.md` and engram `sdd/cerebro-agent-knowledge-router/tasks` (id 2467) both record 12A-2 as done with matching evidence (108+/22-, 115+/2-, 363/363, hash unchanged) — consistent with what this independent verification found. `12.1` (client adapters/evaluation/migration/cutover, including claim formation from research evidence — Slice 12A-3) remains correctly unchecked; `claims` stays `[]` throughout the changed code, matching the stated scope boundary.
+- Spec (`sdd/cerebro-agent-knowledge-router/spec`, id 2464): the "policy-bounded live research" and "untrusted-evidence handling" normative sections describe exactly this fold-into-evidence-with-degradation pattern; this slice's implementation is consistent with that spec at the `proceed`-path scope it claims (research evidence folding, not yet claim formation).
+
+### Final Verdict
+**PASS.** Zero CRITICAL findings. One WARNING (missing dedicated unit coverage for `_candidate_urls`'s SSRF-adjacent filter — behavior itself verified correct, coverage gap only). One SUGGESTION (documentation of truncation-priority ordering). Slice 12A-2 is safe to commit as-is; the WARNING should be addressed opportunistically (e.g. alongside Slice 12A-3) rather than blocking this slice.
+
+---
+
 ## Verification Report — Slice 12A-1 (`service.py` non-`proceed` cutover to `context.assemble_context`)
 
 **Change**: cerebro-agent-knowledge-router · **Boundary**: task 12A-1 — `cerebro-retrieval/src/cerebro_router/service.py` (+28/-6, first authorized edit of the previously frozen module), `cerebro-retrieval/tests/test_service.py` (+25/-1). **Date**: 2026-07-24 · **Run**: independent, fresh-context, adversarial verification (did not author the code). **Mode**: Standard (no Strict TDD cache found for this project at verify time).

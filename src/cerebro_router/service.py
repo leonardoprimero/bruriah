@@ -12,10 +12,23 @@
 # `assemble_context`'s `_route_gated_result` adds escalation `host_actions`
 # (`_escalation_host_actions(decision.gaps)`), the consequential-action refusal warning plus
 # `inspect_capability` action, and output-budget compaction, none of which the old manual
-# construction had. The `proceed` path is untouched: `assemble_context` discards evidence not
-# cited by a claim, which would destroy the capability + local retrieval catalog this module
-# still builds directly -- wiring `proceed` through the assembler is a later sub-slice's job, not
-# this one's.
+# construction had. The `proceed` path was untouched in 12A-1: `assemble_context` discards
+# evidence not cited by a claim, which would destroy the capability + local retrieval catalog
+# this module still builds directly -- wiring `proceed`'s CONCLUSIONS through the assembler
+# remains a later sub-slice's job (claim formation is Slice 12A-3), not this one's.
+#
+# Slice 12A-2: the second authorized edit. `investigate()`'s `proceed` path now runs bounded live
+# research (`research.py`, Slice 9B, standalone until now) over each `http`/`https` locator in
+# `request.candidate_material` and folds the outcomes into the same combined evidence/host_actions/
+# degradation catalog this module already builds -- mirroring the identical fold `context.py`'s
+# `_assembled_result` (:184-201) already performs for assembled claims: fetched/cached evidence is
+# appended (ref-deduplicated), everything else becomes a named `research_unavailable:<code>`
+# degradation entry plus the ALREADY-COMPUTED vendor-neutral `host_actions` `research()` returned
+# (reused, never re-derived). `ServiceDeps.research` defaults to `None`, so every existing
+# construction -- including frozen `platform.load_deps` -- still type-checks and keeps research
+# dormant: `_run_research` then returns `[]` and the `proceed` result is byte-identical to
+# 12A-1's. `claims` stays `[]` here; forming claims from research evidence is Slice 12A-3, not
+# this one.
 from __future__ import annotations
 
 import base64
@@ -25,16 +38,19 @@ import sqlite3
 import time
 from collections.abc import Callable
 from dataclasses import dataclass
+from urllib.parse import urlsplit
 
 from .classify import classify
 from .context import assemble_context
 from .contracts import (
-    EvidenceRecord, InvestigationRequest, InvestigationResult, ReadItem, ReadRequest, ReadResult,
+    EvidenceRecord, HostAction, InvestigationRequest, InvestigationResult, ReadItem, ReadRequest,
+    ReadResult,
 )
 from .index import ActiveSnapshot
 from .lookup import discover, resolve_capability
 from .packs import CapabilityPolicy
 from .registries import Registry
+from .research import ResearchDeps, ResearchOutcome, research
 from .retrieval import EmbedQuery, search, to_evidence_records
 from .route import route
 
@@ -52,12 +68,16 @@ class ServiceDeps:
     """Everything `investigate`/`read` need but must never load themselves: the deterministic
     registry (5A/5B) and the currently active read-only snapshot (Slice 3/4). `embed_query`/
     `clock` mirror `retrieval.search`'s own injection points so tests and later slices control
-    them identically. 7B wires the real registry/snapshot; tests wire real or fixture ones."""
+    them identically. 7B wires the real registry/snapshot; tests wire real or fixture ones.
+    `research` (Slice 12A-2) defaults to `None`, keeping live research dormant for every deps
+    construction that does not explicitly opt in -- including frozen `platform.load_deps`, whose
+    real `ResearchDeps` construction remains a later sub-slice."""
 
     registry: Registry
     snapshot: ActiveSnapshot
     embed_query: EmbedQuery | None = None
     clock: Callable[[], float] = time.monotonic
+    research: ResearchDeps | None = None
 
 
 def _canonical_json(payload: object) -> str:
@@ -147,16 +167,72 @@ def _window_text(
     return window, start, actual_end, actual_end < wanted_end
 
 
+def _candidate_urls(request: InvestigationRequest) -> list[str]:
+    # Only `http`/`https` locators are live-fetch targets -- other `candidate_material` locators
+    # (e.g. a bare capability id or filesystem-style path) are not URLs `research.py`/`fetch.py`
+    # can ever admit, so they are silently skipped here rather than passed through to fail later.
+    # Order-preserving de-duplication, then truncated to the declared `max_network_requests`
+    # ceiling -- the same budget `research()` itself would refuse against one at a time, checked
+    # here too so this module never plans more research calls than the request actually allows.
+    urls: list[str] = []
+    for material in request.candidate_material:
+        if urlsplit(material.locator).scheme not in ("http", "https"):
+            continue
+        if material.locator not in urls:
+            urls.append(material.locator)
+    return urls[: request.budgets.max_network_requests]
+
+
+def _run_research(request: InvestigationRequest, deps: ServiceDeps) -> list[ResearchOutcome]:
+    # `deps.research is None` (the default) keeps research dormant: no ResearchDeps means no
+    # network policy has been provisioned for this deps construction, so this returns `[]` rather
+    # than raising -- the invariant that keeps the `proceed` result byte-identical to 12A-1's
+    # whenever research was never wired in. Sequential, in `_candidate_urls`' deterministic order:
+    # `research()` is total and never raises (module docstring #7), so no try/except is needed
+    # here, and there is no fan-out to make ordering ambiguous.
+    if deps.research is None:
+        return []
+    return [research(request, url, deps.research) for url in _candidate_urls(request)]
+
+
+def _fold_research(
+    outcomes: list[ResearchOutcome],
+) -> tuple[list[HostAction], list[str], list[EvidenceRecord]]:
+    # Mirrors `context.py`'s `_assembled_result` research fold (:184-201) exactly: a `cached`/
+    # `fetched` outcome's evidence is appended (ref-deduplicated against outcomes already folded);
+    # every other outcome is a named `research_unavailable:<code>` degradation entry plus its
+    # ALREADY-COMPUTED vendor-neutral `host_actions` (reused verbatim, never re-derived -- research.
+    # py already built them without fetching). Deduplicated by `HostAction` equality, same as
+    # `context.py`.
+    host_actions: list[HostAction] = []
+    degradation: list[str] = []
+    evidence: list[EvidenceRecord] = []
+    seen_refs: set[str] = set()
+    for outcome in outcomes:
+        if outcome.status in ("cached", "fetched") and outcome.evidence is not None:
+            if outcome.evidence.ref not in seen_refs:
+                evidence.append(outcome.evidence)
+                seen_refs.add(outcome.evidence.ref)
+        else:
+            degradation.append(f"research_unavailable:{outcome.code}")
+            for action in outcome.host_actions:
+                if action not in host_actions:
+                    host_actions.append(action)
+    return host_actions, degradation, evidence
+
+
 def investigate(request: InvestigationRequest, deps: ServiceDeps) -> InvestigationResult:
     """Compose classify -> discover -> route, then, only on `proceed`, retrieve over the
-    snapshot. `route_only`/`abstained` delegate to `context.assemble_context` (Slice 12A-1),
-    which carries the route decision's gaps, escalation `host_actions`, and safety `warnings`,
-    and never retrieves or fabricates evidence -- design.md "Routing/retrieval": "Generic
-    discovery only routes or abstains." Deterministic: identical `request`/`deps` state always
-    yields an identical result. Errors raised by the frozen stages (`ClassificationError`/
-    `LookupError`/`RouteError`/`RetrievalError`) are already typed `ValueError` subclasses with a
-    `.code` and propagate unwrapped; `ServiceError` is reserved for this module's own
-    request/deps validation.
+    snapshot AND run bounded live research (Slice 12A-2) over any `http`/`https` candidate-
+    material locators. `route_only`/`abstained` delegate to `context.assemble_context` (Slice
+    12A-1), which carries the route decision's gaps, escalation `host_actions`, and safety
+    `warnings`, and never retrieves or fabricates evidence -- design.md "Routing/retrieval":
+    "Generic discovery only routes or abstains." Deterministic: identical `request`/`deps` state
+    always yields an identical result (`deps.research is None` -> research stays dormant ->
+    result is byte-identical to a build with no research wired in at all). Errors raised by the
+    frozen stages (`ClassificationError`/`LookupError`/`RouteError`/`RetrievalError`) are already
+    typed `ValueError` subclasses with a `.code` and propagate unwrapped; `ServiceError` is
+    reserved for this module's own request/deps validation.
     """
     if not isinstance(request, InvestigationRequest):
         raise ServiceError("invalid_request_type")
@@ -182,7 +258,7 @@ def investigate(request: InvestigationRequest, deps: ServiceDeps) -> Investigati
         # gates on `decision.outcome`, not on `mode`, whenever it isn't already "proceed".
         return assemble_context(request, decision, mode="full")
 
-    evidence, warnings, degradation, status = [], [], [], decision.outcome
+    evidence, warnings, degradation, status, host_actions = [], [], [], decision.outcome, []
     if decision.outcome == "proceed":
         # Capability evidence (Slice 7A-2): one EvidenceRecord per matched `lookup.capabilities`
         # entry -- "Method and tool discovery" requires capability refs alongside knowledge, not
@@ -203,20 +279,30 @@ def investigate(request: InvestigationRequest, deps: ServiceDeps) -> Investigati
         # capability_recommendation claim -- and are typically the smaller, most specific set;
         # local passages fill the remaining budget. This ordering is the truncation preference below.
         evidence = capability_evidence + local_evidence
-        # Enforce the declared `max_evidence` ceiling over the COMBINED set. retrieval.search bounds
-        # by `max_candidates` (a scan ceiling), not by `max_evidence` (the result-item ceiling), so
-        # without this an investigation could return more evidence items than the smaller declared
-        # budget -- "Bounded Investigation": every request MUST enforce the declared evidence-items
-        # ceiling. Truncation is reported, never silent.
+        # Bounded live research (Slice 12A-2): run only when `deps.research` was actually
+        # provisioned (`_run_research` returns `[]` otherwise -- the byte-identical-to-12A-1
+        # invariant), then fold outcomes the same way `context.py`'s `_assembled_result` folds
+        # them for assembled claims: fetched/cached evidence appended, everything else a named
+        # `research_unavailable:<code>` degradation entry plus its already-computed host actions.
+        research_outcomes = _run_research(request, deps)
+        host_actions, research_degradation, research_evidence = _fold_research(research_outcomes)
+        evidence = evidence + research_evidence
+        degradation = degradation + research_degradation
+        # Enforce the declared `max_evidence` ceiling over the COMBINED set (capability + local +
+        # research). retrieval.search bounds by `max_candidates` (a scan ceiling), not by
+        # `max_evidence` (the result-item ceiling), so without this an investigation could return
+        # more evidence items than the smaller declared budget -- "Bounded Investigation": every
+        # request MUST enforce the declared evidence-items ceiling. Truncation is reported, never
+        # silent.
         if len(evidence) > request.budgets.max_evidence:
             evidence = evidence[: request.budgets.max_evidence]
             degradation.append("max_evidence_exceeded")
             truncated = True
-        status = "partial" if truncated else "complete"
+        status = "partial" if truncated or research_degradation else "complete"
 
     return InvestigationResult(
         schema_version="1", status=status, request_id=request_id, evidence=evidence,
-        claims=[], conflicts=[], gaps=list(decision.gaps), host_actions=[],
+        claims=[], conflicts=[], gaps=list(decision.gaps), host_actions=host_actions,
         warnings=warnings, degradation=degradation, budgets=request.budgets, next_cursor=None,
     )
 
