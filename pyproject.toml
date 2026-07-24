@@ -7,10 +7,22 @@ dependencies = [
   "fastembed==0.8.0",
   "markdown-it-py>=4.0.0,<5",
   "mcp>=1.28.1,<2",
+  "platformdirs>=4.11,<5",
   "pydantic>=2.13.4,<3",
   "pyyaml>=6.0.3,<7",
   "sqlite-vec==0.1.9",
 ]
+
+[project.scripts]
+cerebro-mcp = "cerebro_router.cli:cerebro_mcp_main"
+
+[build-system]
+requires = ["uv_build>=0.11,<0.12"]
+build-backend = "uv_build"
+
+[tool.uv.build-backend]
+module-root = "src"
+module-name = "cerebro_router"
 
 [dependency-groups]
 dev = [
@@ -22,6 +34,3 @@ dev = [
 addopts = "-ra"
 pythonpath = ["src"]
 testpaths = ["tests"]
-
-[tool.uv]
-package = false

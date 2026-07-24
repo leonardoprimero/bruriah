@@ -63,11 +63,12 @@ filecache = [
 [[package]]
 name = "cerebro-router"
 version = "0.1.0"
-source = { virtual = "." }
+source = { editable = "." }
 dependencies = [
     { name = "fastembed" },
     { name = "markdown-it-py" },
     { name = "mcp" },
+    { name = "platformdirs" },
     { name = "pydantic" },
     { name = "pyyaml" },
     { name = "sqlite-vec" },
@@ -84,6 +85,7 @@ requires-dist = [
     { name = "fastembed", specifier = "==0.8.0" },
     { name = "markdown-it-py", specifier = ">=4.0.0,<5" },
     { name = "mcp", specifier = ">=1.28.1,<2" },
+    { name = "platformdirs", specifier = ">=4.11,<5" },
     { name = "pydantic", specifier = ">=2.13.4,<3" },
     { name = "pyyaml", specifier = ">=6.0.3,<7" },
     { name = "sqlite-vec", specifier = "==0.1.9" },
