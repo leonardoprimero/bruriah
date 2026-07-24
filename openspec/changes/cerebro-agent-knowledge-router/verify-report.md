@@ -1,3 +1,106 @@
+## Verification Report — Slice 10 (`evidence.py` normalization + claim-state ledger)
+
+**Change**: cerebro-agent-knowledge-router · **Boundary**: 10.1 — `evidence.py` (342, new, unwired — matches how 9B delivered `research.py`), `tests/test_evidence.py` (333, 21 tests, no fixture files). **Date**: 2026-07-24 · **Run**: independent, fresh-context, adversarial verification (did not author the code). **Mode**: Standard (no Strict TDD cache found for this project at verify time).
+
+### Verdict
+**PASS WITH WARNINGS.** Zero CRITICAL issues. All frozen-context constraints hold (zero diff to every tracked module, `uv.lock` hash unchanged, no new runtime deps, locked-env install/test/baseline all green). The core adversarial security property — assessment authority comes ONLY from the matched `SourcePolicy`, never from evidence's own self-declared/injected content — holds both statically (grep-confirmed: `record.authority` is never read for any decision) and dynamically (manual runtime probe below, stronger than the shipped test). Two WARNINGs are test-coverage gaps for genuine guarantees that are correct in the shipped code but not regression-guarded by the shipped test suite.
+
+### Frozen-Context Constraints
+| Check | Result |
+|---|---|
+| HEAD is `7725ab7` | ✅ `git rev-parse HEAD` → `7725ab7397ac6ae78288d51908913660cf74d4e9` |
+| `git diff --stat 7725ab7 -- cerebro-retrieval/` | ✅ empty — zero diff to every frozen tracked module (`fetch.py`, `cache.py`, `audit.py`, `research.py`, `classify.py`, `lookup.py`, `route.py`, `service.py`, `mcp_server.py`, `platform.py`, `cli.py`, `contracts.py`, `packs.py`, `pyproject.toml`, `uv.lock`) |
+| Only new files | ✅ `git status --porcelain cerebro-retrieval/` → `?? evidence.py`, `?? tests/test_evidence.py` only. (Repo-root `.gitignore` has an unrelated pre-existing local diff — SDD skill-index ignore rule — not part of this slice.) |
+| `uv.lock` sha256 | ✅ `3c83d9eb87c9e5e94dcd5ae850339da9c29aa567292773c4d9e093795f4f2bc8` (matches expected) |
+| `uv lock --check` | ✅ `Resolved 78 packages in 8ms` — no changes needed |
+| No new runtime dep | ✅ `rg 'requests|httpx|urllib3|aiohttp' src/` → only pre-existing prose/comment hits in `fetch.py`/`research.py`/`contracts.py` (field name `max_network_requests`); zero import statements in `evidence.py` |
+| `scripts/verify_legacy_baseline.py` (fresh venv, `uv sync --locked`, registered `.venv` untouched) | ✅ `status: pass`, `errors: []` |
+| `pip_audit --skip-editable` (fresh venv) | ✅ "No known vulnerabilities found" |
+| AST parse of `evidence.py` | ✅ valid |
+
+Fresh venv used for all execution: `uv venv <scratch>/.venv --python 3.12` + `UV_PROJECT_ENVIRONMENT=<scratch>/.venv uv sync --locked` — the registered `cerebro-retrieval/.venv` was never touched.
+
+### Test Execution
+```text
+$ <scratch-venv>/bin/python -m pytest tests -q -p no:randomly
+........................................................................ [ 21%]
+........................................................................ [ 43%]
+........................................................................ [ 65%]
+........................................................................ [ 87%]
+..........................................                               [100%]
+330 passed in 23.53s
+```
+Matches the expected count exactly (309 prior + 21 new `test_evidence.py` tests).
+
+### Adversarial Checks (10 requested, all independently exercised)
+| # | Check | Result |
+|---|---|---|
+| 1 | Assessment not steerable by evidence content (self-declared `authority` ignored) | ✅ **Statically confirmed**: `rg -n "record\.authority" evidence.py` → zero hits outside comments; `resolve_authority` reads only `source.authority`/`source.rationale`. ✅ **Dynamically confirmed by shipped test** `test_prompt_injection_in_extract_never_changes_assessment_or_executes` (record self-declares `authority="primary"`, extract contains an injected file-write instruction; no source matched → `state="unknown"`, no file written). ⚠️ **Manual probe (stronger, not in shipped suite)**: constructed a record with `authority="primary"` (spoofed) **plus** a real matched `SourcePolicy(authority="official")` → `resolve_authority(source)` returned `("official", "real pack rationale")`, `assessment.authority_rationale == "real pack rationale"`, `state="supported"`. The spoofed self-declaration never leaked in even the strongest combined case — but this exact combination (matched source + conflicting self-declaration) has no regression test. See WARNING 1. |
+| 2 | Digest integrity is real (one-char tamper detected via real hashlib, not a stub) | ✅ `verify_extract_digest` computes `hashlib.sha256(extract.encode('utf-8'))` directly (line 90); `test_wrap_evidence_detects_real_tampered_digest_mismatch` tampers one word of a real string and gets `EvidenceError("digest_mismatch")`; `test_verify_extract_digest_matches_real_sha256_of_full_text` confirms the positive case against real hashlib-computed digests (test helper `_digest` independently reimplements the sha256, not a shared stub). |
+| 3 | Claim states correct, never fabricated | ✅ `supported` requires: applicable (jurisdiction/as_of/version) AND single normalized-claim group AND known authority AND `freshness=="current"`. Never returned by default — confirmed by code path (line 300-305 is the only `state="supported"` return) and 21 tests exercising every other branch. `unknown` correctly returned for unmatched-source and fully-unknown-metadata evidence (`test_unknown_metadata_stays_unknown_never_current`, `assess_freshness` with all dates `None` → `"unknown"`, never `"current"`). |
+| 4 | Abstention discipline (unsupported-domain / "general" → abstain-equivalent) | ✅ At this layer (Slice 11 owns `route_only`/`abstained` status), the ledger's abstain-equivalent is `state="unknown"` with a named `uncertainty` reason — `test_arbitrary_unsupported_profession_has_no_matched_source_stays_unknown` confirms no fabricated consensus/advice is produced when no pack source matches. Consistent with `route.py`'s own verified note (line 269 of the same verify-report file) that these three domain nuances are explicitly Slice 10's duty, not routing triggers. |
+| 5 | Non-applicable evidence preserved, never hidden | ✅ `non_applicable_refs` populated and asserted in `test_two_jurisdiction_accounting_authority_is_jurisdiction_sensitive` (EU ref preserved when jurisdiction=US) and `test_versioned_software_guidance_marks_mismatch_non_applicable` (3.9 docs preserved when version=3.12 requested). |
+| 6 | Corroboration counts distinct publishers, not refs | ✅ Code: `corroboration = len({item.envelope.record.publisher for ... in current})` (line 300) — a `set`, so duplicate publishers collapse. Shipped test only covers the **positive** case (2 distinct publishers → `corroboration=2`, `test_corroboration_counts_distinct_publishers_not_duplicate_refs`). ⚠️ **Manual probe (not in shipped suite)**: 2 refs, same publisher → `corroboration=1` (confirmed). Guarantee holds; negative case untested. See WARNING 2. |
+| 7 | Determinism, no wall-clock | ✅ `rg -n "date\.today\(|datetime\.now\(" evidence.py` → zero hits — `assess_freshness` takes `today: date` as a mandatory keyword-only injected argument, never reads wall-clock. `test_assess_claim_is_deterministic_for_identical_inputs` confirms identical `ClaimAssessment` for identical inputs; ordering is deterministic because `groups` (a `dict`) preserves first-seen insertion order of the input list, and `conflict_classes` is explicitly `sorted(...)`. |
+| 8 | Typed-total boundary | ✅ `assess_claim`'s public entry wraps `_assess_claim_inner` in `except EvidenceError` then a bare `except Exception` backstop (line 324) — confirmed by `test_assess_claim_never_raises_on_malformed_evidence_claims` (string instead of list) and by manual probes: a list containing a non-`EvidenceClaim` dict item, empty `claim_text`, and a non-`date` `today` all return `state="unknown"` with a distinct named `uncertainty` code rather than raising. |
+| 9 | Closed models | ✅ `ClaimAssessment` imports and extends `contracts.ClosedModel` (`extra="forbid", strict=True`) — live probe: unknown field raises `ValidationError`, invalid `Literal` value for `state` raises, and passing `state=123` (non-str) raises under `strict=True` (no int→str coercion). |
+| 10 | No synthetic-fixture-masks-real-data | ✅ Every test builds `EvidenceRecord`/`SourcePolicy` from real pydantic-validated data, real `hashlib.sha256` digests (independently recomputed by the test module, not shared with production code), and real `date` arithmetic. No test's assertion would trivially pass against a stubbed `assess_claim` — each asserts a specific `state`, specific `uncertainty` code(s), or specific ref-set membership that requires the actual branching logic to produce. |
+
+### Spec Compliance Matrix
+| Requirement | Scenario | Test | Result |
+|---|---|---|---|
+| Evidence Normalization and Claim State | Conflicting current sources | `test_evidence.py::test_conflicting_current_sources_preserves_both_refs_and_conflict_class` | ✅ COMPLIANT — same-jurisdiction, differing `effective_at` → `state="conflicted"`, both refs preserved, `conflict_classes==["time"]`, `extracted_claim is None` (no fabricated consensus) |
+| Domain-Sensitive Outcomes | Supported regulated domain lacks context | `test_supported_regulated_domain_lacks_context_names_the_gap` | ✅ COMPLIANT — `state="insufficient"`, named gaps `missing_jurisdiction`+`missing_effective_date` |
+| Domain-Sensitive Outcomes | Accounting authority is jurisdiction-sensitive | `test_two_jurisdiction_accounting_authority_is_jurisdiction_sensitive` | ✅ COMPLIANT — **note**: spec.md's own scenario text says non-applicable refs are *preserved and non-applicable*, not "conflicted" (that's the separate "Conflicting current sources" scenario, same-jurisdiction only). The code and test correctly implement spec.md's actual wording: EU ref → `non_applicable_refs`, US ref → `state="supported"`. (The verification brief's summary phrase "conflicted for ... two-jurisdiction law/accounting" is imprecise relative to spec.md; flagging as a brief-wording note, not a code defect — see SUGGESTION 2.) |
+| Domain-Sensitive Outcomes | Cybersecurity evidence lacks authorization | `test_cybersecurity_evidence_cites_without_any_recommendation_field` | ⚠️ PARTIAL — proves the guarantee structurally (`ClaimAssessment.model_fields` has no `recommendation`/`action` field at all, so no exploit/incident recommendation can exist in this slice's output) rather than literally modeling "authorization/environment facts absent". Defensible given Slice 10's explicit non-goal of "professional advice" — see SUGGESTION 1. |
+| Domain-Sensitive Outcomes | Programming guidance is version-bound | `test_versioned_software_guidance_marks_mismatch_non_applicable` | ✅ COMPLIANT — mismatched version → `non_applicable_refs`, matching version → `supported` |
+| Domain-Sensitive Outcomes | UX and web evidence types differ | `test_ux_standards_vs_contextual_research_are_distinguished_never_merged` | ✅ COMPLIANT — `state="conflicted"` (genuinely differing values), `standard`/`contextual` authority classes kept distinct, both refs preserved |
+| Domain-Sensitive Outcomes | Arbitrary unsupported profession | `test_arbitrary_unsupported_profession_has_no_matched_source_stays_unknown` | ✅ COMPLIANT — no pack match → `state="unknown"`, `uncertainty==["authority_unknown"]` |
+| Instruction and Evidence Separation | Retrieved prompt injection | `test_prompt_injection_in_extract_never_changes_assessment_or_executes` | ✅ COMPLIANT — injected instruction + spoofed self-declared authority stays inert; no file written; assessment driven only by structured fields |
+
+**Compliance summary**: 8/8 scenarios compliant (1 PARTIAL noted for coverage precision, not a functional gap).
+
+### Correctness (Static Evidence)
+| Requirement | Status | Notes |
+|---|---|---|
+| `UntrustedEvidence` typed envelope | ✅ Implemented | `dataclass(frozen=True)`; `wrap_evidence` type-checks record/extract, bounds extract to 200k chars, optional digest match |
+| Pack-contextual authority | ✅ Implemented | `resolve_authority` reads only `SourcePolicy`; `record.authority` never consulted (grep-confirmed) |
+| Date-rule freshness, no wall-clock | ✅ Implemented | `assess_freshness(today: date, ...)` mandatory injected `today`; zero `date.today()`/`datetime.now()` in file |
+| Structural conflict classification | ✅ Implemented | `_classify_conflict` compares only structured fields (`jurisdiction`, `effective_at`, `pack_version`, `applies_to_version`), never prose |
+| Total/typed `assess_claim` | ✅ Implemented | `EvidenceError` + bare `except Exception` backstop; verified never raises across 4 malformed-input shapes (1 shipped test + 3 manual probes) |
+| Closed models | ✅ Implemented | `ClaimAssessment(ClosedModel)` reuses `contracts.ClosedModel`, not a new/duplicate definition |
+| `render_claim_record` one-way projection | ✅ Implemented | Projects `ClaimAssessment` → frozen `ClaimRecord`; frozen contract never enriched in place |
+
+### Coherence (Design)
+| Decision | Followed? | Notes |
+|---|---|---|
+| "`evidence.py` stores source text only inside typed `UNTRUSTED_EVIDENCE` envelopes; parsers cannot emit actions" (design.md, Evidence row) | ✅ Yes | `UntrustedEvidence.extract` is read only for citation display; no assessment function reads it |
+| "Authority is pack-contextual" | ✅ Yes | Confirmed statically and via the strongest manual adversarial probe |
+| "freshness is date-rule state" | ✅ Yes | Injected `today`, no wall-clock |
+| "conflicts are classified" | ✅ Yes | `ConflictClass = Literal["time", "jurisdiction", "definition", "version"]` |
+| Slice boundary: "Evidence normalization and claim verification ledger / Rollback: Return raw cited evidence only" (design.md Files-and-Verification table) | ✅ Yes | Module is delivered unwired (composition into `service.py` deferred to Slice 11, matching the 9B precedent) — rollback is simply not wiring it in |
+| Non-goals: consensus invention, professional advice, context assembly | ✅ Yes | No free-text `assessment`/`recommendation` field exists on `ClaimAssessment`; `render_claim_record` performs only a structural projection |
+
+### Issues Found
+**CRITICAL**: None.
+
+**WARNING**:
+1. Missing regression test for the *strongest* form of adversarial check #1: a record with a matched `SourcePolicy` (real authority, e.g. `"official"`) **plus** a conflicting/spoofed self-declared `EvidenceRecord.authority` (e.g. `"primary"`). The shipped `test_prompt_injection_...` and `test_self_declared_authority_...` tests only cover the `source=None` case. I confirmed by manual runtime probe that the guarantee holds even in the matched-source case (resolved authority stayed `"official"`, never `"primary"`), but this specific combination has no regression test guarding it — a future refactor of `resolve_authority` could silently regress this without any test failing. `cerebro-retrieval/src/cerebro_router/evidence.py:150-157`, `cerebro-retrieval/tests/test_evidence.py`.
+2. Missing regression test for the negative corroboration case: two refs from the **same** publisher must not inflate `corroboration`. Only the positive (2 distinct publishers → `corroboration=2`) case is tested. I confirmed by manual probe that 2 same-publisher refs correctly yield `corroboration=1`, but no test locks this in. `cerebro-retrieval/src/cerebro_router/evidence.py:300`, `cerebro-retrieval/tests/test_evidence.py`.
+
+**SUGGESTION**:
+1. `test_cybersecurity_evidence_cites_without_any_recommendation_field` proves its guarantee via schema-absence (no `recommendation`/`action` field exists at all on `ClaimAssessment`) rather than literally modeling "authorization/environment facts do not exist yet evidence exists". This is a defensible way to prove the guarantee at this architectural layer given the slice's explicit non-goal of not inventing free-text recommendations — but a reviewer scanning test names for scenario traceability could miss that it does not construct a missing-authorization *input* case. Consider renaming or adding a short docstring clarifying the structural-proof approach.
+2. The verification brief's own summary line ("`conflicted` for genuinely conflicting current sources (two-jurisdiction law/accounting; ...)") slightly conflates two distinct spec.md scenarios: "Conflicting current sources" (same-jurisdiction, genuinely disagreeing → `conflicted`) and "Accounting authority is jurisdiction-sensitive" (different-jurisdiction, non-conflicting → `non_applicable_refs`). The implementation correctly follows spec.md's actual wording for both; future verification prompts should quote spec.md scenario titles verbatim to avoid this ambiguity during review.
+3. Add explicit malformed-item-in-list coverage (`assess_claim("x", [{"not": "an EvidenceClaim"}], today=...)`) alongside the existing malformed-list-type test, since `_assess_claim_inner`'s type guard checks both the container and each item — only the container-type violation is currently tested.
+
+### Task/Artifact Trail
+`openspec/changes/cerebro-agent-knowledge-router/tasks.md:119` — task `10.1` checkbox is still `- [ ]` (unchecked) at verify time. Recommend marking it complete now that Slice 10 is independently verified PASS WITH WARNINGS, consistent with the precedent set for prior slices (e.g. "Task `9.1` may be marked complete") in this same file.
+
+### Next Recommended
+No CRITICAL blocks archive of this slice. Before Phase 12 cutover (or, at minimum, before Slice 11 wires `evidence.py` into `service.py`'s `investigate()`), close WARNING 1 and WARNING 2 with regression tests — both guarantees are correct today but currently rely on this verification run's manual probes rather than a checked-in test. Proceed to Slice 11 (context assembly, host actions, refusal/escalation) once these are addressed or explicitly accepted as scoped follow-ups, mirroring how 9B's WARNINGs were carried forward rather than blocking.
+
+---
+
 ## Verification Report — Slice 9B (`research.py` planner + private cache + content-free audit) — completes Phase 9
 
 **Change**: cerebro-agent-knowledge-router · **Boundary**: 9B — `cache.py` (182, new), `audit.py` (93, new), `research.py` (325, new), `tests/test_cache.py` (161, 14 tests), `tests/test_audit.py` (63, 5 tests), `tests/test_research.py` (515, 19 tests). **Date**: 2026-07-24 · **Run**: independent, fresh-context, adversarial verification (did not author the code).
