@@ -156,7 +156,7 @@ Investigation SHALL search eligible local knowledge and discover relevant skills
 
 Live research MUST be opt-in by policy and limited to public read-only `HTTPS` destinations admitted by strict configured destination allowlists. The router MUST validate hostname resolution and every redirect; reject loopback, private, link-local, multicast, reserved, ambiguous, and disallowed IP destinations; pin validation to the connection destination; and enforce method, port, redirect, timeout, concurrency, compressed/decompressed size, and content-type limits. It MUST NOT forward ambient credentials, cookies, authorization headers, client secrets, or undeclared proxy credentials, and MUST redact unnecessary personal data and likely secrets from outbound material and local logs.
 
-Robots directives, access restrictions, source terms, and licensing policy MUST be honored where applicable; paywalls, authentication, CAPTCHAs, and technical restrictions MUST NOT be bypassed.
+Robots directives, access restrictions, source terms, and licensing policy MUST be honored where applicable. Because the router fetches only caller-declared single URLs and never crawls, link-discovers, or follows undeclared destinations, robots directives are honored through the operator-configured destination allowlist/denylist (`AccessPolicy`) rather than by live-fetching `robots.txt`: issuing an unrequested request for a host's `robots.txt` would itself violate the caller-declared-URL-only and no-hidden-chaining invariants this requirement depends on, and `robots.txt` governs automated crawling/discovery that this router structurally does not perform. Paywalls, authentication, CAPTCHAs, and technical restrictions MUST NOT be bypassed.
 
 #### Scenario: DNS or redirect SSRF attempt
 
