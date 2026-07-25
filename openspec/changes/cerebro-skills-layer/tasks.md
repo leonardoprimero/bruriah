@@ -383,7 +383,25 @@ Apply to every unit without exception.
   Verification (all passed): 795 → **814 passed** (+19); `verify_legacy_baseline.py` `status: pass`, `errors: []`; pins unchanged; `uv lock --check` and `git diff --check` clean.
   Rollback: delete module and tests; `validate_skillset` keeps taking an injected map. [S-Candidate Lifecycle and Approval Gate]
 
-- [ ] **9A.3. The four subcommands.** `skill-ingest`, `skill-analyze`, `skill-approve`, `skill-sign` as thin `_cmd_*` wrappers over testable `run_*`, JSON on stdout and human text on stderr, one typed `CliError` per failure. `skill-sign` reuses `signing.py` so the CLI and the release script cannot drift.
+- [x] **9A.3. The four subcommands.** DONE 2026-07-25. `skill-ingest`, `skill-analyze`, `skill-approve`, `skill-sign` registered and working end to end from the terminal.
+
+  Files: `cli.py`, `tests/test_cli.py` (+241).
+  Estimate: 110 + 120 tests = **~230**. **Actual: 241** — 1.05x.
+
+  **The output carries its own limits.** `skill-analyze` and `skill-approve` both return an `analysis_limits` field stating that an advisory means a person should look, never that something is dangerous, and that the absence of advisories never means it is safe. Reasoning: a report that travels without its disclaimer becomes a clearance — someone pastes the JSON into a ticket and the caveat stays behind. Putting it *inside* the payload means copying the result copies the caveat. `skill-sign` carries the equivalent note that a signature establishes who signed, not that the bytes are correct or safe.
+
+  **The CLI must not reintroduce at the boundary the verdict the analysis layer refuses to express.** Pinned by a test asserting the exact output key set and checking `safe`/`passed`/`verdict`/`risk`/`severity`/`score`/`clean` are absent — the same discipline `AnalysisReport` enforces one layer down, now enforced where a user actually reads it.
+
+  `skill-sign` calls `signing.sign_pack`, the same function the release script uses, so a manifest produced through the CLI and one produced by `scripts/sign_pack.py` cannot drift. Verified by signing through the CLI and loading the result through the unmodified `load_skill_pack`.
+
+  **Falsifiability probes: two.** (1) Adding `"safe": not report.advisories` to the analyze output failed the no-verdict test. (2) Dropping `analysis_limits` from the approve output failed the disclaimer test. Both reverted.
+
+  **Flakiness observed once, recorded rather than ignored.** During the probe run, `test_retrieval_eval.py::test_legacy_adapter_search_does_not_mutate_database` and `::test_legacy_adapter_returns_note_level_results` failed while the suite took 49s instead of the usual 25s. Investigated rather than re-run and forgotten: both pass in isolation (33/33), the full clean suite passes (828), and — the check that actually matters — the `cerebro.db` pin is still `03e9f3c5`, so nothing mutated the legacy engine. Attributed to contention during that run. Cause not proven; if it recurs it deserves a real investigation.
+
+  Verification (all passed): 814 → **828 passed** (+14); all four subcommands present in `--help`; every failure surfaces as one typed `cerebro-mcp: error:` line rather than a traceback, exercised through the real argv path; `verify_legacy_baseline.py` `status: pass`, `errors: []`; pins unchanged; `uv lock --check` and `git diff --check` clean.
+  Rollback: remove subcommands; no MCP behaviour touched. [S-Candidate Lifecycle and Approval Gate; S-Read-Only Boundary and CLI-Confined Mutation]
+
+- [ ] ~~9A.3 (original)~~ `skill-ingest`, `skill-analyze`, `skill-approve`, `skill-sign` as thin `_cmd_*` wrappers over testable `run_*`, JSON on stdout and human text on stderr, one typed `CliError` per failure. `skill-sign` reuses `signing.py` so the CLI and the release script cannot drift.
 
   Estimate: 110 + 120 tests = **~230**.
   Verification: CLI output never claims prose was verified safe; every failure is one typed code; approve refuses without full acknowledgment through the CLI path too.

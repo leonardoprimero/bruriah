@@ -21,6 +21,7 @@ from . import cache, clients
 from .corpus import CorpusPolicy, CorpusPolicyError
 from .index import BuildConfig, BuildResult, Embedder, IndexLifecycleError, build_candidate, promote_candidate
 from .mcp_server import build_server
+from . import approvals, candidates, signing
 from .platform import (
     PlatformError, PlatformPaths, ensure_private_dirs, load_build_descriptor, load_deps,
     load_registry, open_snapshot, resolve_paths, write_build_descriptor,
@@ -298,6 +299,104 @@ async def _serve_stdio(deps: ServiceDeps) -> None:
         await server.run(read_stream, write_stream, server.create_initialization_options())
 
 
+# The skill lifecycle is CLI-confined by design: the MCP surface stays two read-only tools, and
+# every mutation -- ingest, approve, sign -- happens here, run by a human who can see what they are
+# agreeing to. `run_*` carries the behaviour and is directly testable; `_cmd_*` only formats.
+
+_ANALYSIS_LIMITS = (
+    "Structural checks only. An advisory means a person should look at this, never that it is "
+    "dangerous, and the absence of advisories never means it is safe. Whether prose persuades an "
+    "agent to act against you is not observable by inspection; the permission envelope and your own "
+    "reading of the text are what protect you."
+)
+
+
+def run_skill_ingest(paths: PlatformPaths, source: Path) -> dict[str, object]:
+    """Store a candidate pack privately, addressed by its own content digest."""
+    try:
+        record = candidates.ingest_candidate(source, paths.data_dir)
+    except candidates.CandidateError as error:
+        raise CliError(f"candidate_rejected:{error.code}") from error
+    return {"path": str(record.path), "digest": record.digest,
+            "pack_id": record.pack_id, "version": record.version}
+
+
+def run_skill_analyze(candidate: Path) -> dict[str, object]:
+    """Report structural findings. The result carries its own limits so that copying the output
+    copies the caveat with it -- a report that travels without its disclaimer becomes a clearance."""
+    try:
+        report = candidates.analyze_candidate(candidate)
+    except candidates.CandidateError as error:
+        raise CliError(f"candidate_rejected:{error.code}") from error
+    return {
+        "digest": report.digest, "pack_id": report.pack_id, "version": report.version,
+        "skill_ids": list(report.skill_ids),
+        "advisories": [
+            {"id": item.identifier, "code": item.code, "skill_id": item.skill_id,
+             "detail": item.detail}
+            for item in report.advisories
+        ],
+        "analysis_limits": _ANALYSIS_LIMITS,
+    }
+
+
+def run_skill_approve(
+    paths: PlatformPaths, candidate: Path, acknowledge: list[str], *, today: date | None = None,
+) -> dict[str, object]:
+    """Record human approval, bound to each skill's current body digest."""
+    try:
+        records = approvals.approve_candidate(
+            candidate, paths.data_dir, acknowledge=acknowledge, today=today or date.today(),
+        )
+    except approvals.ApprovalError as error:
+        raise CliError(f"approval_refused:{error.code}") from error
+    return {"approved": [record.as_json() for record in records],
+            "analysis_limits": _ANALYSIS_LIMITS}
+
+
+def run_skill_sign(key: Path, signer: str, pack: Path, out: Path | None) -> dict[str, object]:
+    """Sign a pack through the same `signing` module the release script uses, so a manifest produced
+    here and one produced there cannot drift apart."""
+    try:
+        manifest = signing.sign_pack(key, signer, pack, out)
+    except signing.SigningError as error:
+        raise CliError(f"signing_failed:{error.code}") from error
+    return {"manifest": str(manifest), "signer": signer,
+            "note": "A signature establishes who signed these bytes. It is not a claim that they "
+                    "are correct or safe."}
+
+
+def _cmd_skill_ingest(args: argparse.Namespace) -> int:
+    result = run_skill_ingest(_resolve_paths(args), args.pack)
+    print(json.dumps(result, indent=2, sort_keys=True))
+    print(f"Stored candidate at {result['path']}", file=sys.stderr)
+    return 0
+
+
+def _cmd_skill_analyze(args: argparse.Namespace) -> int:
+    result = run_skill_analyze(args.candidate)
+    print(json.dumps(result, indent=2, sort_keys=True))
+    count = len(result["advisories"])
+    print(f"{count} advisor{'y' if count == 1 else 'ies'} for review.", file=sys.stderr)
+    print(_ANALYSIS_LIMITS, file=sys.stderr)
+    return 0
+
+
+def _cmd_skill_approve(args: argparse.Namespace) -> int:
+    result = run_skill_approve(_resolve_paths(args), args.candidate, args.acknowledge or [])
+    print(json.dumps(result, indent=2, sort_keys=True))
+    for record in result["approved"]:
+        print(f"Approved {record['skill_id']} bound to {record['body_digest']}", file=sys.stderr)
+    return 0
+
+
+def _cmd_skill_sign(args: argparse.Namespace) -> int:
+    result = run_skill_sign(args.key, args.signer, args.pack, args.out)
+    print(json.dumps(result, indent=2, sort_keys=True))
+    print(f"Wrote manifest to {result['manifest']}", file=sys.stderr)
+    return 0
+
+
 def _resolve_paths(args: argparse.Namespace) -> PlatformPaths:
     try:
         return resolve_paths(
@@ -393,6 +492,19 @@ def _build_cli_parser() -> argparse.ArgumentParser:
     index_parser.add_argument(
         "--model", default="sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
     )
+    ingest = add("skill-ingest", "Store a candidate skill pack privately.", _cmd_skill_ingest)
+    ingest.add_argument("--pack", type=Path, required=True)
+    analyze = add("skill-analyze", "Report structural findings for review.", _cmd_skill_analyze)
+    analyze.add_argument("--candidate", type=Path, required=True)
+    approve = add("skill-approve", "Record approval, bound to the content digest.", _cmd_skill_approve)
+    approve.add_argument("--candidate", type=Path, required=True)
+    approve.add_argument("--acknowledge", action="append", metavar="SKILL_ID:CODE",
+                         help="Acknowledge one advisory. Repeat for each; all are required.")
+    sign = add("skill-sign", "Sign a pack with a release key held by path.", _cmd_skill_sign)
+    sign.add_argument("--key", type=Path, required=True)
+    sign.add_argument("--signer", required=True)
+    sign.add_argument("--pack", type=Path, required=True)
+    sign.add_argument("--out", type=Path, default=None)
     add("serve", "Run the two-tool MCP server over stdio.", _cmd_serve)
     add("doctor", "Read-only health check.", _cmd_doctor)
     return parser
