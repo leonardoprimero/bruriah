@@ -126,7 +126,12 @@ def route(classification: RequestClassification, lookup: LookupResult, request: 
         raise RouteError("invalid_request_type")
 
     effective_risk = _effective_risk(classification.risk, request.risk_class)
-    has_evidence = lookup.domain_supported or bool(lookup.sources) or bool(lookup.capabilities)
+    # Strictly ADDITIVE: skills can only make evidence present, never absent. A caller that
+    # passes no skill set gets `skills=()` and the identical decision it got before.
+    has_evidence = (
+        lookup.domain_supported or bool(lookup.sources)
+        or bool(lookup.capabilities) or bool(lookup.skills)
+    )
 
     if classification.intent == "consequential_action":
         outcome: RouteOutcome = "route_only" if has_evidence else "abstained"

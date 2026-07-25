@@ -299,3 +299,58 @@ def test_module_performs_no_io_or_network_imports() -> None:
         elif isinstance(node, ast.ImportFrom) and node.module:
             imported.add(node.module.split(".")[0])
     assert imported.isdisjoint(forbidden)
+
+
+# --- skills count as evidence (Unit 5) -----------------------------------------------------------
+
+
+def _skill_only_lookup() -> LookupResult:
+    """The case that matters: no supported domain, no sources, no capabilities -- a skill is the ONLY
+    evidence present. Before Unit 5 this shape abstained."""
+    from cerebro_router.lookup import SkillMatch
+    from cerebro_router.skills import SkillPack
+
+    from test_skills import _pack as _skill_pack
+
+    pack = SkillPack.model_validate_json(json.dumps(_skill_pack()))
+    return LookupResult(
+        domain_supported=False, sources=(), capabilities=(),
+        skills=(SkillMatch(skill=pack.skills[0], pack_id=pack.pack_id),),
+    )
+
+
+def _investigate() -> RequestClassification:
+    return RequestClassification(intent="investigate", domain="programming", claim_type="factual",
+                                 risk="low", jurisdiction="unknown")
+
+
+def test_a_skill_alone_is_enough_evidence_to_proceed() -> None:
+    decision = route(_investigate(), _skill_only_lookup(), InvestigationRequest(task="review this ui"))
+    assert decision.outcome != "abstained"
+    assert "no_approved_domain_pack" not in decision.gaps
+
+
+def test_the_same_shape_without_the_skill_still_abstains() -> None:
+    # MANDATORY negative control. One field differs from the test above. If this stays green, the
+    # previous test proves nothing about skills.
+    empty = LookupResult(domain_supported=False, sources=(), capabilities=(), skills=())
+    decision = route(_investigate(), empty, InvestigationRequest(task="review this ui"))
+    assert decision.outcome == "abstained"
+    assert "no_approved_domain_pack" in decision.gaps
+
+
+def test_skills_only_add_evidence_and_never_remove_it() -> None:
+    # Additive means additive: adding skills to a lookup that already had evidence must not change
+    # the outcome it already produced.
+    from cerebro_router.lookup import SkillMatch
+    from cerebro_router.skills import SkillPack
+
+    from test_skills import _pack as _skill_pack
+
+    pack = SkillPack.model_validate_json(json.dumps(_skill_pack()))
+    supported = LookupResult(domain_supported=True, sources=(), capabilities=(), skills=())
+    with_skills = dataclasses.replace(
+        supported, skills=(SkillMatch(skill=pack.skills[0], pack_id=pack.pack_id),)
+    )
+    request = InvestigationRequest(task="review this ui")
+    assert route(_investigate(), supported, request).outcome == route(_investigate(), with_skills, request).outcome

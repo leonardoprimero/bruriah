@@ -13,15 +13,14 @@
 #    `load_pack(..., domain=...)` already uses ("unsupported_domain" in packs.py). Structural
 #    set membership between `Identifier` strings, not a synonym map. Requirement:
 #    "Domain-Sensitive Outcomes and Unsupported-Domain Abstention".
-#    IMPORTANT -- current state: `classify.Domain` and `DomainPack.domains` are independent
-#    vocabularies with an EMPTY intersection today. The only shipped pack declares
-#    `domains=["software-research"]`, which no classifier Domain value equals, so source
-#    discovery is empty for ALL SEVEN domains (law, accounting, cybersecurity, programming,
-#    ux_design, general, unsupported) -- not merely general/unsupported. That is spec-compliant
-#    (no approved pack for the domain -> abstain, via 6B-3) and is pinned by
-#    `test_real_bundled_pack_resolves_no_domain_sources_for_any_classifier_domain`. Reconciling
-#    the two vocabularies belongs to future pack authoring (packs declaring classifier-domain
-#    identifiers) or an explicit documented domain contract -- NEVER to a synonym map here.
+#    RECONCILED 2026-07-25 by pack authoring, exactly as this note originally required. The
+#    `research.minimal` pack still declares `domains=["software-research"]`, which no classifier
+#    Domain value equals; the bundled `programming.minimal` pack declares `domains=["programming"]`
+#    and is what makes discovery resolve at all. Today `programming` is supported and the other six
+#    (law, accounting, cybersecurity, ux_design, general, unsupported) still abstain, pinned as an
+#    EXACT SET by `test_platform.py::test_the_bundled_registry_reconciles_exactly_one_classifier_domain`
+#    so widening a pack's domains fails a test rather than silently broadening routing. Further
+#    domains are added the same way -- by authoring a pack -- and NEVER by a synonym map here.
 #
 # 2. Jurisdiction is disclosed, never silently collapsed: every domain-applicable source
 #    returns a `jurisdiction_applicable` flag -- true for a "GLOBAL" declaration (the
@@ -62,6 +61,7 @@ from dataclasses import dataclass
 from .classify import RequestClassification
 from .packs import CapabilityPolicy, SourcePolicy
 from .registries import Registry
+from .skills import SkillPolicy, SkillSet
 
 _GLOBAL_JURISDICTION = "GLOBAL"
 
@@ -83,14 +83,30 @@ class SourceMatch:
 
 
 @dataclass(frozen=True)
+class SkillMatch:
+    """A skill whose declared domains include the classification's domain.
+
+    Carries `pack_id` because `SkillPolicy` does not: the pack is where provenance lives (signer,
+    tier, review window), and the dispatch layer has to disclose it without searching for the owning
+    pack a second time. `skill` is the loaded set's own instance, never cloned."""
+
+    skill: SkillPolicy
+    pack_id: str
+
+
+@dataclass(frozen=True)
 class LookupResult:
     """Closed, read-only lookup outcome. `domain_supported=False` means no loaded pack
     declares the classification's domain -- the signal 6B-3's binding constraint needs to
-    abstain identically for `general` and `unsupported` when no approved pack exists."""
+    abstain identically for `general` and `unsupported` when no approved pack exists.
+
+    `skills` defaults to empty so every existing caller keeps its exact current behaviour: a caller
+    that passes no skill set is byte-identical to before this field existed."""
 
     domain_supported: bool
     sources: tuple[SourceMatch, ...]
     capabilities: tuple[CapabilityPolicy, ...]
+    skills: tuple[SkillMatch, ...] = ()
 
 
 def _domain_applicable_pack_ids(registry: Registry, domain: str) -> frozenset[str]:
@@ -109,13 +125,17 @@ def _jurisdiction_applicable(source: SourcePolicy, jurisdiction: str) -> bool:
     return jurisdiction in source.jurisdictions
 
 
-def discover(classification: RequestClassification, registry: Registry) -> LookupResult:
+def discover(
+    classification: RequestClassification, registry: Registry, skill_set: SkillSet | None = None
+) -> LookupResult:
     """Look up sources/capabilities `classification` may draw on. Pure and deterministic:
     same (classification, registry) always yields the same `LookupResult`."""
     if not isinstance(classification, RequestClassification):
         raise LookupError("invalid_classification_type")
     if not isinstance(registry, Registry):
         raise LookupError("invalid_registry_type")
+    if skill_set is not None and not isinstance(skill_set, SkillSet):
+        raise LookupError("invalid_skill_set_type")
 
     applicable_pack_ids = _domain_applicable_pack_ids(registry, classification.domain)
     domain_supported = bool(applicable_pack_ids)
@@ -134,7 +154,27 @@ def discover(classification: RequestClassification, registry: Registry) -> Looku
     if classification.claim_type == "capability_recommendation":
         capabilities = registry.capabilities
 
-    return LookupResult(domain_supported=domain_supported, sources=sources, capabilities=capabilities)
+    return LookupResult(
+        domain_supported=domain_supported, sources=sources, capabilities=capabilities,
+        skills=_domain_applicable_skills(skill_set, classification.domain),
+    )
+
+
+def _domain_applicable_skills(skill_set: SkillSet | None, domain: str) -> tuple[SkillMatch, ...]:
+    """Match skills by exact membership of the classifier domain in the skill's own `domains`.
+
+    The same closed-vocabulary membership test the sources above use -- no scoring, no similarity,
+    no synonym map. Skill text is never an input to this decision, so corpus or pack prose cannot
+    influence WHICH skill is selected. Order follows the loaded set's pack order, which
+    `SkillSet.from_packs` already sorted, so the result is deterministic."""
+    if skill_set is None:
+        return ()
+    return tuple(
+        SkillMatch(skill=skill, pack_id=pack.pack_id)
+        for pack in skill_set.packs
+        for skill in pack.skills
+        if domain in skill.domains
+    )
 
 
 def resolve_source(source_id: object, registry: Registry) -> SourcePolicy | None:
@@ -163,4 +203,5 @@ def resolve_capability(capability_id: object, registry: Registry) -> CapabilityP
     return None
 
 
-__all__ = ["LookupError", "LookupResult", "SourceMatch", "discover", "resolve_capability", "resolve_source"]
+__all__ = ["LookupError", "LookupResult", "SkillMatch", "SourceMatch", "discover",
+           "resolve_capability", "resolve_source"]
