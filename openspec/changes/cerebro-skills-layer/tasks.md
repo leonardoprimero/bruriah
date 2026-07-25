@@ -258,7 +258,26 @@ Apply to every unit without exception.
   Verification: both bundled packs verify through the unmodified `load_pack` path under the new trust root; `cerebro-release-test` no longer appears anywhere; a pack signed by the retired signer now fails `unknown_signer`; `domain_supported` becomes True for `programming`.
   Rollback: restore the previous `trust-roots.json` and manifest; remove the new pack. [K-Signed Skill Pack Schema and Fail-Closed Loading; A-Domain Vocabulary Reconciliation]
 
-- [ ] **7. Contract deltas behind the opt-in gate.** `contracts.py`: add optional input `host_skills: HostSkillInventory | None = None` with typed `(skill_id, version, digest)` entries; add optional output `EvidenceRecord.envelope`; extend `EvidenceRecord.kind` and `ReadItem.evidence_kind` with `"skill"`; widen `HostAction.kind` by exactly two members (`draft_skill_candidate`, `install_skill`). Every addition is gated on `host_skills is not None`, so a pre-skills client never sends the field and therefore never receives a new enum member or new field.
+- [x] **7. Contract deltas behind the opt-in gate.** DONE 2026-07-25. `HostSkill` + `InvestigationRequest.host_skills`, `PermissionDisclosure` + `EvidenceRecord.envelope`, `"skill"` added to `EvidenceRecord.kind` and `ReadItem.evidence_kind`, and exactly two new `HostAction.kind` members.
+
+  Files: `contracts.py` (152 → 200), `tests/test_contracts.py`.
+  Estimate: 55 + 150 tests = **~205**. **Actual: 141** (+137/-4) — 0.69x.
+
+  **A defect in the plan's own premise, found by measuring instead of assuming.** The unit promised "a request without `host_skills` produces a response byte-identical to the pre-change response". That is FALSE for a plain optional field: `mcp_server.py` serializes with `model_dump(mode="json")` and no `exclude_none`, so `envelope: PermissionDisclosure | None = None` would have added `"envelope": null` to EVERY `EvidenceRecord` — including every record returned to a client that never opted in. `EvidenceRecord` already emits eight nulls, so this would have looked unremarkable in review and shipped as a silent contract change.
+
+  Fixed with a `@model_serializer(mode="wrap")` that drops `envelope` when absent rather than emitting null. The promise is now literally true, verified against a golden captured BEFORE the change. It is also the truer encoding: a record that is not a skill has no envelope, rather than an envelope of null.
+
+  Other decisions:
+  - **`host_skills` is `list[HostSkill] | None`, not a prose list.** `None` means not opted in, `[]` means opted in with nothing installed — a distinction `host_capabilities` (free text, capped 32) structurally cannot express, and parsing a sha256 out of prose is the exact failure mode this repo already documents for `CapabilityPolicy.integrity`.
+  - **`PermissionDisclosure` is declared in `contracts.py` rather than reusing `skills.PermissionEnvelope`**, matching how `EvidenceRecord` already flattens `SourcePolicy` instead of embedding it: the public contract should not inherit the pack schema's shape. The real risk of that choice — the pack growing a permission dimension the contract cannot disclose, so a skill ships a grant nobody sees — is guarded by a test pinning both field sets.
+  - An empty envelope serializes as six empty lists rather than being collapsed. Default-deny must be VISIBLE; "grants nothing" and "no envelope" are different claims.
+
+  **Falsifiability probes: two, closing the behaviour from both sides.** (1) Making the serializer never omit `envelope` failed the golden byte-identity test. (2) Making it always omit failed both tests asserting the envelope IS emitted when present — proving the field is not merely unreachable. Neither degeneration can pass.
+
+  Verification (all passed): 733 → **742 passed** (+9); golden comparison byte-identical against a pre-change capture; every new model closed (`extra="forbid"`); the exact enum membership pinned as a set so a third member cannot be added unnoticed; `verify_legacy_baseline.py` `status: pass`, `errors: []`; pins unchanged; `uv lock --check` and `git diff --check` clean.
+  Rollback: revert models; nothing emitted them yet. [S-Non-Destructive Gate Failure and Two-Tool Backward Compatibility; A-Two-Tool Surface Preservation under Skill Dispatch; D-Architecture Decisions 6]
+
+- [ ] ~~7 (original)~~ `contracts.py`: add optional input `host_skills: HostSkillInventory | None = None` with typed `(skill_id, version, digest)` entries; add optional output `EvidenceRecord.envelope`; extend `EvidenceRecord.kind` and `ReadItem.evidence_kind` with `"skill"`; widen `HostAction.kind` by exactly two members (`draft_skill_candidate`, `install_skill`). Every addition is gated on `host_skills is not None`, so a pre-skills client never sends the field and therefore never receives a new enum member or new field.
 
   Files: `contracts.py`, `tests/test_contracts.py`, `tests/test_mcp_contract.py`.
   Estimate: 55 + 150 tests = **~205**.

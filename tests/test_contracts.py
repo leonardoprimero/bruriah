@@ -153,3 +153,96 @@ def test_read_item_carries_eight_evidence_state_fields() -> None:
     assert ReadItem.model_fields["provenance_chain"].annotation == evidence_shape
     with pytest.raises(ValidationError):
         ReadItem(ref="evidence:one", status="ok", provenance_chain=["x"] * 11)
+
+
+# --- skills-layer contract deltas behind the opt-in gate (Unit 7) --------------------------------
+
+import json  # noqa: E402
+
+from cerebro_router.contracts import HostAction, HostSkill, PermissionDisclosure  # noqa: E402
+
+_EVIDENCE_FIELDS = dict(
+    ref="local:a#1", kind="local", publisher="p", locator="l", citation_locator="c",
+    digest="sha256:" + "a" * 64, authority="official", authority_rationale="r",
+    freshness="current", license="permitted", conflict="none",
+)
+
+
+def test_a_record_without_an_envelope_serializes_exactly_as_before() -> None:
+    """The compatibility guarantee, stated as bytes rather than as an argument.
+
+    Responses go out through `model_dump(mode="json")` with no `exclude_none`, so a plain optional
+    field would add `"envelope": null` to every record a pre-skills client receives. It must be
+    absent, not null."""
+    dumped = EvidenceRecord(**_EVIDENCE_FIELDS).model_dump(mode="json")
+    assert "envelope" not in dumped
+    assert json.loads(EvidenceRecord(**_EVIDENCE_FIELDS).model_dump_json()) == dumped
+
+
+def test_an_envelope_is_emitted_when_it_is_actually_present() -> None:
+    # The negative control for the test above: if `envelope` were dropped unconditionally, the field
+    # would be unreachable and the omission would be a bug rather than a gate.
+    record = EvidenceRecord(**{**_EVIDENCE_FIELDS, "kind": "skill",
+                              "envelope": PermissionDisclosure(filesystem_read=["docs/"])})
+    dumped = record.model_dump(mode="json")
+    assert dumped["envelope"]["filesystem_read"] == ["docs/"]
+    assert dumped["envelope"]["network_hosts"] == []
+
+
+def test_an_empty_envelope_still_serializes_as_a_grant_of_nothing() -> None:
+    # Default-deny must be VISIBLE. An envelope granting nothing is not the same as no envelope, and
+    # collapsing the two would hide the strongest thing Cerebro can say about a skill.
+    dumped = EvidenceRecord(**{**_EVIDENCE_FIELDS, "kind": "skill",
+                              "envelope": PermissionDisclosure()}).model_dump(mode="json")
+    assert dumped["envelope"] == {
+        "filesystem_read": [], "filesystem_write": [], "network_hosts": [],
+        "network_schemes": [], "programs": [], "secrets": [],
+    }
+
+
+def test_host_skills_distinguishes_not_opted_in_from_nothing_installed() -> None:
+    # The reason this field is typed and nullable rather than a prose list: these two states drive
+    # different behaviour, and `host_capabilities` cannot tell them apart.
+    assert InvestigationRequest(task="t").host_skills is None
+    assert InvestigationRequest(task="t", host_skills=[]).host_skills == []
+
+
+def test_a_host_skill_entry_is_strictly_typed() -> None:
+    entry = HostSkill(skill_id="design.ui-review", version="1.4.0", digest="sha256:" + "b" * 64)
+    assert entry.skill_id == "design.ui-review"
+    for bad in ({"skill_id": "Design UI"}, {"version": "1.4"}, {"digest": "b" * 64}):
+        with pytest.raises(ValidationError):
+            HostSkill(**{**{"skill_id": "a.b", "version": "1.0.0",
+                            "digest": "sha256:" + "b" * 64}, **bad})
+
+
+@pytest.mark.parametrize("model", [HostSkill, PermissionDisclosure])
+def test_the_new_models_are_closed(model) -> None:
+    base = ({"skill_id": "a.b", "version": "1.0.0", "digest": "sha256:" + "b" * 64}
+            if model is HostSkill else {})
+    with pytest.raises(ValidationError) as error:
+        model(**base, unexpected="x")
+    assert "unexpected" in str(error.value)
+
+
+def test_the_new_enum_members_are_the_only_ones_added() -> None:
+    # Widening an OUTPUT enum is the one change a pinned client cannot ignore, so the exact members
+    # are pinned here rather than left to review.
+    import typing
+    assert set(typing.get_args(EvidenceRecord.model_fields["kind"].annotation)) == {
+        "local", "captured_live", "source", "capability", "skill"}
+    assert set(typing.get_args(HostAction.model_fields["kind"].annotation)) == {
+        "web_search", "fetch_public_url", "inspect_capability", "request_jurisdiction",
+        "consult_professional", "draft_skill_candidate", "install_skill"}
+
+
+def test_the_disclosure_covers_every_dimension_the_signed_envelope_can_express() -> None:
+    """Guards the one real risk of not reusing `skills.PermissionEnvelope`: that the pack grows a
+    permission dimension the public contract cannot disclose, and a skill ships a grant nobody sees."""
+    from cerebro_router.skills import PermissionEnvelope
+
+    envelope = set(PermissionEnvelope.model_fields)
+    disclosed = set(PermissionDisclosure.model_fields)
+    assert envelope == {"filesystem", "network", "subprocess", "secrets"}
+    assert disclosed == {"filesystem_read", "filesystem_write", "network_hosts",
+                         "network_schemes", "programs", "secrets"}
