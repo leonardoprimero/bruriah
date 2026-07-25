@@ -1,0 +1,312 @@
+from __future__ import annotations
+
+import base64
+import hashlib
+import json
+import os
+import tempfile
+import uuid
+from collections.abc import Iterable, Mapping
+from dataclasses import dataclass
+from datetime import date
+from pathlib import Path
+from typing import Annotated, Literal
+
+from pydantic import Field, ValidationError
+
+from .packs import MAX_PACK_BYTES, ClosedModel, PackError, encode_pack, parse_pack_bytes
+from .skills import SkillPack, SkillSet, load_skill_pack_bytes
+
+# Compiled skill-set generations: the immutable on-disk artifact dispatch will read from.
+#
+# A generation is a SEALED BUNDLE of its source packs, not a rewrite of them. It embeds each pack's
+# original bytes and its release manifest verbatim, so `validate_skillset` recomputes every digest and
+# re-verifies every Ed25519 signature from the generation alone. That is what makes the lifecycle
+# spec's "rollback restores a retained generation WITHOUT rebuilding from source packs" literally
+# true: a retained generation stays independently verifiable long after its source files moved or
+# changed. The compiled records are DERIVED at validation time rather than stored beside the bytes,
+# so the file holds exactly one source of truth and the two can never disagree.
+#
+# What a generation is NOT: a trust boundary. It lives under `data_dir`, which anyone able to write
+# there controls, so validation here defends against corruption, truncation, and partial writes --
+# precisely what `index.py` validates a candidate database for. The security gates remain the pack
+# signature, the default-deny envelope, and the human approval record, all re-checked below.
+
+MAX_SKILLSET_BYTES = 1_048_576
+# Sixteen packs at `MAX_PACK_BYTES` plus base64's 4/3 inflation and manifest overhead leaves room for
+# roughly eleven embedded packs. A set that outgrows this is a packaging decision to make explicitly,
+# never a ceiling to raise quietly.
+
+Base64Blob = Annotated[
+    str, Field(min_length=4, max_length=MAX_SKILLSET_BYTES, pattern=r"^[A-Za-z0-9+/]+={0,2}$")
+]
+
+
+class SkillSetError(ValueError):
+    """The single boundary error for the skill-set lifecycle.
+
+    A pack-level failure keeps its exact `PackError` code (`digest_mismatch`, `expired_pack`,
+    `unsigned_nonlocal_pack`, ...) rather than being flattened into one generic code, because those
+    codes ARE the actionable diagnostic the lifecycle spec asks for. The original exception is always
+    chained. Codes owned here do not collide with pack codes."""
+
+    def __init__(self, code: str):
+        self.code = code
+        super().__init__(code)
+
+
+class GenerationPack(ClosedModel):
+    """One source pack, byte-for-byte, plus the manifest that signs it.
+
+    There is deliberately no "this entry was allowed to be unsigned" flag. A redundant flag could
+    disagree with the manifest field beside it, so an absent manifest simply IS the unsigned case,
+    and the tier invariant (`unsigned_nonlocal_pack`) remains its only gate: an unsigned entry may
+    carry local skills and nothing else."""
+
+    format: Literal[".json", ".yaml", ".yml"]
+    source: Base64Blob
+    manifest: Base64Blob | None = None
+
+
+class Generation(ClosedModel):
+    schema_version: Literal["1"]
+    packs: list[GenerationPack]
+
+
+@dataclass(frozen=True)
+class SkillSource:
+    """One input to a compile: a pack file and, unless it is a local T3 pack, its release manifest."""
+
+    pack_path: Path
+    manifest_path: Path | None = None
+    allow_unsigned_local: bool = False
+
+
+@dataclass(frozen=True)
+class ValidatedSkillSet:
+    """`build_id` is the sha256 of the generation's canonical bytes, so identical content always
+    yields an identical id and the pointer entry pins exactly which bytes were activated."""
+
+    build_id: str
+    skill_set: SkillSet
+
+
+def generation_path(directory: Path) -> Path:
+    """Name a fresh generation. Kept out of `compile_skillset` so compiles stay deterministic and
+    testable; the CLI supplies the name, mirroring `cli.py`'s candidate naming."""
+    return directory / f"skillset-{uuid.uuid4().hex}.json"
+
+
+def _canonical(packs: list[GenerationPack]) -> bytes:
+    return json.dumps(
+        {"schema_version": "1", "packs": [item.model_dump(mode="json") for item in packs]},
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
+
+
+def _entry(source: SkillSource, trust_roots: dict[str, str], gates: dict) -> tuple[str, GenerationPack]:
+    """Verify one source through the full fail-closed path and capture its bytes verbatim.
+
+    Reading the manifest eagerly is correct HERE, unlike in `load_skill_pack`: compile is not the
+    order-sensitive API, and reading each file exactly once removes a window in which the pack could
+    change between verification and capture."""
+    try:
+        raw = source.pack_path.read_bytes()
+    except OSError as error:
+        raise SkillSetError("pack_unreadable") from error
+    if len(raw) > MAX_PACK_BYTES:
+        raise SkillSetError("pack_too_large")
+    manifest_raw: bytes | None = None
+    if source.manifest_path is not None:
+        try:
+            manifest_raw = source.manifest_path.read_bytes()
+        except OSError as error:
+            raise SkillSetError("malformed_manifest") from error
+    try:
+        pack = load_skill_pack_bytes(
+            raw,
+            source.pack_path.suffix.lower(),
+            None if manifest_raw is None else _reader(manifest_raw),
+            trust_roots,
+            allow_unsigned_local=source.allow_unsigned_local,
+            **gates,
+        )
+    except PackError as error:
+        raise SkillSetError(error.code) from error
+    return pack.pack_id, GenerationPack(
+        format=source.pack_path.suffix.lower(),
+        source=base64.b64encode(raw).decode("ascii"),
+        manifest=None if manifest_raw is None else base64.b64encode(manifest_raw).decode("ascii"),
+    )
+
+
+def _reader(data: bytes):
+    return lambda: data
+
+
+def compile_skillset(
+    sources: Iterable[SkillSource],
+    destination: Path,
+    trust_roots: dict[str, str],
+    approvals: Mapping[str, str],
+    *,
+    today: date | None = None,
+    router_version: str = "0.1.0",
+    minimum_versions: dict[str, str] | None = None,
+) -> ValidatedSkillSet:
+    """Compile approved skill packs into one immutable generation at `destination`.
+
+    Every source is verified through the full fail-closed path before it is embedded, and the encoded
+    result is then re-validated AS A WHOLE before anything touches disk. A failed compile therefore
+    leaves no artifact at all, and a generation that exists is one that has already validated once."""
+    if destination.exists():
+        raise SkillSetError("generation_exists")
+    gates = {"today": today, "router_version": router_version, "minimum_versions": minimum_versions}
+    entries = [_entry(source, trust_roots, gates) for source in sources]
+    raw = _canonical([pack for _, pack in sorted(entries, key=lambda item: item[0])])
+    result = validate_skillset_bytes(raw, trust_roots, approvals, **gates)
+    _write_generation(destination, raw)
+    return result
+
+
+def validate_skillset_bytes(
+    raw: bytes,
+    trust_roots: dict[str, str],
+    approvals: Mapping[str, str],
+    *,
+    today: date | None = None,
+    router_version: str = "0.1.0",
+    minimum_versions: dict[str, str] | None = None,
+) -> ValidatedSkillSet:
+    """Re-verify a generation from its bytes alone, then derive the skill set it compiles to.
+
+    Nothing is taken on trust from the previous compile: every embedded pack is parsed with the same
+    hardened loader, re-validated against the closed schema, its digest recomputed, its signature
+    re-checked against the bundled trust roots, and its dates re-checked against an injected `today`
+    so freshness never depends on the wall clock."""
+    if len(raw) > MAX_SKILLSET_BYTES:
+        raise SkillSetError("skillset_too_large")
+    try:
+        data = parse_pack_bytes(raw, ".json")
+        encoded = encode_pack(data)
+    except PackError as error:
+        raise SkillSetError(error.code) from error
+    try:
+        generation = Generation.model_validate_json(encoded)
+    except (ValidationError, ValueError) as error:
+        raise SkillSetError("malformed_skillset") from error
+    if not generation.packs:
+        raise SkillSetError("empty_skillset")
+    gates = {"today": today, "router_version": router_version, "minimum_versions": minimum_versions}
+    packs = [_load_entry(entry, trust_roots, gates) for entry in generation.packs]
+    identifiers = [pack.pack_id for pack in packs]
+    if identifiers != sorted(identifiers):
+        # Canonical order is what makes `build_id` an identity for the SET rather than for one
+        # particular input ordering. Reject rather than re-sort: a generation whose bytes are not
+        # canonical did not come from `compile_skillset`.
+        raise SkillSetError("unsorted_generation")
+    try:
+        skill_set = SkillSet.from_packs(packs)
+    except PackError as error:
+        raise SkillSetError(error.code) from error
+    _check_approvals(skill_set, approvals)
+    return ValidatedSkillSet(hashlib.sha256(raw).hexdigest(), skill_set)
+
+
+def validate_skillset(
+    path: Path,
+    trust_roots: dict[str, str],
+    approvals: Mapping[str, str],
+    *,
+    today: date | None = None,
+    router_version: str = "0.1.0",
+    minimum_versions: dict[str, str] | None = None,
+) -> ValidatedSkillSet:
+    try:
+        raw = path.read_bytes()
+    except OSError as error:
+        raise SkillSetError("skillset_unreadable") from error
+    return validate_skillset_bytes(
+        raw,
+        trust_roots,
+        approvals,
+        today=today,
+        router_version=router_version,
+        minimum_versions=minimum_versions,
+    )
+
+
+def _load_entry(entry: GenerationPack, trust_roots: dict[str, str], gates: dict) -> SkillPack:
+    try:
+        source = base64.b64decode(entry.source, validate=True)
+        manifest = None if entry.manifest is None else base64.b64decode(entry.manifest, validate=True)
+    except ValueError as error:
+        raise SkillSetError("malformed_skillset") from error
+    # The size ceiling travels with the path API through `read_pack_bytes`, so an embedded pack has
+    # to be measured explicitly here or a generation would be a way to smuggle an oversized pack past
+    # a limit the direct loader enforces.
+    if len(source) > MAX_PACK_BYTES:
+        raise SkillSetError("pack_too_large")
+    try:
+        return load_skill_pack_bytes(
+            source,
+            entry.format,
+            None if manifest is None else _reader(manifest),
+            trust_roots,
+            allow_unsigned_local=entry.manifest is None,
+            **gates,
+        )
+    except PackError as error:
+        raise SkillSetError(error.code) from error
+
+
+def _check_approvals(skill_set: SkillSet, approvals: Mapping[str, str]) -> None:
+    """Every skill in an activated set MUST carry a human approval bound to the exact body digest its
+    record declares.
+
+    Approval is one of the two strong trust axes; the other is the envelope. A signature says who
+    published a skill, never that a human read it. Re-checking the binding at activation, and not
+    only when approval is granted, is what makes editing a body invalidate ACTIVATION rather than
+    merely invalidating a record nobody consults again."""
+    for skill in skill_set.skills:
+        approved = approvals.get(skill.skill_id)
+        if approved is None:
+            raise SkillSetError("skill_not_approved")
+        if approved != skill.body_digest:
+            raise SkillSetError("approval_digest_divergent")
+
+
+def _write_generation(destination: Path, raw: bytes) -> None:
+    """Private tempfile in the destination directory, fsync'd, then `os.replace`, mirroring
+    `index.py`'s candidate build: a generation is never observable half-written, and an interrupted
+    compile leaves nothing behind."""
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    handle = tempfile.NamedTemporaryFile(
+        prefix=f".{destination.name}.", suffix=".tmp", dir=destination.parent, delete=False
+    )
+    temporary = Path(handle.name)
+    try:
+        handle.write(raw)
+        handle.flush()
+        os.fsync(handle.fileno())
+        handle.close()
+        os.replace(temporary, destination)
+    except BaseException:
+        handle.close()
+        temporary.unlink(missing_ok=True)
+        raise
+
+
+__all__ = [
+    "MAX_SKILLSET_BYTES",
+    "Generation",
+    "GenerationPack",
+    "SkillSetError",
+    "SkillSource",
+    "ValidatedSkillSet",
+    "compile_skillset",
+    "generation_path",
+    "validate_skillset",
+    "validate_skillset_bytes",
+]

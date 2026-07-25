@@ -157,17 +157,19 @@ def read_pack_bytes(pack_path: Path) -> bytes:
     if len(raw) > MAX_PACK_BYTES:
         raise PackError("pack_too_large")
     return raw
-def verify_manifest(
-    raw: bytes, manifest_path: Path, trust_roots: dict[str, str], pack_id: str, version: str
+def verify_manifest_bytes(
+    raw: bytes, manifest_raw: bytes, trust_roots: dict[str, str], pack_id: str, version: str
 ) -> ReleaseManifest:
-    """Verify a release manifest against the pack bytes.
+    """Verify a release manifest already held in memory, so a caller that has the manifest bytes
+    without a file behind them (a compiled skill-set generation embeds them) verifies through this
+    exact path instead of growing a second one.
 
     Fixed order: malformed_manifest -> unknown_signer -> digest_mismatch -> invalid_signature. Note
     that a valid signature establishes only WHO signed; it is never evidence that the signed content
     is safe."""
     try:
-        manifest = ReleaseManifest.model_validate_json(manifest_path.read_bytes())
-    except (OSError, ValidationError, ValueError) as error:
+        manifest = ReleaseManifest.model_validate_json(manifest_raw)
+    except (ValidationError, ValueError) as error:
         raise PackError("malformed_manifest") from error
     if manifest.signer not in trust_roots:
         raise PackError("unknown_signer")
@@ -181,6 +183,16 @@ def verify_manifest(
     except (ValueError, InvalidSignature) as error:
         raise PackError("invalid_signature") from error
     return manifest
+def verify_manifest(
+    raw: bytes, manifest_path: Path, trust_roots: dict[str, str], pack_id: str, version: str
+) -> ReleaseManifest:
+    """Read a release manifest from disk and verify it. An unreadable manifest is `malformed_manifest`
+    exactly as it was before the split, so the observable order is unchanged."""
+    try:
+        manifest_raw = manifest_path.read_bytes()
+    except OSError as error:
+        raise PackError("malformed_manifest") from error
+    return verify_manifest_bytes(raw, manifest_raw, trust_roots, pack_id, version)
 def check_review_window(reviewed_at: date, expires_at: date, freshness_days: int, now: date) -> None:
     """Fixed order: future_review -> expired_pack -> stale_pack."""
     if reviewed_at > now:

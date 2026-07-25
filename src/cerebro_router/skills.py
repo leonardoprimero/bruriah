@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import date
 from pathlib import Path
@@ -19,7 +20,7 @@ from .packs import (
     encode_pack,
     parse_pack_bytes,
     read_pack_bytes,
-    verify_manifest,
+    verify_manifest_bytes,
 )
 
 # Skill records for the Skills Layer. A skill is a POINTER plus a policy: Cerebro decides WHICH
@@ -178,6 +179,60 @@ class SkillSet:
             if skill.skill_id == skill_id:
                 return skill
         return None
+ManifestReader = Callable[[], bytes]
+def load_skill_pack_bytes(
+    raw: bytes,
+    suffix: str,
+    manifest: ManifestReader | None,
+    trust_roots: dict[str, str],
+    *,
+    today: date | None = None,
+    router_version: str = "0.1.0",
+    minimum_versions: dict[str, str] | None = None,
+    allow_unsigned_local: bool = False,
+) -> SkillPack:
+    """Verify a skill pack already held in memory, failing closed on every gate.
+
+    Check order deliberately mirrors `load_pack`, and every verification primitive is the SAME
+    function `load_pack` calls -- there is one Ed25519/digest/hardened-parsing path in this codebase,
+    not two that can drift apart. The order is: parse -> executable payload -> schema -> signature ->
+    review window -> router compatibility -> version floor. The size ceiling belongs to whoever
+    produced `raw`; `load_skill_pack` applies it through `read_pack_bytes`.
+
+    `manifest` is a READER rather than bytes so an unreadable manifest is still discovered at the
+    same point in the order as before -- after parsing and schema validation. Reading it eagerly here
+    would silently promote `malformed_manifest` ahead of `malformed_pack` and `payload_unsupported`,
+    which is exactly the kind of invisible precedence change the `packs.py` extraction took a
+    dedicated test block to avoid.
+
+    `payload_unsupported` is raised before schema validation so an unsupported capability reports
+    itself instead of surfacing as a generic `malformed_pack`, which would read as a typo. There are
+    no domain or jurisdiction gates here: skills are domain-gated at dispatch, not at load."""
+    data = parse_pack_bytes(raw, suffix)
+    reject_executable_payload(data)
+    encoded = encode_pack(data)
+    try:
+        pack = SkillPack.model_validate_json(encoded)
+    except (ValidationError, ValueError) as error:
+        raise PackError("malformed_pack") from error
+    if manifest is None:
+        if not allow_unsigned_local:
+            raise PackError("signature_required")
+        # Unsigned is a LOCAL-ONLY affordance. A first- or third-party skill without a signature has
+        # no provenance at all, so it must not ride in on the local-pack exception.
+        if any(skill.tier != "local" for skill in pack.skills):
+            raise PackError("unsigned_nonlocal_pack")
+    else:
+        try:
+            manifest_raw = manifest()
+        except OSError as error:
+            raise PackError("malformed_manifest") from error
+        verify_manifest_bytes(raw, manifest_raw, trust_roots, pack.pack_id, pack.version)
+    now = today or date.today()
+    check_review_window(pack.reviewed_at, pack.expires_at, pack.freshness_days, now)
+    check_router_compatibility(pack.min_router_version, pack.max_router_version, router_version)
+    check_version_floor(pack.pack_id, pack.version, minimum_versions)
+    return pack
 def load_skill_pack(
     pack_path: Path,
     manifest_path: Path | None,
@@ -188,38 +243,20 @@ def load_skill_pack(
     minimum_versions: dict[str, str] | None = None,
     allow_unsigned_local: bool = False,
 ) -> SkillPack:
-    """Load and verify a skill pack, failing closed on every gate.
-
-    Check order deliberately mirrors `load_pack`, and every verification primitive is the SAME
-    function `load_pack` calls -- there is one Ed25519/digest/hardened-parsing path in this codebase,
-    not two that can drift apart. The order is: unreadable -> oversized -> parse -> executable
-    payload -> schema -> signature -> review window -> router compatibility -> version floor.
-
-    `payload_unsupported` is raised before schema validation so an unsupported capability reports
-    itself instead of surfacing as a generic `malformed_pack`, which would read as a typo. There are
-    no domain or jurisdiction gates here: skills are domain-gated at dispatch, not at load."""
+    """Load and verify a skill pack from disk. The ceiling-checked read is the only step that needs a
+    path; `manifest_path.read_bytes` is passed unevaluated so the manifest is touched at the same
+    point in the check order as before, never earlier."""
     raw = read_pack_bytes(pack_path)
-    data = parse_pack_bytes(raw, pack_path.suffix.lower())
-    reject_executable_payload(data)
-    encoded = encode_pack(data)
-    try:
-        pack = SkillPack.model_validate_json(encoded)
-    except (ValidationError, ValueError) as error:
-        raise PackError("malformed_pack") from error
-    if manifest_path is None:
-        if not allow_unsigned_local:
-            raise PackError("signature_required")
-        # Unsigned is a LOCAL-ONLY affordance. A first- or third-party skill without a signature has
-        # no provenance at all, so it must not ride in on the local-pack exception.
-        if any(skill.tier != "local" for skill in pack.skills):
-            raise PackError("unsigned_nonlocal_pack")
-    else:
-        verify_manifest(raw, manifest_path, trust_roots, pack.pack_id, pack.version)
-    now = today or date.today()
-    check_review_window(pack.reviewed_at, pack.expires_at, pack.freshness_days, now)
-    check_router_compatibility(pack.min_router_version, pack.max_router_version, router_version)
-    check_version_floor(pack.pack_id, pack.version, minimum_versions)
-    return pack
+    return load_skill_pack_bytes(
+        raw,
+        pack_path.suffix.lower(),
+        None if manifest_path is None else manifest_path.read_bytes,
+        trust_roots,
+        today=today,
+        router_version=router_version,
+        minimum_versions=minimum_versions,
+        allow_unsigned_local=allow_unsigned_local,
+    )
 def reject_executable_payload(data: dict) -> None:
     """A candidate declaring a non-prose payload is REFUSED with its own code, never silently
     dropped or coerced to prose. Closed-model validation alone would report `malformed_pack`, which
@@ -231,6 +268,7 @@ __all__ = [
     "Digest",
     "FilesystemAccess",
     "Hostname",
+    "ManifestReader",
     "NetworkAccess",
     "PermissionEnvelope",
     "RelPath",
@@ -240,5 +278,6 @@ __all__ = [
     "SubprocessAccess",
     "Tier",
     "load_skill_pack",
+    "load_skill_pack_bytes",
     "reject_executable_payload",
 ]
