@@ -339,7 +339,33 @@ Apply to every unit without exception.
 
 ### Lifecycle CLI and first-party content
 
-- [ ] **9A. CLI candidate intake — `skill-ingest`, `skill-analyze`, `skill-approve`, `skill-sign`.** Flat subcommands in the existing `cli.py` style, each a thin `_cmd_*` over a testable `run_*`, JSON on stdout and human text on stderr, one typed `CliError` code per failure. Static analysis is deterministic and structural only: byte ceiling, UTF-8 and control-character checks, hardened parse, closed-schema validation, envelope invariants, digest recomputation. Pattern findings (`~/.ssh`, `~/.aws`, `.env`, `curl`/`wget`, base64-plus-network, shell-profile writes) are recorded as reviewer advisories requiring explicit per-finding acknowledgment at approve time, and MUST be labelled as advisories, never as a safety verdict. Approval records bind to the exact content digest.
+**Unit 9A was re-estimated before opening and SPLIT.** Measured, candidate storage + static analysis + approval records + four subcommands lands near 460 lines against an estimated 340. The seam separates producing advisories from consuming them at approval time.
+
+- [x] **9A.1. Candidate intake and static analysis.** DONE 2026-07-25. New `candidates.py`: `ingest_candidate` (content-addressed, private) and `analyze_candidate` (deterministic structural analysis producing advisories).
+
+  Files: `candidates.py` (new, 228), `tests/test_candidates.py` (new, 196).
+  Estimate: 120 + 180 tests = **~300**. **Actual: 424** — 1.41x, over the 400 budget by 24 lines. `size:exception` with a thin rationale: the overrun is entirely the advisory pattern table and its parametrised tests, and splitting analysis from the patterns it runs would ship a scanner with nothing to scan for.
+
+  **THE design decision of this unit: `AnalysisReport` has NO field for `safe`, `passed`, `risk`, `severity`, `score`, or `verdict`.** A verdict is not withheld here — it is INEXPRESSIBLE, the same discipline that makes "allow everything" unwritable in a permission envelope. A report saying "no findings: safe" would be worse than no report at all, because it moves the reviewer's attention away from the only things that actually protect them: the envelope and their own reading of the prose. `Advisory` carries no severity either, because ranking findings implies a scale this module has no basis to place them on, and reviewers skip low-ranked items. **Pinned by a test that asserts the exact field set and explicitly checks the forbidden names**, so adding one later fails a test that explains why.
+
+  Structural failures RAISE; prose findings ADVISE. Collapsing the two would either hide malformed input among advisories or lend prose findings the authority of a schema error. Ingest is deliberately NOT a gate: a candidate that will draw findings still lands on disk, because refusing there would make the suspicious case the invisible one.
+
+  **A REAL SECURITY BUG in my own implementation, found by a test.** The control-character check originally scanned the RAW BYTES. `json.dumps` escapes such characters as ASCII `‮`, so a byte-level scan sees seven harmless characters while the parsed string contains the real one — a bidirectional override or zero-width character could have ridden into approved prose completely unseen while the check looked thorough. Moved to run over the PARSED VALUES. The test found it because its fixture was built with `json.dumps`, which is exactly how a real candidate arrives.
+
+  Also corrected: schema-validation failure originally raised a candidate-specific `malformed_candidate`, while `load_skill_pack` reports `malformed_pack` for the same input. Unified — a second name for one condition only makes an operator learn two words for it.
+
+  **Falsifiability probes: two.** (1) Emptying the control-character scan failed all four invisible-character tests, including the two that only exist because of the bug above. (2) Adding a `safe: bool` field to `AnalysisReport` failed the structural test — the prohibition is enforced, not documented. Both reverted.
+
+  Verification (all passed): 768 → **795 passed** (+27); `verify_legacy_baseline.py` `status: pass`, `errors: []`; pins unchanged; `uv lock --check` and `git diff --check` clean. Nothing imports this module yet.
+  Rollback: delete module and tests. [S-Candidate Lifecycle and Approval Gate; S-Skill Trust Tiers and Provenance]
+
+- [ ] **9A.2. Approval records and the four subcommands.** Approval bound to the exact content digest with explicit per-advisory acknowledgment, plus `skill-ingest`, `skill-analyze`, `skill-approve`, `skill-sign` as thin `_cmd_*` wrappers over testable `run_*`, JSON on stdout and human text on stderr, one typed `CliError` per failure. `skill-sign` reuses `signing.py` so the CLI and the release script cannot drift.
+
+  Estimate: 130 + 160 tests = **~290**.
+  Verification: a digest change invalidates a prior approval and forces re-entry from static analysis; approving without acknowledging each advisory fails; CLI output never claims prose was verified safe.
+  Rollback: remove subcommands; no MCP behaviour touched. [S-Candidate Lifecycle and Approval Gate]
+
+- [ ] ~~9A (original)~~ CLI candidate intake — `skill-ingest`, `skill-analyze`, `skill-approve`, `skill-sign`.** Flat subcommands in the existing `cli.py` style, each a thin `_cmd_*` over a testable `run_*`, JSON on stdout and human text on stderr, one typed `CliError` code per failure. Static analysis is deterministic and structural only: byte ceiling, UTF-8 and control-character checks, hardened parse, closed-schema validation, envelope invariants, digest recomputation. Pattern findings (`~/.ssh`, `~/.aws`, `.env`, `curl`/`wget`, base64-plus-network, shell-profile writes) are recorded as reviewer advisories requiring explicit per-finding acknowledgment at approve time, and MUST be labelled as advisories, never as a safety verdict. Approval records bind to the exact content digest.
 
   Files: `cli.py`, approval-record storage, `tests/test_cli.py`.
   Estimate: 170 + 170 tests = **~340**.
