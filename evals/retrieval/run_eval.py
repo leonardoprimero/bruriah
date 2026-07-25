@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """Runs the note-level retrieval-quality eval against BOTH live Cerebro
 engines (legacy `cerebro.py`/`cerebro.db` and the new `cerebro-router` active
-snapshot) and writes `report-v1.md` + `report-v1.json`.
+snapshot) and writes `<out-prefix>.md` + `<out-prefix>.json` (default
+`report-v1.md`/`report-v1.json`).
 
 Read-only, deterministic, reproducible: every DB is opened `mode=ro`, no
 metric depends on wall-clock time, and the report is stamped with the legacy
@@ -11,9 +12,11 @@ indexes reproduces the same numbers.
 
 Usage:
     python evals/retrieval/run_eval.py
+    python evals/retrieval/run_eval.py --dataset dataset-v2.jsonl --out-prefix report-v3
 """
 from __future__ import annotations
 
+import argparse
 import hashlib
 import json
 import sys
@@ -37,10 +40,8 @@ from metrics import (  # noqa: E402
     recall_at_k,
 )
 
-DATASET_PATH = _HERE / "dataset-v1.jsonl"
-REPORT_MD_PATH = _HERE / "report-v1.md"
-REPORT_JSON_PATH = _HERE / "report-v1.json"
-DATASET_VERSION = "v1"
+DEFAULT_DATASET_PATH = _HERE / "dataset-v1.jsonl"
+DEFAULT_OUT_PREFIX = "report-v1"
 K = 10
 ENGINES = ("legacy", "new")
 POSITIVE_BASELINE_TYPES = {"factual", "procedural", "exact_name"}
@@ -235,9 +236,11 @@ def _fmt(value: object) -> str:
     return str(value)
 
 
-def render_markdown(result: RunResult, meta: dict[str, object], dataset: list[QueryRecord]) -> str:
+def render_markdown(
+    result: RunResult, meta: dict[str, object], dataset: list[QueryRecord], out_prefix: str
+) -> str:
     lines: list[str] = []
-    lines.append("# Cerebro Retrieval Eval — NEW vs LEGACY (report-v1)")
+    lines.append(f"# Cerebro Retrieval Eval — NEW vs LEGACY ({out_prefix})")
     lines.append("")
     lines.append(
         "Note-level comparison (chunk/section results deduped to one entry per note, keeping "
@@ -361,8 +364,34 @@ def render_markdown(result: RunResult, meta: dict[str, object], dataset: list[Qu
     return "\n".join(lines)
 
 
+def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--dataset",
+        type=Path,
+        default=DEFAULT_DATASET_PATH,
+        help=f"Path to the dataset JSONL file (default: {DEFAULT_DATASET_PATH.name})",
+    )
+    parser.add_argument(
+        "--out-prefix",
+        type=str,
+        default=DEFAULT_OUT_PREFIX,
+        help=(
+            "Prefix for the two output report files, written next to this script "
+            f"as '<out-prefix>.md' and '<out-prefix>.json' (default: {DEFAULT_OUT_PREFIX})"
+        ),
+    )
+    return parser.parse_args(argv)
+
+
 def main() -> int:
-    dataset = load_dataset(DATASET_PATH)
+    args = parse_args()
+    dataset_path = args.dataset if args.dataset.is_absolute() else (_HERE / args.dataset)
+    report_md_path = _HERE / f"{args.out_prefix}.md"
+    report_json_path = _HERE / f"{args.out_prefix}.json"
+    dataset_version = dataset_path.stem.removeprefix("dataset-") or dataset_path.stem
+
+    dataset = load_dataset(dataset_path)
 
     legacy_hash_before = sha256_file(LEGACY_DB_PATH)
 
@@ -382,8 +411,8 @@ def main() -> int:
         )
 
     meta = {
-        "dataset_version": DATASET_VERSION,
-        "dataset_path": str(DATASET_PATH.relative_to(ROOT)),
+        "dataset_version": dataset_version,
+        "dataset_path": str(dataset_path.relative_to(ROOT)),
         "n_queries": len(dataset),
         "k": K,
         "legacy_db_sha256": legacy_hash_after,
@@ -400,12 +429,12 @@ def main() -> int:
         "abstention_separation": result.abstention_separation,
     }, "per_query": result.per_query}
 
-    REPORT_JSON_PATH.write_text(json.dumps(report_json, indent=2, ensure_ascii=False, sort_keys=True), encoding="utf-8")
-    REPORT_MD_PATH.write_text(render_markdown(result, meta, dataset), encoding="utf-8")
+    report_json_path.write_text(json.dumps(report_json, indent=2, ensure_ascii=False, sort_keys=True), encoding="utf-8")
+    report_md_path.write_text(render_markdown(result, meta, dataset, args.out_prefix), encoding="utf-8")
 
     print(f"Legacy db sha256 unchanged: {legacy_hash_before == legacy_hash_after}")
-    print(f"Wrote {REPORT_JSON_PATH}")
-    print(f"Wrote {REPORT_MD_PATH}")
+    print(f"Wrote {report_json_path}")
+    print(f"Wrote {report_md_path}")
     return 0
 
 
