@@ -1,3 +1,115 @@
+## Verification Report — Slice 12B (`clients.py` canonical launch manifest + 6 client renderers)
+
+**Change**: cerebro-agent-knowledge-router · **Boundary**: task 12.1 (client-adapters half) — `cerebro-retrieval/src/cerebro_router/clients.py` (270, new), `cerebro-retrieval/tests/test_clients.py` (213, new, 35 tests), `cerebro-retrieval/docs/client-guidance.md` (183, new). HEAD at authoring time: `b638159`. **Date**: 2026-07-24 · **Run**: independent, fresh-context, adversarial verification (did not author the code). **Mode**: Standard (no Strict TDD cache found for this project at verify time).
+
+### Verdict
+**PASS WITH WARNINGS.** Zero CRITICAL findings. The core safety property — one `LaunchManifest` frozen dataclass is the single source of truth every one of the six renderers consumes, so all six clients launch the byte-identical canonical `cerebro-mcp serve` command/args — is proven by both code inspection and independent adversarial execution (not just the shipped 35-test suite). The negative-control command-injection guard correctly rejects relative paths, classic shell metacharacters (`; & | $ \` ( ) < > { } [ ] \n \r \t \\ " ' * ? ~ ! #`), and Unicode fullwidth-semicolon homoglyphs in `command`/`args`/`env`. Every existing tracked module (`cli.py`, `mcp_server.py`, all 20 others) is confirmed byte-frozen — only the 3 new files exist. `uv.lock` hash, `pyproject.toml`, and `scripts/verify_legacy_baseline.py` are all unchanged/passing. Full suite: 399/399 passed (364 prior + 35 new), exactly as claimed. Four independent adversarial probes beyond the shipped test suite found real, non-blocking gaps: (1) the spec's explicit "version visibility" MUST-bullet for adapters is entirely unimplemented anywhere in the codebase; (2) a non-`str` `command` (e.g. `None`, `int`) raises an untyped `TypeError` from `PurePath(...)` instead of the module's own documented `ClientError`; (3) the shell-metacharacter rejection set omits the plain space character, inconsistent with the module's own "must survive a shell round-trip" defense-in-depth rationale; (4) the already-self-disclosed review-workload-guard gap (666 changed lines, no recorded `size:exception`) remains unresolved. None of these break the stated security boundary (all renderers emit JSON argv arrays, never shell strings) or make any rendered config launch a different server.
+
+### Frozen-Context Constraints
+| Check | Result |
+|---|---|
+| `git diff --numstat b638159 -- cerebro-retrieval/` shows ONLY the 3 new files | ✅ output is empty for tracked-file diffing — confirmed via `git status --porcelain -- cerebro-retrieval/` showing exactly `?? clients.py`, `?? test_clients.py`, `?? docs/` untracked, and zero modified tracked files under `cerebro-retrieval/` |
+| `git diff b638159 -- cerebro-retrieval/src/cerebro_router/cli.py` | ✅ empty — byte-frozen |
+| `git diff b638159 -- cerebro-retrieval/src/cerebro_router/mcp_server.py` | ✅ empty — byte-frozen |
+| Every other tracked module in `src/cerebro_router/` (`__init__.py`, `audit.py`, `cache.py`, `classify.py`, `context.py`, `contracts.py`, `corpus.py`, `evidence.py`, `fetch.py`, `index.py`, `lookup.py`, `models.py`, `packs.py`, `platform.py`, `registries.py`, `research.py`, `retrieval.py`, `route.py`, `service.py`) | ✅ confirmed present and unmodified; `git status --porcelain` shows none of them as modified |
+| `uv.lock` sha256 | ✅ `3c83d9eb87c9e5e94dcd5ae850339da9c29aa567292773c4d9e093795f4f2bc8` — matches expected |
+| `uv lock --check` | ✅ `Resolved 78 packages in 3ms` — no changes needed |
+| `pyproject.toml`/`uv.lock` byte-identical vs `b638159` | ✅ `git diff b638159 -- pyproject.toml uv.lock` → empty |
+| `scripts/verify_legacy_baseline.py` | ✅ `status: "pass"`, `errors: []` (module set touched this slice has zero overlap with the preservation baseline, so before/after are identically the one recorded run) |
+| `git diff --check` | ✅ clean, exit 0 |
+| AST parse of `clients.py` + `test_clients.py` | ✅ both parse, 270/213 lines exactly as claimed |
+| `pip_audit --skip-editable` | ✅ "No known vulnerabilities found" (only the editable `cerebro-router` package itself skipped, expected) |
+
+Locked external interpreter used for all execution: fresh `uv venv --python 3.12` + `UV_PROJECT_ENVIRONMENT=<scratchpad>/verify12b/venv2 uv sync --locked` — the registered `cerebro-retrieval/.venv` was never touched.
+
+### Test Execution Evidence
+```text
+$ uv lock --check
+Resolved 78 packages in 3ms
+
+$ UV_PROJECT_ENVIRONMENT=<scratchpad>/venv2 uv sync --locked
+(78 packages installed, isolated venv)
+
+$ python scripts/verify_legacy_baseline.py
+{"status": "pass", "errors": [], ...}
+
+$ python -m pytest tests -q -p no:randomly
+........................................................................ [ 18%]
+........................................................................ [ 36%]
+........................................................................ [ 54%]
+........................................................................ [ 72%]
+........................................................................ [ 90%]
+.......................................                                  [100%]
+399 passed in 24.46s
+```
+
+### Adversarial Check 1 — Single source of truth (CRITICAL if broken; NOT broken)
+`RENDERERS: dict[ClientId, Callable[[LaunchManifest], str]]` maps all 6 `ClientId` values to functions that each take only a `LaunchManifest` and derive every field from it (`manifest.command`, `manifest.args`/`manifest.full_argv`, `manifest.env_dict`, `manifest.server_name`) — no renderer hand-writes or hardcodes a command/path string. `render_claude_code`/`render_cursor`/`render_gemini`/`render_antigravity` all delegate to the single shared `_render_mcp_servers(manifest, top_key="mcpServers")`; `render_opencode` and `render_generic_stdio` build their own dict literal but still read every value off `manifest`. Proven at runtime, not just by inspection: constructed a manifest with `command="/opt/custom/cerebro-mcp"`, called `render_all(manifest)`, and confirmed the string `/opt/custom/cerebro-mcp` appears in the argv extracted from all 6 rendered configs and nowhere is any other command string present.
+
+### Adversarial Check 2 — Deterministic explicit invocation (byte-identical renders)
+`test_render_is_deterministic_byte_identical_across_calls` and `test_render_invokes_exact_canonical_command_and_args` (both parametrized over all 6 `ClientId`) pass. `_canonical_json` uses `json.dumps(payload, indent=2, sort_keys=True)` — sorted keys, no set/dict-insertion-order dependence, no wall-clock. Independently re-verified: called `render(client_id, manifest)` 5 times in a loop for each of the 6 clients and diffed all outputs — byte-identical every time. `rg -n "date\.today\(|datetime\.now\("` on `clients.py` → zero hits.
+
+### Adversarial Check 3 — Negative control / command-injection guard (attacked directly)
+Independent adversarial probing beyond the shipped 35-test suite, using `LaunchManifest(...)` construction directly:
+
+| Attack | Result |
+|---|---|
+| `command="../../usr/bin/evil"` (relative traversal) | ✅ rejected, `command_not_absolute` |
+| `args=("serve", "&& curl evil.example")` | ✅ rejected (shipped test) |
+| `env=(("PATH", "/bin:$HOME"),)` | ✅ rejected (shipped test) |
+| `command="/usr/bin/cerebro-mcp; rm -rf /"`, `` /usr/bin/$(whoami)``, `` /usr/bin/`id` `` | ✅ all rejected (shipped tests) |
+| `server_name='cerebro-router": {"evil": "1'` (JSON-structure injection via server name) | ✅ rejected, `server_name_invalid` (the `isalnum()`-after-hyphen-strip check blocks embedded quotes/braces/colons) |
+| `args=("serve;\uFF1Brm -rf /",)` (Unicode fullwidth semicolon `\uFF1B`, a common ASCII-filter-bypass homoglyph) | ✅ rejected, `arg_has_shell_metacharacters` — the character set check is per-Unicode-codepoint membership, not an ASCII-only regex, so this specific bypass class is closed |
+| `command="~/cerebro-mcp"` (tilde, not expanded, not absolute per `PurePath`) | ✅ rejected, `command_not_absolute` |
+| `command="C:\\Windows\\evil.exe"` (Windows-style path on a POSIX `PurePath` check) | ✅ rejected, `command_not_absolute` (POSIX `PurePath` never considers a drive-letter path absolute) |
+| **`command="/usr/bin/cerebro mcp evil"` (embedded plain space — argument-splitting smuggling)** | ❌ **NOT rejected** — constructs successfully. See WARNING 3 below. |
+| **`command="/usr/bin/cerebro-mcp\x00evil"` (embedded NUL byte)** | ❌ **NOT rejected** — constructs successfully. See SUGGESTION 1 below. |
+| **`LaunchManifest(command=None)` / `command=12345`** | ❌ **NOT rejected as `ClientError`** — raises an untyped `TypeError` from `PurePath(...)` before the guard runs. See WARNING 2 below. |
+
+For every case that DID construct (the three ❌ rows above), the actually-rendered JSON for all 6 clients still carries the single string verbatim as one argv token — no renderer re-splits or reinterprets it, so no config can be tricked into launching a *different* executable via these three gaps. They are hardening gaps in the manifest's own construction-time guard, not exploitable divergence between the manifest and any rendered output.
+
+### Adversarial Check 4 — Cross-client core equivalence
+`test_cross_client_core_equivalence_same_argv_across_all_six`, `..._same_env_across_all_six`, `..._only_wrapping_format_differs` all pass. Independently re-verified with a manifest carrying 3 args and 2 env pairs: extracted argv from all 6 renders — identical `[command, *args]` in every case; extracted env — identical dict in every case; only the top-level JSON key/shape differs (`mcpServers` for Claude Code/Cursor/Gemini/Antigravity, `mcp`/`type:"local"`/`environment` for OpenCode, unwrapped `command`/`args`/`env` for generic stdio) — matches `client-guidance.md`'s "What never changes across clients" section exactly.
+
+### Adversarial Check 5 — Valid, round-tripping JSON output
+`test_rendered_output_is_valid_json_and_round_trips` (parametrized over all 6) passes: `json.dumps(json.loads(rendered), indent=2, sort_keys=True) + "\n" == rendered` for every client. OpenCode's shape independently confirmed distinct: combined `argv` array under `"command"`, env under `"environment"` (not `"env"`) — verified this is genuinely different from the `mcpServers` shape's separate `"command"`(string)/`"args"`(array)/`"env"`(dict) fields, not an accidental reuse.
+
+### Adversarial Check 6 — Degradation annotation is inert
+`test_capability_annotation_never_alters_rendered_output` passes; independently re-verified by rendering every client twice, reading `CLIENT_CAPABILITIES[client_id].note` and `.structured_output` in between, and diffing — byte-identical. `CLIENT_CAPABILITY`/`StructuredOutputSupport` fields are never referenced inside any `render_*` function or `_canonical_json`/`_mcp_servers_entry` (confirmed by reading every renderer body — none imports or touches `CLIENT_CAPABILITIES`). Text-fallback guarantee is a server-side property of `mcp_server.py` (unchanged, frozen this slice; confirmed both `structuredContent=structured` and canonical JSON text are unconditionally emitted at `mcp_server.py:81` regardless of client), not something the manifest renders differently per client — correctly documented that way in the module and in `docs/client-guidance.md`'s closing section.
+
+### Adversarial Check 7 — Typed-total / no side effects
+`render()` raises `ClientError("unknown_client")` (not `KeyError`) for a bad `ClientId` — confirmed both by the shipped test and independently with `render("not-a-real-client", manifest)`. **Gap found** (see WARNING 2): a malformed `LaunchManifest` construction itself (non-`str` `command`) is NOT typed-total — it raises `TypeError`, not `ClientError`, directly contradicting `ClientError`'s own class docstring ("no `ValueError`/`KeyError`/etc. from this module is ever untyped"). No filesystem/network/subprocess call exists in `clients.py`: `rg -n "open\(|write|socket|requests\.|urllib|httpx|subprocess|Popen|os\.system|exec\(|eval\("` on the module returns zero matches (only a comment describing the *absence* of these). Also independently found: `render()`/`render_all()` perform no `isinstance(manifest, LaunchManifest)` check — a duck-typed non-`LaunchManifest` object with matching attributes renders successfully, bypassing `__post_init__`'s validation entirely. See SUGGESTION 2.
+
+### Adversarial Check 8 — No synthetic-fixture-masks-real-data
+All 35 tests assert real rendered JSON strings/parsed structures against the real manifest fields (`_COMMAND = "/usr/local/bin/cerebro-mcp"`, real multi-segment `args`), not placeholder toys — e.g. `test_render_invokes_exact_canonical_command_and_args` asserts `argv == list(_MANIFEST.full_argv)` against the real manifest, and `_extract_argv`/`_extract_env` genuinely parse each client's distinct JSON shape rather than string-matching. No stubbed/mocked renderer path exists — every test calls the real `render`/`render_all` functions directly.
+
+### Adversarial Check 9 — Honesty of unverified shapes
+`docs/client-guidance.md`'s Antigravity section explicitly states: "Antigravity's exact on-disk config path and schema could not be verified from first principles at authoring time... not a verified claim. Confirm the real path and any schema differences against current Antigravity documentation before relying on this snippet in production." `CLIENT_CAPABILITIES[ClientId.ANTIGRAVITY].note` carries the identical caveat in code. Neither location silently presents the Antigravity or generic-stdio (`StructuredOutputSupport.DEGRADED`, "assume the minimum") shapes as authoritative — both are correctly flagged best-effort. No overreach found.
+
+### Issues Found
+
+**CRITICAL**: None.
+
+**WARNING**:
+1. **Spec MUST-bullet "version visibility" is unimplemented.** `specs/knowledge-corpus-lifecycle/spec.md`'s "Canonical Client Launch Manifest and Adapters" requirement states: "Adapters MUST use absolute executable semantics, explicit arguments/environment, **version visibility**, stderr diagnostics, and no shell-specific quoting dependency." `clients.py`, `test_clients.py`, and `docs/client-guidance.md` contain zero version-related content (`rg -n "version" -i` on all three files → no matches), and the CLI has no `--version` flag anywhere (`rg -n "add_argument.*version|__version__|action=.version"` on `cli.py` → no matches). `design.md` line 30's own "Clients" summary also omits this property (it lists only "detect declared structured output and host capabilities... core requires only `tools/list`/`tools/call`, always emits text fallback, stderr-only diagnostics, absolute commands, and no shell quoting" — 4 of the 5 spec.md MUST properties, silently dropping "version visibility"). This is a genuine, unaddressed requirement text that must be resolved (e.g. embedding a version field in the manifest/rendered config, or a documented `cerebro-mcp --version`/`doctor` cross-reference) before task 12.1/the "K-Canonical Client Launch Manifest and Adapters" requirement can be considered fully satisfied — not a 12B-introduced regression, but a gap this slice was the natural place to close and did not.
+2. **Malformed-type manifest construction is not typed-total.** `LaunchManifest(command=None)` and `LaunchManifest(command=12345)` raise an untyped `TypeError: argument should be a str or an os.PathLike object...` from `PurePath(self.command).is_absolute()` at `clients.py:78`, before the `ClientError` guard is ever reached. This directly contradicts `ClientError`'s own class docstring ("the one escape hatch every render entry point raises through; no `ValueError`/`KeyError`/etc. from this module is ever untyped") and the task's own explicit adversarial requirement ("malformed manifest raises typed `ClientError`, no untyped escape"). No test in `test_clients.py` covers a non-`str` `command`/`args`/`env` type. Recommend an `isinstance` check before the `PurePath` call, converting to `ClientError("command_not_string")` (or equivalent).
+3. **Shell-metacharacter rejection set omits plain space.** `_SHELL_METACHARACTERS` blocks `\t`/`\n`/`\r` (all default IFS word-splitting characters) but not plain space (also a default IFS character). `LaunchManifest(command="/usr/bin/cerebro mcp evil")` constructs successfully. This is inconsistent with the module's own stated defense-in-depth rationale ("a manifest that could not survive a shell round-trip must never be produced") and with the task's explicit adversarial requirement to reject "spaces-as-splitting." Currently non-exploitable in this codebase (all 6 renderers emit the command as one JSON string/array element, never shell-interpolated), but the inconsistency itself — tab/newline blocked, space not — is worth an explicit decision: either add space to the rejected set (accepting the tradeoff that some legitimate absolute paths, e.g. macOS home directories like `/Users/John Doe/...`, would then be rejected and need a different validation strategy), or document why space is deliberately excluded. Currently undocumented either way.
+4. **Review-workload-guard decision still outstanding (already self-disclosed, not newly discovered).** `tasks.md:138` and Engram `sdd/cerebro-agent-knowledge-router/apply-progress` (id 2473) both correctly and transparently report: 666 total changed lines (270+213+183) is over the ~400-460 review-unit guidance, and **"Not self-approved — flagged for an explicit `size:exception` decision (or a split)... before this counts toward 12.1."** Independently re-measured and confirmed exact: `270 + 213 + 183 = 666`. `12.1` in `tasks.md` correctly remains unchecked. This blocks archive/cutover until the orchestrator/user resolves `delivery_strategy` for this slice — it is not a code defect, but it is unresolved and must not be silently treated as closed.
+
+**SUGGESTION**:
+1. `_SHELL_METACHARACTERS` does not include the NUL byte (`\x00`); `LaunchManifest(command="/usr/bin/cerebro-mcp\x00evil")` constructs successfully. Low real-world exploitability (Python's `os.exec*`/`subprocess` family raise their own `ValueError: embedded null byte` if a downstream host ever tries to exec such a string), but for consistency with the module's "typed, no untyped escape" philosophy, consider rejecting embedded NUL bytes at construction time too.
+2. `render()`/`render_all()` perform no `isinstance(manifest, LaunchManifest)` check — a duck-typed object with matching attribute names (`command`, `args`, `env`, `server_name`, `full_argv`, `env_dict`) but that never went through `__post_init__` validation renders successfully. No current internal caller does this (the proposed 12B-2 follow-up that wires `clients.py` into `cli.py`'s `init` would presumably always construct a real `LaunchManifest`), but hardening `render()` with an explicit `isinstance` check before that follow-up lands would close this defense-in-depth gap cheaply.
+3. `client-guidance.md` documents config-file shapes only; it does not yet carry the "invoke Cerebro only when explicitly asked" policy language from spec's "A-Deterministic Explicit Invocation and Negative Controls" requirement. This appears correctly out of scope for 12B (that requirement's evaluation is explicitly deferred to the not-yet-started evaluation harness, 12C, per `tasks.md`'s own task-12.1 text) — flagging only so it is not lost when 12C is scoped.
+
+### Task/Spec Cross-Check
+- `tasks.md` (12B status paragraph, appended before the still-unchecked `- [ ] 12.1` line) and Engram `sdd/cerebro-agent-knowledge-router/apply-progress` (id 2473) both claim: 270/213/183-line new files, 399/399 tests (364→399, +35 net new), legacy baseline pass before/after, `uv.lock` hash unchanged, `cli.py` byte-frozen, `pip-audit` clean, zero new `requests`/`httpx` import, and the size-exception NOT approved. **Every one of these claims was independently re-executed and confirmed exact in this verification** — no discrepancy found between what apply-progress reports and what this independent run observed.
+- Spec cross-check against `specs/knowledge-corpus-lifecycle/spec.md`'s "Canonical Client Launch Manifest and Adapters" requirement: 4 of 5 listed MUST properties are satisfied (absolute executable semantics ✅, explicit arguments/environment ✅, stderr diagnostics ✅ — inherited from frozen `mcp_server.py`/`cli.py`, no shell-specific quoting dependency ✅ — JSON argv arrays throughout); "version visibility" is not (WARNING 1). Against `specs/agent-knowledge-routing/spec.md`'s "Cross-Client Core Equivalence" requirement: fully satisfied for the launch-configuration layer this slice covers (schema/status/refs/citations/budgets/errors/text-fallback equivalence itself is a `service.py`/`mcp_server.py` property, already verified in prior slices and untouched here).
+
+### Final Verdict
+**PASS WITH WARNINGS.** Zero CRITICAL findings — the core security/determinism/cross-client-equivalence guarantees this slice claims are all independently proven, including under adversarial probing beyond the shipped test suite. Four WARNINGs: one genuine spec-compliance gap ("version visibility" unimplemented anywhere in the codebase, not just this slice), two hardening gaps in the manifest's negative-control guard (untyped `TypeError` on malformed type input; plain space not treated as a shell metacharacter despite the module's own stated rationale for blocking tab/newline), and one already-self-disclosed process gate (666-line size-exception decision outstanding). None of these WARNINGs represent an exploitable path to launching a different server or a different command than the one canonical manifest specifies — the single-source-of-truth and cross-client-equivalence properties hold under attack. Recommend resolving WARNING 4 (size-exception/split decision) before archiving this slice, and tracking WARNINGs 1-3 as follow-up hardening (WARNING 1 ideally before claiming "K-Canonical Client Launch Manifest and Adapters" fully compliant; WARNINGs 2-3 are cheap, low-risk fixes suitable for a small follow-up).
+
+---
+
 ## Verification Report — Slice 12A-2 (`service.py` `proceed` path wired to bounded live research)
 
 **Change**: cerebro-agent-knowledge-router · **Boundary**: task 12A-2 — `cerebro-retrieval/src/cerebro_router/service.py` (+108/-22, second authorized edit of the previously frozen module), `cerebro-retrieval/tests/test_service.py` (+115/-2). **Date**: 2026-07-24 · **Run**: independent, fresh-context, adversarial verification (did not author the code). **Mode**: Standard (no Strict TDD cache found for this project at verify time).
