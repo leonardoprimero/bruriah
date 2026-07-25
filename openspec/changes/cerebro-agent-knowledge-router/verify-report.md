@@ -1,3 +1,132 @@
+## Verification Report — Slice 12C (`evaluation.py` gate-matrix harness)
+
+**Change**: cerebro-agent-knowledge-router · **Boundary**: task 12.1 (evaluation harness half) — `cerebro-retrieval/src/cerebro_router/evaluation.py` (740, new), `cerebro-retrieval/tests/test_evaluation.py` (355, new, 16 tests), `cerebro-retrieval/evals/investigation_cases.jsonl` (5 cases, new), `cerebro-retrieval/evals/domain_claims.jsonl` (6 cases, new). HEAD at authoring time: `e35ef68` (these 4 files are staged-but-uncommitted on top of it). **Date**: 2026-07-24 · **Run**: independent, fresh-context, adversarial verification (did not author the code). **Mode**: Standard (no Strict TDD cache found for this project at verify time). This is an evaluation harness whose entire product is *honesty of its own gate verdicts* — the review below attacks exactly that property.
+
+### Verdict
+**PASS.** Zero CRITICAL findings. **No dishonest `pass` was found anywhere in the module.** I drove the REAL gate matrix myself, standalone (not just via the shipped pytest suite), against a freshly built real corpus/index/registry/snapshot, and inspected the raw `EvaluationReport` JSON cell-by-cell (`22 pass / 0 fail / 16 not_validated`, `38` total cells). Every cell the module claims must be `not_validated` — the 6 domain `end_to_end_*` cells, `unsupported_claim_zero_tolerance`, `secret_not_leaked_in_audit` (no probe supplied), `os_linux`/`os_windows`, all 5 named-client cells, `rollback_rehearsal_config_first` — was in fact `not_validated` in the real output, never `pass`. Re-running the harness twice produced byte-identical cell content except `measured_ms` (determinism confirmed). Every gate that touches security/schema/invocation drives the real assembled pipeline (`build_server`, `investigate`, `read`, `assess_claim`, `research`/`fetch`) — zero `mock`/`monkeypatch`/`Mock` usage anywhere in the module or its test file (grep-confirmed). One process item is carried forward, not a code defect: the 1106-line size exception for 12C is still unapproved by the user (mirrors 12B's precedent, which the user later approved as one cohesive unit) — flagged as WARNING, matching the module's own honest self-report in `tasks.md`.
+
+### Frozen-Context Constraints
+| Check | Result |
+|---|---|
+| `git diff --numstat e35ef68 -- cerebro-retrieval/` shows ONLY the 4 new files | ✅ confirmed via `git status --porcelain` — exactly `?? evaluation.py`, `?? test_evaluation.py`, `?? evals/investigation_cases.jsonl`, `?? evals/domain_claims.jsonl` untracked; zero modified tracked files under `cerebro-retrieval/` (only `openspec/changes/.../tasks.md` and root `.gitignore` are modified, both outside `cerebro-retrieval/`) |
+| All 15 named frozen modules (`service`, `context`, `research`, `evidence`, `route`, `classify`, `lookup`, `retrieval`, `platform`, `mcp_server`, `cli`, `clients`, `contracts`, `packs`, `registries`) `git diff e35ef68 -- <path>` | ✅ EMPTY for all 15 — verified individually via `git diff --quiet e35ef68 -- <path>` (exit 0 for every one) |
+| `uv.lock` sha256 | ✅ `3c83d9eb87c9e5e94dcd5ae850339da9c29aa567292773c4d9e093795f4f2bc8` — matches expected |
+| `uv lock --check` | ✅ `Resolved 78 packages in 3ms` — no changes needed |
+| `pyproject.toml`/`uv.lock` byte-identical vs `e35ef68` | ✅ `git diff e35ef68 -- pyproject.toml uv.lock` → empty (exit 0) |
+| `scripts/verify_legacy_baseline.py` before AND after the full suite run | ✅ `status: "pass"`, `errors: []` both times; lock sha256 in the report matches `3c83d9eb…`; corpus/database/model/goldens all reported healthy |
+| `git diff --check e35ef68 -- cerebro-retrieval/` | ✅ clean, exit 0 |
+| AST parse of `evaluation.py` + `test_evaluation.py` | ✅ both parse cleanly |
+| `pip_audit --skip-editable` | ✅ "No known vulnerabilities found" (only the editable `cerebro-router` package itself skipped, expected) |
+
+Locked external interpreter used for all execution: fresh `UV_PROJECT_ENVIRONMENT=<scratchpad>/verify12c-venv uv sync --locked` (78 packages) — the registered `cerebro-retrieval/.venv` was never touched.
+
+### Test Execution Evidence
+```text
+$ uv lock --check
+Resolved 78 packages in 3ms
+
+$ UV_PROJECT_ENVIRONMENT=<scratchpad>/verify12c-venv uv sync --locked
+ (78 packages installed into an isolated venv)
+
+$ python scripts/verify_legacy_baseline.py   # BEFORE
+{"status": "pass", "errors": [], "lock": {"sha256": "3c83d9eb87c9e5e94dcd5ae850339da9c29aa567292773c4d9e093795f4f2bc8", "package_count": 78, ...}, ...}
+
+$ python -m pytest tests -q -p no:randomly
+........................................................................ [ 16%]
+........................................................................ [ 32%]
+........................................................................ [ 48%]
+........................................................................ [ 64%]
+........................................................................ [ 81%]
+........................................................................ [ 97%]
+............                                                             [100%]
+444 passed in 20.43s
+
+$ python -m pytest tests/test_evaluation.py -q -v
+16 passed in 2.77s
+
+$ python scripts/verify_legacy_baseline.py   # AFTER
+{"status": "pass", "errors": [], "lock": {"sha256": "3c83d9eb87c9e5e94dcd5ae850339da9c29aa567292773c4d9e093795f4f2bc8", ...}, ...}
+
+$ pip_audit --skip-editable
+No known vulnerabilities found
+```
+
+### Adversarial Probe: Independent Real Gate-Matrix Run (the core of this verification)
+
+I wrote a standalone script (outside pytest, outside the shipped harness's own test doubles) that builds a real corpus/index/registry/snapshot exactly the way `test_evaluation.py`/`test_service.py` do, and calls `evaluation.run_gate_matrix()` directly, then dumps the raw `EvaluationReport.model_dump()` JSON. Ran it twice.
+
+**Result** (both runs, byte-identical except `measured_ms`): `passed=22, failed=0, not_validated=16`, 38 cells total.
+
+Every `not_validated` cell found in the real output, with its real reason string:
+- `domain/end_to_end_*` × 6 (one per named spec scenario) — reason cites Slice 12A-3 deferred + no domain-aligned pack sources, never claims a fabricated pass
+- `security/unsupported_claim_zero_tolerance` — same 12A-3 reason
+- `security/secret_not_leaked_in_audit` — "no live TLS loopback research deps were supplied" (I ran without a probe; `test_run_security_gate_with_a_real_live_secret_probe_passes` proves the `pass` branch is real and reachable when a probe *is* supplied)
+- `package_os_client/os_linux`, `os_windows` — "no {OS} host is available in this evaluation environment"
+- `package_os_client/client_claude-code|opencode|cursor|gemini|antigravity` — "no live {client} process is reachable from this evaluation host"
+- `rollback_preservation/rollback_rehearsal_config_first` — "Slice 12D scope"
+
+No cell anywhere reported `pass` for a check that did not actually execute against the real pipeline. The 22 `pass` cells all carry real, non-generic reason strings tied to actually-observed results (e.g. `"status=complete, evidence=3, claims=0"`, `"real assess_claim state=conflicted matches the declared domain scenario"`, `"DNS-rebinding-into-a-blocked-IP destination refused before any connection attempt"`).
+
+### Adversarial Probe: SSRF Guard Is Genuinely Load-Bearing (revert-style, via code reading — no file was modified)
+
+`_check_ssrf_blocked` (evaluation.py:525) supplies a `resolver` that DNS-rebinds an allowlisted host to `127.0.0.1`, and a `connect` callable that `raise AssertionError("fetch must block on IP validation before ever attempting to connect")` if it is ever invoked. I traced the real, frozen `fetch.py` call path (`_fetch_one_hop`, fetch.py:183-197): `resolver(host)` is called once, then **every** candidate IP is passed through `_validate_ip()` (fetch.py:129-143, raises `FetchError("dangerous_ip_blocked")` for loopback/private/link-local/metadata/reserved/`not is_global`) **before** `connect(candidate_ips[0], ...)` is ever called on line 197. This means:
+- **If the guard runs correctly** (today): `_validate_ip` raises before `connect`, the poisoned `_refuse_connect` never fires, `fetch()` returns a typed `dangerous_ip_blocked` error, `research.py` (research.py:286-317) propagates `.code` into `ResearchOutcome`, `service.py`'s `_fold_research` (service.py:198-221) folds it into `degradation.append(f"research_unavailable:{outcome.code}")`, and the gate cell's assertion `"dangerous_ip_blocked" in entry for entry in result.degradation` passes — checking a real, propagated error code, not a fabricated string.
+- **If the guard were removed/broken**: `connect` would be reached, the poisoned callable raises `AssertionError`, `_safe_cell`'s bare `except Exception` backstop converts it to a `fail` cell with reason `unexpected_error:AssertionError:fetch must block on IP validation before ever attempting to connect`.
+
+This is a structurally real revert-style proof — the assertion is load-bearing on the actual code path, not merely on a trivially-true string match.
+
+### Adversarial Probe: No Monkeypatch/Mock Substitutes the Pipeline
+
+`rg -n "mock|Mock|monkeypatch|patch\(|MagicMock" evaluation.py test_evaluation.py` → zero hits except the module's own comments stating "never mocks." The `resolver`/`connect` seams used for the SSRF probe are the same first-class dependency-injection points `fetch.py`/`research.py` already expose for legitimate DNS-rebinding testing (used identically in `test_research.py`, `test_fetch.py`); they are not test doubles that bypass the guard under test — they simulate the exact attack (a rebound DNS answer) the guard must catch. The secret-leak probe (`test_run_security_gate_with_a_real_live_secret_probe_passes`) drives a real loopback TLS server (`_LocalTlsServer`, real `ssl.SSLContext`, real cert/key, real socket accept loop) reused verbatim from `test_research.py` — genuine TLS, not a stub.
+
+### Adversarial Probe: `not_validated` Reasons Are Truthful, Not a Catch-All
+
+Cross-checked each `not_validated` reason against the actual code state:
+- Domain `end_to_end_*`: confirmed by reading `service.py` — `investigate()`'s `proceed` path builds `claims = []` always (12A-3 deferred, per tasks.md's own 12A-2 report); the reason is accurate.
+- `unsupported_claim_zero_tolerance`: same root cause, same accuracy.
+- `os_linux`/`os_windows`: this evaluation host is genuinely Darwin (`platform.system()` dynamically read, not hardcoded — confirmed in source at evaluation.py:614).
+- Named-client `not_validated` cells: cross-checked against `clients.py`'s `CLIENT_CAPABILITIES` — the 5 non-generic-stdio client IDs (`claude-code`, `opencode`, `cursor`, `gemini`, `antigravity`) match exactly; no live external process exists on this host to drive any of them through a real protocol round trip, so `not_validated` is correct, not a laziness shortcut.
+- `rollback_rehearsal_config_first`: correctly scoped to Slice 12D per `tasks.md`'s own phase breakdown.
+
+### Adversarial Probe: Typed-Total / Closed Models
+
+`_safe_cell`'s bare `except Exception` backstop (evaluation.py:112-125) is real and independently exercised: `test_safe_cell_backstop_converts_any_exception_into_a_fail_cell_never_raises` proves a raised `RuntimeError` becomes a `fail` cell, never propagates. `GateCell`/`EvaluationReport` both subclass the frozen `ClosedModel` (`ConfigDict(extra="forbid", strict=True)`, contracts.py:7-8) — confirmed a 4th status value (`"maybe"`) and an unknown field both raise `pydantic.ValidationError` (`test_gate_cell_and_report_are_closed_models_rejecting_unknown_fields`, independently re-run and green).
+
+### Adversarial Probe: Fixtures Are Realistic, Not Synthetic Toys
+
+`evals/domain_claims.jsonl`'s 6 cases carry real dated evidence records, real `SourcePolicy` shapes (`authority`, `jurisdictions`, `freshness_days`, `citation_rules`), and non-trivial expected outcomes (`insufficient` for missing-jurisdiction law, `conflicted` for the UX target-size case with `expect_conflict_classes: ["definition"]`, `supported` with `expect_non_applicable_refs` for the version-bound programming case). These exercise the pre-existing, independently-verified (Slice 10) `evidence.assess_claim` real logic — not a stub built for this slice. `evals/investigation_cases.jsonl`'s negative-control case ("a peaceful lakeside walking trail") genuinely does not match anything in the fixture corpus and correctly returns `abstained` through the real router/retrieval stages, confirmed live in my standalone run.
+
+### Adversarial Probe: Latency Assertions Are Loose, Never Tight/Flaky
+
+`_measure_investigate_latency`/`_measure_read_latency` (evaluation.py:577-598) only assert `measured_ms < Budgets().max_elapsed_ms` (10,000ms default) — a generous ceiling, never an equality or narrow-window check. `measured_ms` is recorded on the cell but never itself asserted against another measurement. Confirmed via two independent runs (0ms and 0ms in this in-process fixture — trivially inside budget, no flake risk).
+
+### Adversarial Probe: Determinism
+
+Two independent standalone runs of `run_gate_matrix` produced byte-identical cell content (`dimension`, `cell_id`, `status`, `reason`) for all 38 cells; only `measured_ms` (an intentionally-excluded timing field) varied. No gate verdict depends on wall-clock ordering or iteration order.
+
+### Spec Compliance Matrix (Slice 12C scope)
+| Requirement | Scenario | Test/Evidence | Result |
+|---|---|---|---|
+| K-Cross-Domain, Client, Platform, Security, and Utility Gates | Domain, client, platform, or security failure | `run_domain_gate`/`run_security_gate`/`run_package_os_client_gate`, all real-pipeline, all `not_validated` cells honestly labeled, zero fabricated `pass` (verified via standalone run) | ✅ COMPLIANT (harness correctly implements "block on failure or honest non-validation," full cutover completion is Slice 12A-3/12D scope) |
+| K-Cross-Domain... | Utility regression | `run_utility_latency_gate` measures real elapsed time against declared budgets + a golden-query evidence check | ✅ COMPLIANT |
+| A-Deterministic Explicit Invocation and Negative Controls | Explicit invocation / Negative control | `run_invocation_gate` drives real `investigate()`+`read()`; negative control confirmed `abstained` with zero evidence | ✅ COMPLIANT |
+| A-Cross-Client Core Equivalence | Minimal or schema-sanitizing client | `run_package_os_client_gate`'s `client_generic-stdio` cell drives a real `mcp.shared.memory` session (tools/list + tools/call); the 5 named clients are honestly `not_validated`, not fabricated | ✅ COMPLIANT for the reachable protocol-minimum cell; named-client live equivalence remains `not_validated` pending Slice 12D/live client availability |
+
+### Issues Found
+
+**CRITICAL**: None. No dishonest `pass` was found in any cell, in any of the two independent standalone runs, or in code inspection of every gate-cell-producing path.
+
+**WARNING**:
+1. `size:exception` for 12C's 1106 changed lines is still unapproved by the user (self-disclosed in `tasks.md`'s own 12C entry) — a process/delivery-strategy gate, not a code defect. Mirrors the 12B precedent, which the user later approved as one cohesive unit at 863 lines.
+2. `run_gate_matrix`'s top-level orchestration uses `next(...)` (evaluation.py:716-717) to locate the `prompt_injection`/`consequential_action` fixture cases without a fallback — if `evals/investigation_cases.jsonl` were ever edited to drop one of those `kind`s, the orchestrator would raise an uncaught `StopIteration` rather than reporting a graceful `fail`/`not_validated` cell. This is orchestration-level (a fixture-configuration precondition), not a per-cell probe, and does not affect the honesty of any produced `GateCell` — but it is a minor gap in the "harness itself never raises" claim's literal scope (the individual gate runners never raise; the top-level `run_gate_matrix` assembly step technically can, given a malformed fixture file).
+
+**SUGGESTION**: None beyond the above.
+
+### Verdict
+**PASS.** 0 CRITICAL, 2 WARNING (both process/edge-case, neither is a dishonest-pass finding), 0 SUGGESTION. The evaluation harness's core claim — that it never reports `pass` for a check that did not actually run or did not actually succeed — held up under independent real-pipeline execution, revert-style code tracing of the SSRF guard, and cross-checking of every `not_validated` reason against the actual code state.
+
+---
+
 ## Verification Report — Slice 12B (`clients.py` canonical launch manifest + 6 client renderers)
 
 **Change**: cerebro-agent-knowledge-router · **Boundary**: task 12.1 (client-adapters half) — `cerebro-retrieval/src/cerebro_router/clients.py` (270, new), `cerebro-retrieval/tests/test_clients.py` (213, new, 35 tests), `cerebro-retrieval/docs/client-guidance.md` (183, new). HEAD at authoring time: `b638159`. **Date**: 2026-07-24 · **Run**: independent, fresh-context, adversarial verification (did not author the code). **Mode**: Standard (no Strict TDD cache found for this project at verify time).
