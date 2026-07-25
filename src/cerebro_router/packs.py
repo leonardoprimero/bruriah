@@ -85,7 +85,8 @@ class PackError(ValueError):
         self.code = code
         super().__init__(code)
 _VERSION_PATTERN = re.compile(r"^\d+\.\d+\.\d+$")
-def _version(value: str) -> tuple[int, int, int]:
+MAX_PACK_BYTES = 65_536
+def parse_version(value: str) -> tuple[int, int, int]:
     if not _VERSION_PATTERN.match(value):
         raise PackError("invalid_version")
     return tuple(map(int, value.split(".")))  # type: ignore[return-value]
@@ -119,7 +120,7 @@ def _reject_yaml_aliases(raw: bytes) -> None:
         raise PackError("malformed_pack") from error
     if any(isinstance(token, (yaml.AnchorToken, yaml.AliasToken)) for token in tokens):
         raise PackError("malformed_pack")
-def _parse_pack_bytes(raw: bytes, suffix: str) -> dict:
+def parse_pack_bytes(raw: bytes, suffix: str) -> dict:
     if suffix in (".yaml", ".yml"):
         _reject_yaml_aliases(raw)
         try:
@@ -138,11 +139,69 @@ def _parse_pack_bytes(raw: bytes, suffix: str) -> dict:
     if not isinstance(data, dict):
         raise PackError("malformed_pack")
     return data
-def _encode_pack(data: dict) -> str:
+def encode_pack(data: dict) -> str:
     try:
         return json.dumps(data, allow_nan=False)
     except (TypeError, ValueError) as error:
         raise PackError("malformed_pack") from error
+# Helpers shared with any second pack kind (skill packs). Extraction only: every code and, more
+# importantly, every CHECK ORDER below is identical to the inline version it replaced. The order is
+# observable -- callers branch on which code surfaces when two conditions fail together -- and is
+# pinned by the failure-precedence block in `tests/test_packs.py`, written before this refactor.
+def read_pack_bytes(pack_path: Path) -> bytes:
+    """Read a pack under the shared size ceiling: unreadable before oversized, both before parsing."""
+    try:
+        raw = pack_path.read_bytes()
+    except OSError as error:
+        raise PackError("pack_unreadable") from error
+    if len(raw) > MAX_PACK_BYTES:
+        raise PackError("pack_too_large")
+    return raw
+def verify_manifest(
+    raw: bytes, manifest_path: Path, trust_roots: dict[str, str], pack_id: str, version: str
+) -> ReleaseManifest:
+    """Verify a release manifest against the pack bytes.
+
+    Fixed order: malformed_manifest -> unknown_signer -> digest_mismatch -> invalid_signature. Note
+    that a valid signature establishes only WHO signed; it is never evidence that the signed content
+    is safe."""
+    try:
+        manifest = ReleaseManifest.model_validate_json(manifest_path.read_bytes())
+    except (OSError, ValidationError, ValueError) as error:
+        raise PackError("malformed_manifest") from error
+    if manifest.signer not in trust_roots:
+        raise PackError("unknown_signer")
+    digest = hashlib.sha256(raw).hexdigest()
+    if digest != manifest.sha256 or (manifest.pack_id, manifest.version) != (pack_id, version):
+        raise PackError("digest_mismatch")
+    signed = f"1\n{manifest.signer}\n{manifest.pack_id}\n{manifest.version}\n{digest}".encode()
+    try:
+        key = Ed25519PublicKey.from_public_bytes(base64.b64decode(trust_roots[manifest.signer], validate=True))
+        key.verify(base64.b64decode(manifest.signature, validate=True), signed)
+    except (ValueError, InvalidSignature) as error:
+        raise PackError("invalid_signature") from error
+    return manifest
+def check_review_window(reviewed_at: date, expires_at: date, freshness_days: int, now: date) -> None:
+    """Fixed order: future_review -> expired_pack -> stale_pack."""
+    if reviewed_at > now:
+        raise PackError("future_review")
+    if expires_at < now:
+        raise PackError("expired_pack")
+    if reviewed_at + timedelta(days=freshness_days) < now:
+        raise PackError("stale_pack")
+def check_router_compatibility(
+    min_router_version: str, max_router_version: str, router_version: str
+) -> None:
+    if not (
+        parse_version(min_router_version)
+        <= parse_version(router_version)
+        <= parse_version(max_router_version)
+    ):
+        raise PackError("incompatible_pack")
+def check_version_floor(pack_id: str, version: str, minimum_versions: dict[str, str] | None) -> None:
+    minimum = (minimum_versions or {}).get(pack_id)
+    if minimum and parse_version(version) < parse_version(minimum):
+        raise PackError("version_rollback")
 def load_pack(
     pack_path: Path,
     manifest_path: Path | None,
@@ -155,14 +214,9 @@ def load_pack(
     jurisdiction: str | None = None,
     allow_unsigned_local: bool = False,
 ) -> DomainPack:
-    try:
-        raw = pack_path.read_bytes()
-    except OSError as error:
-        raise PackError("pack_unreadable") from error
-    if len(raw) > 65_536:
-        raise PackError("pack_too_large")
-    data = _parse_pack_bytes(raw, pack_path.suffix.lower())
-    encoded = _encode_pack(data)
+    raw = read_pack_bytes(pack_path)
+    data = parse_pack_bytes(raw, pack_path.suffix.lower())
+    encoded = encode_pack(data)
     try:
         pack = DomainPack.model_validate_json(encoded)
     except (ValidationError, ValueError) as error:
@@ -173,33 +227,11 @@ def load_pack(
         if pack.regulated_domain:
             raise PackError("unsigned_regulated_pack")
     else:
-        try:
-            manifest = ReleaseManifest.model_validate_json(manifest_path.read_bytes())
-        except (OSError, ValidationError, ValueError) as error:
-            raise PackError("malformed_manifest") from error
-        if manifest.signer not in trust_roots:
-            raise PackError("unknown_signer")
-        digest = hashlib.sha256(raw).hexdigest()
-        if digest != manifest.sha256 or (manifest.pack_id, manifest.version) != (pack.pack_id, pack.version):
-            raise PackError("digest_mismatch")
-        signed = f"1\n{manifest.signer}\n{manifest.pack_id}\n{manifest.version}\n{digest}".encode()
-        try:
-            key = Ed25519PublicKey.from_public_bytes(base64.b64decode(trust_roots[manifest.signer], validate=True))
-            key.verify(base64.b64decode(manifest.signature, validate=True), signed)
-        except (ValueError, InvalidSignature) as error:
-            raise PackError("invalid_signature") from error
+        verify_manifest(raw, manifest_path, trust_roots, pack.pack_id, pack.version)
     now = today or date.today()
-    if pack.reviewed_at > now:
-        raise PackError("future_review")
-    if pack.expires_at < now:
-        raise PackError("expired_pack")
-    if pack.reviewed_at + timedelta(days=pack.freshness_days) < now:
-        raise PackError("stale_pack")
-    if not (_version(pack.min_router_version) <= _version(router_version) <= _version(pack.max_router_version)):
-        raise PackError("incompatible_pack")
-    minimum = (minimum_versions or {}).get(pack.pack_id)
-    if minimum and _version(pack.version) < _version(minimum):
-        raise PackError("version_rollback")
+    check_review_window(pack.reviewed_at, pack.expires_at, pack.freshness_days, now)
+    check_router_compatibility(pack.min_router_version, pack.max_router_version, router_version)
+    check_version_floor(pack.pack_id, pack.version, minimum_versions)
     if domain and domain not in pack.domains:
         raise PackError("unsupported_domain")
     if jurisdiction and jurisdiction not in pack.jurisdictions:

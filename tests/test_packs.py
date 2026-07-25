@@ -167,3 +167,49 @@ def test_unsigned_future_review_and_malformed_manifest_fail_closed(tmp_path: Pat
     broken.write_text("{")
     with pytest.raises(PackError, match="malformed_manifest"):
         load_pack(source, broken, roots, today=date(2026, 7, 23))
+
+
+# --- Failure-precedence baseline -----------------------------------------------------------------
+# `load_pack` runs its checks in a fixed order, and WHICH code surfaces when two conditions fail
+# together is observable behaviour a caller can branch on. Extracting these checks into helpers
+# reusable by a second pack kind must not reorder them. This block pins the current order BEFORE
+# that refactor: a precedence test written afterwards would only confirm whatever the refactor
+# happened to produce, which proves nothing.
+def _roots() -> dict[str, str]:
+    return json.loads((DATA / "trust-roots.json").read_text())
+def test_precedence_unreadable_beats_every_later_check(tmp_path: Path) -> None:
+    with pytest.raises(PackError, match="pack_unreadable"):
+        load_pack(tmp_path / "absent.json", tmp_path / "absent.manifest.json", _roots(), today=date(2026, 7, 23))
+def test_precedence_size_limit_beats_parsing(tmp_path: Path) -> None:
+    oversized = tmp_path / "big.json"
+    oversized.write_bytes(b"{" + b"x" * 70_000)  # oversized AND unparseable
+    with pytest.raises(PackError, match="pack_too_large"):
+        load_pack(oversized, None, {}, allow_unsigned_local=True, today=date(2026, 7, 23))
+def test_precedence_schema_beats_manifest_checks(tmp_path: Path) -> None:
+    # Schema validation precedes the manifest branch: a pack that is both schema-invalid and signed
+    # by an unknown signer reports the schema failure.
+    assert _code(tmp_path, lambda p, m: (p.pop("license"), m.update({"signer": "unknown"}))) == "malformed_pack"
+def test_precedence_unknown_signer_beats_digest_mismatch(tmp_path: Path) -> None:
+    mutate = lambda p, m: (p.update({"maintainer": "tampered"}), m.update({"signer": "unknown"}))
+    assert _code(tmp_path, mutate) == "unknown_signer"
+def test_precedence_digest_mismatch_beats_invalid_signature(tmp_path: Path) -> None:
+    mutate = lambda p, m: (p.update({"maintainer": "tampered"}), m.update({"signature": "AA=="}))
+    assert _code(tmp_path, mutate) == "digest_mismatch"
+def test_precedence_signature_checks_beat_date_checks(tmp_path: Path) -> None:
+    assert _code(tmp_path, lambda p, m: m.update({"signer": "unknown"}), today=date(2030, 1, 1)) == "unknown_signer"
+def test_precedence_signature_required_beats_date_checks(tmp_path: Path) -> None:
+    with pytest.raises(PackError, match="signature_required"):
+        load_pack(DATA / "research-policy.json", None, {}, today=date(2030, 1, 1))
+def test_precedence_expired_beats_stale(tmp_path: Path) -> None:
+    # A date far past expiry also exceeds the freshness window; expiry is checked first.
+    assert _code(tmp_path, None, today=date(2030, 1, 1)) == "expired_pack"
+def test_precedence_dates_beat_router_compatibility(tmp_path: Path) -> None:
+    assert _code(tmp_path, None, today=date(2030, 1, 1), router_version="1.0.0") == "expired_pack"
+def test_precedence_router_compatibility_beats_version_floor(tmp_path: Path) -> None:
+    kwargs = {"router_version": "1.0.0", "minimum_versions": {"research.minimal": "2.0.0"}}
+    assert _code(tmp_path, None, **kwargs) == "incompatible_pack"
+def test_precedence_version_floor_beats_unsupported_domain(tmp_path: Path) -> None:
+    kwargs = {"minimum_versions": {"research.minimal": "2.0.0"}, "domain": "law"}
+    assert _code(tmp_path, None, **kwargs) == "version_rollback"
+def test_precedence_domain_beats_jurisdiction(tmp_path: Path) -> None:
+    assert _code(tmp_path, None, domain="law", jurisdiction="AR") == "unsupported_domain"
