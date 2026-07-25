@@ -21,7 +21,9 @@ from cerebro_router.retrieval import search as router_search
 from mcp.shared.memory import create_connected_server_and_client_session
 
 # Pinned so the doctor freshness check is deterministic, not a wall-clock time bomb.
-_TODAY = date(2026, 7, 23)
+# Bumped from 2026-07-23 when the second bundled pack landed: `programming-policy` is
+# reviewed 2026-07-25, and a `today` earlier than a pack's review date is `future_review`.
+_TODAY = date(2026, 7, 25)
 _NOW = datetime(2026, 7, 23, 12, 0, 0, tzinfo=timezone.utc)  # pinned: cache-stats freshness too
 _FINGERPRINT = (
     '{"artifact":"model.onnx","artifact_sha256":"' + "a" * 64
@@ -99,7 +101,7 @@ def test_end_to_end_init_index_serve_doctor(tmp_path: Path, capsys: pytest.Captu
     report = cli.run_doctor(paths, today=_TODAY)
     assert report["healthy"] is True
     assert report["snapshot"]["build_id"] == result.build_id
-    assert report["registry"]["pack_ids"] == ["research.minimal"]
+    assert report["registry"]["pack_ids"] == ["programming.minimal", "research.minimal"]
 
     capsys.readouterr()  # discard init/index stdout before the serve-wiring stdout-clean check
     deps = cli.build_serve_deps(paths, embedder_factory=_fake_embedder_factory)
@@ -208,7 +210,9 @@ def test_doctor_is_read_only_and_reports_freshness(tmp_path: Path) -> None:
     assert uninitialized["snapshot"] == {"status": "error", "code": "index_not_built"}
     assert uninitialized["cache"] == {"entries": 0, "expired": 0, "total_bytes": 0}
 
-    near_stale = date(2026, 8, 20)  # bundled pack reviewed 2026-07-23, freshness_days=30
+    # Both bundled packs are reviewed mid-2026 with freshness_days=365, so the 7-day warning
+    # window opens in July 2027. doctor still warns BEFORE the hard fail, which is the point.
+    near_stale = date(2027, 7, 20)
     warned = cli.run_doctor(paths, today=near_stale, now=_NOW)
     assert warned["registry"]["status"] == "ok"
     assert any("goes stale" in warning for warning in warned["warnings"])

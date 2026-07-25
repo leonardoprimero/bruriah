@@ -36,9 +36,10 @@ def _real_bundled_registry() -> Registry:
 
 
 def test_real_bundled_pack_resolves_no_domain_sources_for_any_classifier_domain() -> None:
-    # The only pack shipped today declares domains=["software-research"], which no classifier
-    # Domain value equals, so source discovery is empty for ALL seven domains -- not just
-    # general/unsupported. This is spec-compliant (no approved pack for the domain -> abstain,
+    # The RESEARCH pack declares domains=["software-research"], which no classifier Domain value
+    # equals, so on its own it resolves no sources for ANY of the seven domains -- not just
+    # general/unsupported. The bundled `programming.minimal` pack is what reconciles the two
+    # vocabularies, and it is pinned separately so this negative stays meaningful in isolation. This is spec-compliant (no approved pack for the domain -> abstain,
     # via 6B-3) but must be PINNED against the real pack, not only a synthetic domains=("general",)
     # fixture: an accidental edit to research-policy.json's domains, or a classifier/pack
     # vocabulary drift, must fail a test rather than silently change routing. Reconciliation of the

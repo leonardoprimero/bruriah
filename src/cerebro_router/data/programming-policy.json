@@ -1,0 +1,72 @@
+{
+  "schema_version": "1",
+  "pack_id": "programming.minimal",
+  "version": "1.0.0",
+  "maintainer": "Cerebro release maintainers",
+  "min_router_version": "0.1.0",
+  "max_router_version": "0.9.9",
+  "reviewed_at": "2026-07-25",
+  "expires_at": "2027-07-25",
+  "freshness_days": 365,
+  "domains": ["programming"],
+  "regulated_domain": false,
+  "claim_types": ["documentation", "specification"],
+  "jurisdictions": ["GLOBAL"],
+  "languages": ["en", "es"],
+  "update_cadence": "Review annually and on security advisories",
+  "license": "CC0-1.0 policy metadata; source terms remain controlling",
+  "provenance": "Bundled Cerebro programming-routing policy. Declares the classifier domain identifier 'programming' so domain-gated discovery can resolve at all; the bundled research pack declares 'software-research', which no classifier Domain value equals.",
+  "sources": [
+    {
+      "source_id": "normative-language-specifications",
+      "publisher": "Standards bodies and language stewards (ECMA, IETF, W3C, WHATWG, Python Software Foundation, and equivalents)",
+      "authority": "standard",
+      "rationale": "A normative specification is the only artifact that defines what a language or protocol REQUIRES. Tutorials and answers describe what worked for someone; a specification states what must hold.",
+      "claim_types": ["specification"],
+      "jurisdictions": ["GLOBAL"],
+      "temporal_rules": "Cite the specific edition or revision consulted. Specifications are versioned and a requirement can change between editions, so an unversioned citation is not verifiable.",
+      "citation_rules": "Cite the section or clause identifier, never the document as a whole. Quote normative wording verbatim when the distinction between MUST, SHOULD and MAY carries the answer.",
+      "reuse_rules": "Terms vary by body and several prohibit redistribution of the text. Link and quote narrowly; do not reproduce a specification wholesale.",
+      "freshness_days": 365,
+      "limitations": [
+        "States requirements, not practice: conforming implementations differ, and widely used behaviour is sometimes outside the specification entirely.",
+        "Silent on performance, ergonomics, and which of several conforming options to prefer."
+      ],
+      "biases": [
+        "Reflects committee consensus, which lags real-world usage and can encode compromises no implementer would choose alone."
+      ],
+      "conflicts": [
+        "A specification and a shipping implementation can disagree. Neither is automatically authoritative: the specification governs conformance, the implementation governs what actually runs."
+      ],
+      "exclusions": [
+        "Draft or proposal-stage documents, which are not yet normative and must not be cited as if they were."
+      ]
+    },
+    {
+      "source_id": "official-implementation-documentation",
+      "publisher": "The maintainers of the implementation, library, or runtime in question",
+      "authority": "official",
+      "rationale": "For behaviour a specification does not fix, the maintainers' own documentation is the closest thing to a primary source about what their software does.",
+      "claim_types": ["documentation"],
+      "jurisdictions": ["GLOBAL"],
+      "temporal_rules": "Pin the version. Documentation for a version other than the one in use is evidence about a different program.",
+      "citation_rules": "Cite the versioned page or the tagged source. Documentation for 'latest' is a moving target and is not reproducible evidence.",
+      "reuse_rules": "Follow the project's licence, which is frequently distinct from the licence of the code it documents.",
+      "freshness_days": 180,
+      "limitations": [
+        "Documentation drifts from the code it describes; the source is authoritative where the two disagree.",
+        "Coverage is uneven, and undocumented behaviour is not thereby absent behaviour."
+      ],
+      "biases": [
+        "Written to present the project favourably. Known defects, sharp edges, and unfavourable comparisons are systematically underrepresented."
+      ],
+      "conflicts": [
+        "Can contradict the normative specification, which is a real finding about the implementation rather than an error in either document."
+      ],
+      "exclusions": [
+        "Community wikis, blog posts, and forum answers, which are not published by the maintainers and carry no official authority."
+      ]
+    }
+  ],
+  "capabilities": []
+}

@@ -200,10 +200,10 @@ def test_pack_schema_version_is_pinned() -> None:
 
 
 # --- signed loading ------------------------------------------------------------------------------
-# The tests generate their OWN ephemeral keypair. That is legitimate here and worth noting: the
-# repository has no private key (the bundled `cerebro-release-test` signer's private half was never
-# kept), which blocks shipping a NEW signed bundled pack -- but it never blocked signing in a test.
-# It also shows the eventual signing tool is small: keygen, digest, one canonical string, one sign.
+# The tests generate their OWN ephemeral keypair rather than reaching for the release key, which is
+# the right shape: a test must never depend on maintainer key material existing on the machine.
+# This predates `signing.py` and is what showed the signing tool would be small -- keygen, digest,
+# one canonical string, one signature.
 SIGNER = "cerebro-test-signer"
 def _bytes(payload: dict) -> bytes:
     return json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()

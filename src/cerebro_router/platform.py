@@ -22,6 +22,9 @@ from .service import ServiceDeps
 APP_NAME = "cerebro-router"
 ENV_PREFIX = "CEREBRO_ROUTER_"
 _BUNDLED_DATA = Path(__file__).resolve().parent / "data"
+# Fixed order, so the reported `registry_load_failed` code is deterministic when more than one pack
+# is unverifiable. `Registry.from_packs` sorts by pack id, so this order does not affect the result.
+_BUNDLED_PACKS = ("programming-policy", "research-policy")
 _CONFIG_KEYS = {"config_dir", "data_dir", "cache_dir", "log_dir", "network_enabled"}
 
 
@@ -161,19 +164,26 @@ def load_build_descriptor(paths: PlatformPaths) -> BuildConfig:
 
 
 def load_registry(today: date | None = None) -> Registry:
-    """Load the bundled research-policy pack into a `Registry`. `today` is injectable (default:
-    real date) so the fail-closed freshness/expiry check is deterministic in tests instead of a
-    wall-clock time bomb; production uses the real date, surfacing a stale bundled pack as
-    `registry_load_failed`."""
+    """Load every bundled domain pack into a `Registry`. `today` is injectable (default: real date)
+    so the fail-closed freshness/expiry check is deterministic in tests instead of a wall-clock time
+    bomb; production uses the real date, surfacing an expired bundled pack as `registry_load_failed`.
+
+    Loading is all-or-nothing: one unverifiable pack fails the whole registry rather than serving a
+    partial one, because a caller cannot tell a deliberately small registry from a silently truncated
+    one. The packs are loaded in a fixed order so the reported code is deterministic when more than
+    one is bad."""
     try:
         roots = json.loads((_BUNDLED_DATA / "trust-roots.json").read_text(encoding="utf-8"))
-        pack = load_pack(
-            _BUNDLED_DATA / "research-policy.json", _BUNDLED_DATA / "research-policy.manifest.json", roots,
-            today=today,
-        )
+        packs = [
+            load_pack(
+                _BUNDLED_DATA / f"{name}.json", _BUNDLED_DATA / f"{name}.manifest.json", roots,
+                today=today,
+            )
+            for name in _BUNDLED_PACKS
+        ]
     except PackError as error:
         raise PlatformError(f"registry_load_failed:{error.code}") from error
-    return Registry.from_packs([pack])
+    return Registry.from_packs(packs)
 
 
 def open_snapshot(paths: PlatformPaths) -> ActiveSnapshot:

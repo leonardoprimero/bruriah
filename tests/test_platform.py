@@ -22,7 +22,9 @@ from cerebro_router.platform import (
 from mcp.shared.memory import create_connected_server_and_client_session
 
 # Pinned so the fail-closed freshness check is deterministic, not a wall-clock time bomb.
-_TODAY = date(2026, 7, 23)
+# Bumped from 2026-07-23 when the second bundled pack landed: `programming-policy` is
+# reviewed 2026-07-25, and a `today` earlier than a pack's review date is `future_review`.
+_TODAY = date(2026, 7, 25)
 
 FINGERPRINT = (
     '{"artifact":"model.onnx","artifact_sha256":"' + "a" * 64
@@ -133,13 +135,18 @@ def test_open_snapshot_without_a_built_index_is_typed_and_read_only(tmp_path: Pa
 
 def test_load_registry_freshness_is_date_injectable_not_wall_clock() -> None:
     # Injected date so freshness is deterministic, not a wall-clock time bomb after the window.
-    assert load_registry(today=date(2026, 7, 23)).pack_ids == ("research.minimal",)
-    with pytest.raises(PlatformError) as stale:
-        load_registry(today=date(2026, 8, 23))
-    assert stale.value.code == "registry_load_failed:stale_pack"
+    assert load_registry(today=date(2026, 7, 25)).pack_ids == ("programming.minimal", "research.minimal")
+    # Loading is all-or-nothing: the earliest-expiring bundled pack takes the whole registry down
+    # rather than leaving a silently truncated one, which a caller could not distinguish from a
+    # deliberately small registry.
     with pytest.raises(PlatformError) as expired:
         load_registry(today=date(2027, 7, 24))
     assert expired.value.code == "registry_load_failed:expired_pack"
+    # A pack whose review is in the future is refused too, which is what keeps a mis-dated pack from
+    # quietly loading.
+    with pytest.raises(PlatformError) as future:
+        load_registry(today=date(2026, 7, 24))
+    assert future.value.code == "registry_load_failed:future_review"
 
 
 def test_real_index_then_load_deps_produces_a_working_service_deps(tmp_path: Path) -> None:
@@ -207,3 +214,68 @@ def test_real_pipeline_build_server_answers_investigate_and_read_over_mcp(tmp_pa
         anyio.run(_run)
     finally:
         deps.snapshot.database.close()
+
+
+def test_the_bundled_registry_reconciles_exactly_one_classifier_domain() -> None:
+    """The point of the second bundled pack: `programming` resolves, everything else abstains.
+
+    Asserted as an exact set rather than "programming is True", so quietly widening a pack's
+    `domains` shows up here as a failure instead of as silently broader routing."""
+    import typing
+
+    from cerebro_router.classify import Domain, RequestClassification
+    from cerebro_router.lookup import discover
+
+    registry = load_registry(today=_TODAY)
+    supported = {
+        domain
+        for domain in typing.get_args(Domain)
+        if discover(
+            RequestClassification(intent="investigate", domain=domain, claim_type="factual",
+                                  risk="low", jurisdiction="unknown"),
+            registry,
+        ).domain_supported
+    }
+    assert supported == {"programming"}
+
+
+def test_the_retired_test_signer_is_no_longer_trusted() -> None:
+    """`cerebro-release-test` was a signer whose private half nobody controls. Retiring it is only
+    real if a pack bearing its name is now refused, so that is what gets asserted -- the absence of a
+    key from a JSON file proves nothing on its own."""
+    import json as _json
+
+    from cerebro_router.packs import PackError, load_pack
+
+    data = Path(__file__).parents[1] / "src/cerebro_router/data"
+    roots = _json.loads((data / "trust-roots.json").read_text())
+    assert "cerebro-release-test" not in roots
+    assert set(roots) == {"cerebro-release"}
+
+    forged = _json.loads((data / "research-policy.manifest.json").read_text())
+    forged["signer"] = "cerebro-release-test"
+    forged_path = Path(__file__).parent / "_forged.manifest.json"
+    forged_path.write_text(_json.dumps(forged))
+    try:
+        with pytest.raises(PackError) as refused:
+            load_pack(data / "research-policy.json", forged_path, roots, today=_TODAY)
+        assert refused.value.code == "unknown_signer"
+    finally:
+        forged_path.unlink()
+
+
+def test_both_bundled_packs_ship_with_a_verifiable_manifest() -> None:
+    """Packaging assertion: every pack in the data directory has a manifest beside it that verifies
+    through the unmodified load path. A pack that ships without one is dead weight the loader will
+    refuse at startup."""
+    from cerebro_router.packs import load_pack
+
+    data = Path(__file__).parents[1] / "src/cerebro_router/data"
+    roots = json.loads((data / "trust-roots.json").read_text())
+    packs = sorted(item for item in data.glob("*.json") if not item.name.endswith(".manifest.json")
+                   and item.name != "trust-roots.json")
+    assert [item.stem for item in packs] == ["programming-policy", "research-policy"]
+    for pack in packs:
+        manifest = pack.with_suffix(".manifest.json")
+        assert manifest.is_file(), pack.name
+        assert load_pack(pack, manifest, roots, today=_TODAY).version == "1.0.0"

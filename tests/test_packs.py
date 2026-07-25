@@ -56,7 +56,9 @@ def test_registry_rejects_cross_pack_identifier_collisions(tmp_path: Path) -> No
         (lambda p, m: p.pop("license"), "malformed_pack"),
         (lambda p, m: p["sources"][0].pop("conflicts"), "malformed_pack"),
         (lambda p, m: p["sources"][0].pop("rationale"), "malformed_pack"),
-        (lambda p, m: p["sources"][0].update({"freshness_days": 31}), "malformed_pack"),
+        # Must exceed the PACK's window to trip `source_freshness_exceeds_pack`; the invariant is
+        # unchanged, only the pack's window moved from 30 to 365 days.
+        (lambda p, m: p["sources"][0].update({"freshness_days": 366}), "malformed_pack"),
     ],
 )
 def test_signed_pack_tampering_fails_closed(tmp_path: Path, mutate, code: str) -> None:
@@ -73,7 +75,15 @@ def test_version_validation_rejects_malformed_router_and_minimum_versions(tmp_pa
     assert _code(tmp_path, None, minimum_versions={"research.minimal": "latest"}) == "invalid_version"
 def test_expiry_malformed_oversized_and_unsigned_regulated_fail_closed(tmp_path: Path) -> None:
     assert _code(tmp_path, None, today=date(2028, 1, 1)) == "expired_pack"
-    assert _code(tmp_path, None, today=date(2026, 8, 23)) == "stale_pack"
+    # `stale_pack` is deliberately UNREACHABLE for the bundled pack: with freshness_days=365 and
+    # reviewed_at 2026-07-23 the freshness window ends the same day expires_at does, and expiry is
+    # checked first. That is the point of the widened window -- `expires_at` is the single active
+    # deadline instead of a second, far more aggressive one that killed startup eleven months early.
+    # Pinned as a property so shortening the window again fails here rather than in production.
+    assert _load(tmp_path, None, today=date(2027, 7, 23)).pack_id == "research.minimal"
+    assert _code(tmp_path, None, today=date(2027, 7, 24)) == "expired_pack"
+    # The staleness MECHANISM stays covered against a fixture pack in
+    # `test_skills.py::test_review_window_gates_fail_closed`, where a stale pack can still be built.
     bad = tmp_path / "bad.json"
     bad.write_text("{")
     with pytest.raises(PackError, match="malformed_pack"):

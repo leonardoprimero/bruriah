@@ -1,0 +1,8 @@
+{
+  "pack_id": "programming.minimal",
+  "schema_version": "1",
+  "sha256": "0a67351ee42f429521dde8b190cdf24c43b8a5994694d187a8df4841ad61cf43",
+  "signature": "aWUmX6OsqyHTcDDu1tl+f2LiciuQs+pY5A4SS/QbLPmA91ciQ4AglyvF8fOlUcJ9aHJiTWlp25f8k6ypKyb6DA==",
+  "signer": "cerebro-release",
+  "version": "1.0.0"
+}

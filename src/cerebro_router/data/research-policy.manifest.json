@@ -1,1 +1,8 @@
-{"pack_id":"research.minimal","schema_version":"1","sha256":"b6483cc8c38cbd1d0cde703c074e4bde91302bea6a148906e38cc2a986212e7b","signature":"jWqkfSxrSrc33+oP1zp8IhgDJxlU7UhnqGboatUe1UB0yx3ijouqN5sEgiPNxsS6oCGophu8f7XG6JNI68uNAA==","signer":"cerebro-release-test","version":"1.0.0"}
+{
+  "pack_id": "research.minimal",
+  "schema_version": "1",
+  "sha256": "458e3ed02ac732eda9aa59eb5d0b9d88b6aa39b94e49d40ad44903326651b7d7",
+  "signature": "kUwwwu9X9OvMZpArZRxABthFee7fxJs6r3ZPuo2kuh5O4gdEX+TB/8YkCrAPDTRHWqEHaeURf3BMwmeBiZlGBw==",
+  "signer": "cerebro-release",
+  "version": "1.0.0"
+}
