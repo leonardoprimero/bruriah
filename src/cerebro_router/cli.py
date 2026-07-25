@@ -4,6 +4,7 @@ import argparse
 import hashlib
 import importlib.metadata
 import json
+import os
 import sys
 import uuid
 from array import array
@@ -16,6 +17,7 @@ import mcp.server.stdio
 import yaml
 from fastembed import TextEmbedding
 
+from . import clients
 from .corpus import CorpusPolicy, CorpusPolicyError
 from .index import BuildConfig, BuildResult, Embedder, IndexLifecycleError, build_candidate, promote_candidate
 from .mcp_server import build_server
@@ -27,6 +29,8 @@ from .service import ServiceDeps
 
 # Slice 8A-2: `cerebro-mcp {init,serve,index,doctor}` over Slice 8A-1's `platform.py` loader.
 # `_embedding_fingerprint`/`main` below stay unchanged (Slice-3 entry point, imported by name).
+# Slice 12B-2: `init` now also renders and writes all six `clients.py` client configs (see
+# `_build_launch_manifest`/`run_client_configs` below) under a private `clients/` subdir.
 EmbedderFactory = Callable[[str], tuple[Embedder, str, int]]
 
 
@@ -199,18 +203,40 @@ def run_init(paths: PlatformPaths) -> Path:
     return config_file
 
 
-def _client_snippet(paths: PlatformPaths) -> str:
-    """Generic stdio client snippet; no packaged entry point until 8B, so it invokes this module."""
-    server_entry = {
-        "command": sys.executable,
-        "args": [
+def _build_launch_manifest(paths: PlatformPaths) -> clients.LaunchManifest:
+    """The one manifest every rendered client config derives from (Slice 12B-2): invokes this
+    module directly via `sys.executable` (absolute, always importable) rather than a `which
+    cerebro-mcp` lookup -- no packaged console-script entry point exists until Slice 8B."""
+    return clients.LaunchManifest(
+        command=sys.executable,
+        args=(
             "-m", "cerebro_router.cli", "serve",
             "--config-dir", str(paths.config_dir), "--data-dir", str(paths.data_dir),
             "--cache-dir", str(paths.cache_dir), "--log-dir", str(paths.log_dir),
-        ],
-        "env": {},
-    }
-    return json.dumps({"mcpServers": {"cerebro-router": server_entry}}, indent=2, sort_keys=True)
+        ),
+        server_name="cerebro-router",
+    )
+
+
+def run_client_configs(
+    paths: PlatformPaths, manifest: clients.LaunchManifest,
+) -> dict[clients.ClientId, Path]:
+    """Render and persist all six client configs under a private `clients/` subdir of
+    `config_dir`; deterministic content and `ClientId` declaration order (`clients.render_all`).
+    Private permissions (0700 dir / 0600 files) on POSIX, reusing `audit.py`'s
+    write-then-chmod pattern; Windows ACL NOT VALIDATED on this Darwin host."""
+    clients_dir = paths.config_dir / "clients"
+    clients_dir.mkdir(parents=True, exist_ok=True)
+    written: dict[clients.ClientId, Path] = {}
+    for client_id, rendered in clients.render_all(manifest).items():
+        target = clients_dir / f"{client_id.value}.json"
+        target.write_text(rendered, encoding="utf-8")
+        written[client_id] = target
+    if os.name == "posix":
+        os.chmod(clients_dir, 0o700)
+        for target in written.values():
+            os.chmod(target, 0o600)
+    return written
 
 
 def build_serve_deps(paths: PlatformPaths) -> ServiceDeps:
@@ -242,7 +268,18 @@ def _cmd_init(args: argparse.Namespace) -> int:
     paths = _resolve_paths(args)
     config_file = run_init(paths)
     print(f"Wrote private configuration to {config_file}", file=sys.stderr)
-    print(_client_snippet(paths))
+    try:
+        manifest = _build_launch_manifest(paths)
+        written = run_client_configs(paths, manifest)
+    except clients.ClientError as error:
+        raise CliError(f"client_manifest_invalid:{error.code}") from error
+    print("Wrote client configs:", file=sys.stderr)
+    for client_id, target in written.items():
+        capability = clients.CLIENT_CAPABILITIES[client_id]
+        print(f"  {capability.display_name}: {target}", file=sys.stderr)
+        print(f"    -> expected location: {capability.config_path_hint}", file=sys.stderr)
+    print("See docs/client-guidance.md for full per-client detail.", file=sys.stderr)
+    print(clients.render_generic_stdio(manifest))
     return 0
 
 

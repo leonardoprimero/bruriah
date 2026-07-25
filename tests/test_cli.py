@@ -6,6 +6,7 @@ from __future__ import annotations
 import json
 import os
 import stat
+import sys
 from array import array
 from datetime import date
 from pathlib import Path
@@ -13,7 +14,7 @@ from pathlib import Path
 import anyio
 import platformdirs
 import pytest
-from cerebro_router import cli
+from cerebro_router import cli, clients
 from cerebro_router.platform import resolve_paths
 from mcp.shared.memory import create_connected_server_and_client_session
 
@@ -108,6 +109,69 @@ def test_init_is_idempotent_and_registers_no_client(tmp_path: Path) -> None:
     cli.run_init(paths)  # re-running init must not clobber an existing config
     assert (paths.config_dir / "config.json").read_text(encoding="utf-8") == custom
     assert real_config_dir.exists() == existed_before  # init touches only the resolved tmp dir
+
+
+def _init_args(paths) -> list[str]:
+    return [
+        "init", "--config-dir", str(paths.config_dir), "--data-dir", str(paths.data_dir),
+        "--cache-dir", str(paths.cache_dir), "--log-dir", str(paths.log_dir),
+    ]
+
+
+def test_init_writes_all_client_configs_with_private_perms_and_manifest_cross_check(
+    tmp_path: Path,
+) -> None:
+    paths = _paths(tmp_path)
+    args = cli._build_cli_parser().parse_args(_init_args(paths))
+    assert cli._cmd_init(args) == 0
+
+    manifest = cli._build_launch_manifest(paths)
+    assert manifest.command == sys.executable
+    assert manifest.full_argv[:3] == [sys.executable, "-m", "cerebro_router.cli"]
+
+    clients_dir = paths.config_dir / "clients"
+    expected = clients.render_all(manifest)
+    assert {path.name for path in clients_dir.iterdir()} == {
+        f"{client_id.value}.json" for client_id in clients.ClientId
+    }
+    for client_id, rendered in expected.items():
+        target = clients_dir / f"{client_id.value}.json"
+        assert target.read_text(encoding="utf-8") == rendered
+        json.loads(rendered)  # every rendered client config is valid JSON
+
+    generic = json.loads((clients_dir / f"{clients.ClientId.GENERIC_STDIO.value}.json").read_text())
+    assert [generic["command"], *generic["args"]] == manifest.full_argv  # cross-checked argv
+
+    config = json.loads((paths.config_dir / "config.json").read_text(encoding="utf-8"))
+    assert config == {"network_enabled": False}
+
+    if os.name == "posix":
+        assert stat.S_IMODE(clients_dir.stat().st_mode) == 0o700
+        for target in clients_dir.iterdir():
+            assert stat.S_IMODE(target.stat().st_mode) == 0o600
+
+
+def test_init_client_configs_are_idempotent(tmp_path: Path) -> None:
+    paths = _paths(tmp_path)
+    args = cli._build_cli_parser().parse_args(_init_args(paths))
+    assert cli._cmd_init(args) == 0
+    clients_dir = paths.config_dir / "clients"
+    before = {path.name: path.read_text(encoding="utf-8") for path in clients_dir.iterdir()}
+    assert cli._cmd_init(args) == 0  # re-running init must not error or duplicate/clobber
+    after = {path.name: path.read_text(encoding="utf-8") for path in clients_dir.iterdir()}
+    assert before == after
+
+
+def test_init_client_manifest_failure_is_typed_not_bare(
+    tmp_path: Path, capsys: pytest.CaptureFixture,
+) -> None:
+    bad_config_dir = tmp_path / "bad;name"  # a shell metacharacter lands in a rendered arg
+    exit_code = cli.cerebro_mcp_main([
+        "init", "--config-dir", str(bad_config_dir), "--data-dir", str(tmp_path / "data"),
+        "--cache-dir", str(tmp_path / "cache"), "--log-dir", str(tmp_path / "log"),
+    ])
+    assert exit_code == 1
+    assert "client_manifest_invalid" in capsys.readouterr().err
 
 
 def test_doctor_is_read_only_and_reports_freshness(tmp_path: Path) -> None:
