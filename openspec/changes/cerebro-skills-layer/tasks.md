@@ -18,7 +18,17 @@ Apply to every unit without exception.
 
 ## Blocking Precondition — Signing Capability and Key Custody
 
-- [ ] **P.1 Resolve release-key custody before Units 6 and 11.** Verified state: `src/cerebro_router/data/trust-roots.json` contains exactly one signer, `cerebro-release-test`, as a public key. There is **no private key, no signing script, and no test that constructs `Ed25519PrivateKey` or calls `.sign(...)` anywhere in the repository** — the only `.pem` files are `tests/fixtures/fetch/{testcert,testkey}.pem`, which belong to the TLS fetch tests. `packs.py` verifies signatures; nothing in-repo can produce one. The existing `research-policy.manifest.json` was therefore signed out of band.
+- [x] **P.1 Resolve release-key custody before Units 6 and 11. RESOLVED 2026-07-25 by Leo.**
+
+  **Custody**: the release key lives at `~/.config/cerebro/release-key.pem`, mode `0600`, outside the repository. Every tool addresses it BY PATH and never copies, prints, or writes it anywhere else. **Leo generates it himself** with `scripts/sign_pack.py keygen` and hands over only the public half — the private key never passes through an assistant's context or a session log. It is his root of trust; there is no reason for a model to have seen it.
+
+  **`cerebro-release-test` is RETIRED.** The shipped product currently trusts a signer whose private half is unaccounted for, and the repository is headed for open source. Retiring it forces re-signing the bundled `research-policy` pack in the same unit, which is why both happen together in 6b.
+
+  Stated limit, not softened: the key is written unencrypted, protected by `0600` and by living outside the repository. Adequate for a single maintainer on an encrypted disk, inadequate on a shared machine. Adding a passphrase is a small change to `generate_key` and a larger one to every caller of `sign_pack`.
+
+  Original analysis follows.
+
+- [ ] ~~P.1 (original)~~ Verified state: `src/cerebro_router/data/trust-roots.json` contains exactly one signer, `cerebro-release-test`, as a public key. There is **no private key, no signing script, and no test that constructs `Ed25519PrivateKey` or calls `.sign(...)` anywhere in the repository** — the only `.pem` files are `tests/fixtures/fetch/{testcert,testkey}.pem`, which belong to the TLS fetch tests. `packs.py` verifies signatures; nothing in-repo can produce one. The existing `research-policy.manifest.json` was therefore signed out of band.
 
   **Resolved 2026-07-25 — option (a) does not exist.** Traced the key's origin: `trust-roots.json` was added in commit `c4b38eb` ("add closed contracts, registries and signed domain packs"), the Slice 5A implementation commit. The signer is named `cerebro-release-test` and the private half was never persisted anywhere in the repository or in project memory. It was an ephemeral test key generated to sign the example pack during that slice. There is no existing release key to recover.
 
@@ -180,12 +190,34 @@ Apply to every unit without exception.
   Verification: unsupported domains still resolve `domain_supported=False` and still yield `route_only`/`abstained`; negative controls fail when mutated.
   Rollback: revert loader change and remove the pack; `LookupResult.skills` defaults empty so dispatch goes dormant. [A-Domain Vocabulary Reconciliation and Domain-Gated Capability Surfacing; S-Bounded Deterministic Skill Dispatch]
 
-- [ ] **6. Bundled domain pack and signing tool.** Blocked on P.1. Build the signing utility (out of the MCP surface, CLI or `scripts/`, private key by path and never written into `data_dir`), generate the new bundled domain pack plus its release manifest, wire `platform.load_registry` to load it, and apply the `test_platform.py:136` tuple update if it was deferred from Unit 5.
+**Unit 6 was SPLIT once P.1 resolved.** 6a is the tool and depends on nothing; 6b needs the public half of a key only Leo can generate, so the split is imposed by the work rather than by size.
 
-  Files: `scripts/` or `cli.py`, `src/cerebro_router/data/`, `platform.py`, `tests/test_platform.py`, `tests/test_cli.py`.
-  Estimate: 90 + 120 tests = **~210** *(est. — depends on the P.1 outcome)*.
-  Verification: the generated manifest verifies through the unmodified `load_pack` path; a tampered byte fails `digest_mismatch`; the signing tool never writes key material into `data_dir`.
-  Rollback: remove pack and manifest; revert `load_registry`. [K-Signed Skill Pack Schema and Fail-Closed Loading]
+- [x] **6a. Signing tool.** DONE 2026-07-25. `signing.py` with `generate_key` / `load_public` / `sign_pack`, plus `scripts/sign_pack.py` as a thin CLI over it.
+
+  Files: `signing.py` (new, 145), `scripts/sign_pack.py` (new, 65), `tests/test_signing.py` (new, 194).
+  Estimate: 110 + 150 tests = **~260**. **Actual: 404** — 1.55x, four lines over the 400 budget. Not inflated into a formal `size:exception`, but recorded rather than rounded away.
+
+  **The logic lives in an importable module, not only in the script**, because Unit 9A's `skill-sign` must produce byte-identical manifests to the release script. Two implementations of the same canonical signing string is precisely how a signer and a verifier drift apart.
+
+  Design points:
+  - **Signing does NOT validate the pack.** A signature establishes WHO signed a byte sequence and nothing else — not that the content is well-formed, current, or safe. `verify_manifest` already says this from the other side; the signer now says it too.
+  - **`pack_id` and `version` are read FROM THE PACK, never taken as arguments.** A manifest whose identity disagrees with the pack is rejected at load as `digest_mismatch`, so accepting them separately would only manufacture manifests that can never verify.
+  - The pack is deliberately not reformatted or re-encoded: a signer that rewrites what it signs would invalidate its own signature.
+  - `generate_key` returns ONLY the public half, writes `0600` via `O_EXCL`, creates missing parents, refuses to write inside the installed package, and refuses to overwrite an existing key.
+
+  **Tests sign the REAL bundled `research-policy.json` and load it through the unmodified `load_pack`.** Signing an artificial fixture would only prove the tool agrees with itself. Also covered: a tampered byte fails `digest_mismatch`, an unknown signer fails `unknown_signer`, and a different key under the same signer id fails `invalid_signature`.
+
+  **Falsifiability probes: three run, and one caused real damage rather than merely failing an assert.** (1) Reordering the canonical signing string (`version` before `pack_id`) failed both tests that load through the production path — signer and verifier agree byte for byte. (2) **Removing the `key_inside_package` guard failed its test AND wrote a real Ed25519 private key into `src/cerebro_router/data/`.** The guard is the only thing preventing key material inside the repository; the probe produced the exact harm the invariant exists to prevent. Leo removed the file. (3) Dropping `O_EXCL` failed the no-overwrite test — a release key could be silently destroyed without it. All reverted and re-verified in the source.
+
+  Verification (all passed): 702 → **720 passed** (+18); `verify_legacy_baseline.py` `status: pass`, `errors: []`; pins 3c83d9eb / 03e9f3c5 unchanged; `uv lock --check` clean; `git diff --check` clean; `data/` confirmed back to its three original files with no key material anywhere in the repository.
+  Rollback: delete the module, the script, and the tests. Nothing else imports them yet. [K-Signed Skill Pack Schema and Fail-Closed Loading]
+
+- [ ] **6b. Real release key, trust-root rotation, and the bundled domain pack.** Needs the public half from Leo's `keygen` run. Add it to `trust-roots.json` as `cerebro-release`, **remove `cerebro-release-test`**, re-sign the bundled `research-policy` pack with the real key in the SAME unit (retiring the signer without re-signing would break the existing pack), author the new bundled domain pack declaring `domains: ["programming"]` plus its manifest, wire `platform.load_registry` to load it, and apply the `test_platform.py:136` tuple update.
+
+  Files: `src/cerebro_router/data/`, `platform.py`, `tests/test_platform.py`, `tests/test_packaging.py`.
+  Estimate: 40 + 110 tests = **~150** plus pack data.
+  Verification: both bundled packs verify through the unmodified `load_pack` path under the new trust root; `cerebro-release-test` no longer appears anywhere; a pack signed by the retired signer now fails `unknown_signer`; `domain_supported` becomes True for `programming`.
+  Rollback: restore the previous `trust-roots.json` and manifest; remove the new pack. [K-Signed Skill Pack Schema and Fail-Closed Loading; A-Domain Vocabulary Reconciliation]
 
 - [ ] **7. Contract deltas behind the opt-in gate.** `contracts.py`: add optional input `host_skills: HostSkillInventory | None = None` with typed `(skill_id, version, digest)` entries; add optional output `EvidenceRecord.envelope`; extend `EvidenceRecord.kind` and `ReadItem.evidence_kind` with `"skill"`; widen `HostAction.kind` by exactly two members (`draft_skill_candidate`, `install_skill`). Every addition is gated on `host_skills is not None`, so a pre-skills client never sends the field and therefore never receives a new enum member or new field.
 
