@@ -284,7 +284,27 @@ Apply to every unit without exception.
   Verification: golden byte-identical comparison proving a request without `host_skills` produces a response identical to the pre-change response; every new model closed (`extra="forbid"`); unknown field still rejected by the pydantic path, not the JSON-Schema pre-check.
   Rollback: revert models; the gate means no behavior was reachable. [S-Non-Destructive Gate Failure and Two-Tool Backward Compatibility; A-Two-Tool Surface Preservation under Skill Dispatch; D-Architecture Decisions 6]
 
-- [ ] **8A. `dispatch.py` — pure bounded dispatch.** `dispatch(classification, skill_set, host_skills)` returning ordered bounded matches: boolean set membership over `(classifier domain, claim type, skill id)`, ordered by `skill_id`, capped by a declared ceiling with excess reported as a typed gap rather than silently dropped. No score, no model, no corpus input.
+- [x] **8A. `dispatch.py` — pure bounded dispatch.** DONE 2026-07-25. `dispatch(lookup, host_skills, *, ceiling)` returning ordered, bounded matches annotated with host availability.
+
+  Files: `dispatch.py` (new, 119), `tests/test_dispatch.py` (new, 161).
+  Estimate: 110 + 160 tests = **~270**. **Actual: 280** — 1.04x.
+
+  **Three decisions taken here rather than inherited, all recorded with their reasoning.**
+
+  1. **The ceiling is a function parameter, NOT a `Budgets` field.** The obvious move — expose it as a declared budget like `max_evidence` — is wrong: `Budgets` is echoed back inside `InvestigationResult`, so adding a field would change the response every pre-skills client receives, destroying exactly the byte-identity Unit 7 was built to guarantee. It is also unnecessary, because skills are already bounded a second time downstream by `max_evidence`, which the client does declare. This ceiling only stops skills from crowding every other kind of evidence out of that budget. The value 5 is kept and labelled **assumed, not measured**, matching design.md's open question — inheriting an unexamined constant silently is how an assumption becomes a fact.
+
+  2. **`dispatch` takes the `LookupResult`, not `(classification, skill_set)` as the plan wrote it.** Domain gating already exists in `lookup._domain_applicable_skills` (Unit 5). Re-deriving matches here would create a second membership test and therefore a second place for the classifier and pack vocabularies to drift apart — the exact failure the `lookup.py` header has warned about since Slice 6B.
+
+  3. **Claim-type gating is NOT implemented, deliberately.** `S-Bounded Deterministic Skill Dispatch` describes membership over `(classifier domain, claim type, skill id)`, but `SkillPolicy` has no `claim_types` field, so it is not expressible without changing a signed pack schema. More to the point, the classifier's three claim types (`factual`, `capability_recommendation`, `professional_conclusion`) describe the shape of an ASSERTION, while a skill is a procedure that applies to a task — inventing a correspondence would fabricate exactly the kind of false taxonomy `lookup.py` note 4 already refuses for `SourcePolicy.claim_types`. **Flagged for `sdd-verify` as a deliberate spec divergence**, alongside the same judgment already recorded for capability domain-gating.
+
+  **The invariant this module exists to protect**: ordering and the ceiling are computed from the signed set BEFORE the host inventory is read. A host that misreports its inventory can change how availability is DESCRIBED but never which skills are selected, in what order, or which fall past the ceiling. Two further host-facing hardening choices: availability compares the **digest**, never the version label, so a host cannot claim approval by renaming; and on a duplicate host entry the FIRST wins, so a host cannot append a corrected line to upgrade `digest_divergent` into `installed`.
+
+  **Falsifiability probes: three.** (1) A plausible "optimisation" that sorts host-installed skills first — consulting the inventory before the cut — failed exactly the invariant test. (2) Trusting `version` instead of `digest` failed three availability tests. (3) Dropping the overflow gap failed four ceiling tests. All reverted.
+
+  Verification (all passed): 742 → **759 passed** (+17); `verify_legacy_baseline.py` `status: pass`, `errors: []`; pins unchanged; `uv lock --check` and `git diff --check` clean. Nothing imports this module yet, so no existing behaviour could change.
+  Rollback: delete module and tests. [S-Bounded Deterministic Skill Dispatch]
+
+- [ ] ~~8A (original)~~ `dispatch(classification, skill_set, host_skills)` returning ordered bounded matches: boolean set membership over `(classifier domain, claim type, skill id)`, ordered by `skill_id`, capped by a declared ceiling with excess reported as a typed gap rather than silently dropped. No score, no model, no corpus input.
 
   Files: `dispatch.py` (new), `tests/test_dispatch.py` (new).
   Estimate: 110 + 160 tests = **~270**.
