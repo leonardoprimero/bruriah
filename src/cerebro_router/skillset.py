@@ -15,6 +15,7 @@ from typing import Annotated, Literal
 from pydantic import Field, ValidationError
 
 from .packs import MAX_PACK_BYTES, ClosedModel, PackError, encode_pack, parse_pack_bytes
+from .pointer import controlled_file, identity_matches, read_pointer, serialized, write_pointer
 from .skills import SkillPack, SkillSet, load_skill_pack_bytes
 
 # Compiled skill-set generations: the immutable on-disk artifact dispatch will read from.
@@ -298,15 +299,143 @@ def _write_generation(destination: Path, raw: bytes) -> None:
         raise
 
 
+# --- activation ----------------------------------------------------------------------------------
+# The pointer entries name a generation file and the digest of its bytes. `skillset` is the key whose
+# value must stay a bare filename; everything else about the pointer is generic and lives in
+# `pointer.py`, shared verbatim with the corpus index rather than reimplemented.
+
+_POINTER_ENTRY_KEYS = frozenset({"skillset", "build_id"})
+
+
+@dataclass(frozen=True)
+class SkillSetActivation:
+    """Mirrors `index.ActivationResult` and adds the derived set, so a caller that just promoted does
+    not have to validate the same bytes a second time to learn what it activated."""
+
+    path: Path
+    build_id: str
+    durable: bool
+    skill_set: SkillSet
+
+
+def _read_pointer(pointer: Path) -> dict[str, object]:
+    return read_pointer(
+        pointer, entry_keys=_POINTER_ENTRY_KEYS, name_key="skillset", error=SkillSetError
+    )
+
+
+def _controlled_file(pointer: Path, name: str) -> tuple[Path, int, tuple[int, int, int, int]]:
+    return controlled_file(pointer, name, error=SkillSetError)
+
+
+def _pointer_entry(path: Path, build_id: str) -> dict[str, str]:
+    return {"skillset": path.name, "build_id": build_id}
+
+
+def _read_descriptor(descriptor: int) -> bytes:
+    """Read the generation from the descriptor already confirmed by `controlled_file`, not by
+    re-opening the path -- re-opening would reintroduce exactly the swap window that opening under
+    `O_NOFOLLOW` closed. `pread` leaves the descriptor's offset untouched, so the later `fsync` and
+    identity re-check still see the file the caller opened. The read is bounded so an oversized file
+    is detected rather than loaded."""
+    return os.pread(descriptor, MAX_SKILLSET_BYTES + 1, 0)
+
+
+@serialized(1)
+def promote_skillset(
+    candidate: Path,
+    pointer: Path,
+    trust_roots: dict[str, str],
+    approvals: Mapping[str, str],
+    *,
+    today: date | None = None,
+    router_version: str = "0.1.0",
+    minimum_versions: dict[str, str] | None = None,
+    retain: int = 2,
+) -> SkillSetActivation:
+    """Validate a candidate generation and swap the active pointer to it, under an exclusive lock.
+
+    Structure mirrors `index.promote_candidate` step for step: confirm the candidate is a regular
+    file in the pointer's own directory, validate the bytes behind that confirmed descriptor,
+    re-confirm the file's identity so a swap during validation is caught, `fsync`, then write the
+    pointer atomically. Every failure raises BEFORE the pointer write, so the previously active
+    generation stays byte-identical and fully readable; there is no partial activation because the
+    generation file is immutable and unreferenced until the swap.
+
+    `pointer` must be passed positionally -- `serialized(1)` locks `args[1]`."""
+    if retain < 1 or candidate.parent.resolve() != pointer.parent.resolve():
+        raise SkillSetError("invalid_activation_path")
+    path, descriptor, file_identity = _controlled_file(pointer, candidate.name)
+    try:
+        result = validate_skillset_bytes(
+            _read_descriptor(descriptor),
+            trust_roots,
+            approvals,
+            today=today,
+            router_version=router_version,
+            minimum_versions=minimum_versions,
+        )
+        if not identity_matches(path, file_identity):
+            raise SkillSetError("candidate_changed_during_validation")
+        os.fsync(descriptor)
+        retained: list[dict[str, str]] = []
+        if pointer.exists():
+            retained = _demote_current(pointer)
+        active = _pointer_entry(path, result.build_id)
+        retained = [item for item in retained if item != active][:retain]
+        durable = write_pointer(pointer, active, retained)
+        return SkillSetActivation(path, result.build_id, durable, result.skill_set)
+    finally:
+        os.close(descriptor)
+
+
+def _demote_current(pointer: Path) -> list[dict[str, str]]:
+    """Move the outgoing active generation to the head of `retained`.
+
+    Its `build_id` is RE-DERIVED from its bytes rather than copied from the pointer or recomputed by
+    full validation. Re-deriving keeps the retained entry describing what the file actually contains
+    now; full validation would let an outgoing generation that merely went stale or expired block the
+    promotion of a fresh one, which is the same relaxation `index.py` makes by reading activation
+    metadata instead of canonical metadata here."""
+    current = _read_pointer(pointer)
+    current_path, current_descriptor, current_identity = _controlled_file(
+        pointer, current["active"]["skillset"]
+    )
+    try:
+        raw = _read_descriptor(current_descriptor)
+        if len(raw) > MAX_SKILLSET_BYTES:
+            raise SkillSetError("skillset_too_large")
+        build_id = hashlib.sha256(raw).hexdigest()
+        if not identity_matches(current_path, current_identity):
+            raise SkillSetError("active_target_changed_during_validation")
+    finally:
+        os.close(current_descriptor)
+    return [_pointer_entry(current_path, build_id), *current["retained"]]
+
+
+def read_active(pointer: Path) -> tuple[Path, str]:
+    """Resolve the active generation's path and pinned `build_id` without validating it. The reader
+    half of the swap: it exists so a concurrent reader can be shown to observe exactly one complete
+    generation. Fail-soft handling of an unreadable pointer belongs to the degraded-serve path."""
+    value = _read_pointer(pointer)
+    entry = value["active"]
+    path, descriptor, _ = _controlled_file(pointer, entry["skillset"])
+    os.close(descriptor)
+    return path, entry["build_id"]
+
+
 __all__ = [
     "MAX_SKILLSET_BYTES",
     "Generation",
     "GenerationPack",
+    "SkillSetActivation",
     "SkillSetError",
     "SkillSource",
     "ValidatedSkillSet",
     "compile_skillset",
     "generation_path",
+    "promote_skillset",
+    "read_active",
     "validate_skillset",
     "validate_skillset_bytes",
 ]

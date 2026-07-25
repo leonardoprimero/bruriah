@@ -3,6 +3,8 @@ from __future__ import annotations
 import base64
 import hashlib
 import json
+import threading
+from concurrent.futures import ThreadPoolExecutor
 from datetime import date
 from pathlib import Path
 from typing import Any
@@ -11,12 +13,15 @@ import pytest
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
 
+from cerebro_router import skillset
 from cerebro_router.skillset import (
     MAX_SKILLSET_BYTES,
     SkillSetError,
     SkillSource,
     compile_skillset,
     generation_path,
+    promote_skillset,
+    read_active,
     validate_skillset,
     validate_skillset_bytes,
 )
@@ -356,3 +361,182 @@ def test_generation_path_names_a_fresh_file(tmp_path: Path) -> None:
     first = generation_path(tmp_path)
     assert first.parent == tmp_path and first.name.startswith("skillset-") and first.suffix == ".json"
     assert first != generation_path(tmp_path)
+
+
+# --- activation ------------------------------------------------------------------------------------
+# Generations live directly beside the pointer, as promotion requires; their source packs go in a
+# per-generation subdirectory so distinct generations can reuse one pack id.
+
+
+def _built(tmp_path: Path, name: str, **overrides: Any) -> Path:
+    workspace = tmp_path / f".src-{name}"
+    workspace.mkdir()
+    destination = tmp_path / f"skillset-{name}.json"
+    compile_skillset(
+        [_source(workspace, _pack(**overrides))], destination, ROOTS, APPROVALS, today=TODAY
+    )
+    return destination
+
+
+def _promote(candidate: Path, pointer: Path, **kwargs: Any):
+    kwargs.setdefault("today", TODAY)
+    approvals = kwargs.pop("approvals", APPROVALS)
+    return promote_skillset(candidate, pointer, ROOTS, approvals, **kwargs)
+
+
+def _pointer_state(pointer: Path) -> tuple[str, list[str]]:
+    value = json.loads(pointer.read_text())
+    return value["active"]["build_id"], [item["build_id"] for item in value["retained"]]
+
+
+def test_promotion_publishes_the_candidate(tmp_path: Path) -> None:
+    pointer = tmp_path / "active.json"
+    result = _promote(_built(tmp_path, "one"), pointer)
+    assert result.durable and result.skill_set.skill_ids == ("design.ui-review",)
+    path, build_id = read_active(pointer)
+    assert path == result.path and build_id == result.build_id
+    assert _pointer_state(pointer) == (result.build_id, [])
+
+
+def test_promotion_demotes_the_outgoing_generation(tmp_path: Path) -> None:
+    pointer = tmp_path / "active.json"
+    first = _promote(_built(tmp_path, "one"), pointer)
+    second = _promote(_built(tmp_path, "two", maintainer="Second"), pointer)
+    assert _pointer_state(pointer) == (second.build_id, [first.build_id])
+
+
+def test_retention_keeps_exactly_two_prior_generations(tmp_path: Path) -> None:
+    pointer = tmp_path / "active.json"
+    built = [_promote(_built(tmp_path, str(n), maintainer=f"M{n}"), pointer) for n in range(4)]
+    active, retained = _pointer_state(pointer)
+    assert active == built[3].build_id
+    assert retained == [built[2].build_id, built[1].build_id]
+
+
+def test_repromoting_the_same_generation_does_not_duplicate_it(tmp_path: Path) -> None:
+    pointer = tmp_path / "active.json"
+    first = _built(tmp_path, "one")
+    second = _built(tmp_path, "two", maintainer="Second")
+    _promote(first, pointer)
+    _promote(second, pointer)
+    again = _promote(first, pointer)
+    active, retained = _pointer_state(pointer)
+    assert active == again.build_id
+    assert retained.count(again.build_id) == 0
+
+
+def test_failed_validation_leaves_the_active_set_byte_identical(tmp_path: Path) -> None:
+    pointer = tmp_path / "active.json"
+    good = _built(tmp_path, "one")
+    _promote(good, pointer)
+    before_pointer = pointer.read_bytes()
+    before_active = good.read_bytes()
+    rejected = _built(tmp_path, "two", maintainer="Second")
+    assert _code(_promote, rejected, pointer, approvals={}) == "skill_not_approved"
+    assert pointer.read_bytes() == before_pointer
+    assert good.read_bytes() == before_active
+    assert read_active(pointer)[0] == good
+
+
+def test_expiry_is_checked_at_promotion_with_the_injected_today(tmp_path: Path) -> None:
+    pointer = tmp_path / "active.json"
+    candidate = _built(tmp_path, "one")
+    assert _code(_promote, candidate, pointer, today=date(2030, 1, 1)) == "expired_pack"
+    assert not pointer.exists()
+    assert _promote(candidate, pointer).durable
+
+
+@pytest.mark.parametrize("retain", [0, -1])
+def test_retention_below_one_is_refused(tmp_path: Path, retain: int) -> None:
+    pointer = tmp_path / "active.json"
+    assert _code(_promote, _built(tmp_path, "one"), pointer, retain=retain) == "invalid_activation_path"
+
+
+def test_candidate_outside_the_pointer_directory_is_refused(tmp_path: Path) -> None:
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    candidate = _built(elsewhere, "one")
+    assert _code(_promote, candidate, tmp_path / "active.json") == "invalid_activation_path"
+
+
+def test_symlinked_candidate_is_refused(tmp_path: Path) -> None:
+    real = _built(tmp_path, "one")
+    link = tmp_path / "skillset-link.json"
+    link.symlink_to(real)
+    assert _code(_promote, link, tmp_path / "active.json") == "invalid_active_target"
+
+
+def test_symlinked_pointer_is_refused(tmp_path: Path) -> None:
+    pointer = tmp_path / "active.json"
+    _promote(_built(tmp_path, "one"), pointer)
+    real = tmp_path / "real.json"
+    pointer.rename(real)
+    pointer.symlink_to(real)
+    assert _code(_promote, _built(tmp_path, "two", maintainer="Second"), pointer) == "invalid_active_pointer"
+
+
+def test_traversal_in_the_pointer_is_refused(tmp_path: Path) -> None:
+    pointer = tmp_path / "active.json"
+    _promote(_built(tmp_path, "one"), pointer)
+    pointer.write_text(json.dumps(
+        {"version": 1, "active": {"skillset": "../escape.json", "build_id": "x"}, "retained": []}
+    ))
+    assert _code(_promote, _built(tmp_path, "two", maintainer="Second"), pointer) == "invalid_active_pointer"
+    assert _code(read_active, pointer) == "invalid_active_pointer"
+
+
+def test_a_candidate_swapped_during_validation_is_caught(tmp_path: Path, monkeypatch) -> None:
+    pointer = tmp_path / "active.json"
+    candidate = _built(tmp_path, "one")
+    other = _built(tmp_path, "two", maintainer="Second").read_bytes()
+    original = skillset.validate_skillset_bytes
+
+    def swap(raw: bytes, *args: Any, **kwargs: Any):
+        result = original(raw, *args, **kwargs)
+        candidate.write_bytes(other)
+        return result
+
+    monkeypatch.setattr(skillset, "validate_skillset_bytes", swap)
+    assert _code(_promote, candidate, pointer) == "candidate_changed_during_validation"
+    assert not pointer.exists()
+
+
+def test_concurrent_readers_observe_one_complete_generation(tmp_path: Path) -> None:
+    pointer = tmp_path / "active.json"
+    first = _promote(_built(tmp_path, "one"), pointer)
+    second = _built(tmp_path, "two", maintainer="Second")
+    barrier = threading.Barrier(5)
+
+    def observe() -> set[str]:
+        seen: set[str] = set()
+        barrier.wait()
+        for _ in range(60):
+            path, build_id = read_active(pointer)
+            # Every observation must be a COMPLETE generation: the file the pointer names validates,
+            # and its bytes hash to the build id the pointer pinned. A torn write fails both.
+            assert validate_skillset(path, ROOTS, APPROVALS, today=TODAY).build_id == build_id
+            seen.add(build_id)
+        return seen
+
+    with ThreadPoolExecutor(max_workers=5) as pool:
+        readers = [pool.submit(observe) for _ in range(4)]
+        barrier.wait()
+        promoted = _promote(second, pointer)
+        observed = set().union(*(future.result() for future in readers))
+    assert observed <= {first.build_id, promoted.build_id}
+
+
+def test_concurrent_promotions_serialize_and_keep_full_history(tmp_path: Path) -> None:
+    pointer = tmp_path / "active.json"
+    candidates = [_built(tmp_path, str(n), maintainer=f"M{n}") for n in range(3)]
+    first = _promote(candidates[0], pointer)
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        promotions = [pool.submit(_promote, candidate, pointer) for candidate in candidates[1:]]
+        build_ids = {future.result().build_id for future in promotions}
+    assert len(build_ids) == 2
+    active, retained = _pointer_state(pointer)
+    # flock serialized the two promoters, so neither update was lost: whichever ran second is active
+    # and the other sits in retained alongside the original.
+    assert active in build_ids
+    assert set(retained) == (build_ids - {active}) | {first.build_id}
+    assert len(retained) == 2
