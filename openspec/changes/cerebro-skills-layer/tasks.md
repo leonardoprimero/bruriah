@@ -131,12 +131,30 @@ Apply to every unit without exception.
   Verification (all passed): 664 → **679 passed** (+15); `verify_legacy_baseline.py` `status: pass`, `errors: []`; pins 3c83d9eb / 03e9f3c5 unchanged; `uv lock --check` clean; `git diff --check` clean; no existing file touched — both changed files are new and untracked.
   Rollback: delete the promotion functions and the `skills/` directory; 4A.1 remains usable for compiling and verifying generations. [K-Atomic Skill Set Activation, Retention, and Rollback; S-Non-Destructive Gate Failure and Two-Tool Backward Compatibility; D-Atomic Skill-Set Replacement and Recovery 3-5]
 
-- [ ] **4B. Rollback, recovery, prune, and degraded serve.** `skill-rollback` promotes `retained[0]` after revalidating it, demoting the current active into `retained`. `skill-recover` revalidates `[active, *retained]` in order and republishes the first that passes, else `no_recoverable_skillset`. Evicted generations are deliberately NOT garbage-collected (matching `index.py` rather than diverging); they are listed and removed only by explicit prune. A missing pointer means the layer is simply inactive; an invalid or unreadable pointer disables dispatch with a typed `skillset_unreadable:<code>` warning and MUST NEVER fail `serve`, `doctor`, or corpus retrieval.
+**Unit 4B was re-estimated before opening and SPLIT.** Measured, rollback + recover + degraded serve + prune lands near 425 changed lines against the estimated 260. The seam separates *recovery* (restoring a good generation) from *operation* (serving degraded, and reclaiming disk).
+
+- [x] **4B.1. Rollback and recovery.** DONE 2026-07-25. `rollback_skillset` republishes `retained[0]` after revalidating it, demoting the current active into `retained`. `recover_skillset` revalidates `[active, *retained]` in order and republishes the first that passes, else `no_recoverable_skillset`. Both `@serialized(0)` on the pointer.
+
+  Files: `skillset.py` (441 → 514), `tests/test_skillset.py` (542 → 662).
+  Estimate: 120 + 180 tests = **~300**. **Actual: 193** (+73 impl, +120 tests) — 0.64x, the second unit under estimate and the best ratio so far. Calibration across seven units: 2.1x → 1.5x → 1.13x → 0.89x → 1.6x → 1.2x → 0.64x.
+
+  Implementation notes:
+  - Extracted `_entry_bytes`, the one controlled read every referenced generation goes through (symlink and containment control, bounded read, identity re-confirmation). `_demote_current` now composes it, so the containment guarantee is stated once rather than repeated per operation.
+  - **Rollback REVALIDATES the retained generation rather than republishing it blindly.** A generation that was valid when promoted can have expired since; republishing it unchecked would quietly reactivate an out-of-window skill set. It is never rebuilt from source packs — that property comes free from the sealed-bundle format and is now asserted directly by deleting every source file before rolling back.
+  - **Asymmetry, deliberate**: rollback validates the incoming generation canonically but only re-derives the outgoing active's digest. Rolling back AWAY from a broken generation must not be blocked by that generation being broken, which is the whole reason someone rolls back. Recovery, by contrast, validates every candidate canonically INCLUDING the current active, because recovery exists precisely for the case where the active is the broken one.
+  - Recovery skips failing entries silently rather than reporting them: a corrupt generation is the expected input here, not an error condition. Expiry is a validation failure like any other, so recovery steps over a merely expired generation too.
+
+  **Falsifiability probes: two run, both load-bearing.** (1) Hard-coding `today` inside `rollback_skillset` so the injected value is ignored failed exactly `test_rollback_revalidates_rather_than_republishing_blindly` — the injected clock genuinely reaches revalidation. (2) Removing recovery's `except SkillSetError: continue` failed all three recovery tests, confirming the skip is load-bearing and that expiry is treated as an ordinary validation failure. Both reverted.
+
+  Verification (all passed): 679 → **689 passed** (+10); `verify_legacy_baseline.py` `status: pass`, `errors: []`; pins 3c83d9eb / 03e9f3c5 unchanged; `uv lock --check` clean; `git diff --check` clean.
+  Rollback: delete the two functions; promotion from 4A.2 is unaffected. [K-Atomic Skill Set Activation, Retention, and Rollback; D-Atomic Skill-Set Replacement and Recovery 6]
+
+- [ ] **4B.2. Degraded serve and prune.** A missing pointer means the layer is simply inactive; an invalid or unreadable pointer disables dispatch with a typed `skillset_unreadable:<code>` warning and MUST NEVER fail `serve`, `doctor`, or corpus retrieval. Evicted generations are deliberately NOT garbage-collected (matching `index.py` rather than diverging); they are listed and removed only by explicit prune.
 
   Files: `skillset.py`, `tests/test_skillset.py`.
-  Estimate: 110 + 150 tests = **~260**.
-  Verification: rollback restores without rebuilding from source packs; recovery skips a corrupt generation; unreadable pointer degrades rather than failing serve; prune deletes only unreferenced generations.
-  Rollback: revert; generations remain on disk and readable. [K-Atomic Skill Set Activation, Retention, and Rollback; D-Atomic Skill-Set Replacement and Recovery 6-8]
+  Estimate: 80 + 145 tests = **~225**.
+  Verification: unreadable pointer degrades rather than failing serve; prune deletes only unreferenced generations and refuses to touch active or retained ones.
+  Rollback: revert; generations remain on disk and readable. [K-Atomic Skill Set Activation, Retention, and Rollback; D-Atomic Skill-Set Replacement and Recovery 7-8]
 
 ### Dispatch path
 

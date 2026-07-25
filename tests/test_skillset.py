@@ -22,6 +22,8 @@ from cerebro_router.skillset import (
     generation_path,
     promote_skillset,
     read_active,
+    recover_skillset,
+    rollback_skillset,
     validate_skillset,
     validate_skillset_bytes,
 )
@@ -540,3 +542,121 @@ def test_concurrent_promotions_serialize_and_keep_full_history(tmp_path: Path) -
     assert active in build_ids
     assert set(retained) == (build_ids - {active}) | {first.build_id}
     assert len(retained) == 2
+
+
+# --- rollback and recovery ---------------------------------------------------------------------
+
+
+def _lifecycle(callable_, pointer: Path, **kwargs: Any):
+    kwargs.setdefault("today", TODAY)
+    approvals = kwargs.pop("approvals", APPROVALS)
+    return callable_(pointer, ROOTS, approvals, **kwargs)
+
+
+def _corrupt(path: Path) -> None:
+    path.write_bytes(b"{not a generation")
+
+
+def test_rollback_without_a_retained_generation_is_refused(tmp_path: Path) -> None:
+    pointer = tmp_path / "active.json"
+    _promote(_built(tmp_path, "one"), pointer)
+    assert _code(_lifecycle, rollback_skillset, pointer) == "no_retained_skillset"
+
+
+def test_rollback_restores_the_previous_generation_and_demotes_the_current(tmp_path: Path) -> None:
+    pointer = tmp_path / "active.json"
+    first = _promote(_built(tmp_path, "one"), pointer)
+    second = _promote(_built(tmp_path, "two", maintainer="Second"), pointer)
+    restored = _lifecycle(rollback_skillset, pointer)
+    assert restored.build_id == first.build_id
+    assert _pointer_state(pointer) == (first.build_id, [second.build_id])
+    assert read_active(pointer)[1] == first.build_id
+
+
+def test_rollback_does_not_rebuild_from_source_packs(tmp_path: Path) -> None:
+    # The lifecycle spec's exact wording. A retained generation is self-contained, so deleting every
+    # source pack and manifest must leave rollback fully functional.
+    pointer = tmp_path / "active.json"
+    first = _promote(_built(tmp_path, "one"), pointer)
+    _promote(_built(tmp_path, "two", maintainer="Second"), pointer)
+    for workspace in tmp_path.glob(".src-*"):
+        for leftover in workspace.iterdir():
+            leftover.unlink()
+    restored = _lifecycle(rollback_skillset, pointer)
+    assert restored.build_id == first.build_id
+    assert restored.skill_set.skill_ids == ("design.ui-review",)
+
+
+def test_rollback_revalidates_rather_than_republishing_blindly(tmp_path: Path) -> None:
+    # A generation that was valid when promoted can have expired since. Republishing it unchecked
+    # would quietly reactivate an out-of-window skill set.
+    pointer = tmp_path / "active.json"
+    _promote(_built(tmp_path, "one"), pointer)
+    _promote(_built(tmp_path, "two", maintainer="Second"), pointer)
+    before = pointer.read_bytes()
+    assert _code(_lifecycle, rollback_skillset, pointer, today=date(2030, 1, 1)) == "expired_pack"
+    assert pointer.read_bytes() == before
+
+
+def test_rollback_keeps_the_remaining_retention_tail(tmp_path: Path) -> None:
+    pointer = tmp_path / "active.json"
+    built = [_promote(_built(tmp_path, str(n), maintainer=f"M{n}"), pointer) for n in range(3)]
+    restored = _lifecycle(rollback_skillset, pointer)
+    assert restored.build_id == built[1].build_id
+    assert _pointer_state(pointer) == (built[1].build_id, [built[2].build_id, built[0].build_id])
+
+
+def test_rollback_away_from_a_broken_active_still_works(tmp_path: Path) -> None:
+    # The outgoing active only has its digest re-derived, so rolling back away from a generation
+    # must not be blocked by that generation being the broken one.
+    pointer = tmp_path / "active.json"
+    first = _promote(_built(tmp_path, "one"), pointer)
+    second = _built(tmp_path, "two", maintainer="Second")
+    _promote(second, pointer)
+    _corrupt(second)
+    assert _lifecycle(rollback_skillset, pointer).build_id == first.build_id
+
+
+def test_recovery_skips_a_corrupt_active_and_republishes_the_next(tmp_path: Path) -> None:
+    pointer = tmp_path / "active.json"
+    first = _promote(_built(tmp_path, "one"), pointer)
+    second = _built(tmp_path, "two", maintainer="Second")
+    _promote(second, pointer)
+    _corrupt(second)
+    recovered = _lifecycle(recover_skillset, pointer)
+    assert recovered.build_id == first.build_id
+    assert _pointer_state(pointer) == (first.build_id, [])
+
+
+def test_recovery_keeps_a_healthy_active_in_place(tmp_path: Path) -> None:
+    pointer = tmp_path / "active.json"
+    first = _promote(_built(tmp_path, "one"), pointer)
+    second = _promote(_built(tmp_path, "two", maintainer="Second"), pointer)
+    recovered = _lifecycle(recover_skillset, pointer)
+    assert recovered.build_id == second.build_id
+    assert _pointer_state(pointer) == (second.build_id, [first.build_id])
+
+
+def test_recovery_fails_closed_when_nothing_survives(tmp_path: Path) -> None:
+    pointer = tmp_path / "active.json"
+    one = _built(tmp_path, "one")
+    _promote(one, pointer)
+    two = _built(tmp_path, "two", maintainer="Second")
+    _promote(two, pointer)
+    before = pointer.read_bytes()
+    _corrupt(one)
+    _corrupt(two)
+    assert _code(_lifecycle, recover_skillset, pointer) == "no_recoverable_skillset"
+    assert pointer.read_bytes() == before
+
+
+def test_recovery_skips_a_generation_that_merely_expired(tmp_path: Path) -> None:
+    # Expiry is a validation failure like any other, so recovery must step over an expired
+    # generation rather than republishing it.
+    pointer = tmp_path / "active.json"
+    fresh = _built(tmp_path, "fresh", reviewed_at="2026-07-20", expires_at="2027-07-20")
+    aging = _built(tmp_path, "aging", maintainer="Aging", expires_at="2026-08-01")
+    _promote(fresh, pointer)
+    _promote(aging, pointer)
+    recovered = _lifecycle(recover_skillset, pointer, today=date(2026, 9, 1))
+    assert recovered.path == fresh

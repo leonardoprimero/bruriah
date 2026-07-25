@@ -389,6 +389,22 @@ def promote_skillset(
         os.close(descriptor)
 
 
+def _entry_bytes(pointer: Path, entry: dict) -> tuple[Path, bytes]:
+    """Open a pointer entry under symlink and containment control and read it, confirming the file did
+    not change between the open and the read. Every path that touches a referenced generation goes
+    through here, so the containment guarantee is stated once rather than repeated per operation."""
+    path, descriptor, file_identity = _controlled_file(pointer, entry["skillset"])
+    try:
+        raw = _read_descriptor(descriptor)
+        if len(raw) > MAX_SKILLSET_BYTES:
+            raise SkillSetError("skillset_too_large")
+        if not identity_matches(path, file_identity):
+            raise SkillSetError("active_target_changed_during_validation")
+        return path, raw
+    finally:
+        os.close(descriptor)
+
+
 def _demote_current(pointer: Path) -> list[dict[str, str]]:
     """Move the outgoing active generation to the head of `retained`.
 
@@ -398,19 +414,74 @@ def _demote_current(pointer: Path) -> list[dict[str, str]]:
     promotion of a fresh one, which is the same relaxation `index.py` makes by reading activation
     metadata instead of canonical metadata here."""
     current = _read_pointer(pointer)
-    current_path, current_descriptor, current_identity = _controlled_file(
-        pointer, current["active"]["skillset"]
-    )
-    try:
-        raw = _read_descriptor(current_descriptor)
-        if len(raw) > MAX_SKILLSET_BYTES:
-            raise SkillSetError("skillset_too_large")
-        build_id = hashlib.sha256(raw).hexdigest()
-        if not identity_matches(current_path, current_identity):
-            raise SkillSetError("active_target_changed_during_validation")
-    finally:
-        os.close(current_descriptor)
-    return [_pointer_entry(current_path, build_id), *current["retained"]]
+    current_path, raw = _entry_bytes(pointer, current["active"])
+    return [_pointer_entry(current_path, hashlib.sha256(raw).hexdigest()), *current["retained"]]
+
+
+@serialized(0)
+def rollback_skillset(
+    pointer: Path,
+    trust_roots: dict[str, str],
+    approvals: Mapping[str, str],
+    *,
+    today: date | None = None,
+    router_version: str = "0.1.0",
+    minimum_versions: dict[str, str] | None = None,
+) -> SkillSetActivation:
+    """Restore the most recently retained generation, demoting the current active into `retained`.
+
+    The retained generation is REVALIDATED before it is republished but is never rebuilt from source
+    packs -- it is self-contained, which is the property the sealed-bundle format exists to provide.
+    Revalidating matters: a generation that was valid when it was promoted can have expired since, and
+    republishing it unchecked would quietly reactivate an out-of-window skill set.
+
+    The outgoing active only has its digest re-derived, matching `promote_skillset`: rolling back
+    away from a broken generation must not be blocked by that generation being broken."""
+    gates = {"today": today, "router_version": router_version, "minimum_versions": minimum_versions}
+    value = _read_pointer(pointer)
+    if not value["retained"]:
+        raise SkillSetError("no_retained_skillset")
+    selected_path, raw = _entry_bytes(pointer, value["retained"][0])
+    result = validate_skillset_bytes(raw, trust_roots, approvals, **gates)
+    current_path, current_raw = _entry_bytes(pointer, value["active"])
+    current = _pointer_entry(current_path, hashlib.sha256(current_raw).hexdigest())
+    selected = _pointer_entry(selected_path, result.build_id)
+    durable = write_pointer(pointer, selected, [current, *value["retained"][1:]])
+    return SkillSetActivation(selected_path, result.build_id, durable, result.skill_set)
+
+
+@serialized(0)
+def recover_skillset(
+    pointer: Path,
+    trust_roots: dict[str, str],
+    approvals: Mapping[str, str],
+    *,
+    today: date | None = None,
+    router_version: str = "0.1.0",
+    minimum_versions: dict[str, str] | None = None,
+) -> SkillSetActivation:
+    """Republish the first generation in `[active, *retained]` that still validates.
+
+    Unlike rollback, every candidate is validated CANONICALLY, including the current active: recovery
+    exists precisely for the case where the active generation is the broken one. Entries that fail are
+    skipped rather than reported, because a corrupt generation is the expected input here, not an
+    error; if none survives, `no_recoverable_skillset` says so rather than leaving a pointer that
+    names something unreadable."""
+    gates = {"today": today, "router_version": router_version, "minimum_versions": minimum_versions}
+    value = _read_pointer(pointer)
+    survivors: list[tuple[Path, ValidatedSkillSet]] = []
+    for entry in [value["active"], *value["retained"]]:
+        try:
+            path, raw = _entry_bytes(pointer, entry)
+            survivors.append((path, validate_skillset_bytes(raw, trust_roots, approvals, **gates)))
+        except SkillSetError:
+            continue
+    if not survivors:
+        raise SkillSetError("no_recoverable_skillset")
+    path, result = survivors[0]
+    retained = [_pointer_entry(item, value.build_id) for item, value in survivors[1:3]]
+    durable = write_pointer(pointer, _pointer_entry(path, result.build_id), retained)
+    return SkillSetActivation(path, result.build_id, durable, result.skill_set)
 
 
 def read_active(pointer: Path) -> tuple[Path, str]:
@@ -436,6 +507,8 @@ __all__ = [
     "generation_path",
     "promote_skillset",
     "read_active",
+    "recover_skillset",
+    "rollback_skillset",
     "validate_skillset",
     "validate_skillset_bytes",
 ]
