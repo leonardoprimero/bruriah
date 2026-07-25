@@ -470,3 +470,124 @@ def test_max_evidence_truncation_prefers_capability_over_local_deterministically
     assert len(result.evidence) == 1
     assert result.evidence[0].kind == "capability"
     assert "max_evidence_exceeded" in result.degradation
+
+
+# --- skill dispatch wiring behind the opt-in gate (Unit 8B) --------------------------------------
+
+import dataclasses  # noqa: E402
+
+from cerebro_router.contracts import HostSkill  # noqa: E402
+from cerebro_router.skills import SkillPack, SkillSet  # noqa: E402
+from test_skills import DIGEST  # noqa: E402
+from test_skills import _pack as _skill_pack  # noqa: E402
+from test_skills import _skill as _skill_entry  # noqa: E402
+
+# Verified against the real classifier, not assumed: this phrasing yields domain="programming",
+# which is what the bundled programming pack and the fixture skill are both gated on.
+_SKILL_TASK = "debug this python code and review the function"
+
+
+def _skills(**overrides) -> SkillSet:
+    payload = _skill_pack(skills=[_skill_entry(domains=["programming"], **overrides)])
+    return SkillSet.from_packs([SkillPack.model_validate_json(json.dumps(payload))])
+
+
+def _skill_deps(deps, **overrides) -> ServiceDeps:
+    return dataclasses.replace(deps, skill_set=_skills(**overrides))
+
+
+def _installed(digest: str = DIGEST) -> list[HostSkill]:
+    return [HostSkill(skill_id="design.ui-review", version="1.4.0", digest=digest)]
+
+
+def _skill_records(result):
+    return [item for item in result.evidence if item.kind == "skill"]
+
+
+def test_a_client_that_does_not_opt_in_sees_no_skills_at_all(deps) -> None:
+    """The gate, asserted on a deps that HAS a skill set loaded. Without this the test would pass
+    for the trivial reason that there were no skills to emit."""
+    result = investigate(InvestigationRequest(task=_SKILL_TASK), _skill_deps(deps))
+    assert _skill_records(result) == []
+    assert not any(gap.startswith("skill_") for gap in result.gaps)
+    assert not any(action.kind in {"install_skill", "draft_skill_candidate"}
+                   for action in result.host_actions)
+
+
+def test_opting_in_emits_a_skill_ref_with_provenance_and_envelope(deps) -> None:
+    result = investigate(
+        InvestigationRequest(task=_SKILL_TASK, host_skills=_installed()), _skill_deps(deps))
+    records = _skill_records(result)
+    assert len(records) == 1
+    record = records[0]
+    assert record.ref == "skill:design.ui-review@1.4.0"
+    assert record.digest == DIGEST
+    assert set(record.provenance_chain) == {
+        "tier:first_party", "pack:cerebro.skills", "availability:installed"}
+    assert record.envelope is not None and record.envelope.network_hosts == []
+
+
+def test_an_uninstalled_skill_yields_a_gap_and_an_install_action(deps) -> None:
+    result = investigate(
+        InvestigationRequest(task=_SKILL_TASK, host_skills=[]), _skill_deps(deps))
+    ref = "skill:design.ui-review@1.4.0"
+    assert f"skill_not_installed:{ref}" in result.gaps
+    action = next(item for item in result.host_actions if item.kind == "install_skill")
+    assert action.target == ref
+
+
+def test_a_divergent_copy_is_never_reported_as_approved(deps) -> None:
+    result = investigate(
+        InvestigationRequest(task=_SKILL_TASK, host_skills=_installed("sha256:" + "e" * 64)),
+        _skill_deps(deps))
+    ref = "skill:design.ui-review@1.4.0"
+    assert f"skill_digest_divergent:{ref}" in result.gaps
+    assert "availability:digest_divergent" in _skill_records(result)[0].provenance_chain
+    action = next(item for item in result.host_actions if item.target == ref)
+    assert action.kind == "inspect_capability" and "unapproved" in action.reason
+
+
+def test_no_skill_body_is_reachable_through_either_tool(deps) -> None:
+    """Required verification, asserted rather than assumed.
+
+    The body is absent by construction -- SkillPolicy has no body field -- so this walks the ACTUAL
+    output of both tools looking for body content and for any field that could carry it."""
+    service_deps = _skill_deps(deps)
+    result = investigate(
+        InvestigationRequest(task=_SKILL_TASK, host_skills=_installed()), service_deps)
+    ref = _skill_records(result)[0].ref
+    read_result = read(ReadRequest(refs=[ref]), service_deps)
+    payload = json.dumps(result.model_dump(mode="json")) + json.dumps(read_result.model_dump(mode="json"))
+    # The locator is a POINTER an install action needs; the body it points at must never appear.
+    assert "design/ui-review/SKILL.md" in payload
+    disclosed = json.loads(read_result.items[0].content)
+    assert set(disclosed) == {
+        "skill_id", "version", "tier", "payload", "summary", "domains", "body_locator",
+        "body_digest", "permissions", "provenance", "license", "advisories", "limitations"}
+    assert "body" not in disclosed
+
+
+def test_reading_a_skill_ref_discloses_metadata_only(deps) -> None:
+    service_deps = _skill_deps(deps)
+    item = read(ReadRequest(refs=["skill:design.ui-review@1.4.0"]), service_deps).items[0]
+    assert item.status == "ok" and item.evidence_kind == "skill"
+    assert item.digest == DIGEST
+    assert json.loads(item.content)["permissions"]["network_hosts"] == []
+
+
+def test_a_skill_ref_pinned_to_another_version_is_missing_not_substituted(deps) -> None:
+    item = read(ReadRequest(refs=["skill:design.ui-review@9.9.9"]), _skill_deps(deps)).items[0]
+    assert item.status == "missing_ref"
+
+
+def test_a_skill_ref_without_a_loaded_set_is_missing(deps) -> None:
+    item = read(ReadRequest(refs=["skill:design.ui-review@1.4.0"]), deps).items[0]
+    assert item.status == "missing_ref"
+
+
+def test_skill_refs_still_respect_the_declared_evidence_budget(deps) -> None:
+    request = InvestigationRequest(task=_SKILL_TASK, host_skills=_installed(),
+                                   budgets=Budgets(max_evidence=1))
+    result = investigate(request, _skill_deps(deps))
+    assert len(result.evidence) == 1
+    assert "max_evidence_exceeded" in result.degradation

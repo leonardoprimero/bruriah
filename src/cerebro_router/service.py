@@ -43,18 +43,21 @@ from urllib.parse import urlsplit
 from .classify import classify
 from .context import assemble_context
 from .contracts import (
-    EvidenceRecord, HostAction, InvestigationRequest, InvestigationResult, ReadItem, ReadRequest,
-    ReadResult,
+    EvidenceRecord, HostAction, InvestigationRequest, InvestigationResult, PermissionDisclosure,
+    ReadItem, ReadRequest, ReadResult,
 )
+from .dispatch import SkillDispatch, dispatch
 from .index import ActiveSnapshot
-from .lookup import discover, resolve_capability
+from .lookup import SkillMatch, discover, resolve_capability
 from .packs import CapabilityPolicy
+from .skills import PermissionEnvelope, SkillSet
 from .registries import Registry
 from .research import ResearchDeps, ResearchOutcome, research
 from .retrieval import EmbedQuery, search, to_evidence_records
 from .route import route
 
 _CAPABILITY_REF_PREFIX = "capability:"
+_SKILL_REF_PREFIX = "skill:"
 
 
 class ServiceError(ValueError):
@@ -78,6 +81,9 @@ class ServiceDeps:
     embed_query: EmbedQuery | None = None
     clock: Callable[[], float] = time.monotonic
     research: ResearchDeps | None = None
+    # Dormant unless supplied. A deps built without it behaves exactly as it did before the
+    # skills layer existed, which is the same discipline `research` follows above.
+    skill_set: SkillSet | None = None
 
 
 def _canonical_json(payload: object) -> str:
@@ -148,6 +154,74 @@ def _capability_evidence_record(capability: CapabilityPolicy) -> EvidenceRecord:
         authority_rationale="Capability identity only; permissions and limitations are disclosed on read.",
         freshness="unknown", license="unknown", conflict="unknown",
     )
+
+
+def _skill_ref(match: SkillMatch) -> str:
+    return f"{_SKILL_REF_PREFIX}{match.skill.skill_id}@{match.skill.version}"
+
+
+def _disclose_envelope(envelope: PermissionEnvelope) -> PermissionDisclosure:
+    """Flatten the signed pack's envelope into the public contract's shape.
+
+    Disclosure, never enforcement: Cerebro does not execute skills. An envelope that grants nothing
+    still serializes as six empty lists, because "grants nothing" is the strongest thing this layer
+    can say about a skill and hiding it would waste the claim."""
+    return PermissionDisclosure(
+        filesystem_read=list(envelope.filesystem.read_paths),
+        filesystem_write=list(envelope.filesystem.write_paths),
+        network_hosts=list(envelope.network.hosts),
+        network_schemes=list(envelope.network.schemes),
+        programs=list(envelope.subprocess.programs),
+        secrets=list(envelope.secrets),
+    )
+
+
+def _skill_evidence_record(entry: SkillDispatch) -> EvidenceRecord:
+    """One record per dispatched skill: identity, provenance, and the declared envelope.
+
+    The BODY is absent, and not by omission here -- `SkillPolicy` has no body field at all, so it is
+    structurally impossible for a skill body to reach this surface. `locator` is where the HOST
+    finds the body, which is a pointer an `install_skill` action needs, never the content itself.
+
+    `digest` is the body digest human approval was bound to, so a host comparing its local copy is
+    comparing against the approved bytes rather than against a version label. `authority` is
+    honestly "unknown": provenance is attribution, never a safety or authority assessment, and this
+    module must not fabricate one."""
+    skill = entry.skill.skill
+    return EvidenceRecord(
+        ref=_skill_ref(entry.skill),
+        kind="skill",
+        publisher=skill.provenance,
+        locator=skill.body_locator,
+        citation_locator=f"{skill.skill_id}@{skill.version}",
+        digest=skill.body_digest,
+        provenance_chain=[
+            f"tier:{skill.tier}", f"pack:{entry.skill.pack_id}", f"availability:{entry.availability}",
+        ],
+        authority="unknown",
+        authority_rationale=skill.summary,
+        freshness="unknown", license="unknown", conflict="unknown",
+        envelope=_disclose_envelope(skill.permissions),
+    )
+
+
+def _skill_outcomes(entries: tuple[SkillDispatch, ...]) -> tuple[list[str], list[HostAction]]:
+    """Turn availability into gaps and host actions. Divergence is never reported as approved."""
+    gaps: list[str] = []
+    actions: list[HostAction] = []
+    for entry in entries:
+        ref = _skill_ref(entry.skill)
+        if entry.availability == "not_installed":
+            gaps.append(f"skill_not_installed:{ref}")
+            actions.append(HostAction(kind="install_skill", reason=entry.skill.skill.summary, target=ref))
+        elif entry.availability == "digest_divergent":
+            gaps.append(f"skill_digest_divergent:{ref}")
+            actions.append(HostAction(
+                kind="inspect_capability",
+                reason="The installed copy does not match the approved digest and is unapproved.",
+                target=ref,
+            ))
+    return gaps, actions
 
 
 def _window_text(
@@ -247,7 +321,11 @@ def investigate(request: InvestigationRequest, deps: ServiceDeps) -> Investigati
 
     request_id = _content_hash(request)
     classification = classify(request)
-    lookup = discover(classification, deps.registry)
+    # The opt-in gate, applied once and early: a request without `host_skills` never reaches the
+    # skill set, so dispatch cannot emit a ref, a gap, an action, or a new enum member to a
+    # client that did not ask for one.
+    opted_in = request.host_skills is not None
+    lookup = discover(classification, deps.registry, deps.skill_set if opted_in else None)
     decision = route(classification, lookup, request)
 
     if decision.outcome != "proceed":
@@ -259,12 +337,18 @@ def investigate(request: InvestigationRequest, deps: ServiceDeps) -> Investigati
         return assemble_context(request, decision, mode="full")
 
     evidence, warnings, degradation, status, host_actions = [], [], [], decision.outcome, []
+    extra_gaps: list[str] = []
     if decision.outcome == "proceed":
         # Capability evidence (Slice 7A-2): one EvidenceRecord per matched `lookup.capabilities`
         # entry -- "Method and tool discovery" requires capability refs alongside knowledge, not
         # local retrieval alone. `lookup` was already computed above for route()'s has_evidence
         # gate; nothing here re-queries the registry.
         capability_evidence = [_capability_evidence_record(capability) for capability in lookup.capabilities]
+        # Skill refs lead the evidence list for the same reason capabilities do: they are the
+        # smallest, most specific answer to "what procedure applies here". `dispatch` is only
+        # reached under the opt-in gate, so `skill_evidence` is [] for every pre-skills client.
+        skill_dispatch = dispatch(lookup, request.host_skills or []) if opted_in else None
+        skill_evidence = [_skill_evidence_record(item) for item in skill_dispatch.skills] if skill_dispatch else []
         outcome = search(
             deps.snapshot, request.task, request.budgets,
             embed_query=deps.embed_query, clock=deps.clock,
@@ -278,7 +362,7 @@ def investigate(request: InvestigationRequest, deps: ServiceDeps) -> Investigati
         # most directly answer "which tool/library" -- the reason `route()` proceeded on a
         # capability_recommendation claim -- and are typically the smaller, most specific set;
         # local passages fill the remaining budget. This ordering is the truncation preference below.
-        evidence = capability_evidence + local_evidence
+        evidence = skill_evidence + capability_evidence + local_evidence
         # Bounded live research (Slice 12A-2): run only when `deps.research` was actually
         # provisioned (`_run_research` returns `[]` otherwise -- the byte-identical-to-12A-1
         # invariant), then fold outcomes the same way `context.py`'s `_assembled_result` folds
@@ -299,10 +383,14 @@ def investigate(request: InvestigationRequest, deps: ServiceDeps) -> Investigati
             degradation.append("max_evidence_exceeded")
             truncated = True
         status = "partial" if truncated or research_degradation else "complete"
+        if skill_dispatch is not None:
+            skill_gaps, skill_actions = _skill_outcomes(skill_dispatch.skills)
+            extra_gaps = list(skill_dispatch.gaps) + skill_gaps
+            host_actions = host_actions + skill_actions
 
     return InvestigationResult(
         schema_version="1", status=status, request_id=request_id, evidence=evidence,
-        claims=[], conflicts=[], gaps=list(decision.gaps), host_actions=host_actions,
+        claims=[], conflicts=[], gaps=list(decision.gaps) + extra_gaps, host_actions=host_actions,
         warnings=warnings, degradation=degradation, budgets=request.budgets, next_cursor=None,
     )
 
@@ -369,6 +457,45 @@ def _read_capability_one(
     return item, remaining_total - len(window)
 
 
+def _read_skill_one(
+    skill_set: SkillSet | None, ref: str, requested_range: object, cursor_start: int | None,
+    item_cap: int, remaining_total: int, request_id: str,
+) -> tuple[ReadItem, int]:
+    # Resolves a `skill:<id>@<version>` ref against the ACTIVE set, mirroring `_read_capability_one`.
+    # Content is the skill's declared METADATA as canonical JSON -- identity, provenance, envelope,
+    # advisories, limitations. The body is not withheld here so much as absent by construction:
+    # `SkillPolicy` has no body field, so there is no code path through either tool that could
+    # return one. The version must match too: a ref pinned to a version the active set no longer
+    # carries is `missing_ref`, never silently answered with a different version's metadata.
+    identifier, _, version = ref[len(_SKILL_REF_PREFIX):].partition("@")
+    skill = skill_set.resolve(identifier) if skill_set is not None else None
+    if skill is None or skill.version != version:
+        return ReadItem(ref=ref, status="missing_ref"), remaining_total
+    disclosure = _canonical_json({
+        "skill_id": skill.skill_id, "version": skill.version, "tier": skill.tier,
+        "payload": skill.payload, "summary": skill.summary, "domains": skill.domains,
+        "body_locator": skill.body_locator, "body_digest": skill.body_digest,
+        "permissions": _disclose_envelope(skill.permissions).model_dump(mode="json"),
+        "provenance": skill.provenance, "license": skill.license,
+        "advisories": skill.advisories, "limitations": skill.limitations,
+    })
+
+    windowed = _window_text(disclosure, requested_range, cursor_start, item_cap, remaining_total)
+    if windowed is None:
+        return ReadItem(ref=ref, status="invalid_range"), remaining_total
+    window, start, actual_end, truncated = windowed
+    next_cursor = _encode_cursor(request_id, ref, actual_end + 1) if truncated else None
+
+    item = ReadItem(
+        ref=ref, status="ok", content=window, start=start, end=actual_end,
+        digest=skill.body_digest, truncated=truncated, next_cursor=next_cursor,
+        evidence_kind="skill", locator=skill.body_locator,
+        citation_locator=f"{skill.skill_id}@{skill.version}",
+        authority="unknown", freshness="unknown", license="unknown", conflict="unknown",
+    )
+    return item, remaining_total - len(window)
+
+
 def read(request: ReadRequest, deps: ServiceDeps) -> ReadResult:
     """Resolve each `refs` entry to immutable local or capability evidence and return exact,
     budget-bounded content. Missing or out-of-range refs get typed per-ref failures -- never
@@ -403,8 +530,12 @@ def read(request: ReadRequest, deps: ServiceDeps) -> ReadResult:
     items: list[ReadItem] = []
     try:
         for ref in request.refs:
-            reader = _read_capability_one if ref.startswith(_CAPABILITY_REF_PREFIX) else _read_one
-            source = deps.registry if ref.startswith(_CAPABILITY_REF_PREFIX) else deps.snapshot.database
+            if ref.startswith(_SKILL_REF_PREFIX):
+                reader, source = _read_skill_one, deps.skill_set
+            elif ref.startswith(_CAPABILITY_REF_PREFIX):
+                reader, source = _read_capability_one, deps.registry
+            else:
+                reader, source = _read_one, deps.snapshot.database
             item, remaining = reader(
                 source, ref, ranges_by_ref.get(ref),
                 cursor_start if ref == cursor_ref else None,

@@ -311,7 +311,26 @@ Apply to every unit without exception.
   Verification: identical inputs always yield identical ordered output; adversarial evidence text claiming a different skill applies does not change selection; ceiling overflow emits a gap and drops nothing silently.
   Rollback: delete module. [S-Bounded Deterministic Skill Dispatch]
 
-- [ ] **8B. `service.py` wiring — refs, availability, divergence.** Emit `skill:<id>@<version>` evidence refs (rationale in `authority_rationale`; tier/pack/signer/digest in `provenance_chain`; envelope in `envelope`); add a `skill:` branch to `read` disclosing canonical-JSON **metadata only**, mirroring `_read_capability_one` (service.py:338-369, 406); emit availability and divergence outcomes — absent ref yields gap `skill_not_installed:<ref>` plus an `install_skill` action, digest mismatch yields gap `skill_digest_divergent:<ref>` plus an `inspect_capability` action with the local copy reported unapproved.
+- [x] **8B. `service.py` wiring — refs, availability, divergence.** DONE 2026-07-25. **`investigate_work` now returns skill refs.** The layer is live end to end.
+
+  Files: `service.py`, `tests/test_service.py`.
+  Estimate: 100 + 200 tests = **~300**. **Actual: 252** (+260/-8) — 0.84x.
+
+  Implementation notes:
+  - **The opt-in gate is applied ONCE and early**: `opted_in = request.host_skills is not None` decides whether `deps.skill_set` even reaches `discover`. A request without the field never touches the skill set, so no ref, gap, action, or new enum member can reach a pre-skills client — enforced at a single point rather than re-checked at each emission site.
+  - `ServiceDeps.skill_set` defaults to `None`, matching the discipline `research` already follows: a deps built without it behaves exactly as before the skills layer existed.
+  - **`EvidenceRecord.digest` is the skill's `body_digest`** — the digest human approval was bound to — so a host comparing its local copy compares against the approved bytes rather than a version label.
+  - `locator` is `body_locator`: a POINTER an `install_skill` action needs, never content. `authority` is honestly `"unknown"`; provenance is attribution, never a safety assessment, and this module must not fabricate one. Tier, pack and availability go in `provenance_chain`, which is what that field is for. **`signer` is deliberately NOT included**: it lives in the release manifest, which does not travel into `SkillPack`, and inventing one would be worse than omitting it.
+  - `read` gained a `skill:` branch mirroring `_read_capability_one`, disclosing canonical-JSON metadata only. A ref pinned to a version the active set no longer carries is `missing_ref`, never silently answered with another version's metadata.
+
+  **Falsifiability probes: three, including the one that matters most.** (1) Forcing `opted_in = True` failed the gate test — which is asserted against a deps that HAS a skill set loaded, so it cannot pass for the trivial reason that there was nothing to emit. (2) Silencing the divergence branch failed the test that a divergent copy is never reported as approved. (3) **Injecting a `"body"` field carrying text into the read disclosure failed the mandated "no skill body is reachable" test** — that verification walks the actual output of both tools and genuinely detects a leak rather than restating that the field does not exist.
+
+  **A test-fixture lesson worth carrying.** The first task string, "review this programming interface for hierarchy and contrast", classifies as `general`, not `programming`, so every skill test abstained. The fixture was wrong, not the code. Verified against the real classifier and corrected to a phrasing that actually yields `programming` — checking what the classifier does beats assuming what it should do.
+
+  Verification (all passed): 759 → **768 passed** (+9); end-to-end run confirmed outside the suite: a real request classifies `programming`, resolves the bundled pack (2 sources, `domain_supported=True`), matches one skill, and dispatches it as `skill:design.ui-review@1.4.0 [installed]` with an envelope granting nothing. Budgets still enforced with skill refs present. `verify_legacy_baseline.py` `status: pass`, `errors: []`; pins unchanged; `uv lock --check` and `git diff --check` clean.
+  Rollback: the gate returns no refs; the `read` branch becomes unreachable. [S-No Obeyable Instruction Emission; S-Host-Side Availability and Digest Divergence; S-Read-Only Boundary and CLI-Confined Mutation]
+
+- [ ] ~~8B (original)~~ Emit `skill:<id>@<version>` evidence refs (rationale in `authority_rationale`; tier/pack/signer/digest in `provenance_chain`; envelope in `envelope`); add a `skill:` branch to `read` disclosing canonical-JSON **metadata only**, mirroring `_read_capability_one` (service.py:338-369, 406); emit availability and divergence outcomes — absent ref yields gap `skill_not_installed:<ref>` plus an `install_skill` action, digest mismatch yields gap `skill_digest_divergent:<ref>` plus an `inspect_capability` action with the local copy reported unapproved.
 
   Files: `service.py`, `tests/test_service.py`.
   Estimate: 100 + 200 tests = **~300**.
