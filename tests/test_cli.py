@@ -528,3 +528,126 @@ def test_every_subcommand_is_registered_and_fails_typed(tmp_path: Path, argv, ca
     assert cli.cerebro_mcp_main([*argv, "--data-dir", str(tmp_path / "d"),
                                  "--config-dir", str(tmp_path / "c")]) == 1
     assert "cerebro-mcp: error:" in capsys.readouterr().err
+
+
+# --- skill activation subcommands (Unit 9B) -------------------------------------------------------
+
+from cerebro_router.cli import (  # noqa: E402
+    run_skill_activate, run_skill_prune, run_skill_rollback, run_skill_status,
+)
+
+_T3 = dict(tier="local", domains=["programming"])
+
+
+def _local_pack(tmp_path: Path, name: str, **overrides) -> Path:
+    payload = _skill_pack(pack_id="local.skills", skills=[_skill_entry(**_T3, **overrides)])
+    path = tmp_path / f"{name}.json"
+    path.write_text(json.dumps(payload))
+    return path
+
+
+def _approved(tmp_path: Path, paths, name: str = "pack", **overrides) -> Path:
+    candidate = _local_pack(tmp_path, name, **overrides)
+    run_skill_approve(paths, candidate, [], today=date(2026, 7, 25))
+    return candidate
+
+
+def _activate(paths, *candidates_: Path):
+    return run_skill_activate(paths, list(candidates_), allow_unsigned_local=True,
+                              today=date(2026, 7, 25))
+
+
+def test_the_whole_lifecycle_runs_from_the_cli(tmp_path: Path) -> None:
+    """Approve, activate, inspect -- without touching the Python API."""
+    paths = _paths(tmp_path)
+    result = _activate(paths, _approved(tmp_path, paths))
+    assert result["skills"] == ["design.ui-review"]
+    assert len(result["build_id"]) == 64
+    status = run_skill_status(paths, today=date(2026, 7, 25))
+    assert status["active"] == result["build_id"] and status["warning"] is None
+
+
+def test_activation_refuses_an_unapproved_candidate(tmp_path: Path) -> None:
+    # The gate holds through the CLI too: approval is not implied by naming a candidate.
+    paths = _paths(tmp_path)
+    assert _cli_code(run_skill_activate, paths, [_local_pack(tmp_path, "pack")],
+                     allow_unsigned_local=True, today=date(2026, 7, 25)) == \
+        "activation_refused:skill_not_approved"
+
+
+def test_an_unsigned_pack_needs_the_explicit_flag(tmp_path: Path) -> None:
+    # The T3 exception has to be typed out. Defaulting it on would make the unsigned path the easy
+    # one, which is the opposite of what an exception should feel like.
+    paths = _paths(tmp_path)
+    candidate = _approved(tmp_path, paths)
+    assert _cli_code(run_skill_activate, paths, [candidate], today=date(2026, 7, 25)) == \
+        "activation_refused:signature_required"
+
+
+def test_naming_no_candidate_is_refused_rather_than_activating_everything(tmp_path: Path) -> None:
+    # Approval says "I read this"; activation says "this goes into service". An empty invocation must
+    # not be read as "activate everything approved" -- that would collapse the two.
+    assert _cli_code(run_skill_activate, _paths(tmp_path), []) == "no_candidates_named"
+
+
+def test_rollback_restores_the_previous_generation(tmp_path: Path) -> None:
+    paths = _paths(tmp_path)
+    first = _activate(paths, _approved(tmp_path, paths, "one"))
+    second = _activate(paths, _approved(tmp_path, paths, "two", summary="A second revision."))
+    assert second["build_id"] != first["build_id"]
+    restored = run_skill_rollback(paths, today=date(2026, 7, 25))
+    assert restored["build_id"] == first["build_id"]
+
+
+def test_rollback_without_history_is_one_typed_error(tmp_path: Path) -> None:
+    paths = _paths(tmp_path)
+    _activate(paths, _approved(tmp_path, paths))
+    assert _cli_code(run_skill_rollback, paths, today=date(2026, 7, 25)) == \
+        "rollback_refused:no_retained_skillset"
+
+
+def test_status_never_raises_on_a_broken_pointer(tmp_path: Path) -> None:
+    """Status is the command an operator runs precisely when something is wrong, so it must survive
+    exactly the state it exists to report."""
+    paths = _paths(tmp_path)
+    _activate(paths, _approved(tmp_path, paths))
+    (paths.data_dir / "skills" / "active.json").write_text("{not json")
+    status = run_skill_status(paths, today=date(2026, 7, 25))
+    assert status["active"] is None
+    assert status["warning"] == "skillset_unreadable:invalid_active_pointer"
+    assert status["inventory_unavailable"] == "invalid_active_pointer"
+
+
+def test_status_on_a_fresh_install_reports_inactive_not_broken(tmp_path: Path) -> None:
+    status = run_skill_status(_paths(tmp_path), today=date(2026, 7, 25))
+    assert status == {"active": None, "skills": [], "warning": None,
+                      "retained": [], "unreferenced": []}
+
+
+def test_prune_removes_only_unreferenced_generations(tmp_path: Path) -> None:
+    paths = _paths(tmp_path)
+    for index in range(4):
+        _activate(paths, _approved(tmp_path, paths, f"p{index}", summary=f"Revision {index}."))
+    status = run_skill_status(paths, today=date(2026, 7, 25))
+    assert len(status["unreferenced"]) == 1
+    removed = run_skill_prune(paths)
+    assert removed["removed"] == status["unreferenced"]
+    assert run_skill_status(paths, today=date(2026, 7, 25))["active"] is not None
+
+
+def test_prune_refuses_without_a_readable_pointer(tmp_path: Path) -> None:
+    assert _cli_code(run_skill_prune, _paths(tmp_path)) == "prune_refused:no_active_skillset"
+
+
+@pytest.mark.parametrize(
+    "argv",
+    [["skill-activate", "--candidate", "x.json"], ["skill-rollback"],
+     ["skill-status"], ["skill-prune"]],
+)
+def test_every_activation_subcommand_is_registered(tmp_path: Path, argv, capsys) -> None:
+    code = cli.cerebro_mcp_main([*argv, "--data-dir", str(tmp_path / "d"),
+                                 "--config-dir", str(tmp_path / "c")])
+    # skill-status succeeds on a fresh install by design; the rest fail typed rather than traceback.
+    assert code == (0 if argv[0] == "skill-status" else 1)
+    if code == 1:
+        assert "cerebro-mcp: error:" in capsys.readouterr().err

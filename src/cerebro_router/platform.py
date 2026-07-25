@@ -163,6 +163,14 @@ def load_build_descriptor(paths: PlatformPaths) -> BuildConfig:
         raise PlatformError("corrupt_build_descriptor") from error
 
 
+def load_trust_roots() -> dict[str, str]:
+    """The bundled trust roots, read from one place so no caller has to know the data layout."""
+    try:
+        return json.loads((_BUNDLED_DATA / "trust-roots.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError) as error:
+        raise PlatformError("trust_roots_unreadable") from error
+
+
 def load_registry(today: date | None = None) -> Registry:
     """Load every bundled domain pack into a `Registry`. `today` is injectable (default: real date)
     so the fail-closed freshness/expiry check is deterministic in tests instead of a wall-clock time
@@ -218,5 +226,5 @@ def load_deps(
 
 __all__ = [
     "PlatformError", "PlatformPaths", "ensure_private_dirs", "load_build_descriptor",
-    "load_deps", "load_registry", "open_snapshot", "resolve_paths", "write_build_descriptor",
+    "load_deps", "load_registry", "load_trust_roots", "open_snapshot", "resolve_paths", "write_build_descriptor",
 ]

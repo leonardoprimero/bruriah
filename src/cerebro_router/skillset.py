@@ -579,11 +579,20 @@ def list_generations(pointer: Path) -> GenerationInventory:
     return GenerationInventory(active, retained, unreferenced)
 
 
-@serialized(0)
 def prune_skillset(pointer: Path) -> tuple[Path, ...]:
     """Delete every unreferenced generation and return what was removed.
 
-    Serialized on the pointer so a promotion cannot retain a generation between the moment the
+    The directory check happens BEFORE the lock: `serialized` creates its lock file beside the
+    pointer, so on an installation where nothing was ever activated the lock itself would fail with a
+    bare `FileNotFoundError` instead of the typed refusal a caller can act on."""
+    if not pointer.parent.is_dir():
+        raise SkillSetError("no_active_skillset")
+    return _prune_locked(pointer)
+
+
+@serialized(0)
+def _prune_locked(pointer: Path) -> tuple[Path, ...]:
+    """Serialized on the pointer so a promotion cannot retain a generation between the moment the
     inventory is taken and the moment the file is unlinked."""
     unreferenced = list_generations(pointer).unreferenced
     for path in unreferenced:

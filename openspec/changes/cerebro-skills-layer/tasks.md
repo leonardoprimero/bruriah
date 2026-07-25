@@ -420,7 +420,25 @@ Apply to every unit without exception.
   Verification: a digest change invalidates a prior approval and forces re-entry from static analysis; approving without acknowledging each advisory fails; CLI output never claims prose was verified safe.
   Rollback: remove subcommands; no MCP behavior touched. [S-Candidate Lifecycle and Approval Gate; S-Skill Trust Tiers and Provenance]
 
-- [ ] **9B. CLI activation — `skill-activate`, `skill-rollback`, `skill-status`, `skill-prune`.** Thin CLI over the Unit 4A/4B primitives. `skill-status` lists active, retained, and unreferenced generations so disk growth is visible and operator-controlled.
+- [x] **9B. CLI activation — `skill-activate`, `skill-rollback`, `skill-status`, `skill-prune`.** DONE 2026-07-25. **The lifecycle now runs end to end from the terminal**, with no Python API required.
+
+  Files: `cli.py`, `platform.py`, `skillset.py`, `tests/test_cli.py` (+279/-4).
+  Estimate: 130 + 140 tests = **~270**. **Actual: 283** — 1.05x.
+
+  **The decision of this unit: `skill-activate` names its candidates EXPLICITLY.** There is deliberately no "activate everything approved" mode. Approval says *I read this and accept it*; activation says *this goes into service now*. A sweep-up mode would collapse the two and make approval an implicit activation — the exact door the review gate exists to close. An empty invocation is `no_candidates_named`, not a convenience. `--allow-unsigned-local` is likewise explicit and never defaulted: the T3 exception should take effort to type.
+
+  **`skill-status` never raises**, because status is the command an operator runs precisely when something is wrong — it must survive the state it exists to report. It distinguishes three cases: active, inactive (fresh install, no fault), and broken pointer with a typed warning. Conflating the first two would send someone hunting a problem that is not there.
+
+  **A REAL BUG found by a test, in code shipped two units ago.** `prune_skillset` was decorated `@serialized(0)`, and `serialized` creates its lock file beside the pointer — so on an installation where nothing was ever activated, pruning died with a bare `FileNotFoundError` before the function body could raise its typed refusal. Split into a public `prune_skillset` that checks the directory BEFORE taking the lock and a `_prune_locked` that does the work. Any caller of the raw API hit this, not just the CLI.
+
+  **Verified end to end outside the suite**, which is the point of this unit: `skill-analyze` → `skill-approve` → `skill-activate --allow-unsigned-local` → `skill-status` reports the active build id; and the same activation without the flag is refused `activation_refused:signature_required`.
+
+  **Falsifiability probes: three, one per decision.** (1) Treating an empty candidate list as "activate everything" failed the collapse test. (2) Defaulting `allow_unsigned_local` to True failed the explicit-flag test. (3) Making status strict rather than fail-soft failed both status tests and the registration test. All reverted.
+
+  Verification (all passed): 828 → **842 passed** (+14); `verify_legacy_baseline.py` `status: pass`, `errors: []`; pins unchanged; `uv lock --check` and `git diff --check` clean.
+  Rollback: remove subcommands; generations stay on disk. [K-Atomic Skill Set Activation, Retention, and Rollback; S-Read-Only Boundary and CLI-Confined Mutation]
+
+- [ ] ~~9B (original)~~ CLI activation — `skill-activate`, `skill-rollback`, `skill-status`, `skill-prune`.** Thin CLI over the Unit 4A/4B primitives. `skill-status` lists active, retained, and unreferenced generations so disk growth is visible and operator-controlled.
 
   Files: `cli.py`, `tests/test_cli.py`.
   Estimate: 130 + 140 tests = **~270**.
