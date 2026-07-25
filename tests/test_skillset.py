@@ -20,7 +20,10 @@ from cerebro_router.skillset import (
     SkillSource,
     compile_skillset,
     generation_path,
+    list_generations,
+    open_skillset,
     promote_skillset,
+    prune_skillset,
     read_active,
     recover_skillset,
     rollback_skillset,
@@ -660,3 +663,117 @@ def test_recovery_skips_a_generation_that_merely_expired(tmp_path: Path) -> None
     _promote(aging, pointer)
     recovered = _lifecycle(recover_skillset, pointer, today=date(2026, 9, 1))
     assert recovered.path == fresh
+
+
+# --- degraded serve and prune -------------------------------------------------------------------
+
+
+def _open(pointer: Path, **kwargs: Any):
+    kwargs.setdefault("today", TODAY)
+    return open_skillset(pointer, ROOTS, kwargs.pop("approvals", APPROVALS), **kwargs)
+
+
+def test_a_healthy_pointer_serves_the_active_skill_set(tmp_path: Path) -> None:
+    pointer = tmp_path / "active.json"
+    promoted = _promote(_built(tmp_path, "one"), pointer)
+    status = _open(pointer)
+    assert status.warning is None
+    assert status.build_id == promoted.build_id
+    assert status.skill_set.skill_ids == ("design.ui-review",)
+
+
+def test_a_missing_pointer_means_inactive_not_broken(tmp_path: Path) -> None:
+    status = _open(tmp_path / "active.json")
+    assert (status.skill_set, status.build_id, status.warning) == (None, None, None)
+
+
+@pytest.mark.parametrize(
+    ("break_it", "code"),
+    [
+        (lambda p, g: p.write_text("{not json"), "invalid_active_pointer"),
+        (lambda p, g: p.write_text(json.dumps(
+            {"version": 1, "active": {"skillset": "../escape.json", "build_id": "x"}, "retained": []}
+        )), "invalid_active_pointer"),
+        (lambda p, g: p.write_text(json.dumps(
+            {"version": 1, "active": {"skillset": "absent.json", "build_id": "x"}, "retained": []}
+        )), "invalid_active_target"),
+        (lambda p, g: g.write_bytes(b"{not a generation"), "malformed_pack"),
+    ],
+)
+def test_a_broken_pointer_degrades_with_a_typed_warning(tmp_path: Path, break_it, code: str) -> None:
+    pointer = tmp_path / "active.json"
+    generation = _built(tmp_path, "one")
+    _promote(generation, pointer)
+    break_it(pointer, generation)
+    status = _open(pointer)
+    assert status.skill_set is None and status.build_id is None
+    assert status.warning == f"skillset_unreadable:{code}"
+
+
+def test_a_dangling_symlink_pointer_is_broken_not_absent(tmp_path: Path) -> None:
+    # Path.exists follows the link and answers False, which would report a corrupted deployment as a
+    # layer that was never activated. The distinction is the whole point of the status type.
+    pointer = tmp_path / "active.json"
+    pointer.symlink_to(tmp_path / "nowhere.json")
+    status = _open(pointer)
+    assert status.skill_set is None
+    assert status.warning == "skillset_unreadable:invalid_active_pointer"
+
+
+def test_an_expired_active_degrades_rather_than_raising(tmp_path: Path) -> None:
+    pointer = tmp_path / "active.json"
+    _promote(_built(tmp_path, "one"), pointer)
+    assert _open(pointer, today=date(2030, 1, 1)).warning == "skillset_unreadable:expired_pack"
+
+
+def test_inventory_separates_active_retained_and_unreferenced(tmp_path: Path) -> None:
+    pointer = tmp_path / "active.json"
+    built = [_built(tmp_path, str(n), maintainer=f"M{n}") for n in range(4)]
+    for candidate in built:
+        _promote(candidate, pointer)
+    inventory = list_generations(pointer)
+    assert inventory.active == built[3]
+    assert set(inventory.retained) == {built[2], built[1]}
+    assert inventory.unreferenced == (built[0],)
+
+
+def test_prune_removes_only_unreferenced_generations(tmp_path: Path) -> None:
+    pointer = tmp_path / "active.json"
+    built = [_built(tmp_path, str(n), maintainer=f"M{n}") for n in range(4)]
+    for candidate in built:
+        _promote(candidate, pointer)
+    assert prune_skillset(pointer) == (built[0],)
+    assert not built[0].exists()
+    assert all(candidate.exists() for candidate in built[1:])
+    assert _open(pointer).build_id is not None
+
+
+def test_prune_is_idempotent(tmp_path: Path) -> None:
+    pointer = tmp_path / "active.json"
+    _promote(_built(tmp_path, "one"), pointer)
+    _promote(_built(tmp_path, "two", maintainer="Second"), pointer)
+    assert prune_skillset(pointer) == ()
+    assert prune_skillset(pointer) == ()
+
+
+def test_prune_refuses_to_delete_without_a_readable_pointer(tmp_path: Path) -> None:
+    # The dangerous case. Without a readable pointer nothing can be known to be unreferenced, so the
+    # only safe delete list is the empty one -- and reporting that as "pruned nothing" would be a
+    # lie, so it fails closed instead.
+    pointer = tmp_path / "active.json"
+    orphan = _built(tmp_path, "one")
+    assert _code(prune_skillset, pointer) == "no_active_skillset"
+    assert orphan.exists()
+    _promote(orphan, pointer)
+    pointer.write_text("{not json")
+    assert _code(prune_skillset, pointer) == "invalid_active_pointer"
+    assert orphan.exists()
+
+
+def test_prune_ignores_files_outside_the_naming_convention(tmp_path: Path) -> None:
+    pointer = tmp_path / "active.json"
+    _promote(_built(tmp_path, "one"), pointer)
+    bystander = tmp_path / "notes.json"
+    bystander.write_text("{}")
+    assert prune_skillset(pointer) == ()
+    assert bystander.exists()

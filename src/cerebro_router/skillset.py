@@ -495,8 +495,106 @@ def read_active(pointer: Path) -> tuple[Path, str]:
     return path, entry["build_id"]
 
 
+@dataclass(frozen=True)
+class SkillSetStatus:
+    """The result of trying to open the active skill set. Three distinguishable states, because
+    conflating them is how a broken deployment gets reported as an empty one: `skill_set` present
+    means dispatch is live; both fields absent with no warning means the layer was never activated
+    and is simply inactive; a `warning` means a pointer IS present but unusable."""
+
+    skill_set: SkillSet | None
+    build_id: str | None
+    warning: str | None
+
+
+@dataclass(frozen=True)
+class GenerationInventory:
+    active: Path | None
+    retained: tuple[Path, ...]
+    unreferenced: tuple[Path, ...]
+
+
+def open_skillset(
+    pointer: Path,
+    trust_roots: dict[str, str],
+    approvals: Mapping[str, str],
+    *,
+    today: date | None = None,
+    router_version: str = "0.1.0",
+    minimum_versions: dict[str, str] | None = None,
+) -> SkillSetStatus:
+    """Open the active skill set for serving. NEVER raises.
+
+    Skill dispatch is an addition to Cerebro, not a precondition for it, so a broken skills layer
+    must degrade to "no skills" and must never take down `serve`, `doctor`, or corpus retrieval. The
+    failure is reported as a typed `skillset_unreadable:<code>` warning that keeps the underlying
+    cause visible rather than swallowing it.
+
+    A dangling symlink is treated as a BROKEN pointer, not an absent one: `Path.exists` follows the
+    link and would answer False, which would report a corrupted deployment as a layer that was simply
+    never activated -- the one confusion this function exists to prevent."""
+    if not pointer.exists() and not pointer.is_symlink():
+        return SkillSetStatus(None, None, None)
+    try:
+        value = _read_pointer(pointer)
+        path, raw = _entry_bytes(pointer, value["active"])
+        result = validate_skillset_bytes(
+            raw,
+            trust_roots,
+            approvals,
+            today=today,
+            router_version=router_version,
+            minimum_versions=minimum_versions,
+        )
+    except SkillSetError as error:
+        return SkillSetStatus(None, None, f"skillset_unreadable:{error.code}")
+    except OSError:
+        return SkillSetStatus(None, None, "skillset_unreadable:pointer_unreadable")
+    return SkillSetStatus(result.skill_set, result.build_id, None)
+
+
+def list_generations(pointer: Path) -> GenerationInventory:
+    """Inventory the generations on disk, split into active, retained, and unreferenced.
+
+    Evicted generations are deliberately NOT garbage collected, matching `index.py` rather than
+    diverging from it, so disk growth stays visible and operator-controlled instead of silent.
+
+    Only files matching the `skillset-*.json` naming convention are considered, and never symlinks.
+    That is a safety property, not an oversight: an inventory that swept every file in `data_dir`
+    would hand `prune_skillset` a delete list containing things it never created.
+
+    Raises rather than returning an empty inventory when the pointer is missing or unreadable. A
+    caller cannot know what is referenced without a readable pointer, and the only safe answer to
+    "what may I delete?" in that state is nothing at all."""
+    if not pointer.exists() and not pointer.is_symlink():
+        raise SkillSetError("no_active_skillset")
+    value = _read_pointer(pointer)
+    active = pointer.parent / value["active"]["skillset"]
+    retained = tuple(pointer.parent / item["skillset"] for item in value["retained"])
+    referenced = {active.name, *(item.name for item in retained)}
+    unreferenced = tuple(sorted(
+        item for item in pointer.parent.glob("skillset-*.json")
+        if item.is_file() and not item.is_symlink() and item.name not in referenced
+    ))
+    return GenerationInventory(active, retained, unreferenced)
+
+
+@serialized(0)
+def prune_skillset(pointer: Path) -> tuple[Path, ...]:
+    """Delete every unreferenced generation and return what was removed.
+
+    Serialized on the pointer so a promotion cannot retain a generation between the moment the
+    inventory is taken and the moment the file is unlinked."""
+    unreferenced = list_generations(pointer).unreferenced
+    for path in unreferenced:
+        path.unlink()
+    return unreferenced
+
+
 __all__ = [
     "MAX_SKILLSET_BYTES",
+    "GenerationInventory",
+    "SkillSetStatus",
     "Generation",
     "GenerationPack",
     "SkillSetActivation",
@@ -505,7 +603,10 @@ __all__ = [
     "ValidatedSkillSet",
     "compile_skillset",
     "generation_path",
+    "list_generations",
+    "open_skillset",
     "promote_skillset",
+    "prune_skillset",
     "read_active",
     "recover_skillset",
     "rollback_skillset",

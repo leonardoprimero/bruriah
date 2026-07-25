@@ -149,11 +149,20 @@ Apply to every unit without exception.
   Verification (all passed): 679 → **689 passed** (+10); `verify_legacy_baseline.py` `status: pass`, `errors: []`; pins 3c83d9eb / 03e9f3c5 unchanged; `uv lock --check` clean; `git diff --check` clean.
   Rollback: delete the two functions; promotion from 4A.2 is unaffected. [K-Atomic Skill Set Activation, Retention, and Rollback; D-Atomic Skill-Set Replacement and Recovery 6]
 
-- [ ] **4B.2. Degraded serve and prune.** A missing pointer means the layer is simply inactive; an invalid or unreadable pointer disables dispatch with a typed `skillset_unreadable:<code>` warning and MUST NEVER fail `serve`, `doctor`, or corpus retrieval. Evicted generations are deliberately NOT garbage-collected (matching `index.py` rather than diverging); they are listed and removed only by explicit prune.
+- [x] **4B.2. Degraded serve and prune.** DONE 2026-07-25. `open_skillset` returns a `SkillSetStatus` and NEVER raises; `list_generations` inventories active / retained / unreferenced; `prune_skillset` deletes only the unreferenced ones, serialized on the pointer.
 
-  Files: `skillset.py`, `tests/test_skillset.py`.
-  Estimate: 80 + 145 tests = **~225**.
-  Verification: unreadable pointer degrades rather than failing serve; prune deletes only unreferenced generations and refuses to touch active or retained ones.
+  Files: `skillset.py` (514 → 615), `tests/test_skillset.py` (662 → 779).
+  Estimate: 80 + 145 tests = **~225**. **Actual: 218** (+101 impl, +117 tests) — 0.97x. Calibration across eight units: 2.1x → 1.5x → 1.13x → 0.89x → 1.6x → 1.2x → 0.64x → 0.97x.
+
+  Implementation notes:
+  - **`SkillSetStatus` distinguishes THREE states, not two.** `skill_set` present means dispatch is live; both fields absent with no warning means the layer was never activated and is simply inactive; a `warning` means a pointer IS present but unusable. Collapsing the last two is how a broken deployment gets reported as an empty one.
+  - **A dangling symlink pointer is BROKEN, not absent.** `Path.exists` follows the link and answers `False`, which would have reported a corrupted deployment as a layer that was never activated — the exact confusion the status type exists to prevent. Guarded with `not pointer.exists() and not pointer.is_symlink()` and pinned by its own test.
+  - **`list_generations` raises rather than returning an empty inventory when the pointer is missing or unreadable.** Nothing can be known to be unreferenced without a readable pointer, and the only safe answer to "what may I delete?" in that state is nothing at all. This is the fail-closed gate on the one function in this module that deletes files.
+  - Only `skillset-*.json` files are inventoried, never symlinks. That is a safety property, not an oversight — see the probe below.
+
+  **Falsifiability probes: three run, and one exposed a latent disaster.** (1) Making `list_generations` treat "no pointer" as "nothing referenced" failed `test_prune_refuses_to_delete_without_a_readable_pointer` AND deleted the orphan generation, confirming the fail-closed gate is the only thing standing between a missing pointer and data loss. (2) Dropping the `is_symlink` guard failed exactly the dangling-symlink test. (3) **Widening the inventory glob from `skillset-*.json` to `*.json` failed four tests, because it swept `active.json` — the POINTER ITSELF — into the delete list.** A broad glob would have made `prune_skillset` destroy the pointer it was pruning against. The naming convention is load-bearing, not cosmetic. All reverted.
+
+  Verification (all passed): 689 → **702 passed** (+13); `verify_legacy_baseline.py` `status: pass`, `errors: []`; pins 3c83d9eb / 03e9f3c5 unchanged; `uv lock --check` clean; `git diff --check` clean.
   Rollback: revert; generations remain on disk and readable. [K-Atomic Skill Set Activation, Retention, and Rollback; D-Atomic Skill-Set Replacement and Recovery 7-8]
 
 ### Dispatch path
