@@ -8,18 +8,20 @@ import os
 import stat
 import sys
 from array import array
-from datetime import date
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
 import anyio
 import platformdirs
 import pytest
-from cerebro_router import cli, clients
+from cerebro_router import cache, cli, clients
+from cerebro_router.contracts import EvidenceRecord
 from cerebro_router.platform import resolve_paths
 from mcp.shared.memory import create_connected_server_and_client_session
 
 # Pinned so the doctor freshness check is deterministic, not a wall-clock time bomb.
 _TODAY = date(2026, 7, 23)
+_NOW = datetime(2026, 7, 23, 12, 0, 0, tzinfo=timezone.utc)  # pinned: cache-stats freshness too
 _FINGERPRINT = (
     '{"artifact":"model.onnx","artifact_sha256":"' + "a" * 64
     + '","pooling":"mean","runtime":"fastembed==0.8.0","snapshot":"snapshot-a","source":"example/model"}'
@@ -52,6 +54,29 @@ def _paths(tmp_path: Path):
         cli_config_dir=tmp_path / "config", cli_data_dir=tmp_path / "data",
         cli_cache_dir=tmp_path / "cache", cli_log_dir=tmp_path / "log", env={},
     )
+
+
+def _evidence_for_cache(**overrides: object) -> EvidenceRecord:
+    """Minimal `EvidenceRecord` for driving `cache.write_cache_atomic` directly in doctor tests
+    (Slice 12D) -- mirrors `test_cache.py`'s own `_evidence` helper."""
+    payload = dict(
+        ref="live:sha256:" + "a" * 32, kind="captured_live", publisher="example.test",
+        locator="https://example.test:443/page", citation_locator="https://example.test:443/page",
+        digest="sha256:" + "b" * 64, extraction_method="raw_lines", authority="unknown",
+        authority_rationale="Live HTTP fetch.", freshness="unknown", license="unknown",
+        reuse="unknown", conflict="unknown", retrieved_at=_NOW,
+    )
+    payload.update(overrides)
+    return EvidenceRecord(**payload)
+
+
+def _write_cache_entry(cache_dir: Path, url: str, *, retrieved_at: datetime) -> None:
+    entry = cache.build_cache_entry(
+        _evidence_for_cache(retrieved_at=retrieved_at), retrieved_at=retrieved_at,
+        ttl=timedelta(hours=1), body=b"cached body content", max_excerpt_chars=1000,
+        policy_version="1.0.0",
+    )
+    cache.write_cache_atomic(cache_dir, url, entry)
 
 
 def test_end_to_end_init_index_serve_doctor(tmp_path: Path, capsys: pytest.CaptureFixture) -> None:
@@ -176,15 +201,35 @@ def test_init_client_manifest_failure_is_typed_not_bare(
 
 def test_doctor_is_read_only_and_reports_freshness(tmp_path: Path) -> None:
     paths = _paths(tmp_path)
-    uninitialized = cli.run_doctor(paths, today=_TODAY)
+    uninitialized = cli.run_doctor(paths, today=_TODAY, now=_NOW)
     assert uninitialized["healthy"] is False
     assert uninitialized["snapshot"] == {"status": "error", "code": "index_not_built"}
+    assert uninitialized["cache"] == {"entries": 0, "expired": 0, "total_bytes": 0}
 
     near_stale = date(2026, 8, 20)  # bundled pack reviewed 2026-07-23, freshness_days=30
-    warned = cli.run_doctor(paths, today=near_stale)
+    warned = cli.run_doctor(paths, today=near_stale, now=_NOW)
     assert warned["registry"]["status"] == "ok"
     assert any("goes stale" in warning for warning in warned["warnings"])
     assert not paths.data_dir.exists()  # doctor never creates the dir it only inspects
+    assert not paths.cache_dir.exists()  # doctor never creates the cache dir either
+
+
+def test_doctor_reports_cache_stats_read_only_never_deletes_an_expired_entry(tmp_path: Path) -> None:
+    """Slice 12D: `doctor` gains cache visibility but design.md's "`doctor` is read-only" holds --
+    it never calls `cache.prune_expired`, so even a genuinely expired entry survives untouched."""
+    paths = _paths(tmp_path)
+    _write_cache_entry(paths.cache_dir, "https://example.test:443/live", retrieved_at=_NOW)
+    expired_at = _NOW - timedelta(hours=5)  # ttl=1h -> expires_at = NOW-4h, already past `now=_NOW`
+    _write_cache_entry(paths.cache_dir, "https://example.test:443/expired", retrieved_at=expired_at)
+
+    before = {path.name for path in paths.cache_dir.iterdir()}
+    report = cli.run_doctor(paths, today=_TODAY, now=_NOW)
+    after = {path.name for path in paths.cache_dir.iterdir()}
+
+    assert after == before  # doctor deleted nothing
+    assert report["cache"]["entries"] == 2
+    assert report["cache"]["expired"] == 1
+    assert report["cache"]["total_bytes"] > 0
 
 
 def test_cli_dispatch_typed_errors_no_bare_exception(tmp_path: Path, capsys: pytest.CaptureFixture) -> None:

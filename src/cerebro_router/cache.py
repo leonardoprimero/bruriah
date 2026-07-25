@@ -22,12 +22,40 @@
 # final name, so no reader can ever observe a partially-written or over-permissioned file.
 # `now` is injectable everywhere TTL is evaluated, so expiry is deterministic under test, never a
 # wall-clock race.
+#
+# Slice 12D: deletion controls (closes 9B WARNING 2 -- "no cache deletion/retention"; the
+# lifecycle spec's "External Evidence and Cache Lifecycle" requires the cache be "governed by TTL
+# and deletion controls", not just TTL staleness detection). Two pieces, both typed-total and both
+# free of wall-clock reads:
+#   - `prune_expired` is the explicit deletion control: it removes an entry once it has genuinely
+#     expired (`now > expires_at`, the same condition `read_cache` already treats as a miss) OR
+#     its `expires_at` exceeds what any legitimate write under the given `ttl` could have produced
+#     (`expires_at - now > ttl`) -- a tamper/corruption ceiling, since a freshly built live entry
+#     can never claim more than `ttl` of remaining life. Corrupt/unreadable entries are always
+#     removed (nothing about them is auditable or bound-checkable). `doctor` (cli.py) never calls
+#     this -- it only calls the read-only `cache_stats` below, preserving "doctor is read-only".
+#   - `write_cache_atomic` self-bounds by sweeping for already-expired entries once after every
+#     successful write, deriving `now` ENTIRELY from the entry just written
+#     (`entry.evidence.retrieved_at` stands in for "now"). This needs zero new parameters and zero
+#     wall-clock, so the frozen `research.py` callsite (`write_cache_atomic(deps.cache_dir,
+#     canonical, entry)`) gets self-bounding for free. Only the plain-expiry direction
+#     (`retrieved_at > other.expires_at`) is used here -- NOT the tamper ceiling -- because
+#     `retrieved_at` is always a real PAST timestamp of one fetch among possibly concurrent or
+#     out-of-order writes; wall-clock time only advances, so if this write's own retrieved_at
+#     already exceeds another entry's `expires_at`, the true current time exceeds it too, and the
+#     removal can never be a false positive. The ceiling check requires an authoritative, operator-
+#     supplied `now`/`ttl` pair (an out-of-order write's own `ttl` says nothing about whether
+#     ANOTHER entry's expiry is plausible), so it is reserved for the explicit `prune_expired` call
+#     below. If `retrieved_at` is absent (the field is optional on `EvidenceRecord`) or not
+#     comparable, self-pruning is skipped for that write -- best-effort, never a hard failure of
+#     the write itself.
 from __future__ import annotations
 
 import hashlib
 import json
 import os
 import tempfile
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -63,6 +91,26 @@ class CacheLookup:
     hit: bool
     expired: bool
     entry: CacheEntry | None
+
+
+@dataclass(frozen=True)
+class PruneSummary:
+    """Result of one `prune_expired` sweep. `corrupt` is a subset of `removed` (every corrupt
+    entry found is also deleted); `bytes_reclaimed` counts freed disk space across all removals."""
+
+    scanned: int
+    removed: int
+    corrupt: int
+    bytes_reclaimed: int
+
+
+@dataclass(frozen=True)
+class CacheStats:
+    """Read-only visibility for `doctor` -- see `cache_stats`. Never deletes anything."""
+
+    entries: int
+    expired: int
+    total_bytes: int
 
 
 def cache_key(canonical_url: str) -> str:
@@ -115,7 +163,9 @@ def write_cache_atomic(cache_dir: Path, canonical_url: str, entry: CacheEntry) -
     """Write-temp-then-rename: a temp file created in the SAME directory (so `os.replace` is an
     atomic rename on one filesystem, never a cross-device copy) is written, chmod'd 0600, then
     atomically renamed onto the final content-addressed path. A reader can only ever observe the
-    prior complete entry or the new complete entry -- never a partial write."""
+    prior complete entry or the new complete entry -- never a partial write. After the write lands,
+    an opportunistic self-prune sweep runs (see `_self_prune_after_write`) so the cache is
+    self-bounding without any new parameter or wall-clock read."""
     cache_dir.mkdir(parents=True, exist_ok=True)
     if os.name == "posix":
         os.chmod(cache_dir, 0o700)
@@ -129,7 +179,94 @@ def write_cache_atomic(cache_dir: Path, canonical_url: str, entry: CacheEntry) -
     except BaseException:
         Path(tmp_name).unlink(missing_ok=True)
         raise
+    _self_prune_after_write(cache_dir, entry)
     return final_path
+
+
+def _unlink_quietly(path: Path) -> bool:
+    """Delete-if-possible, never raise: a concurrent deletion or transient OS error during a
+    best-effort sweep must not abort the sweep or, for `prune_expired`, escape untyped."""
+    try:
+        path.unlink()
+        return True
+    except OSError:
+        return False
+
+
+def _sweep_prunable(cache_dir: Path, is_prunable: Callable[[CacheEntry], bool]) -> PruneSummary:
+    """Shared typed-total core for both deletion paths: scan every `*.json` entry once, always
+    remove a corrupt/unreadable one, and remove a decodable one iff `is_prunable(entry)`. No
+    exception escapes a single bad or racing file."""
+    if not cache_dir.is_dir():
+        return PruneSummary(scanned=0, removed=0, corrupt=0, bytes_reclaimed=0)
+    scanned = removed = corrupt = bytes_reclaimed = 0
+    for path in sorted(cache_dir.glob("*.json")):
+        scanned += 1
+        try:
+            size = path.stat().st_size
+        except OSError:
+            continue
+        try:
+            entry = _decode(path.read_text(encoding="utf-8"))
+        except (CacheError, OSError):
+            corrupt += 1
+            if _unlink_quietly(path):
+                removed += 1
+                bytes_reclaimed += size
+            continue
+        if is_prunable(entry):
+            if _unlink_quietly(path):
+                removed += 1
+                bytes_reclaimed += size
+    return PruneSummary(scanned=scanned, removed=removed, corrupt=corrupt, bytes_reclaimed=bytes_reclaimed)
+
+
+def _self_prune_after_write(cache_dir: Path, entry: CacheEntry) -> PruneSummary | None:
+    """See module docstring "Slice 12D" for the monotonic-safety rationale. Returns `None` (skips
+    pruning for this write) when the entry carries no usable timestamp; this is a best-effort
+    maintenance step, never a reason to fail the write that just succeeded."""
+    retrieved_at = entry.evidence.retrieved_at
+    if retrieved_at is None:
+        return None
+    try:
+        return _sweep_prunable(cache_dir, lambda other: retrieved_at > other.expires_at)
+    except TypeError:
+        return None
+
+
+def prune_expired(cache_dir: Path, *, now: datetime, ttl: timedelta) -> PruneSummary:
+    """Explicit deletion control -- see module docstring "Slice 12D". An entry is removed once it
+    has genuinely expired (`now > expires_at`, the same condition `read_cache` already treats as a
+    miss) or its `expires_at` is implausibly far in the future for the given `ttl`
+    (`expires_at - now > ttl`, a tamper/corruption ceiling that a legitimately built live entry can
+    never trip, since `build_cache_entry` never grants more than `ttl` of remaining life). Corrupt
+    or unreadable entries are always removed. Typed-total throughout."""
+    return _sweep_prunable(cache_dir, lambda entry: now > entry.expires_at or entry.expires_at - now > ttl)
+
+
+def cache_stats(cache_dir: Path, *, now: datetime) -> CacheStats:
+    """Read-only visibility for `doctor` (design.md: "`doctor` is read-only"). Scans without ever
+    deleting, decoding into pruning decisions, or otherwise modifying a file -- `doctor` MUST NOT
+    delete anything; a separate explicit action would be required to expose `prune_expired` via the
+    CLI, and none is added here. A corrupt entry still occupies disk space, so it is counted in
+    `entries`/`total_bytes` even though it can never be validated as expired or live."""
+    if not cache_dir.is_dir():
+        return CacheStats(entries=0, expired=0, total_bytes=0)
+    entries = expired = total_bytes = 0
+    for path in sorted(cache_dir.glob("*.json")):
+        try:
+            size = path.stat().st_size
+        except OSError:
+            continue
+        entries += 1
+        total_bytes += size
+        try:
+            entry = _decode(path.read_text(encoding="utf-8"))
+        except CacheError:
+            continue
+        if now > entry.expires_at:
+            expired += 1
+    return CacheStats(entries=entries, expired=expired, total_bytes=total_bytes)
 
 
 def read_cache(cache_dir: Path, canonical_url: str, *, now: datetime) -> CacheLookup:
@@ -177,6 +314,7 @@ def build_cache_entry(
 
 
 __all__ = [
-    "CacheEntry", "CacheError", "CacheLookup", "ReuseState", "build_cache_entry", "cache_key",
-    "read_cache", "write_cache_atomic",
+    "CacheEntry", "CacheError", "CacheLookup", "CacheStats", "PruneSummary", "ReuseState",
+    "build_cache_entry", "cache_key", "cache_stats", "prune_expired", "read_cache",
+    "write_cache_atomic",
 ]

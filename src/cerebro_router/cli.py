@@ -9,7 +9,7 @@ import sys
 import uuid
 from array import array
 from collections.abc import Callable
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
 import anyio
@@ -17,7 +17,7 @@ import mcp.server.stdio
 import yaml
 from fastembed import TextEmbedding
 
-from . import clients
+from . import cache, clients
 from .corpus import CorpusPolicy, CorpusPolicyError
 from .index import BuildConfig, BuildResult, Embedder, IndexLifecycleError, build_candidate, promote_candidate
 from .mcp_server import build_server
@@ -31,6 +31,9 @@ from .service import ServiceDeps
 # `_embedding_fingerprint`/`main` below stay unchanged (Slice-3 entry point, imported by name).
 # Slice 12B-2: `init` now also renders and writes all six `clients.py` client configs (see
 # `_build_launch_manifest`/`run_client_configs` below) under a private `clients/` subdir.
+# Slice 12D: `doctor` now also reports READ-ONLY cache stats (entry count, expired count, total
+# bytes) via `cache.cache_stats` -- design.md's "`doctor` is read-only" is preserved: `doctor`
+# never calls `cache.prune_expired`; no mutating prune is exposed via this CLI at all.
 EmbedderFactory = Callable[[str], tuple[Embedder, str, int]]
 
 
@@ -159,11 +162,16 @@ def run_index(
 _FRESHNESS_WARNING_DAYS = 7
 
 
-def run_doctor(paths: PlatformPaths, *, today: date | None = None) -> dict[str, object]:
-    """Read-only: resolved dirs, registry load, snapshot open. Never creates/writes anything.
+def run_doctor(
+    paths: PlatformPaths, *, today: date | None = None, now: datetime | None = None,
+) -> dict[str, object]:
+    """Read-only: resolved dirs, registry load, snapshot open, cache stats. Never creates/writes
+    anything -- including the cache: `cache.cache_stats` only reads (never calls
+    `cache.prune_expired`), so a mutating prune stays out of `doctor` entirely (Slice 12D).
     Adds an early WARNING within `_FRESHNESS_WARNING_DAYS` of pack staleness; the hard
     fail-closed staleness/expiry check in `load_registry` itself is unchanged."""
     effective_today = today or date.today()
+    effective_now = now or datetime.now(timezone.utc)
     report: dict[str, object] = {
         "config_dir": str(paths.config_dir), "data_dir": str(paths.data_dir),
         "dirs_exist": {
@@ -187,6 +195,10 @@ def run_doctor(paths: PlatformPaths, *, today: date | None = None) -> dict[str, 
         report["snapshot"] = {"status": "ok", "build_id": snapshot.build_id}
     except PlatformError as error:
         report["snapshot"] = {"status": "error", "code": error.code}
+    stats = cache.cache_stats(paths.cache_dir, now=effective_now)
+    report["cache"] = {
+        "entries": stats.entries, "expired": stats.expired, "total_bytes": stats.total_bytes,
+    }
     report["healthy"] = (
         report["registry"].get("status") == "ok" and report["snapshot"].get("status") == "ok"
     )

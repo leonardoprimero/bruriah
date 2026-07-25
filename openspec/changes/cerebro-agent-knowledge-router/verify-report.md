@@ -1,3 +1,134 @@
+## Verification Report — Slice 12D (`cache.py` deletion controls, `cli.py` doctor cache stats) — FINAL SLICE
+
+**Change**: cerebro-agent-knowledge-router · **Boundary**: 9B WARNING 2 closure ("no cache deletion/retention controls") — `cerebro-retrieval/src/cerebro_router/cache.py` (+141/-3: `prune_expired`, `cache_stats`, self-bounding `write_cache_atomic`), `cli.py` (+16/-4: `doctor` reports read-only cache stats), `tests/test_cache.py` (+123/-2), `tests/test_cli.py` (+49/-4), `docs/cutover.md` (+197, new). **Date**: 2026-07-24 (post-completion evening) · **Run**: independent, fresh-context, adversarial verification (did not author the code). **Mode**: Standard (no Strict TDD cache found for this project at verify time).
+
+**HEAD discrepancy (correction to the verify brief)**: the brief cited `ca1072e` as 12D's HEAD, but `ca1072e` is actually the **12C** commit ("add the evaluation gate-matrix harness" — `evaluation.py`/`evals/*.jsonl`). 12D's four changed files (`cache.py`, `cli.py`, `test_cache.py`, `test_cli.py`) are **uncommitted working-tree modifications on top of `ca1072e`**, plus one new untracked file (`docs/cutover.md`). This matches the same pattern 12C itself used relative to `e35ef68` (staged/uncommitted-at-verify-time, committed afterward), so it is not itself anomalous — but it must be corrected before archive: 12D needs its own commit. Flagged as WARNING below.
+
+### Verdict
+**PASS WITH WARNINGS.** Zero CRITICAL findings — the sharp edge (self-prune out-of-order safety) holds under direct adversarial construction, and `doctor` is provably read-only. Two WARNINGs (process/coverage, not correctness) below.
+
+### Frozen-Context Constraints
+| Check | Result |
+|---|---|
+| `git diff --numstat ca1072e -- cerebro-retrieval/` shows ONLY cache.py/cli.py/test_cache.py/test_cli.py (+docs/cutover.md untracked) | ✅ confirmed — `git status --short` shows exactly these 4 modified + 1 new untracked (`docs/cutover.md`); `.gitignore` modified is outside `cerebro-retrieval/` |
+| All 16 named frozen modules (`research`, `service`, `mcp_server`, `context`, `evidence`, `platform`, `clients`, `evaluation`, `contracts`, `packs`, `registries`, `route`, `classify`, `lookup`, `retrieval`, `index`) `git diff ca1072e -- <path>` | ✅ EMPTY for all 16 in one combined `git diff` invocation (0 lines output) — `research.py` (the frozen caller of `write_cache_atomic`) confirmed byte-identical |
+| `uv.lock` sha256 | ✅ `3c83d9eb87c9e5e94dcd5ae850339da9c29aa567292773c4d9e093795f4f2bc8` — matches expected exactly |
+| `uv lock --check` | ✅ `Resolved 78 packages in 3ms` |
+| `pyproject.toml`/`uv.lock` byte-identical vs `ca1072e` | ✅ `git diff ca1072e -- pyproject.toml uv.lock` → empty |
+| `scripts/verify_legacy_baseline.py` before AND after full suite run | ✅ `status: "pass"`, `errors: []` both times (first attempt hit a transient `sqlite3.OperationalError: database is locked` from an unrelated, independently-running `cerebro.py index` reindex process (`reindex.sh`, PID 18276) holding a write lock on the legacy `cerebro.db` — NOT caused by this diff; retried after that process released the lock and it passed cleanly) |
+| `git diff --check ca1072e -- .` | ✅ clean, exit 0 |
+| AST parse of all `src/cerebro_router/*.py` + `tests/*.py` | ✅ all parse cleanly |
+| `pip_audit --skip-editable` | ✅ "No known vulnerabilities found" (only editable `cerebro-router` itself skipped, expected) |
+
+Locked external interpreter used for all execution: fresh `UV_PROJECT_ENVIRONMENT=<scratchpad>/verify12d-venv uv sync --locked` (78 packages) — the registered `cerebro-retrieval/.venv` was never touched.
+
+### Test Execution Evidence
+```text
+$ UV_PROJECT_ENVIRONMENT=<scratchpad>/verify12d-venv uv sync --locked
+Resolved 78 packages ... (78 packages installed into an isolated venv)
+
+$ uv lock --check
+Resolved 78 packages in 3ms
+
+$ python scripts/verify_legacy_baseline.py   # AFTER (first attempt transiently DB-locked, unrelated process)
+{"status": "pass", "errors": [], "lock": {"sha256": "3c83d9eb87c9e5e94dcd5ae850339da9c29aa567292773c4d9e093795f4f2bc8", ...}, ...}
+
+$ python -m pytest tests -q -p no:randomly
+........................................................................ [ 15%]
+........................................................................ [ 31%]
+........................................................................ [ 47%]
+........................................................................ [ 62%]
+........................................................................ [ 78%]
+........................................................................ [ 94%]
+..........................                                               [100%]
+458 passed in 26.85s
+
+$ python -m pip_audit --skip-editable
+No known vulnerabilities found
+
+$ git diff --check ca1072e -- .
+(exit 0, no output)
+```
+
+### Adversarial Check #1 — Self-prune out-of-order safety (the sharpest edge)
+Constructed a standalone probe (`/private/tmp/.../scratchpad/probe_12d.py`) directly against the real `cache.py` functions, reproducing the exact scenario the brief demands:
+
+1. Write entry **B** first: `retrieved_at=T+2h`, `ttl=5h` → `expires_at=T+7h` (long-lived, still live).
+2. Write entry **A** second, **out of order**: `retrieved_at=T` (older than B), `ttl=1h` → `expires_at=T+1h`. A's own write-path self-prune runs using `retrieved_at=T` as the "now" proxy.
+
+**Result**: B survives (`retrieved_at(A)=T` is NOT `> B.expires_at=T+7h`), A also survives (not self-evicting), confirming the monotonic-safe direction (`this_write.retrieved_at > other.expires_at`) is exactly what's implemented (`cache.py:232`) — never the tamper ceiling (`expires_at - now > ttl`, reserved for `prune_expired` alone, `cache.py:244`). A reverse control (a later write at `T+10h`, past both A's and B's real expiry) correctly swept both, confirming the mechanism does work forward-in-time. Raw probe output:
+```
+B written: retrieved_at=2026-07-24 14:00:00+00:00 expires_at=2026-07-24 19:00:00+00:00
+A written: retrieved_at=2026-07-24 12:00:00+00:00 expires_at=2026-07-24 13:00:00+00:00
+PASS: out-of-order older write (A) did NOT evict the live newer entry (B).
+C written: retrieved_at=2026-07-24 22:00:00+00:00 expires_at=2026-07-24 23:00:00+00:00
+PASS: forward-in-time write correctly swept both now-expired A and B.
+ALL PROBE ASSERTIONS PASSED
+```
+Mathematical soundness also confirmed by inspection: since `A.retrieved_at < B.retrieved_at ≤ B.expires_at` whenever B is out-of-order-older relative to A and `ttl ≥ 0`, `A.retrieved_at > B.expires_at` can never hold — the safety property is structurally guaranteed, not incidental. **No CRITICAL finding.**
+
+**Coverage gap (WARNING, not a correctness defect)**: the shipped `test_cache.py` does NOT contain an explicit, named test for this exact out-of-order-older-write-must-not-evict-live-newer-entry scenario. `test_write_cache_atomic_self_prunes_expired_entries_on_a_later_write` (line 227) only exercises the forward-chronological direction. The property IS incidentally exercised by `test_cli.py`'s `test_doctor_reports_cache_stats_read_only_never_deletes_an_expired_entry` (writes a live entry, then an older/expired entry, and the live one survives) but that test's stated purpose is doctor-read-only, not self-prune-safety, and it doesn't assert the newer entry stays specifically because of the monotonic-safety property. Given the code comment itself (`cache.py:42-48`) calls this out as the entire safety argument for the design, it deserves its own explicit regression test. **Recommend**: add `test_write_cache_atomic_self_prune_does_not_evict_live_entry_on_out_of_order_older_write` to `test_cache.py` mirroring the probe above.
+
+### Adversarial Check #2 — `doctor` is read-only (design hard constraint)
+Static: `run_doctor` (`cli.py:165-205`) calls only `cache.cache_stats(paths.cache_dir, now=effective_now)` (line 198); `cache.prune_expired` is never imported, referenced, or reachable from any CLI subcommand (`init`/`index`/`serve`/`doctor` are the only four subparsers — `cli.py:356-364`). Confirmed via bytecode inspection: `prune_expired` does not appear in `run_doctor.__code__.co_names`.
+
+Dynamic: standalone probe (`probe_12d_doctor.py`) wrote a genuinely expired entry (`ttl=1min`, queried at `now=T+365d`), then called `cache_stats` (doctor's exact call path) and asserted the file **still exists on disk** afterward:
+```
+cache_stats: entries=1 expired=1 total_bytes=865
+PASS: doctor (cache_stats) reported the entry as expired but did NOT delete it.
+PASS: run_doctor's compiled code never references cache.prune_expired by name.
+ALL DOCTOR-READ-ONLY ASSERTIONS PASSED
+```
+Also confirmed via the shipped `test_cli.py::test_doctor_reports_cache_stats_read_only_never_deletes_an_expired_entry` (passed in the 458-test run), which snapshots the cache directory's file set before/after `run_doctor` and asserts `after == before`. **No CRITICAL finding.**
+
+### Adversarial Check #3 — `prune_expired` correctness
+All four properties directly tested and passing in the real suite: `test_prune_expired_keeps_a_live_entry` (live survives), `test_prune_expired_removes_an_entry_past_its_ttl` (`now > expires_at` removed), `test_prune_expired_removes_an_entry_with_an_implausible_future_expiry` (tamper ceiling `expires_at - now > ttl` removed, distinct code path from #1's monotonic direction — confirmed NOT reused on the write path), `test_prune_expired_is_typed_total_on_a_corrupt_entry` (corrupt entry removed, typed via `except (CacheError, OSError)` in `_sweep_prunable`, `cache.py:211`), `test_prune_expired_missing_cache_dir_returns_zero_summary` (`cache_dir.is_dir()` guard, `cache.py:200-201`, zero summary no exception). `now`/`ttl` are both required keyword-only injected parameters (`cache.py:237`) — no wall-clock read anywhere in `prune_expired`. **No CRITICAL finding.**
+
+### Adversarial Check #4 — Self-bounding growth
+`test_write_cache_atomic_self_prunes_expired_entries_on_a_later_write` writes two real on-disk entries in sequence with advancing `retrieved_at`; the first is swept on the second write, leaving exactly one file (`cache_dir.iterdir()` asserted as a single-element set). This is a real filesystem test, not a toy/mock. Note: this demonstrates bounding for one advancing pair, not an N-write stress scenario — acceptable as unit coverage but a stronger multi-write growth-bound test would be a nice-to-have (SUGGESTION, not required).
+
+### Adversarial Check #5 — `research.py` stays byte-frozen
+`git diff ca1072e -- cerebro-retrieval/src/cerebro_router/research.py` → empty. The self-prune sweep is invoked entirely from inside `write_cache_atomic` (`cache.py:182`); `research.py`'s call site `write_cache_atomic(deps.cache_dir, canonical, entry)` needed zero changes to gain self-bounding. Confirmed.
+
+### Adversarial Check #6 — Typed-total (no untyped exception escape)
+- `_decode`: catches `json.JSONDecodeError`, and `(KeyError, TypeError, ValueError, ValidationError)` around pydantic validation — both paths raise typed `CacheError("corrupt_cache_entry")`.
+- `_unlink_quietly`: catches `OSError` only, never raises.
+- `_sweep_prunable` (shared core for both `prune_expired` and the write-path self-prune): catches `(CacheError, OSError)` around decode, `OSError` around `path.stat()`.
+- `_self_prune_after_write`: catches `TypeError` (naive/aware datetime comparison mismatch) and returns `None` rather than failing the write.
+- `cache_stats`: catches `CacheError` around decode, `OSError` around `path.stat()`.
+No bare `except Exception`/bare `except:` found anywhere in `cache.py`'s new code (grep-confirmed). **No CRITICAL finding** — closes the recurring untyped-escape defect class the brief references.
+
+### Adversarial Check #7 — Private permissions preserved
+`write_cache_atomic` unchanged in its chmod sequence: temp file `0600` before `os.replace` (`cache.py:177-178`), `cache_dir` `0700` on every write (`cache.py:170-171`). `prune_expired`/`_sweep_prunable`/self-prune only ever `unlink()` — no new file/dir creation requiring permission handling. `test_cache_file_written_with_0600_permissions` (passing) confirms both. **No CRITICAL finding.**
+
+### Adversarial Check #8 — `docs/cutover.md` honesty
+Read the full 197-line document. Confirmed:
+- Explicitly states (§0, line 6-7): "this change does not perform the actual cutover... does not retire the legacy MCP or the Graphify runtime."
+- §2 accurately restates 12C's `pass`/`fail`/`not_validated` semantics and gives the real, honest cell breakdown from a single-host run (own OS `pass`, other OSes/clients `not_validated`, domain end-to-end `not_validated` because claim formation isn't wired into `investigate()`) — no upgrade of `not_validated` to `pass` anywhere.
+- §5 rollback: restores prior client config/registration without rebuild, reindex, or touching the candidate's own cache/logs; explicitly notes `rollback_rehearsal_config_first` currently reports `not_validated` until a live client config is rehearsed — no over-claim.
+- §6 "what this change does not do" is an explicit non-goals list matching the design's constraints.
+No over-claiming language found anywhere (no "already cut over," no "validated" language applied to unrun platforms/clients). **No CRITICAL finding.**
+
+### Adversarial Check #9 — No synthetic-fixture-masks-real-data
+All `prune_expired`/`cache_stats`/self-prune tests in `test_cache.py` and `test_cli.py` call `write_cache_atomic` to create real on-disk `.json` cache entries (real sha256 digests via `EvidenceRecord`, real ISO timestamps, real file sizes read via `path.stat()`), then invoke the functions under test against that real filesystem state — no monkeypatched decode, no injected fake `CacheEntry` objects bypassing the on-disk format (`dataclasses.replace` in `test_prune_expired_removes_an_entry_with_an_implausible_future_expiry` mutates only `expires_at` on an otherwise real entry before writing it for real). **No CRITICAL finding.**
+
+### Issues
+
+**CRITICAL**: None.
+
+**WARNING 1 — Slice not yet committed.** 12D's four changed files exist only as uncommitted working-tree modifications on top of `ca1072e` (12C's commit); `docs/cutover.md` is untracked. This is the FINAL slice of the change — commit it (with `size:exception` not required, since the diff is 342 changed lines, under the 400-line review budget) before running `sdd-archive`.
+
+**WARNING 2 — Missing explicit out-of-order-safety regression test.** The single most safety-critical property of the write-path self-prune (an older out-of-order write must never evict a still-live newer entry) is proven correct by this verification's standalone probe and by inspection, and is incidentally covered by a doctor-focused test, but has no dedicated, explicitly-named test in `test_cache.py`. Recommend adding one (see Check #1) before archive, since this is exactly the kind of invariant that silently regresses under future refactors without a named test protecting it.
+
+**SUGGESTION 1**: A multi-write (3+) growth-bound stress test for `write_cache_atomic`'s self-prune would strengthen Check #4's evidence beyond the current two-entry case (nice-to-have, not blocking).
+
+**SUGGESTION 2**: Consider exposing `prune_expired` as an explicit opt-in CLI verb (e.g., `cerebro-mcp prune`) in a future slice, since today the only way to force a full sweep is indirectly via new writes or by calling the library function directly — `doctor`'s intentional read-only design is correct, but there is currently no CLI-level explicit deletion control at all, only the implicit write-path self-bound. (This does not violate any spec requirement found — the design explicitly keeps `doctor` read-only and 9B WARNING 2 only required *some* deletion control to exist, which `prune_expired` satisfies as a library-level control.)
+
+### Next Recommended
+`sdd-archive` — after resolving WARNING 1 (commit the slice). WARNING 2 is recommended but not strictly blocking, since the underlying behavior is proven correct by this verification's adversarial probe; archiving with WARNING 2 open is acceptable if the probe script/report is retained as evidence, but adding the named test is the safer close-out.
+
+---
+
 ## Verification Report — Slice 12C (`evaluation.py` gate-matrix harness)
 
 **Change**: cerebro-agent-knowledge-router · **Boundary**: task 12.1 (evaluation harness half) — `cerebro-retrieval/src/cerebro_router/evaluation.py` (740, new), `cerebro-retrieval/tests/test_evaluation.py` (355, new, 16 tests), `cerebro-retrieval/evals/investigation_cases.jsonl` (5 cases, new), `cerebro-retrieval/evals/domain_claims.jsonl` (6 cases, new). HEAD at authoring time: `e35ef68` (these 4 files are staged-but-uncommitted on top of it). **Date**: 2026-07-24 · **Run**: independent, fresh-context, adversarial verification (did not author the code). **Mode**: Standard (no Strict TDD cache found for this project at verify time). This is an evaluation harness whose entire product is *honesty of its own gate verdicts* — the review below attacks exactly that property.
