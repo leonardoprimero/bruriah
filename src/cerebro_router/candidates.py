@@ -45,6 +45,14 @@ class Advisory:
 
     code: str
     detail: str
+    # The skill this came from, as a field rather than something to be parsed back out of `detail`.
+    # Acknowledgment at approval time is PER FINDING, so each one needs a stable identity, and
+    # deriving that identity by splitting prose would break the first time a detail string changed.
+    skill_id: str = ""
+
+    @property
+    def identifier(self) -> str:
+        return f"{self.skill_id}:{self.code}"
 
 
 @dataclass(frozen=True)
@@ -195,7 +203,7 @@ def _advisories(pack: SkillPack) -> tuple[Advisory, ...]:
                               *skill.advisories, *skill.limitations])
         for code, detail, pattern in _PATTERNS:
             if pattern.search(haystack):
-                found.append(Advisory(code=code, detail=f"{skill.skill_id}: {detail}"))
+                found.append(Advisory(code=code, detail=detail, skill_id=skill.skill_id))
     return tuple(found)
 
 

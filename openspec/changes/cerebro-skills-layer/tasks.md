@@ -359,7 +359,37 @@ Apply to every unit without exception.
   Verification (all passed): 768 → **795 passed** (+27); `verify_legacy_baseline.py` `status: pass`, `errors: []`; pins unchanged; `uv lock --check` and `git diff --check` clean. Nothing imports this module yet.
   Rollback: delete module and tests. [S-Candidate Lifecycle and Approval Gate; S-Skill Trust Tiers and Provenance]
 
-- [ ] **9A.2. Approval records and the four subcommands.** Approval bound to the exact content digest with explicit per-advisory acknowledgment, plus `skill-ingest`, `skill-analyze`, `skill-approve`, `skill-sign` as thin `_cmd_*` wrappers over testable `run_*`, JSON on stdout and human text on stderr, one typed `CliError` per failure. `skill-sign` reuses `signing.py` so the CLI and the release script cannot drift.
+**9A.2 was re-estimated before opening and SPLIT again**: approval records plus four subcommands measured near 470 lines. Renamed rather than nested further — 9A.2 is the approval logic, 9A.3 is the CLI.
+
+- [x] **9A.2. Approval records.** DONE 2026-07-25. New `approvals.py`: `approve_candidate`, `load_approvals`, `read_approval`, `revoke_approval`.
+
+  Files: `approvals.py` (new, 174), `tests/test_approvals.py` (new, 202), `candidates.py` + its tests (+16/-3).
+  Estimate: 130 + 160 tests = **~290**. **Actual: 395** — 1.36x, just under budget.
+
+  **This closes a loop opened in Unit 4A.1.** `validate_skillset` has taken an injected `approvals: Mapping[skill_id, body_digest]` since then, with storage deferred. `load_approvals` now returns exactly that map, verified end to end outside the suite: compiling an unapproved pack fails `skill_not_approved`; approving it first makes the same compile succeed.
+
+  Two properties, both enforced rather than documented:
+  - **Approval binds to a DIGEST, never to a name or version.** Editing an approved body does not merely invalidate a filed record — the map no longer matches and the whole skill set fails to activate.
+  - **Every advisory is acknowledged INDIVIDUALLY, by `skill_id:code`.** A blanket "yes" over a list is the interface equivalent of a checkbox nobody reads, and it is precisely the affordance that turns a review gate into a formality. Acknowledging a code once must NOT clear the same finding in a second skill the reviewer never opened. **A stale acknowledgment is refused too** (`unknown_acknowledgment`): offering one for a finding that does not exist means the reviewer was looking at a different candidate, which is the case where waving it through is worst.
+
+  `Advisory` gained a `skill_id` field and an `identifier` property so per-finding acknowledgment has a stable identity instead of being parsed back out of prose. The no-severity test was widened rather than weakened: it still forbids `severity`/`risk`/`score`/`level`/`confidence`, because the prohibition is on RANKING a finding, not on identifying it.
+
+  **`approve_candidate` re-runs the analysis from the file and has no parameter through which a report could be supplied** — asserted by inspecting the signature, because a report passed in is a report that can be fabricated, and the gate that grants trust is the one place that must not be possible. A malformed approval record fails loudly rather than being skipped: dropping one would turn a corrupted approval into an *unapproved* skill, and activation would then fail with a message about entirely the wrong thing.
+
+  **A residual gap, analysed and accepted rather than papered over.** Approval binds to `body_digest`, not to the pack digest, so in principle an unsigned T3 pack could be edited to widen its envelope while keeping the same body digest, and `validate_skillset` would still match. It is closed structurally by the prose-only invariant from Unit 3A: `prose_only_envelope` rejects any network, subprocess, secrets or filesystem-WRITE grant, so the only widening a prose skill can express is `filesystem_read`, which grants nothing the host has not already granted. Recorded here so a future unit that relaxes prose-only knows it must revisit this binding.
+
+  **Falsifiability probes: three.** (1) Collapsing acknowledgment from per-finding to per-code failed three tests including the two-skills case. (2) Removing the unacknowledged-advisories check failed the silent-approval tests. (3) Skipping malformed records instead of raising failed the fail-loudly test. All reverted.
+
+  Verification (all passed): 795 → **814 passed** (+19); `verify_legacy_baseline.py` `status: pass`, `errors: []`; pins unchanged; `uv lock --check` and `git diff --check` clean.
+  Rollback: delete module and tests; `validate_skillset` keeps taking an injected map. [S-Candidate Lifecycle and Approval Gate]
+
+- [ ] **9A.3. The four subcommands.** `skill-ingest`, `skill-analyze`, `skill-approve`, `skill-sign` as thin `_cmd_*` wrappers over testable `run_*`, JSON on stdout and human text on stderr, one typed `CliError` per failure. `skill-sign` reuses `signing.py` so the CLI and the release script cannot drift.
+
+  Estimate: 110 + 120 tests = **~230**.
+  Verification: CLI output never claims prose was verified safe; every failure is one typed code; approve refuses without full acknowledgment through the CLI path too.
+  Rollback: remove subcommands; no MCP behaviour touched. [S-Candidate Lifecycle and Approval Gate; S-Read-Only Boundary and CLI-Confined Mutation]
+
+- [ ] ~~9A.2 (original)~~ Approval records and the four subcommands. Approval bound to the exact content digest with explicit per-advisory acknowledgment, plus `skill-ingest`, `skill-analyze`, `skill-approve`, `skill-sign` as thin `_cmd_*` wrappers over testable `run_*`, JSON on stdout and human text on stderr, one typed `CliError` per failure. `skill-sign` reuses `signing.py` so the CLI and the release script cannot drift.
 
   Estimate: 130 + 160 tests = **~290**.
   Verification: a digest change invalidates a prior approval and forces re-entry from static analysis; approving without acknowledging each advisory fails; CLI output never claims prose was verified safe.

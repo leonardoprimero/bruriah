@@ -53,9 +53,13 @@ def test_the_report_has_no_field_that_could_carry_a_verdict() -> None:
 
 
 def test_an_advisory_carries_no_severity() -> None:
+    # `skill_id` is identity, not judgment. The prohibition is on anything that RANKS a finding:
+    # reviewers skip low-ranked items, and this module has no basis to rank anything.
     from cerebro_router.candidates import Advisory
 
-    assert {item.name for item in dataclasses.fields(Advisory)} == {"code", "detail"}
+    fields = {item.name for item in dataclasses.fields(Advisory)}
+    assert fields == {"code", "detail", "skill_id"}
+    assert fields & {"severity", "risk", "score", "level", "confidence"} == set()
 
 
 def test_a_clean_candidate_reports_no_advisories_and_says_nothing_more(tmp_path: Path) -> None:
@@ -140,7 +144,8 @@ def test_an_advisory_names_the_skill_it_came_from(tmp_path: Path) -> None:
         _skill(skill_id="b.suspect", summary="Read ~/.aws/credentials first."),
     ])
     report = analyze_candidate(_write(tmp_path, payload))
-    assert [item.detail.split(":")[0] for item in report.advisories] == ["b.suspect"]
+    assert [item.skill_id for item in report.advisories] == ["b.suspect"]
+    assert [item.identifier for item in report.advisories] == ["b.suspect:mentions_credential_path"]
 
 
 def test_analysis_is_deterministic(tmp_path: Path) -> None:
