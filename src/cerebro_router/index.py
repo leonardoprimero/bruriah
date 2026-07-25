@@ -1,20 +1,25 @@
 from __future__ import annotations
 
 import hashlib
-import fcntl
 import json
 import os
 import sqlite3
-import stat
 import tempfile
 import uuid
 from collections.abc import Callable
-from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 
 from .corpus import CorpusPolicy, parse_document
+from .pointer import (
+    activation_lock,
+    controlled_file,
+    identity_matches,
+    read_pointer,
+    serialized,
+    write_pointer,
+)
 
 Embedder = Callable[[list[str]], list[bytes]]
 REF_VERSION = "v1"
@@ -346,69 +351,23 @@ def validate_candidate(
     return _validate_database(database, config, policy)
 
 
+# The corpus index's pointer entries name a sqlite file and its build id; `database` is the key
+# whose value must stay a bare filename. Everything else about the pointer is generic -- see
+# `pointer.py`.
+_POINTER_ENTRY_KEYS = frozenset({"database", "build_id"})
+
+
 def _read_pointer(pointer: Path) -> dict[str, object]:
-    if pointer.is_symlink():
-        raise IndexLifecycleError("invalid_active_pointer")
-    try:
-        value = json.loads(pointer.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError) as error:
-        raise IndexLifecycleError("invalid_active_pointer") from error
-    if (
-        not isinstance(value, dict)
-        or set(value) != {"version", "active", "retained"}
-        or value["version"] != 1
-        or not isinstance(value["active"], dict)
-        or not isinstance(value["retained"], list)
-    ):
-        raise IndexLifecycleError("invalid_active_pointer")
-    for entry in [value["active"], *value["retained"]]:
-        if (
-            not isinstance(entry, dict)
-            or set(entry) != {"database", "build_id"}
-            or not all(isinstance(item, str) and item for item in entry.values())
-            or Path(entry["database"]).name != entry["database"]
-        ):
-            raise IndexLifecycleError("invalid_active_pointer")
-    return value
-
-
-def _write_pointer(
-    pointer: Path, active: dict[str, str], retained: list[dict[str, str]]
-) -> bool:
-    handle = tempfile.NamedTemporaryFile(
-        mode="w", encoding="utf-8", prefix=f".{pointer.name}.", suffix=".tmp",
-        dir=pointer.parent, delete=False,
+    return read_pointer(
+        pointer, entry_keys=_POINTER_ENTRY_KEYS, name_key="database", error=IndexLifecycleError
     )
-    temporary = Path(handle.name)
-    try:
-        json.dump({"version": 1, "active": active, "retained": retained}, handle, sort_keys=True)
-        handle.write("\n")
-        handle.flush()
-        os.fsync(handle.fileno())
-        handle.close()
-        os.replace(temporary, pointer)
-        try:
-            directory = os.open(pointer.parent, os.O_RDONLY)
-            try:
-                os.fsync(directory)
-            finally:
-                os.close(directory)
-        except OSError:
-            return False
-        return True
-    except BaseException:
-        handle.close()
-        temporary.unlink(missing_ok=True)
-        raise
+
+
+_write_pointer = write_pointer
 
 
 def _entry(path: Path, metadata: dict[str, str]) -> dict[str, str]:
     return {"database": path.name, "build_id": metadata["build_id"]}
-
-
-def _identity(file_descriptor: int) -> tuple[int, int, int, int]:
-    value = os.fstat(file_descriptor)
-    return value.st_dev, value.st_ino, value.st_size, value.st_mtime_ns
 
 
 def _open_descriptor(file_descriptor: int) -> sqlite3.Connection:
@@ -420,32 +379,10 @@ def _open_descriptor(file_descriptor: int) -> sqlite3.Connection:
 
 
 def _controlled_file(pointer: Path, name: str) -> tuple[Path, int, tuple[int, int, int, int]]:
-    path = pointer.parent / name
-    descriptor = -1
-    try:
-        if path.is_symlink() or path.resolve(strict=True).parent != pointer.parent.resolve(strict=True):
-            raise IndexLifecycleError("invalid_active_target")
-        descriptor = os.open(path, os.O_RDONLY | os.O_NOFOLLOW)
-        identity = _identity(descriptor)
-        if not stat.S_ISREG(os.fstat(descriptor).st_mode):
-            raise IndexLifecycleError("invalid_active_target")
-        return path, descriptor, identity
-    except IndexLifecycleError:
-        if descriptor >= 0:
-            os.close(descriptor)
-        raise
-    except OSError as error:
-        if descriptor >= 0:
-            os.close(descriptor)
-        raise IndexLifecycleError("invalid_active_target") from error
+    return controlled_file(pointer, name, error=IndexLifecycleError)
 
 
-def _identity_matches(path: Path, expected: tuple[int, int, int, int]) -> bool:
-    try:
-        value = path.stat(follow_symlinks=False)
-    except OSError:
-        return False
-    return (value.st_dev, value.st_ino, value.st_size, value.st_mtime_ns) == expected
+_identity_matches = identity_matches
 
 
 def _validated_entry(
@@ -465,24 +402,8 @@ def _validated_entry(
         os.close(descriptor)
 
 
-@contextmanager
-def _activation_lock(pointer: Path):
-    descriptor = os.open(pointer.parent / f".{pointer.name}.lock", os.O_CREAT | os.O_RDWR, 0o600)
-    try:
-        fcntl.flock(descriptor, fcntl.LOCK_EX)
-        yield
-    finally:
-        fcntl.flock(descriptor, fcntl.LOCK_UN)
-        os.close(descriptor)
-
-
-def _serialized(pointer_position: int):
-    def decorate(operation):
-        def locked(*args, **kwargs):
-            with _activation_lock(args[pointer_position]):
-                return operation(*args, **kwargs)
-        return locked
-    return decorate
+_activation_lock = activation_lock
+_serialized = serialized
 
 
 def _open_entry(pointer: Path, entry: dict[str, str], config: BuildConfig) -> ActiveSnapshot:
