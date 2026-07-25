@@ -31,7 +31,19 @@ class InvestigationRequest(ClosedModel):
     network_policy: Literal["off", "public_https"] = "off"
     host_capabilities: Annotated[list[ShortText], Field(max_length=32)] = []
     candidate_material: Annotated[list[CandidateMaterial], Field(max_length=20)] = []
-    cursor: Annotated[str, Field(min_length=1, max_length=2048)] | None = None
+    cursor: Annotated[
+        str,
+        Field(
+            min_length=1,
+            max_length=2048,
+            description=(
+                "Reserved for future investigation pagination; NOT currently supported. Any "
+                "non-null value is rejected with a typed `cursor_not_supported` error rather than "
+                "silently ignored. (Evidence-read pagination IS supported via `read_evidence`'s "
+                "own cursor.)"
+            ),
+        ),
+    ] | None = None
     budgets: Budgets = Budgets()
 class EvidenceRecord(ClosedModel):
     ref: Ref
