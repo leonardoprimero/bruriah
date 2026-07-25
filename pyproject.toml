@@ -3,6 +3,8 @@ name = "cerebro-router"
 version = "0.1.0"
 description = "Read-only MCP knowledge router for the Cerebro corpus"
 requires-python = ">=3.12,<3.13"
+license = "Apache-2.0"
+license-files = ["LICENSE", "NOTICE"]
 dependencies = [
   "fastembed==0.8.0",
   "markdown-it-py>=4.0.0,<5",

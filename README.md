@@ -53,12 +53,14 @@ Honest state, current as of 2026-07-25.
 - Signed domain-policy packs with Ed25519 release manifests and fail-closed loading
 - Deterministic source discovery, domain-gated, with explicit abstention
 - Atomic index build / promote / rollback with retained generations
-- 723 tests
+- 828 tests
 
-**In progress**
-- The **skills layer**: dispatching to a vetted skill instead of flooding context with all of them. The storage, trust, and activation machinery is complete; dispatch is not yet wired to the tool surface.
+**Working, but with nothing to dispatch yet**
+- The **skills layer**: dispatching to a vetted skill instead of flooding context with all of them. The machinery is complete and wired — `investigate_work` returns skill refs with provenance and a permission envelope, and `skill-ingest` / `skill-analyze` / `skill-approve` / `skill-sign` run the review gate from the terminal.
+- **What is missing is content.** No first-party skill pack ships yet, so a fresh install has the dispatcher and no skills for it to dispatch. You can author and approve your own today; a curated pack is the next piece of work, and it is the piece that decides whether any of this is actually useful.
 
 **Known limits, stated rather than buried**
+- Skill **activation** (promoting an approved set so `serve` uses it) is not yet exposed as a subcommand, so the layer is currently driven through the Python API rather than end-to-end from the CLI.
 - Only macOS/POSIX is validated. `index.py` uses POSIX-only primitives and will not import on Windows.
 - Live web research is present in the codebase but **deliberately inert**: it needs an operator-defined destination allowlist that does not ship by default. The absence is a safety posture, not an oversight.
 - Retrieval quality is measured against a 61-query evaluation set, not against a public benchmark.
@@ -112,4 +114,9 @@ The `openspec/` directory carries the specifications, architecture decisions, an
 
 ## Licence
 
-Not yet chosen. Until one is added, no permission to use, copy, or redistribute is granted.
+Apache License 2.0. See `LICENSE` and `NOTICE`.
+
+Chosen over MIT for the explicit patent grant: a project whose entire argument is about trust
+boundaries should not leave a patent question open. Chosen over AGPL because the goal is adoption —
+a copyleft that reaches across a network would keep exactly the users this is built for from trying
+it.
