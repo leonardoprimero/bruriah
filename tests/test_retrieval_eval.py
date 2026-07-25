@@ -308,3 +308,17 @@ def test_router_adapter_returns_note_level_results() -> None:
     assert len(paths) == len(set(paths)), "note-level results must be deduped"
     ranks = [result.rank for result in results]
     assert ranks == sorted(ranks), "results must be rank-ordered"
+
+
+def test_router_adapter_wires_a_real_query_embedder_post_bugfix() -> None:
+    """Bugfix regression: `RouterAdapter` now builds its deps via `cli.build_serve_deps` (the
+    exact function `serve` calls), which always constructs and injects a real query embedder --
+    `degradation_supported` must be `True`, never the pre-fix always-`False`."""
+    try:
+        adapter = RouterAdapter()
+    except Exception:  # noqa: BLE001 -- any failure to load a real snapshot means "absent"
+        pytest.skip("cerebro-router active snapshot is not present in this environment")
+    try:
+        assert adapter.degradation_supported is True
+    finally:
+        adapter.close()

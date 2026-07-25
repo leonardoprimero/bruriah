@@ -22,8 +22,8 @@ from .corpus import CorpusPolicy, CorpusPolicyError
 from .index import BuildConfig, BuildResult, Embedder, IndexLifecycleError, build_candidate, promote_candidate
 from .mcp_server import build_server
 from .platform import (
-    PlatformError, PlatformPaths, ensure_private_dirs, load_deps, load_registry, open_snapshot,
-    resolve_paths, write_build_descriptor,
+    PlatformError, PlatformPaths, ensure_private_dirs, load_build_descriptor, load_deps,
+    load_registry, open_snapshot, resolve_paths, write_build_descriptor,
 )
 from .service import ServiceDeps
 
@@ -34,6 +34,13 @@ from .service import ServiceDeps
 # Slice 12D: `doctor` now also reports READ-ONLY cache stats (entry count, expired count, total
 # bytes) via `cache.cache_stats` -- design.md's "`doctor` is read-only" is preserved: `doctor`
 # never calls `cache.prune_expired`; no mutating prune is exposed via this CLI at all.
+# BUGFIX (vector-leg wiring): `build_serve_deps` previously called `platform.load_deps(paths)`
+# with no `embed_query`, so `serve` always ran retrieval BM25-only (`vector_leg_unavailable`).
+# It now builds a real query embedder via the SAME `EmbedderFactory` `_cmd_index` uses (so query
+# vectors share the exact code path passage vectors were built with) using the model recorded in
+# the active snapshot's own build descriptor, verifies that embedder's fingerprint/dimensions
+# fail-closed against the descriptor before ever using it, and threads it into `load_deps`.
+# `doctor`/`platform.load_deps` stay untouched: `embed_query` still defaults to `None` there.
 EmbedderFactory = Callable[[str], tuple[Embedder, str, int]]
 
 
@@ -251,10 +258,36 @@ def run_client_configs(
     return written
 
 
-def build_serve_deps(paths: PlatformPaths) -> ServiceDeps:
-    """Load real `ServiceDeps`; split from `_serve_stdio` so tests verify wiring, never the loop."""
+def build_serve_deps(
+    paths: PlatformPaths, *, embedder_factory: EmbedderFactory = _default_embedder_factory,
+) -> ServiceDeps:
+    """Load real `ServiceDeps`, including a real query embedder; split from `_serve_stdio` so
+    tests verify wiring, never the loop.
+
+    The query embedder is built by REUSING the identical batch `Embedder` factory `_cmd_index`
+    uses (`embed_query = lambda q: embedder([q])[0]`), so the query vector comes from the exact
+    same code path as the passage vectors -- matching by construction, not by luck. The model
+    is never a blind default: it is read from the ACTIVE SNAPSHOT's own recorded build
+    descriptor (`load_build_descriptor`), i.e. whatever model the snapshot was actually built
+    with. Before ever embedding a real query with it, the constructed embedder's real
+    fingerprint/dimensions are compared fail-closed against the descriptor's recorded
+    `embedding_fingerprint`/`embedding_dimensions`; ANY mismatch raises a typed
+    `embedding_model_mismatch` `CliError` instead of silently poisoning the vector leg with a
+    query embedding space that does not match the indexed passage vectors -- worse than leaving
+    the vector leg off entirely."""
     try:
-        return load_deps(paths)
+        descriptor = load_build_descriptor(paths)
+        embed, fingerprint, dimensions = embedder_factory(descriptor.embedding_model)
+        if (
+            fingerprint != descriptor.embedding_fingerprint
+            or dimensions != descriptor.embedding_dimensions
+        ):
+            raise CliError("embedding_model_mismatch")
+
+        def embed_query(text: str) -> bytes:
+            return embed([text])[0]
+
+        return load_deps(paths, embed_query=embed_query)
     except PlatformError as error:
         raise CliError(error.code) from error
 

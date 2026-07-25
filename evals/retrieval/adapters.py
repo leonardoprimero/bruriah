@@ -24,18 +24,18 @@ time. Queried via the exact public sequence the router ships:
 `search(deps.snapshot, query, budgets, embed_query=deps.embed_query,
 clock=deps.clock)` followed by `to_evidence_records(outcome)`.
 
-IMPORTANT, CONFIRMED DISCOVERY: `cerebro_router.platform.load_deps` never
-wires an `embed_query` callable into `ServiceDeps` (`embed_query` defaults to
-`None`; see `service.py`'s own docstring: "`ServiceDeps.research` defaults to
-`None` ... platform.load_deps still type-checks" -- the same is true of
-`embed_query`, and nothing in `platform.py` or `cli.py`'s `build_serve_deps`
-ever constructs one). This means the ACTUAL deployed `cerebro-mcp serve`
-process runs retrieval with `degradation=("vector_leg_unavailable", ...)` on
-every query: pure lexical BM25 over the snapshot, no semantic/vector leg at
-all. This adapter deliberately reproduces that exact real behavior (it is
-what `deps.embed_query` resolves to) rather than injecting its own embedder,
-because the point of this harness is to measure the engine as it is actually
-deployed today, not a hypothetical fully-wired version of it.
+FIXED (previously a confirmed bug): `cerebro_router.platform.load_deps` used
+to never wire an `embed_query` callable into `ServiceDeps` (`embed_query`
+defaulted to `None`), so the ACTUAL deployed `cerebro-mcp serve` process ran
+retrieval with `degradation=("vector_leg_unavailable", ...)` on every query --
+pure lexical BM25 over the snapshot, no semantic/vector leg at all. This
+adapter now builds its deps via `cli.build_serve_deps`, the exact function
+`serve` itself calls, which constructs a real query embedder (reusing the
+same batch `Embedder` factory `index` builds passage vectors with, verified
+fail-closed against the active snapshot's recorded embedding fingerprint/
+dimensions) and threads it in. This adapter therefore measures the engine as
+it is ACTUALLY deployed today, post-fix: hybrid BM25 + vector retrieval, not
+the BM25-only behavior the bug used to produce.
 
 Because `EvidenceRecord` (the router's public evidence contract) carries no
 numeric score by design (`retrieval.py`: "this slice's conservative
@@ -63,8 +63,9 @@ _SRC = ROOT / "src"
 if str(_SRC) not in sys.path:
     sys.path.insert(0, str(_SRC))
 
+from cerebro_router.cli import build_serve_deps  # noqa: E402
 from cerebro_router.contracts import Budgets  # noqa: E402
-from cerebro_router.platform import PlatformPaths, load_deps, resolve_paths  # noqa: E402
+from cerebro_router.platform import PlatformPaths, resolve_paths  # noqa: E402
 from cerebro_router.retrieval import search as router_search  # noqa: E402
 from cerebro_router.retrieval import to_evidence_records  # noqa: E402
 from cerebro_router.service import ServiceDeps  # noqa: E402
@@ -159,9 +160,10 @@ class LegacyAdapter:
 class RouterAdapter:
     """Queries the new `cerebro_router` engine against its currently active
     snapshot, strictly read-only. Loads `ServiceDeps` (embedding-model
-    metadata + open snapshot) ONCE and reuses it across every `search()`
-    call, matching the task's exact real usage pattern:
-    `load_deps(resolve_paths())` then
+    metadata + open snapshot, INCLUDING a real query embedder) ONCE and
+    reuses it across every `search()` call, matching the task's exact real
+    usage pattern: `cli.build_serve_deps(resolve_paths())` -- the identical
+    function `cerebro-mcp serve` itself calls -- then
     `search(deps.snapshot, query, budgets, embed_query=deps.embed_query,
     clock=deps.clock)`.
     """
@@ -169,7 +171,7 @@ class RouterAdapter:
     _RRF_K = 60  # Matches retrieval.py's internal `_RRF_K` and legacy's default `rrf_k`.
 
     def __init__(self, paths: PlatformPaths | None = None, raw_pool: int = DEFAULT_RAW_POOL) -> None:
-        self._deps: ServiceDeps = load_deps(paths if paths is not None else resolve_paths())
+        self._deps: ServiceDeps = build_serve_deps(paths if paths is not None else resolve_paths())
         self._raw_pool = raw_pool
 
     def search(self, query: str, k: int = 10) -> list[SearchResult]:
@@ -201,7 +203,8 @@ class RouterAdapter:
     @property
     def degradation_supported(self) -> bool:
         """True if this deps construction wired a vector-search callable.
-        Always `False` today -- see the module docstring's discovery note."""
+        Now `True`: `build_serve_deps` (post-fix) always constructs and
+        injects a real query embedder -- see the module docstring."""
         return self._deps.embed_query is not None
 
     @property

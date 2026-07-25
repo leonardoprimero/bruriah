@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import json
 import os
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import date
 from pathlib import Path
@@ -188,11 +189,21 @@ def open_snapshot(paths: PlatformPaths) -> ActiveSnapshot:
         raise PlatformError(f"snapshot_unreadable:{error.code}") from error
 
 
-def load_deps(paths: PlatformPaths, today: date | None = None) -> ServiceDeps:
+def load_deps(
+    paths: PlatformPaths,
+    today: date | None = None,
+    embed_query: Callable[[str], bytes] | None = None,
+) -> ServiceDeps:
     """Assemble the real `ServiceDeps` `serve`/`doctor` need: the bundled registry and the
     active read-only snapshot under the resolved private data directory. `today` forwards to
-    `load_registry` for a deterministic freshness check under test."""
-    return ServiceDeps(registry=load_registry(today), snapshot=open_snapshot(paths))
+    `load_registry` for a deterministic freshness check under test. `embed_query` (default
+    `None`) threads straight into `ServiceDeps` -- this module never constructs one itself (no
+    model load here), so `doctor` and every existing caller that omits it keep the exact same
+    embedder-less, light-weight behavior as before. The real query embedder is `cli.py`'s
+    `build_serve_deps`'s job to build and inject for `serve`."""
+    return ServiceDeps(
+        registry=load_registry(today), snapshot=open_snapshot(paths), embed_query=embed_query,
+    )
 
 
 __all__ = [

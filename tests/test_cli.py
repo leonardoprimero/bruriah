@@ -16,7 +16,8 @@ import platformdirs
 import pytest
 from cerebro_router import cache, cli, clients
 from cerebro_router.contracts import EvidenceRecord
-from cerebro_router.platform import resolve_paths
+from cerebro_router.platform import load_deps, resolve_paths
+from cerebro_router.retrieval import search as router_search
 from mcp.shared.memory import create_connected_server_and_client_session
 
 # Pinned so the doctor freshness check is deterministic, not a wall-clock time bomb.
@@ -101,7 +102,8 @@ def test_end_to_end_init_index_serve_doctor(tmp_path: Path, capsys: pytest.Captu
     assert report["registry"]["pack_ids"] == ["research.minimal"]
 
     capsys.readouterr()  # discard init/index stdout before the serve-wiring stdout-clean check
-    deps = cli.build_serve_deps(paths)
+    deps = cli.build_serve_deps(paths, embedder_factory=_fake_embedder_factory)
+    assert deps.embed_query is not None  # bugfix: serve now wires a real query embedder
     server = cli.build_server(deps)
     try:
         async def _run() -> None:
@@ -283,3 +285,113 @@ def test_cli_index_dispatch_builds_only_under_private_data_dir(tmp_path: Path) -
     assert exit_code == 0
     assert (data_dir / "active.json").is_file()
     assert all(path.parent == data_dir for path in data_dir.rglob("candidate-*.sqlite3"))
+
+
+# ---------------------------------------------------------------------------
+# Bugfix regression: `build_serve_deps` used to call `platform.load_deps(paths)` with no
+# `embed_query`, so the deployed `cerebro-mcp serve` process always ran retrieval BM25-only
+# (`vector_leg_unavailable`). It now builds a real query embedder from the active snapshot's own
+# recorded model, fail-closed verified, and threads it into `load_deps`.
+# ---------------------------------------------------------------------------
+
+
+def _index_with_fake_embedder(tmp_path: Path):
+    root, policy_path = _corpus(tmp_path)
+    paths = _paths(tmp_path)
+    cli.run_index(
+        paths, root, policy_path, model_name="test/minilm", embedder_factory=_fake_embedder_factory,
+    )
+    return paths
+
+
+def test_build_serve_deps_wires_a_real_query_embedder_and_activates_the_vector_leg(
+    tmp_path: Path,
+) -> None:
+    """`build_serve_deps` reuses the SAME `EmbedderFactory` `index` used (query vectors come from
+    the identical code path as passage vectors -- matching by construction), so `search()` over
+    the resulting deps must run BOTH legs, never degrading `vector_leg_unavailable`."""
+    paths = _index_with_fake_embedder(tmp_path)
+
+    deps = cli.build_serve_deps(paths, embedder_factory=_fake_embedder_factory)
+    try:
+        assert deps.embed_query is not None
+        query_vector = deps.embed_query("apple pie baking recipe")
+        assert isinstance(query_vector, bytes)
+        assert len(query_vector) == 3 * 4  # 3 dims, float32 little-endian
+
+        outcome = router_search(deps.snapshot, _TASK, embed_query=deps.embed_query)
+        assert "vector_leg_unavailable" not in outcome.degradation
+    finally:
+        deps.snapshot.database.close()
+
+
+def test_build_serve_deps_default_embedder_factory_is_the_real_fastembed_one() -> None:
+    """`build_serve_deps` must default to the real `_default_embedder_factory` (never silently
+    swap in a fake), so `serve`'s production path always builds a genuine query embedder."""
+    import inspect
+
+    default = inspect.signature(cli.build_serve_deps).parameters["embedder_factory"].default
+    assert default is cli._default_embedder_factory
+
+
+def test_build_serve_deps_fingerprint_mismatch_is_a_typed_fail_closed_error(tmp_path: Path) -> None:
+    """A constructed embedder whose fingerprint does NOT match what the active snapshot was
+    actually built with must raise a typed `embedding_model_mismatch` CliError -- never silently
+    embed queries in the wrong vector space (worse than no vector leg at all)."""
+    paths = _index_with_fake_embedder(tmp_path)
+    wrong_fingerprint = _FINGERPRINT.replace("snapshot-a", "snapshot-b")
+
+    def _wrong_model_embedder_factory(model_name: str) -> tuple[cli.Embedder, str, int]:
+        def embed(texts: list[str]) -> list[bytes]:
+            return [array("f", (1.0, 0.0, 0.0)).tobytes() for _ in texts]
+
+        return embed, wrong_fingerprint, 3
+
+    with pytest.raises(cli.CliError) as error:
+        cli.build_serve_deps(paths, embedder_factory=_wrong_model_embedder_factory)
+    assert error.value.code == "embedding_model_mismatch"
+
+
+def test_build_serve_deps_dimension_mismatch_is_a_typed_fail_closed_error(tmp_path: Path) -> None:
+    """A constructed embedder with the RIGHT fingerprint but the WRONG dimension count (e.g. a
+    caller-supplied `EmbedderFactory` bug) must still fail closed instead of poisoning the
+    vector leg with mismatched-length vectors."""
+    paths = _index_with_fake_embedder(tmp_path)
+
+    def _wrong_dimensions_embedder_factory(model_name: str) -> tuple[cli.Embedder, str, int]:
+        def embed(texts: list[str]) -> list[bytes]:
+            return [array("f", (1.0, 0.0, 0.0, 0.0)).tobytes() for _ in texts]
+
+        return embed, _FINGERPRINT, 4  # index built with dimensions=3
+
+    with pytest.raises(cli.CliError) as error:
+        cli.build_serve_deps(paths, embedder_factory=_wrong_dimensions_embedder_factory)
+    assert error.value.code == "embedding_model_mismatch"
+
+
+def test_load_deps_default_embed_query_stays_none_doctor_path_light(tmp_path: Path) -> None:
+    """`platform.load_deps`'s own default (no `embed_query` argument) must stay `None` -- doctor
+    (and any caller that doesn't opt in) never triggers a model load."""
+    paths = _index_with_fake_embedder(tmp_path)
+    deps = load_deps(paths, today=_TODAY)
+    try:
+        assert deps.embed_query is None
+    finally:
+        deps.snapshot.database.close()
+
+
+def test_load_deps_threads_an_explicit_embed_query_into_service_deps(tmp_path: Path) -> None:
+    """`platform.load_deps` must thread a caller-supplied `embed_query` straight into
+    `ServiceDeps` unchanged -- the exact callable identity, not a wrapped/copied one."""
+    paths = _index_with_fake_embedder(tmp_path)
+
+    def _embed_query(text: str) -> bytes:
+        return array("f", (1.0, 0.0, 0.0)).tobytes()
+
+    deps = load_deps(paths, today=_TODAY, embed_query=_embed_query)
+    try:
+        assert deps.embed_query is _embed_query
+        outcome = router_search(deps.snapshot, _TASK, embed_query=deps.embed_query)
+        assert "vector_leg_unavailable" not in outcome.degradation
+    finally:
+        deps.snapshot.database.close()
