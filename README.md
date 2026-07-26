@@ -5,6 +5,7 @@
 </p>
 
 <p align="center">
+  <a href="https://pypi.org/project/bruriah/"><img alt="PyPI" src="https://img.shields.io/pypi/v/bruriah?style=flat-square&color=2d6a4f"/></a>
   <img alt="tests" src="https://img.shields.io/badge/tests-887%20passing-2d6a4f?style=flat-square"/>
   <img alt="python" src="https://img.shields.io/badge/python-3.12%20%7C%203.13-3776ab?style=flat-square"/>
   <img alt="MCP" src="https://img.shields.io/badge/MCP-2%20read--only%20tools-6a4c93?style=flat-square"/>
@@ -25,8 +26,11 @@
 ## Start here: three seconds, one poisoned document
 
 ```bash
+git clone https://github.com/leonardoprimero/bruriah && cd bruriah
 uv run python demo/injection/run.py
 ```
+
+*(The demo ships in the repository rather than the wheel: a corpus with an injection payload in it is not something to install onto someone's machine by default.)*
 
 <p align="center">
   <img src="https://raw.githubusercontent.com/leonardoprimero/bruriah/main/demo/injection/demo.gif" alt="A corpus containing an injection payload. investigate_work returns the poisoned note as a reference with authority 'unknown' and not one byte of its prose, and the routing decision is identical with the note and without it." width="100%"/>
@@ -96,6 +100,8 @@ That abstain branch is not a failure path. **It is the feature.** Bruriah would 
 Your reasoning already exists. It is in the commit messages that explain **why**, written by the person deciding at the moment of deciding.
 
 ```bash
+pip install bruriah        # macOS or Linux; on Windows use WSL
+
 # 1. turn your history into a corpus (reads only; writes nothing to your repo)
 bruriah corpus --repo . --out ./corpus
 
@@ -247,13 +253,18 @@ Honest state as of 2026-07-25.
 
 ## Install
 
-Requires **Python 3.12 or 3.13** on macOS or Linux. The suite runs green on both (879 and 877 tests; the two extra skips on 3.13 are git-checkout guards, not failures). 3.14 is excluded until the embedding runtime is validated against it -- the pin states what was tested, not what is possible.
-
 ```bash
-uv sync
-uv run bruriah doctor   # read-only health check, safe at any time
-uv run bruriah serve    # the MCP server, over stdio
+pip install bruriah        # or: uv tool install bruriah
+
+bruriah doctor             # read-only health check, safe at any time
+bruriah serve              # the MCP server, over stdio
 ```
+
+Requires **Python 3.12 or 3.13**, on **macOS or Linux**. The suite runs green on both versions. 3.14 is excluded until the embedding runtime is validated against it — the pin states what was tested, not what is possible.
+
+**Windows is not supported, and the package says so rather than crashing.** Activation swaps a pointer under `flock` with `O_NOFOLLOW` and re-confirms the file's identity afterwards; that is what makes promoting a snapshot atomic and unspoofable. Windows has different primitives with different semantics, and half-porting that guarantee would be worse than not having it, because it would fail silently instead of loudly. Run it under **WSL** — that is a real Linux and needs no changes. If you want native Windows, open an issue saying so: knowing someone is waiting is what would make it worth doing carefully.
+
+Working from a clone instead? `uv sync`, then prefix the commands with `uv run`.
 
 ## Design notes
 
