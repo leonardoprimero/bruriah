@@ -2,7 +2,7 @@
 name = "bruriah"
 version = "0.1.0"
 description = "Work-intelligence MCP server: evidence-backed answers from your own history"
-requires-python = ">=3.12,<3.14"
+requires-python = ">=3.12,<3.15"
 license = "Apache-2.0"
 license-files = ["LICENSE", "NOTICE"]
 readme = "README.md"
@@ -20,6 +20,7 @@ classifiers = [
   "Operating System :: POSIX :: Linux",
   "Programming Language :: Python :: 3.12",
   "Programming Language :: Python :: 3.13",
+  "Programming Language :: Python :: 3.14",
   "Topic :: Software Development :: Documentation",
   "Topic :: Text Processing :: Indexing",
   "Typing :: Typed",
