@@ -122,7 +122,7 @@ That is a real answer to *why*, written by the person deciding at the moment of 
 - you are on native Windows without WSL, or Python 3.14.
 - you want prose answers. There is no generative model here; it returns evidence and your agent
   writes the answer.
-- you need instant search over millions of passages. See [how far it scales](#how-far-it-scales) —
+- you need instant search over millions of passages. See [Measured](#measured) —
   the honest ceiling is measured, not hidden.
 
 ## The problem I kept hitting
@@ -225,7 +225,23 @@ flowchart TD
 
 That abstain branch is not a failure path. **It is the feature.** Bruriah would rather tell your agent *"I have no approved policy for employment law, I am not answering this"* than hand it the nearest-looking paragraph.
 
-## What I measured
+## Measured
+
+Every number here comes from running something, and each links to the run that produced it. The
+unflattering ones are in the same table as the rest.
+
+| | | |
+|---|---|---|
+| **Retrieval, English** | recall@3 **83%** · recall@10 92% · MRR@10 0.80 | [eval](https://github.com/leonardoprimero/bruriah/blob/main/evals/project-memory/) |
+| **Retrieval, Spanish** | recall@3 **58%** · recall@10 92% · MRR@10 0.50 | still trails English; the fusion fix took it from 33% |
+| **Query latency** | **≈46µs per passage**, linear — 1k passages 45ms, 16k 734ms | [scale.py](https://github.com/leonardoprimero/bruriah/blob/main/evals/scale.py) |
+| **Index build** | ≈130 passages/second, embedding-dominated, one-off | |
+| **Index size** | ≈5 KB per passage — a 16k-passage corpus is ~79 MB | |
+| **Tests** | 894 passing on a fresh clone, on Linux and macOS, 3.12 and 3.13 | [CI](https://github.com/leonardoprimero/bruriah/actions/workflows/ci.yml) |
+| **Install size** | 178 KB wheel; the embedding model downloads once, separately | |
+| **Sample size** | **12 questions, one corpus, two languages** | the honest caveat: treat the direction as established, the figures as indicative |
+
+### Where the retrieval numbers come from
 
 I do not want you to take my word for any of this, so here are the numbers, including the bad one.
 
@@ -244,7 +260,7 @@ So the lexical leg is now discounted to 0.1 when the query language and the corp
 
 The [eval](https://github.com/leonardoprimero/bruriah/blob/main/evals/project-memory/) carries the per-leg numbers, the weight sweep, and what is still not solved: 58% is the vector leg's own ceiling, so this recovers what fusion was destroying rather than making cross-lingual retrieval as good as same-language retrieval.
 
-## How far it scales
+### Where the latency numbers come from
 
 The lexical leg is a bounded pure-Python BM25 scan, not FTS5, and every query loads every passage. That is linear by construction, and linear is fine right up until it is not — so here is where the line sits, measured on an M4 Pro:
 
