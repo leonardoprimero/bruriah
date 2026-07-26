@@ -8,7 +8,7 @@ Covers:
     real `LegacyAdapter.search()` call must show no change.
 
 Any test that needs a real built index (the legacy `cerebro.db` or the
-`cerebro-router` active snapshot) SKIPS gracefully when that index is absent,
+`bruriah` active snapshot) SKIPS gracefully when that index is absent,
 so this suite passes on a fresh checkout with no indexes built.
 """
 from __future__ import annotations
@@ -297,7 +297,7 @@ def test_router_adapter_returns_note_level_results() -> None:
     try:
         adapter = RouterAdapter()
     except Exception:  # noqa: BLE001 -- any failure to load a real snapshot means "absent"
-        pytest.skip("cerebro-router active snapshot is not present in this environment")
+        pytest.skip("bruriah active snapshot is not present in this environment")
     try:
         results = adapter.search("rate limiting token bucket", k=5)
     finally:
@@ -317,7 +317,7 @@ def test_router_adapter_wires_a_real_query_embedder_post_bugfix() -> None:
     try:
         adapter = RouterAdapter()
     except Exception:  # noqa: BLE001 -- any failure to load a real snapshot means "absent"
-        pytest.skip("cerebro-router active snapshot is not present in this environment")
+        pytest.skip("bruriah active snapshot is not present in this environment")
     try:
         assert adapter.degradation_supported is True
     finally:

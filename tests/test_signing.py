@@ -8,10 +8,10 @@ from pathlib import Path
 
 import pytest
 
-from cerebro_router import signing
-from cerebro_router.packs import PackError, load_pack
-from cerebro_router.signing import SigningError, generate_key, load_public, sign_pack
-from cerebro_router.skills import load_skill_pack
+from bruriah import signing
+from bruriah.packs import PackError, load_pack
+from bruriah.signing import SigningError, generate_key, load_public, sign_pack
+from bruriah.skills import load_skill_pack
 from test_skills import _pack as _skill_pack
 
 # The strongest available assertion about a signer is that its output verifies through the UNMODIFIED
@@ -21,7 +21,7 @@ from test_skills import _pack as _skill_pack
 DATA = Path(signing.__file__).resolve().parent / "data"
 BUNDLED = DATA / "research-policy.json"
 TODAY = date(2026, 7, 23)
-SIGNER = "cerebro-release"
+SIGNER = "bruriah-release"
 
 
 def _key(tmp_path: Path) -> tuple[Path, dict[str, str]]:
@@ -158,7 +158,7 @@ def test_signing_a_skill_pack_verifies_through_load_skill_pack(tmp_path: Path) -
     pack = tmp_path / "skills.json"
     pack.write_text(json.dumps(_skill_pack()))
     manifest = sign_pack(key_path, SIGNER, pack)
-    assert load_skill_pack(pack, manifest, roots, today=date(2026, 7, 25)).pack_id == "cerebro.skills"
+    assert load_skill_pack(pack, manifest, roots, today=date(2026, 7, 25)).pack_id == "bruriah.skills"
 
 
 # --- what signing refuses to do -------------------------------------------------------------------

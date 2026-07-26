@@ -17,16 +17,16 @@ live database is never opened read-write. `legacy.search()` already returns
 chunk hits ordered by descending RRF score (best first) with a genuine
 numeric `score`.
 
-NEW (`cerebro_router` active snapshot): `ServiceDeps` (embedding model +
+NEW (`bruriah` active snapshot): `ServiceDeps` (embedding model +
 open read-only snapshot) is loaded ONCE in `__init__` and reused across every
 `search()` call -- rebuilding it per query would reload the ONNX model each
 time. Queried via the exact public sequence the router ships:
 `search(deps.snapshot, query, budgets, embed_query=deps.embed_query,
 clock=deps.clock)` followed by `to_evidence_records(outcome)`.
 
-FIXED (previously a confirmed bug): `cerebro_router.platform.load_deps` used
+FIXED (previously a confirmed bug): `bruriah.platform.load_deps` used
 to never wire an `embed_query` callable into `ServiceDeps` (`embed_query`
-defaulted to `None`), so the ACTUAL deployed `cerebro-mcp serve` process ran
+defaulted to `None`), so the ACTUAL deployed `bruriah serve` process ran
 retrieval with `degradation=("vector_leg_unavailable", ...)` on every query --
 pure lexical BM25 over the snapshot, no semantic/vector leg at all. This
 adapter now builds its deps via `cli.build_serve_deps`, the exact function
@@ -63,12 +63,12 @@ _SRC = ROOT / "src"
 if str(_SRC) not in sys.path:
     sys.path.insert(0, str(_SRC))
 
-from cerebro_router.cli import build_serve_deps  # noqa: E402
-from cerebro_router.contracts import Budgets  # noqa: E402
-from cerebro_router.platform import PlatformPaths, resolve_paths  # noqa: E402
-from cerebro_router.retrieval import search as router_search  # noqa: E402
-from cerebro_router.retrieval import to_evidence_records  # noqa: E402
-from cerebro_router.service import ServiceDeps  # noqa: E402
+from bruriah.cli import build_serve_deps  # noqa: E402
+from bruriah.contracts import Budgets  # noqa: E402
+from bruriah.platform import PlatformPaths, resolve_paths  # noqa: E402
+from bruriah.retrieval import search as router_search  # noqa: E402
+from bruriah.retrieval import to_evidence_records  # noqa: E402
+from bruriah.service import ServiceDeps  # noqa: E402
 
 LEGACY_DB_PATH = ROOT / "cerebro.db"
 LEGACY_MODULE_PATH = ROOT / "cerebro.py"
@@ -158,12 +158,12 @@ class LegacyAdapter:
 
 
 class RouterAdapter:
-    """Queries the new `cerebro_router` engine against its currently active
+    """Queries the new `bruriah` engine against its currently active
     snapshot, strictly read-only. Loads `ServiceDeps` (embedding-model
     metadata + open snapshot, INCLUDING a real query embedder) ONCE and
     reuses it across every `search()` call, matching the task's exact real
     usage pattern: `cli.build_serve_deps(resolve_paths())` -- the identical
-    function `cerebro-mcp serve` itself calls -- then
+    function `bruriah serve` itself calls -- then
     `search(deps.snapshot, query, budgets, embed_query=deps.embed_query,
     clock=deps.clock)`.
     """

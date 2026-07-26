@@ -17,20 +17,20 @@ from pathlib import Path
 import pytest
 
 from conftest import requires_baseline_script
-from cerebro_router.contracts import ClosedModel
-from cerebro_router.corpus import CorpusPolicy
-from cerebro_router.evaluation import (
+from bruriah.contracts import ClosedModel
+from bruriah.corpus import CorpusPolicy
+from bruriah.evaluation import (
     DomainClaimCase, EvaluationContext, EvaluationError, GateCell, InvestigationCase,
     SecretLeakProbe, _safe_cell, load_domain_cases, load_investigation_cases, run_domain_gate,
     run_gate_matrix, run_invocation_gate, run_package_os_client_gate,
     run_rollback_preservation_gate, run_schema_fallback_gate, run_security_gate,
     run_utility_latency_gate, summarize,
 )
-from cerebro_router.index import BuildConfig, build_candidate, promote_candidate, snapshot_active
-from cerebro_router.packs import load_pack
-from cerebro_router.registries import Registry
-from cerebro_router.research import ConcurrencyLimiter, ResearchDeps
-from cerebro_router.service import ServiceDeps
+from bruriah.index import BuildConfig, build_candidate, promote_candidate, snapshot_active
+from bruriah.packs import load_pack
+from bruriah.registries import Registry
+from bruriah.research import ConcurrencyLimiter, ResearchDeps
+from bruriah.service import ServiceDeps
 from pydantic import ValidationError
 from test_research import _Clock, _LocalTlsServer, _ok_responder
 from test_research import _deps as _research_deps
@@ -42,7 +42,7 @@ FINGERPRINT = (
 )
 _ROOT = Path(__file__).resolve().parents[1]
 _SRC = _ROOT / "src"
-_DATA = _SRC / "cerebro_router" / "data"
+_DATA = _SRC / "bruriah" / "data"
 _EVALS = _ROOT / "evals"
 _INVESTIGATION_CASES_PATH = _EVALS / "investigation_cases.jsonl"
 _DOMAIN_CASES_PATH = _EVALS / "domain_claims.jsonl"

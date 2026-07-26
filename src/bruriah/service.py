@@ -163,7 +163,7 @@ def _skill_ref(match: SkillMatch) -> str:
 def _disclose_envelope(envelope: PermissionEnvelope) -> PermissionDisclosure:
     """Flatten the signed pack's envelope into the public contract's shape.
 
-    Disclosure, never enforcement: Cerebro does not execute skills. An envelope that grants nothing
+    Disclosure, never enforcement: Bruriah does not execute skills. An envelope that grants nothing
     still serializes as six empty lists, because "grants nothing" is the strongest thing this layer
     can say about a skill and hiding it would waste the claim."""
     return PermissionDisclosure(
@@ -211,7 +211,7 @@ def _skill_evidence_record(entry: SkillDispatch) -> EvidenceRecord:
 def _drafting_action(classification, dispatched) -> HostAction | None:
     """Ask the HOST to draft a candidate when a supported domain has no trusted skill covering it.
 
-    Cerebro generates nothing. It has no generative model at all -- the dependency list is embeddings
+    Bruriah generates nothing. It has no generative model at all -- the dependency list is embeddings
     and protocol -- so the only honest move on detecting a gap is to name the gap and hand the work
     to whoever can do it. The brief is bounded and carries NO proposed content: a suggested draft
     written here would be exactly the obeyable instruction text this whole design refuses to emit.
@@ -223,7 +223,7 @@ def _drafting_action(classification, dispatched) -> HostAction | None:
     return HostAction(
         kind="draft_skill_candidate",
         reason=f"No vetted skill covers the {classification.domain} domain for this request. "
-               "Draft one and submit it through `cerebro-mcp skill-ingest`; it enters as a "
+               "Draft one and submit it through `bruriah skill-ingest`; it enters as a "
                "candidate and still requires analysis and human approval before it is dispatched.",
         target=classification.domain,
     )

@@ -17,8 +17,8 @@ from collections.abc import Callable
 from datetime import datetime, timezone
 from pathlib import Path
 
-from cerebro_router.contracts import Budgets
-from cerebro_router.fetch import FetchError, default_connect, default_resolver, fetch
+from bruriah.contracts import Budgets
+from bruriah.fetch import FetchError, default_connect, default_resolver, fetch
 
 _FIXTURES = Path(__file__).parent / "fixtures" / "fetch"
 _CERT = _FIXTURES / "testcert.pem"

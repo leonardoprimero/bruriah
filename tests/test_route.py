@@ -10,16 +10,16 @@ from datetime import date
 from pathlib import Path
 
 import pytest
-from cerebro_router.classify import RequestClassification, classify
-from cerebro_router.contracts import InvestigationRequest
-from cerebro_router.lookup import LookupResult, SourceMatch, discover
-from cerebro_router.packs import CapabilityPolicy, SourcePolicy, load_pack
-from cerebro_router.registries import Registry
-from cerebro_router.route import RouteDecision, RouteError, route
+from bruriah.classify import RequestClassification, classify
+from bruriah.contracts import InvestigationRequest
+from bruriah.lookup import LookupResult, SourceMatch, discover
+from bruriah.packs import CapabilityPolicy, SourcePolicy, load_pack
+from bruriah.registries import Registry
+from bruriah.route import RouteDecision, RouteError, route
 
 _SRC = Path(__file__).resolve().parents[1] / "src"
-_ROUTE_MODULE = _SRC / "cerebro_router" / "route.py"
-_DATA = _SRC / "cerebro_router" / "data"
+_ROUTE_MODULE = _SRC / "bruriah" / "route.py"
+_DATA = _SRC / "bruriah" / "data"
 
 
 def _classification(intent="investigate", domain="general", claim_type="factual", risk="low", jurisdiction="unknown"):
@@ -234,10 +234,10 @@ def test_pure_function_same_inputs_same_result() -> None:
 def test_determinism_across_hash_seeds() -> None:
     script = (
         "import sys; sys.path.insert(0, %r);"
-        "from cerebro_router.classify import RequestClassification;"
-        "from cerebro_router.contracts import InvestigationRequest;"
-        "from cerebro_router.lookup import LookupResult;"
-        "from cerebro_router.route import route;"
+        "from bruriah.classify import RequestClassification;"
+        "from bruriah.contracts import InvestigationRequest;"
+        "from bruriah.lookup import LookupResult;"
+        "from bruriah.route import route;"
         "classification = RequestClassification(intent='investigate', domain='general', "
         "claim_type='factual', risk='low', jurisdiction='unknown');"
         "lookup = LookupResult(domain_supported=False, sources=(), capabilities=());"
@@ -307,8 +307,8 @@ def test_module_performs_no_io_or_network_imports() -> None:
 def _skill_only_lookup() -> LookupResult:
     """The case that matters: no supported domain, no sources, no capabilities -- a skill is the ONLY
     evidence present. Before Unit 5 this shape abstained."""
-    from cerebro_router.lookup import SkillMatch
-    from cerebro_router.skills import SkillPack
+    from bruriah.lookup import SkillMatch
+    from bruriah.skills import SkillPack
 
     from test_skills import _pack as _skill_pack
 
@@ -342,8 +342,8 @@ def test_the_same_shape_without_the_skill_still_abstains() -> None:
 def test_skills_only_add_evidence_and_never_remove_it() -> None:
     # Additive means additive: adding skills to a lookup that already had evidence must not change
     # the outcome it already produced.
-    from cerebro_router.lookup import SkillMatch
-    from cerebro_router.skills import SkillPack
+    from bruriah.lookup import SkillMatch
+    from bruriah.skills import SkillPack
 
     from test_skills import _pack as _skill_pack
 

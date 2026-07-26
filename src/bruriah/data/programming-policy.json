@@ -2,7 +2,7 @@
   "schema_version": "1",
   "pack_id": "programming.minimal",
   "version": "1.0.0",
-  "maintainer": "Cerebro release maintainers",
+  "maintainer": "Bruriah release maintainers",
   "min_router_version": "0.1.0",
   "max_router_version": "0.9.9",
   "reviewed_at": "2026-07-25",
@@ -15,7 +15,7 @@
   "languages": ["en", "es"],
   "update_cadence": "Review annually and on security advisories",
   "license": "CC0-1.0 policy metadata; source terms remain controlling",
-  "provenance": "Bundled Cerebro programming-routing policy. Declares the classifier domain identifier 'programming' so domain-gated discovery can resolve at all; the bundled research pack declares 'software-research', which no classifier Domain value equals.",
+  "provenance": "Bundled Bruriah programming-routing policy. Declares the classifier domain identifier 'programming' so domain-gated discovery can resolve at all; the bundled research pack declares 'software-research', which no classifier Domain value equals.",
   "sources": [
     {
       "source_id": "normative-language-specifications",

@@ -18,12 +18,12 @@ import hashlib
 from datetime import date
 from pathlib import Path
 
-from cerebro_router.contracts import ClaimRecord, EvidenceRecord
-from cerebro_router.evidence import (
+from bruriah.contracts import ClaimRecord, EvidenceRecord
+from bruriah.evidence import (
     ClaimAssessment, EvidenceClaim, EvidenceError, UntrustedEvidence, assess_claim,
     assess_freshness, render_claim_record, resolve_authority, verify_extract_digest, wrap_evidence,
 )
-from cerebro_router.packs import SourcePolicy
+from bruriah.packs import SourcePolicy
 
 _TODAY = date(2026, 7, 24)
 

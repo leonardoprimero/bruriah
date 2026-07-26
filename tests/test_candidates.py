@@ -7,7 +7,7 @@ from typing import Any
 
 import pytest
 
-from cerebro_router.candidates import (
+from bruriah.candidates import (
     AnalysisReport,
     CandidateError,
     analyze_candidate,
@@ -55,7 +55,7 @@ def test_the_report_has_no_field_that_could_carry_a_verdict() -> None:
 def test_an_advisory_carries_no_severity() -> None:
     # `skill_id` is identity, not judgment. The prohibition is on anything that RANKS a finding:
     # reviewers skip low-ranked items, and this module has no basis to rank anything.
-    from cerebro_router.candidates import Advisory
+    from bruriah.candidates import Advisory
 
     fields = {item.name for item in dataclasses.fields(Advisory)}
     assert fields == {"code", "detail", "skill_id"}
@@ -68,7 +68,7 @@ def test_a_clean_candidate_reports_no_advisories_and_says_nothing_more(tmp_path:
     report = _report(tmp_path)
     assert report.advisories == ()
     assert report.skill_ids == ("design.ui-review",)
-    assert report.pack_id == "cerebro.skills"
+    assert report.pack_id == "bruriah.skills"
 
 
 # --- structural failures raise; prose findings advise ----------------------------------------------
@@ -189,7 +189,7 @@ def test_an_ingested_candidate_is_owner_readable_only(tmp_path: Path) -> None:
 
 def test_ingest_records_identity_from_the_pack_itself(tmp_path: Path) -> None:
     record = ingest_candidate(_write(tmp_path, _pack(version="2.5.0")), tmp_path / "data")
-    assert (record.pack_id, record.version) == ("cerebro.skills", "2.5.0")
+    assert (record.pack_id, record.version) == ("bruriah.skills", "2.5.0")
 
 
 def test_a_candidate_with_advisories_is_still_ingested(tmp_path: Path) -> None:

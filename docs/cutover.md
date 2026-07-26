@@ -1,7 +1,7 @@
 # Cutover and Rollback
 
 This document describes the configuration-first procedure for pointing an
-MCP client at the candidate `cerebro-mcp` router instead of the legacy
+MCP client at the candidate `bruriah` router instead of the legacy
 Cerebro MCP, and the rehearsed rollback that undoes it. It is a procedure,
 not an announcement: **this change does not perform the actual cutover**,
 and it does not retire the legacy MCP or the Graphify runtime. Both remain
@@ -18,10 +18,10 @@ Configuration, and Doctor`, "Clean private-default installation"):
 
 ```bash
 python3 -m venv /tmp/cerebro-cutover-check
-/tmp/cerebro-cutover-check/bin/pip install cerebro-router  # or the built wheel/sdist
-/tmp/cerebro-cutover-check/bin/cerebro-mcp init
-/tmp/cerebro-cutover-check/bin/cerebro-mcp index --corpus-root <root> --policy <policy.yaml>
-/tmp/cerebro-cutover-check/bin/cerebro-mcp doctor
+/tmp/cerebro-cutover-check/bin/pip install bruriah  # or the built wheel/sdist
+/tmp/cerebro-cutover-check/bin/bruriah init
+/tmp/cerebro-cutover-check/bin/bruriah index --corpus-root <root> --policy <policy.yaml>
+/tmp/cerebro-cutover-check/bin/bruriah doctor
 ```
 
 `doctor` is **read-only** (design.md line 29: "`doctor` is read-only") --
@@ -49,7 +49,7 @@ environment.
 
 ## 2. Protocol and OS/client gate matrix
 
-`src/cerebro_router/evaluation.py` (Slice 12C) drives the real assembled
+`src/bruriah/evaluation.py` (Slice 12C) drives the real assembled
 pipeline -- real registry, real snapshot, a real `mcp.server.lowlevel`
 session, real `service.investigate`/`service.read` -- across seven gate
 dimensions (design.md line 49): invocation and negative controls,
@@ -106,31 +106,31 @@ during this phase:
   index untouched. No slice in this change installs, enables, or
   registers the candidate as any client's active server.
 - A client MAY be configured to see both servers simultaneously under
-  different names during evaluation (e.g. `cerebro-router` alongside the
+  different names during evaluation (e.g. `bruriah` alongside the
   legacy entry in the same `mcpServers` block) to compare results
   directly before switching.
 
 ## 4. The configuration-first switch
 
 Cutover for one client is **only** a configuration change: point that
-client's existing MCP config at `cerebro-mcp serve` instead of the legacy
+client's existing MCP config at `bruriah serve` instead of the legacy
 launch command. Nothing about the router, its schemas, or its safety
 policy changes at cutover time (spec `K-Canonical Client Launch Manifest
 and Adapters`: "Client-specific configuration MUST NOT redefine the
 public schemas or safety policy").
 
 1. Generate (or regenerate) the client's config via
-   `cerebro-mcp init`, which writes all six rendered configs under
+   `bruriah init`, which writes all six rendered configs under
    `config_dir/clients/` (Slice 12B-2), or render one client explicitly
-   with `src/cerebro_router/clients.py`'s `render(client_id, manifest)`.
+   with `src/bruriah/clients.py`'s `render(client_id, manifest)`.
    `docs/client-guidance.md` documents the exact config file path and
    JSON shape per client.
 2. **Preserve the prior config file.** Copy the client's current config
    (the one pointing at the legacy MCP) to a timestamped backup before
    overwriting it. This is the artifact rollback restores from.
-3. Replace only the `cerebro-router` (or equivalently named) entry in the
+3. Replace only the `bruriah` (or equivalently named) entry in the
    client's config with the rendered candidate entry. Every rendered
-   entry launches `cerebro-mcp serve` via an absolute `command`, explicit
+   entry launches `bruriah serve` via an absolute `command`, explicit
    `args`, and no shell quoting dependency -- there is nothing else to
    configure.
 4. Restart or reload the client so it re-reads its MCP configuration.
@@ -168,7 +168,7 @@ rollback"):
    left untouched by rollback -- rollback "MUST NOT delete candidate
    diagnostics or alter canonical sources" (spec
    `K-Configuration-First Cutover and Rollback`). They may be inspected
-   after the fact via `cerebro-mcp doctor` to help diagnose why rollback
+   after the fact via `bruriah doctor` to help diagnose why rollback
    was needed.
 
 Rollback rehearsal (performing steps 1-4 once against a real client
@@ -183,7 +183,7 @@ config is rehearsed against.
 ## 6. What this change does not do
 
 - It does not switch any real client's registration. Every config
-  rendered by `cerebro-mcp init` or `clients.py` is a file on disk that
+  rendered by `bruriah init` or `clients.py` is a file on disk that
   the operator must explicitly install per section 4 -- nothing in this
   change writes to a client's live config location automatically.
 - It does not retire, disable, or modify the legacy Cerebro MCP runtime,

@@ -5,7 +5,7 @@ from datetime import date, datetime, timezone
 import pytest
 from pydantic import ValidationError
 
-from cerebro_router.contracts import Budgets, EvidenceRecord, InvestigationRequest, ReadItem, ReadRequest
+from bruriah.contracts import Budgets, EvidenceRecord, InvestigationRequest, ReadItem, ReadRequest
 def _assert_closed(schema: dict) -> None:
     if schema.get("type") == "object":
         assert schema.get("additionalProperties") is False
@@ -17,7 +17,7 @@ def _assert_closed(schema: dict) -> None:
                 if isinstance(item, dict):
                     _assert_closed(item)
 def test_public_contract_schemas_are_nested_closed() -> None:
-    from cerebro_router import contracts
+    from bruriah import contracts
 
     for name in contracts.__all__:
         _assert_closed(getattr(contracts, name).model_json_schema())
@@ -159,7 +159,7 @@ def test_read_item_carries_eight_evidence_state_fields() -> None:
 
 import json  # noqa: E402
 
-from cerebro_router.contracts import HostAction, HostSkill, PermissionDisclosure  # noqa: E402
+from bruriah.contracts import HostAction, HostSkill, PermissionDisclosure  # noqa: E402
 
 _EVIDENCE_FIELDS = dict(
     ref="local:a#1", kind="local", publisher="p", locator="l", citation_locator="c",
@@ -191,7 +191,7 @@ def test_an_envelope_is_emitted_when_it_is_actually_present() -> None:
 
 def test_an_empty_envelope_still_serializes_as_a_grant_of_nothing() -> None:
     # Default-deny must be VISIBLE. An envelope granting nothing is not the same as no envelope, and
-    # collapsing the two would hide the strongest thing Cerebro can say about a skill.
+    # collapsing the two would hide the strongest thing Bruriah can say about a skill.
     dumped = EvidenceRecord(**{**_EVIDENCE_FIELDS, "kind": "skill",
                               "envelope": PermissionDisclosure()}).model_dump(mode="json")
     assert dumped["envelope"] == {
@@ -239,7 +239,7 @@ def test_the_new_enum_members_are_the_only_ones_added() -> None:
 def test_the_disclosure_covers_every_dimension_the_signed_envelope_can_express() -> None:
     """Guards the one real risk of not reusing `skills.PermissionEnvelope`: that the pack grows a
     permission dimension the public contract cannot disclose, and a skill ships a grant nobody sees."""
-    from cerebro_router.skills import PermissionEnvelope
+    from bruriah.skills import PermissionEnvelope
 
     envelope = set(PermissionEnvelope.model_fields)
     disclosed = set(PermissionDisclosure.model_fields)

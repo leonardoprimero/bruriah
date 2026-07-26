@@ -45,7 +45,7 @@ from .service import ServiceDeps, ServiceError, investigate, read
 # otherwise reach the client as the mcp SDK's generic exception format instead of our envelope.
 _STAGE_ERRORS = (ServiceError, ClassificationError, RouterLookupError, RouteError, RetrievalError)
 
-SERVER_NAME = "cerebro-router"
+SERVER_NAME = "bruriah"
 INVESTIGATE_TOOL = "investigate_work"
 READ_TOOL = "read_evidence"
 

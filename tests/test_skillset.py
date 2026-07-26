@@ -13,8 +13,8 @@ import pytest
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
 
-from cerebro_router import skillset
-from cerebro_router.skillset import (
+from bruriah import skillset
+from bruriah.skillset import (
     MAX_SKILLSET_BYTES,
     SkillSetError,
     SkillSource,
@@ -152,14 +152,14 @@ def test_compile_is_deterministic_regardless_of_source_order(tmp_path: Path) -> 
     )
     assert (first / "gen.json").read_bytes() == (second / "gen.json").read_bytes()
     assert forward.build_id == backward.build_id
-    assert forward.skill_set.pack_ids == ("another.skills", "cerebro.skills")
+    assert forward.skill_set.pack_ids == ("another.skills", "bruriah.skills")
 
 
 def test_generation_is_self_contained_after_its_sources_are_gone(tmp_path: Path) -> None:
     # The lifecycle spec requires rollback to restore a retained generation WITHOUT rebuilding from
     # source packs. That is only true if the generation carries everything needed to re-verify.
     destination, before = _compile(tmp_path)
-    for leftover in tmp_path.glob("cerebro.skills*"):
+    for leftover in tmp_path.glob("bruriah.skills*"):
         leftover.unlink()
     after = validate_skillset(destination, ROOTS, APPROVALS, today=TODAY)
     assert after.build_id == before.build_id
@@ -234,9 +234,9 @@ def test_embedded_signature_is_re_verified_not_assumed(tmp_path: Path) -> None:
     # trusted signer and carries the correct digest, so only the Ed25519 check can reject it.
     payload = _pack()
     raw = _bytes(payload)
-    pack_path = tmp_path / "cerebro.skills.json"
+    pack_path = tmp_path / "bruriah.skills.json"
     pack_path.write_bytes(raw)
-    manifest_path = tmp_path / "cerebro.skills.manifest.json"
+    manifest_path = tmp_path / "bruriah.skills.manifest.json"
     manifest_path.write_bytes(_manifest(raw, payload, key=Ed25519PrivateKey.generate()))
     source = SkillSource(pack_path, manifest_path)
     assert _code(compile_skillset, [source], tmp_path / "gen.json", ROOTS, APPROVALS, today=TODAY) == "invalid_signature"
@@ -249,7 +249,7 @@ def test_embedded_signature_is_re_verified_not_assumed(tmp_path: Path) -> None:
 
 def test_trust_roots_are_applied_at_validation_not_baked_in(tmp_path: Path) -> None:
     raw = _generation(tmp_path)
-    assert _validate(raw).skill_set.pack_ids == ("cerebro.skills",)
+    assert _validate(raw).skill_set.pack_ids == ("bruriah.skills",)
     assert _code(_validate, raw, roots={"someone-else": ROOTS[SIGNER]}) == "unknown_signer"
 
 
@@ -263,7 +263,7 @@ def test_freshness_is_injected_never_wall_clock(tmp_path: Path) -> None:
 def test_router_compatibility_and_version_floor_are_rechecked(tmp_path: Path) -> None:
     raw = _generation(tmp_path)
     assert _code(_validate, raw, router_version="9.9.9") == "incompatible_pack"
-    assert _code(_validate, raw, minimum_versions={"cerebro.skills": "2.0.0"}) == "version_rollback"
+    assert _code(_validate, raw, minimum_versions={"bruriah.skills": "2.0.0"}) == "version_rollback"
 
 
 def test_envelope_invariant_survives_the_generation_round_trip(tmp_path: Path) -> None:

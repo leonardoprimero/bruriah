@@ -23,7 +23,7 @@ from .packs import (
     verify_manifest_bytes,
 )
 
-# Skill records for the Skills Layer. A skill is a POINTER plus a policy: Cerebro decides WHICH
+# Skill records for the Skills Layer. A skill is a POINTER plus a policy: Bruriah decides WHICH
 # skill applies and discloses its identity, provenance, and permission envelope, but the skill body
 # never traverses the MCP tool surface -- the host loads it through its own trust path. That is why
 # there is no body field here, only a locator and the digest the approval is bound to.
@@ -89,7 +89,7 @@ class SkillPolicy(ClosedModel):
     # Classifier-vocabulary domains. Skill surfacing is domain-gated in addition to claim-type
     # gated, which is what `CapabilityPolicy` cannot express (it has no domain field).
     domains: list[Identifier]
-    # Where the HOST finds the body. Cerebro never reads or returns it; this is what an
+    # Where the HOST finds the body. Bruriah never reads or returns it; this is what an
     # `install_skill` host action points at and what divergence detection compares against.
     body_locator: Text
     body_digest: Digest

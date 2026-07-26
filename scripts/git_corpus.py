@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
-"""Turn a repository's decision record into a corpus Cerebro can index.
+"""Turn a repository's decision record into a corpus Bruriah can index.
 
 A project's reasoning already exists: it is in the commit messages that explain WHY, written by the
 person deciding at the moment of deciding. This reads that history and writes one Markdown document
-per decision, so `cerebro-mcp index` can take it from there.
+per decision, so `bruriah index` can take it from there.
 
     python scripts/git_corpus.py --repo . --out ./cerebro-corpus
-    cerebro-mcp index --corpus-root ./cerebro-corpus --policy ./policy.yaml
+    bruriah index --corpus-root ./cerebro-corpus --policy ./policy.yaml
 
 Commits with no explanatory body are skipped: a subject line records what changed, never why, and
 including them adds noise without reasoning. Merge commits are skipped for the same reason.

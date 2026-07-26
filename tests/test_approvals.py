@@ -8,7 +8,7 @@ from typing import Any
 
 import pytest
 
-from cerebro_router.approvals import (
+from bruriah.approvals import (
     ApprovalError,
     ApprovalRecord,
     approve_candidate,

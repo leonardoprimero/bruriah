@@ -5,10 +5,10 @@ from typing import Any
 
 import pytest
 
-from cerebro_router.contracts import HostSkill
-from cerebro_router.dispatch import DEFAULT_SKILL_CEILING, DispatchResult, dispatch
-from cerebro_router.lookup import LookupResult, SkillMatch
-from cerebro_router.skills import SkillPack
+from bruriah.contracts import HostSkill
+from bruriah.dispatch import DEFAULT_SKILL_CEILING, DispatchResult, dispatch
+from bruriah.lookup import LookupResult, SkillMatch
+from bruriah.skills import SkillPack
 from test_skills import DIGEST, _pack, _skill
 
 # Fixture builders come from `test_skills`, following the `test_service` -> `test_research` precedent.

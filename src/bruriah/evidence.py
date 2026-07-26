@@ -130,7 +130,7 @@ class ClaimAssessment(ClosedModel):
     """The claim ledger entry this slice adds beyond the frozen, minimal `ClaimRecord`:
     the extracted claim, pack-contextual authority rationale, jurisdiction, corroboration count,
     conflict classes, and named uncertainty reasons -- "Evidence Normalization and Claim State".
-    `state`/`conflict_classes`/`corroboration`/`uncertainty` together ARE Cerebro's structured
+    `state`/`conflict_classes`/`corroboration`/`uncertainty` together ARE Bruriah's structured
     assessment (see module docstring for why no free-text assessment/recommendation field is
     added this slice). `render_claim_record` below projects this down to `ClaimRecord`."""
 

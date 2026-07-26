@@ -9,10 +9,10 @@ from types import SimpleNamespace
 import pytest
 
 from conftest import requires_vault
-from cerebro_router.contracts import Budgets, EvidenceRecord
-from cerebro_router.corpus import CorpusPolicy
-from cerebro_router.index import BuildConfig, build_candidate, promote_candidate, snapshot_active
-from cerebro_router.retrieval import RetrievalError, RetrievalMatch, search, to_evidence_records
+from bruriah.contracts import Budgets, EvidenceRecord
+from bruriah.corpus import CorpusPolicy
+from bruriah.index import BuildConfig, build_candidate, promote_candidate, snapshot_active
+from bruriah.retrieval import RetrievalError, RetrievalMatch, search, to_evidence_records
 
 FINGERPRINT = (
     '{"artifact":"model.onnx","artifact_sha256":"' + "a" * 64

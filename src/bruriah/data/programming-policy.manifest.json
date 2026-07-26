@@ -1,0 +1,8 @@
+{
+  "pack_id": "programming.minimal",
+  "schema_version": "1",
+  "sha256": "cfe81543cf7abe17f4e9825c2f5f5d73bf1e0b552eac42ce6b1ba74177cc1f85",
+  "signature": "Tj69r7JPc2cgcwQyZSAIdFHqAbRpwrRES7geghnpSzW/v8IHIptxrGjdVSqefe0p/c+oDIuCWdd/6sTa2rpLCA==",
+  "signer": "bruriah-release",
+  "version": "1.0.0"
+}

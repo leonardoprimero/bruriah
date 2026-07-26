@@ -1,5 +1,5 @@
 # Client launch manifest and adapters (Slice 12B): ONE typed source of truth describing how to
-# launch the `cerebro-mcp serve` server, from which every supported client's config snippet is
+# launch the `bruriah serve` server, from which every supported client's config snippet is
 # rendered. See tasks.md task 12.1 and design.md "Clients": "One manifest renders Claude Code,
 # OpenCode, Cursor, Gemini, Antigravity and generic stdio snippets. Adapters detect declared
 # structured output and host capabilities; core requires only tools/list/tools/call, always
@@ -57,7 +57,7 @@ class ClientError(ValueError):
 #
 # A plain space is deliberately NOT in this set. Because the transport is an argv array (not a
 # shell string), a space inside an absolute command path is legitimate and common on real
-# installs (e.g. macOS `/Users/x/Library/Application Support/cerebro/cerebro-mcp`) and never
+# installs (e.g. macOS `/Users/x/Library/Application Support/cerebro/bruriah`) and never
 # triggers word-splitting when passed as one argv element. Rejecting spaces would break valid
 # installs for no injection-safety benefit, so this set stays scoped to characters that are
 # genuinely dangerous if a config is ever mishandled by a shell, not every character a shell
@@ -86,14 +86,14 @@ def _is_env_pair(entry: object) -> bool:
 class LaunchManifest:
     """The one canonical description of how to launch the server. Every renderer below consumes
     only this -- never a hand-authored per-client command -- so all six clients launch the
-    identical `cerebro-mcp serve` process with the identical two-tool surface.
+    identical `bruriah serve` process with the identical two-tool surface.
 
     `command` MUST be an absolute path (design.md "Clients": "absolute commands"); `args` and
     `env` are additional exec-argv/environment entries (e.g. `--config-dir`). `env` is a tuple of
     `(name, value)` pairs, not a dict, so the manifest stays hashable and its rendering
     deterministic regardless of dict-ordering behavior across callers.
 
-    `router_version` defaults to the installed `cerebro_router.__version__` and gives every
+    `router_version` defaults to the installed `bruriah.__version__` and gives every
     manifest version visibility (spec `K-Canonical Client Launch Manifest and Adapters`: "Adapters
     MUST use ... version visibility ..."): any caller holding a `LaunchManifest` can tell which
     router version the config it describes targets, without this module guessing or embedding an
@@ -105,7 +105,7 @@ class LaunchManifest:
     command: str
     args: tuple[str, ...] = ("serve",)
     env: tuple[tuple[str, str], ...] = ()
-    server_name: str = "cerebro-router"
+    server_name: str = "bruriah"
     router_version: str = _ROUTER_VERSION
 
     def __post_init__(self) -> None:

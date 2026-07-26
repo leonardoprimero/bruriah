@@ -10,11 +10,11 @@ from pathlib import Path
 import unicodedata
 
 import pytest
-from cerebro_router.classify import ClassificationError, RequestClassification, classify
-from cerebro_router.contracts import InvestigationRequest
+from bruriah.classify import ClassificationError, RequestClassification, classify
+from bruriah.contracts import InvestigationRequest
 
 _SRC = Path(__file__).resolve().parents[1] / "src"
-_CLASSIFY_MODULE = _SRC / "cerebro_router" / "classify.py"
+_CLASSIFY_MODULE = _SRC / "bruriah" / "classify.py"
 
 
 def _request(task: str, **fields) -> InvestigationRequest:
@@ -56,8 +56,8 @@ def test_multi_domain_keywords_pick_deterministic_first_match() -> None:
 def test_determinism_across_hash_seeds() -> None:
     script = (
         "import sys; sys.path.insert(0, %r);"
-        "from cerebro_router.classify import classify;"
-        "from cerebro_router.contracts import InvestigationRequest;"
+        "from bruriah.classify import classify;"
+        "from bruriah.contracts import InvestigationRequest;"
         "r = InvestigationRequest(task='Necesito saber si debo declarar IVA en Argentina');"
         "print(classify(r))" % str(_SRC)
     )

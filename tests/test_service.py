@@ -8,15 +8,15 @@ from datetime import date, datetime, timezone
 from pathlib import Path
 
 import pytest
-from cerebro_router.contracts import (
+from bruriah.contracts import (
     Budgets, CandidateMaterial, HostAction, InvestigationRequest, ReadRange, ReadRequest,
 )
-from cerebro_router.corpus import CorpusPolicy
-from cerebro_router.index import BuildConfig, build_candidate, promote_candidate, snapshot_active
-from cerebro_router.packs import load_pack
-from cerebro_router.registries import Registry
-from cerebro_router.retrieval import RetrievalError
-from cerebro_router.service import ServiceDeps, ServiceError, _candidate_urls, investigate, read
+from bruriah.corpus import CorpusPolicy
+from bruriah.index import BuildConfig, build_candidate, promote_candidate, snapshot_active
+from bruriah.packs import load_pack
+from bruriah.registries import Registry
+from bruriah.retrieval import RetrievalError
+from bruriah.service import ServiceDeps, ServiceError, _candidate_urls, investigate, read
 # Slice 12A-2: reuse test_research.py's real TLS-loopback harness (no test in this file ever
 # makes a real external network connection either) instead of re-implementing it -- same
 # discipline as test_research.py's own module docstring.
@@ -29,7 +29,7 @@ FINGERPRINT = (
     + '","pooling":"mean","runtime":"fastembed==0.8.0","snapshot":"snapshot-a","source":"example/model"}'
 )
 _SRC = Path(__file__).resolve().parents[1] / "src"
-_DATA = _SRC / "cerebro_router" / "data"
+_DATA = _SRC / "bruriah" / "data"
 _FILLER = "Unrelated filler sentence for padding purposes only. " * 6
 _TASK = "Find a python schema validation library, apple pie baking recipe"
 _CANDIDATE_DIGEST = "sha256:" + "c" * 64
@@ -476,8 +476,8 @@ def test_max_evidence_truncation_prefers_capability_over_local_deterministically
 
 import dataclasses  # noqa: E402
 
-from cerebro_router.contracts import HostSkill  # noqa: E402
-from cerebro_router.skills import SkillPack, SkillSet  # noqa: E402
+from bruriah.contracts import HostSkill  # noqa: E402
+from bruriah.skills import SkillPack, SkillSet  # noqa: E402
 from test_skills import DIGEST  # noqa: E402
 from test_skills import _pack as _skill_pack  # noqa: E402
 from test_skills import _skill as _skill_entry  # noqa: E402
@@ -523,7 +523,7 @@ def test_opting_in_emits_a_skill_ref_with_provenance_and_envelope(deps) -> None:
     assert record.ref == "skill:design.ui-review@1.4.0"
     assert record.digest == DIGEST
     assert set(record.provenance_chain) == {
-        "tier:first_party", "pack:cerebro.skills", "availability:installed",
+        "tier:first_party", "pack:bruriah.skills", "availability:installed",
         "currency:current", "trusted:true"}
     assert record.freshness == "current"
     assert record.envelope is not None and record.envelope.network_hosts == []
@@ -631,7 +631,7 @@ def test_an_expired_skill_stays_readable_for_re_approval(deps) -> None:
 
 
 def test_a_domain_with_no_trusted_skill_asks_the_host_to_draft_one(deps) -> None:
-    # Cerebro has no generative model, so the only honest response to a gap is to name it.
+    # Bruriah has no generative model, so the only honest response to a gap is to name it.
     service_deps = dataclasses.replace(deps, skill_set=_aged_skills(1))
     result = investigate(
         InvestigationRequest(task=_SKILL_TASK, host_skills=_installed()), service_deps)

@@ -22,20 +22,20 @@ from datetime import date
 from pathlib import Path
 
 import pytest
-from cerebro_router.classify import RequestClassification
-from cerebro_router.context import assemble_context, compact_to_budget
-from cerebro_router.contracts import (
+from bruriah.classify import RequestClassification
+from bruriah.context import assemble_context, compact_to_budget
+from bruriah.contracts import (
     Budgets, ClaimRecord, EvidenceRecord, InvestigationRequest, InvestigationResult,
 )
-from cerebro_router.evidence import EvidenceClaim, assess_claim, wrap_evidence
-from cerebro_router.lookup import LookupResult, SourceMatch
-from cerebro_router.packs import SourcePolicy
-from cerebro_router.research import ConcurrencyLimiter, ResearchDeps, ResearchOutcome, research
-from cerebro_router.route import RouteDecision, route
+from bruriah.evidence import EvidenceClaim, assess_claim, wrap_evidence
+from bruriah.lookup import LookupResult, SourceMatch
+from bruriah.packs import SourcePolicy
+from bruriah.research import ConcurrencyLimiter, ResearchDeps, ResearchOutcome, research
+from bruriah.route import RouteDecision, route
 
 _TODAY = date(2026, 7, 24)
 _SRC = Path(__file__).resolve().parents[1] / "src"
-_CONTEXT_MODULE = _SRC / "cerebro_router" / "context.py"
+_CONTEXT_MODULE = _SRC / "bruriah" / "context.py"
 
 
 # === Shared builders =============================================================================
@@ -649,7 +649,7 @@ def test_typed_total_backstop_never_raises_on_bad_argument_types() -> None:
 
 
 def test_unexpected_exception_is_converted_to_typed_internal_error(monkeypatch: pytest.MonkeyPatch) -> None:
-    import cerebro_router.context as context_module
+    import bruriah.context as context_module
 
     def _exploding_request_id(_request: InvestigationRequest) -> str:
         raise RuntimeError("unexpected failure unrelated to any typed ContextError code")

@@ -10,11 +10,11 @@ import stat
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-from cerebro_router.cache import (
+from bruriah.cache import (
     CacheEntry, CacheStats, PruneSummary, build_cache_entry, cache_key, cache_stats, prune_expired,
     read_cache, write_cache_atomic,
 )
-from cerebro_router.contracts import EvidenceRecord
+from bruriah.contracts import EvidenceRecord
 
 _RETRIEVED_AT = datetime(2026, 7, 24, 12, 0, 0, tzinfo=timezone.utc)
 

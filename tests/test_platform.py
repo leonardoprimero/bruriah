@@ -14,10 +14,10 @@ import anyio
 import pytest
 
 from conftest import requires_legacy_database
-from cerebro_router.corpus import CorpusPolicy
-from cerebro_router.index import BuildConfig, build_candidate, promote_candidate
-from cerebro_router.mcp_server import build_server
-from cerebro_router.platform import (
+from bruriah.corpus import CorpusPolicy
+from bruriah.index import BuildConfig, build_candidate, promote_candidate
+from bruriah.mcp_server import build_server
+from bruriah.platform import (
     PlatformError, ensure_private_dirs, load_build_descriptor, load_deps, load_registry,
     open_snapshot, resolve_paths, write_build_descriptor,
 )
@@ -70,18 +70,18 @@ def test_precedence_cli_over_env_over_config_file_over_default(tmp_path: Path) -
 
     assert resolve_paths(cli_config_dir=config_dir, env={}).data_dir == file_dir
     assert resolve_paths(
-        cli_config_dir=config_dir, env={"CEREBRO_ROUTER_DATA_DIR": str(env_dir)}
+        cli_config_dir=config_dir, env={"BRURIAH_DATA_DIR": str(env_dir)}
     ).data_dir == env_dir
     assert resolve_paths(
         cli_config_dir=config_dir, cli_data_dir=cli_dir,
-        env={"CEREBRO_ROUTER_DATA_DIR": str(env_dir)},
+        env={"BRURIAH_DATA_DIR": str(env_dir)},
     ).data_dir == cli_dir
 
 
 def test_default_paths_are_never_auto_created(tmp_path: Path) -> None:
     import platformdirs
 
-    real_data_dir = Path(platformdirs.user_data_dir("cerebro-router"))
+    real_data_dir = Path(platformdirs.user_data_dir("bruriah"))
     existed_before = real_data_dir.exists()
     paths = resolve_paths(env={})
     assert paths.data_dir == real_data_dir
@@ -90,7 +90,7 @@ def test_default_paths_are_never_auto_created(tmp_path: Path) -> None:
 
 def test_network_defaults_off_unless_explicitly_enabled(tmp_path: Path) -> None:
     assert resolve_paths(env={}).network_enabled is False
-    assert resolve_paths(env={"CEREBRO_ROUTER_NETWORK_ENABLED": "true"}).network_enabled is True
+    assert resolve_paths(env={"BRURIAH_NETWORK_ENABLED": "true"}).network_enabled is True
     assert resolve_paths(cli_network_enabled=True, env={}).network_enabled is True
 
 
@@ -226,15 +226,15 @@ def test_the_bundled_registry_resolves_only_the_domains_it_should() -> None:
     Asserted as an exact set rather than a spot check, so quietly widening a pack's `domains` shows
     up here as a failure instead of as silently broader routing.
 
-    The split is deliberate. Abstention exists to stop Cerebro answering about an EXTERNAL body of
+    The split is deliberate. Abstention exists to stop Bruriah answering about an EXTERNAL body of
     knowledge it holds no policy for, which is why law, accounting, cybersecurity and ux_design must
     keep abstaining -- that is where a confident wrong answer does real damage. `general` is the
     classifier's "no professional speciality applies" bucket; refusing to read a project's own
     decision record there protects nobody and merely hides the user's own corpus from them."""
     import typing
 
-    from cerebro_router.classify import Domain, RequestClassification
-    from cerebro_router.lookup import discover
+    from bruriah.classify import Domain, RequestClassification
+    from bruriah.lookup import discover
 
     registry = load_registry(today=_TODAY)
     supported = {
@@ -252,20 +252,20 @@ def test_the_bundled_registry_resolves_only_the_domains_it_should() -> None:
 
 
 def test_the_retired_test_signer_is_no_longer_trusted() -> None:
-    """`cerebro-release-test` was a signer whose private half nobody controls. Retiring it is only
+    """`bruriah-release-test` was a signer whose private half nobody controls. Retiring it is only
     real if a pack bearing its name is now refused, so that is what gets asserted -- the absence of a
     key from a JSON file proves nothing on its own."""
     import json as _json
 
-    from cerebro_router.packs import PackError, load_pack
+    from bruriah.packs import PackError, load_pack
 
-    data = Path(__file__).parents[1] / "src/cerebro_router/data"
+    data = Path(__file__).parents[1] / "src/bruriah/data"
     roots = _json.loads((data / "trust-roots.json").read_text())
-    assert "cerebro-release-test" not in roots
-    assert set(roots) == {"cerebro-release"}
+    assert "bruriah-release-test" not in roots
+    assert set(roots) == {"bruriah-release"}
 
     forged = _json.loads((data / "research-policy.manifest.json").read_text())
-    forged["signer"] = "cerebro-release-test"
+    forged["signer"] = "bruriah-release-test"
     forged_path = Path(__file__).parent / "_forged.manifest.json"
     forged_path.write_text(_json.dumps(forged))
     try:
@@ -280,10 +280,10 @@ def test_every_bundled_pack_ships_with_a_verifiable_manifest() -> None:
     """Packaging assertion: every pack in the data directory has a manifest beside it that verifies
     through the unmodified load path for ITS OWN kind. A pack that ships without one is dead weight
     the loader refuses at startup."""
-    from cerebro_router.packs import load_pack
-    from cerebro_router.skills import load_skill_pack
+    from bruriah.packs import load_pack
+    from bruriah.skills import load_skill_pack
 
-    data = Path(__file__).parents[1] / "src/cerebro_router/data"
+    data = Path(__file__).parents[1] / "src/bruriah/data"
     roots = json.loads((data / "trust-roots.json").read_text())
     packs = sorted(item for item in data.glob("*.json")
                    if not item.name.endswith(".manifest.json") and item.name != "trust-roots.json")
@@ -330,7 +330,7 @@ def _local_pack(tmp_path: Path, skill_id: str = "leo.deploy") -> Path:
 
 
 def _activate_local(tmp_path: Path, paths, skill_id: str = "leo.deploy") -> None:
-    from cerebro_router import cli
+    from bruriah import cli
 
     candidate = _local_pack(tmp_path, skill_id)
     cli.run_skill_approve(paths, candidate, [], today=_TODAY)
@@ -344,7 +344,7 @@ def test_a_users_own_activated_skill_reaches_serve(tmp_path: Path) -> None:
     claimed it merged the user's set. Everything the CLI did -- ingest, analyse, approve, activate --
     ended in a file the server never read, and no test caught it because every dispatch test built
     its SkillSet by hand."""
-    from cerebro_router.platform import load_active_skills
+    from bruriah.platform import load_active_skills
 
     paths = resolve_paths(cli_data_dir=tmp_path / "data", cli_config_dir=tmp_path / "cfg", env={})
     before = load_active_skills(paths, today=_TODAY)
@@ -360,7 +360,7 @@ def test_a_users_own_activated_skill_reaches_serve(tmp_path: Path) -> None:
 def test_a_broken_user_pointer_leaves_the_shipped_skills_working(tmp_path: Path) -> None:
     # Fail-soft on the user's set, strict on the bundled one: a local mistake must not disarm the
     # skills that shipped signed.
-    from cerebro_router.platform import load_active_skills, load_bundled_skills
+    from bruriah.platform import load_active_skills, load_bundled_skills
 
     paths = resolve_paths(cli_data_dir=tmp_path / "data", cli_config_dir=tmp_path / "cfg", env={})
     _activate_local(tmp_path, paths)
@@ -372,10 +372,10 @@ def test_a_broken_user_pointer_leaves_the_shipped_skills_working(tmp_path: Path)
 def test_a_local_skill_cannot_silently_shadow_a_first_party_one(tmp_path: Path) -> None:
     # Shadowing is exactly how a trusted name gets quietly replaced, so a collision raises rather
     # than letting the local copy win.
-    from cerebro_router.platform import load_active_skills
+    from bruriah.platform import load_active_skills
 
     paths = resolve_paths(cli_data_dir=tmp_path / "data", cli_config_dir=tmp_path / "cfg", env={})
-    _activate_local(tmp_path, paths, skill_id="cerebro.falsifiability-probe")
+    _activate_local(tmp_path, paths, skill_id="bruriah.falsifiability-probe")
     with pytest.raises(PlatformError) as error:
         load_active_skills(paths, today=_TODAY)
     assert error.value.code == "skills_collision:duplicate_skill_id"

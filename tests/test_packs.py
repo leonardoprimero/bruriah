@@ -7,10 +7,10 @@ from pathlib import Path
 import pytest
 import yaml
 
-from cerebro_router.packs import PackError, load_pack
-from cerebro_router.registries import Registry
+from bruriah.packs import PackError, load_pack
+from bruriah.registries import Registry
 
-DATA = Path(__file__).parents[1] / "src/cerebro_router/data"
+DATA = Path(__file__).parents[1] / "src/bruriah/data"
 def _load(tmp_path: Path, mutate=None, **kwargs):
     source = DATA / "research-policy.json"
     pack = json.loads(source.read_text())

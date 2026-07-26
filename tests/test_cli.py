@@ -1,4 +1,4 @@
-# Slice 8A-2: `cerebro-mcp {init,serve,index,doctor}` over the Slice 8A-1 `platform.py` loader.
+# Slice 8A-2: `bruriah {init,serve,index,doctor}` over the Slice 8A-1 `platform.py` loader.
 # Mandatory test below: real init -> index -> serve-wiring -> doctor against a tiny TMP corpus
 # with an injected fake embedder -- never the live cerebro.db, never mocked build/promote/load.
 from __future__ import annotations
@@ -16,10 +16,10 @@ import platformdirs
 import pytest
 
 from conftest import requires_vault
-from cerebro_router import cache, cli, clients
-from cerebro_router.contracts import EvidenceRecord
-from cerebro_router.platform import load_deps, resolve_paths
-from cerebro_router.retrieval import search as router_search
+from bruriah import cache, cli, clients
+from bruriah.contracts import EvidenceRecord
+from bruriah.platform import load_deps, resolve_paths
+from bruriah.retrieval import search as router_search
 from mcp.shared.memory import create_connected_server_and_client_session
 
 # Pinned so the doctor freshness check is deterministic, not a wall-clock time bomb.
@@ -133,7 +133,7 @@ def test_end_to_end_init_index_serve_doctor(tmp_path: Path, capsys: pytest.Captu
 
 
 def test_init_is_idempotent_and_registers_no_client(tmp_path: Path) -> None:
-    real_config_dir = Path(platformdirs.user_config_dir("cerebro-router"))
+    real_config_dir = Path(platformdirs.user_config_dir("bruriah"))
     existed_before = real_config_dir.exists()
     paths = _paths(tmp_path)
     cli.run_init(paths)
@@ -160,7 +160,7 @@ def test_init_writes_all_client_configs_with_private_perms_and_manifest_cross_ch
 
     manifest = cli._build_launch_manifest(paths)
     assert manifest.command == sys.executable
-    assert manifest.full_argv[:3] == [sys.executable, "-m", "cerebro_router.cli"]
+    assert manifest.full_argv[:3] == [sys.executable, "-m", "bruriah.cli"]
 
     clients_dir = paths.config_dir / "clients"
     expected = clients.render_all(manifest)
@@ -199,7 +199,7 @@ def test_init_client_manifest_failure_is_typed_not_bare(
     tmp_path: Path, capsys: pytest.CaptureFixture,
 ) -> None:
     bad_config_dir = tmp_path / "bad;name"  # a shell metacharacter lands in a rendered arg
-    exit_code = cli.cerebro_mcp_main([
+    exit_code = cli.bruriah_main([
         "init", "--config-dir", str(bad_config_dir), "--data-dir", str(tmp_path / "data"),
         "--cache-dir", str(tmp_path / "cache"), "--log-dir", str(tmp_path / "log"),
     ])
@@ -247,7 +247,7 @@ def test_cli_dispatch_typed_errors_no_bare_exception(tmp_path: Path, capsys: pyt
     root, policy_path = _corpus(tmp_path)
 
     missing_root = tmp_path / "does-not-exist"
-    exit_code = cli.cerebro_mcp_main([
+    exit_code = cli.bruriah_main([
         "index", "--config-dir", str(config_dir), "--data-dir", str(data_dir),
         "--corpus-root", str(missing_root), "--policy", str(policy_path),
     ])
@@ -256,12 +256,12 @@ def test_cli_dispatch_typed_errors_no_bare_exception(tmp_path: Path, capsys: pyt
 
     config_dir.mkdir()
     (config_dir / "config.json").write_bytes(b"not json")
-    exit_code = cli.cerebro_mcp_main(["doctor", "--config-dir", str(config_dir)])
+    exit_code = cli.bruriah_main(["doctor", "--config-dir", str(config_dir)])
     assert exit_code == 1
     assert "invalid_config" in capsys.readouterr().err
 
     empty_config = tmp_path / "empty-config"
-    exit_code = cli.cerebro_mcp_main([
+    exit_code = cli.bruriah_main([
         "serve", "--config-dir", str(empty_config), "--data-dir", str(tmp_path / "empty-data"),
     ])
     assert exit_code == 1  # never enters the blocking stdio loop on an uninitialized dir
@@ -269,7 +269,7 @@ def test_cli_dispatch_typed_errors_no_bare_exception(tmp_path: Path, capsys: pyt
 
     bad_policy = tmp_path / "bad.yaml"
     bad_policy.write_text("include: [unclosed\n:::", encoding="utf-8")  # exists but malformed YAML
-    exit_code = cli.cerebro_mcp_main([
+    exit_code = cli.bruriah_main([
         "index", "--config-dir", str(tmp_path / "c2"), "--data-dir", str(tmp_path / "d2"),
         "--corpus-root", str(root), "--policy", str(bad_policy),
     ])
@@ -277,9 +277,9 @@ def test_cli_dispatch_typed_errors_no_bare_exception(tmp_path: Path, capsys: pyt
 
     # init's mkdir into a file-path (no per-site guard) must still exit typed via the backstop.
     file_seg = tmp_path / "afile"; file_seg.write_text("x", encoding="utf-8")
-    exit_code = cli.cerebro_mcp_main(["init", "--config-dir", str(file_seg / "cfg"),
+    exit_code = cli.bruriah_main(["init", "--config-dir", str(file_seg / "cfg"),
         "--data-dir", str(tmp_path / "d3"), "--cache-dir", str(tmp_path / "ca3"), "--log-dir", str(tmp_path / "l3")])
-    assert exit_code == 1 and "cerebro-mcp: error:" in capsys.readouterr().err
+    assert exit_code == 1 and "bruriah: error:" in capsys.readouterr().err
 
 
 def test_cli_index_dispatch_builds_only_under_private_data_dir(tmp_path: Path) -> None:
@@ -297,7 +297,7 @@ def test_cli_index_dispatch_builds_only_under_private_data_dir(tmp_path: Path) -
 
 # ---------------------------------------------------------------------------
 # Bugfix regression: `build_serve_deps` used to call `platform.load_deps(paths)` with no
-# `embed_query`, so the deployed `cerebro-mcp serve` process always ran retrieval BM25-only
+# `embed_query`, so the deployed `bruriah serve` process always ran retrieval BM25-only
 # (`vector_leg_unavailable`). It now builds a real query embedder from the active snapshot's own
 # recorded model, fail-closed verified, and threads it into `load_deps`.
 # ---------------------------------------------------------------------------
@@ -407,7 +407,7 @@ def test_load_deps_threads_an_explicit_embed_query_into_service_deps(tmp_path: P
 
 # --- skill lifecycle subcommands (Unit 9A.3) -----------------------------------------------------
 
-from cerebro_router.cli import (  # noqa: E402
+from bruriah.cli import (  # noqa: E402
     run_skill_analyze, run_skill_approve, run_skill_ingest, run_skill_sign,
 )
 from test_skills import DIGEST as _SKILL_DIGEST  # noqa: E402
@@ -432,7 +432,7 @@ def _cli_code(callable_, *args, **kwargs) -> str:
 def test_ingest_stores_a_candidate_and_reports_its_identity(tmp_path: Path) -> None:
     paths = _paths(tmp_path)
     result = run_skill_ingest(paths, _candidate_file(tmp_path))
-    assert result["pack_id"] == "cerebro.skills" and result["version"] == "1.0.0"
+    assert result["pack_id"] == "bruriah.skills" and result["version"] == "1.0.0"
     assert Path(result["path"]).is_file()
     assert result["digest"].startswith("sha256:")
 
@@ -491,7 +491,7 @@ def test_approve_records_the_binding_when_every_finding_is_acknowledged(tmp_path
 
 
 def test_approve_feeds_the_map_the_skill_set_validates_against(tmp_path: Path) -> None:
-    from cerebro_router.approvals import load_approvals
+    from bruriah.approvals import load_approvals
 
     paths = _paths(tmp_path)
     run_skill_approve(paths, _candidate_file(tmp_path), [], today=date(2026, 7, 25))
@@ -499,16 +499,16 @@ def test_approve_feeds_the_map_the_skill_set_validates_against(tmp_path: Path) -
 
 
 def test_sign_produces_a_manifest_that_verifies_through_the_real_loader(tmp_path: Path) -> None:
-    from cerebro_router.signing import generate_key
-    from cerebro_router.skills import load_skill_pack
+    from bruriah.signing import generate_key
+    from bruriah.skills import load_skill_pack
 
     key = tmp_path / "release-key.pem"
     public = generate_key(key)
     pack = _candidate_file(tmp_path)
-    result = run_skill_sign(key, "cerebro-release", pack, None)
-    loaded = load_skill_pack(pack, Path(result["manifest"]), {"cerebro-release": public},
+    result = run_skill_sign(key, "bruriah-release", pack, None)
+    loaded = load_skill_pack(pack, Path(result["manifest"]), {"bruriah-release": public},
                              today=date(2026, 7, 25))
-    assert loaded.pack_id == "cerebro.skills"
+    assert loaded.pack_id == "bruriah.skills"
     assert "not a claim that they" in result["note"]
 
 
@@ -529,14 +529,14 @@ def test_signing_with_a_missing_key_is_one_typed_error(tmp_path: Path) -> None:
 def test_every_subcommand_is_registered_and_fails_typed(tmp_path: Path, argv, capsys) -> None:
     # Exercised through the real argv path: the subcommand parses, and a missing file surfaces as one
     # typed line on stderr rather than a traceback.
-    assert cli.cerebro_mcp_main([*argv, "--data-dir", str(tmp_path / "d"),
+    assert cli.bruriah_main([*argv, "--data-dir", str(tmp_path / "d"),
                                  "--config-dir", str(tmp_path / "c")]) == 1
-    assert "cerebro-mcp: error:" in capsys.readouterr().err
+    assert "bruriah: error:" in capsys.readouterr().err
 
 
 # --- skill activation subcommands (Unit 9B) -------------------------------------------------------
 
-from cerebro_router.cli import (  # noqa: E402
+from bruriah.cli import (  # noqa: E402
     run_skill_activate, run_skill_prune, run_skill_rollback, run_skill_status,
 )
 
@@ -649,9 +649,9 @@ def test_prune_refuses_without_a_readable_pointer(tmp_path: Path) -> None:
      ["skill-status"], ["skill-prune"]],
 )
 def test_every_activation_subcommand_is_registered(tmp_path: Path, argv, capsys) -> None:
-    code = cli.cerebro_mcp_main([*argv, "--data-dir", str(tmp_path / "d"),
+    code = cli.bruriah_main([*argv, "--data-dir", str(tmp_path / "d"),
                                  "--config-dir", str(tmp_path / "c")])
     # skill-status succeeds on a fresh install by design; the rest fail typed rather than traceback.
     assert code == (0 if argv[0] == "skill-status" else 1)
     if code == 1:
-        assert "cerebro-mcp: error:" in capsys.readouterr().err
+        assert "bruriah: error:" in capsys.readouterr().err

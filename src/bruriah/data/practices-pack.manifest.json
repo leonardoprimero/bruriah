@@ -1,0 +1,8 @@
+{
+  "pack_id": "bruriah.practices",
+  "schema_version": "1",
+  "sha256": "e1b6e7f84870670e77fe9aad06ce7000c9cf2525f3c4c059d2adc0705fd0a69d",
+  "signature": "+uWmL8hrM6DcBepA2JkqF4gQxQ+fYWor2B4eyHtqiP2/4mUI84fURsj4pkrwk66WHcTCokwWg8ych6opgFHIDA==",
+  "signer": "bruriah-release",
+  "version": "1.1.0"
+}

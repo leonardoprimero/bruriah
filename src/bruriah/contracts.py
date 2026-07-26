@@ -33,7 +33,7 @@ class HostSkill(ClosedModel):
 class PermissionDisclosure(ClosedModel):
     """What a skill's SIGNED PACK declares it needs, flattened for disclosure.
 
-    Disclosure, never enforcement: Cerebro does not execute skills and cannot enforce anything at
+    Disclosure, never enforcement: Bruriah does not execute skills and cannot enforce anything at
     runtime. The host enforces. Declared here rather than reusing `skills.PermissionEnvelope` so the
     public contract does not inherit the pack schema's shape -- the same reason `EvidenceRecord`
     flattens `SourcePolicy` instead of embedding it. A test pins that this covers every dimension the

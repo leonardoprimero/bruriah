@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Runs the note-level retrieval-quality eval against BOTH live Cerebro
-engines (legacy `cerebro.py`/`cerebro.db` and the new `cerebro-router` active
+engines (legacy `cerebro.py`/`cerebro.db` and the new `bruriah` active
 snapshot) and writes `<out-prefix>.md` + `<out-prefix>.json` (default
 `report-v1.md`/`report-v1.json`).
 

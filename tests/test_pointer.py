@@ -8,8 +8,8 @@ from pathlib import Path
 
 import pytest
 
-from cerebro_router import pointer as pointer_module
-from cerebro_router.pointer import (
+from bruriah import pointer as pointer_module
+from bruriah.pointer import (
     activation_lock,
     controlled_file,
     identity,

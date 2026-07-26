@@ -525,7 +525,7 @@ def open_skillset(
 ) -> SkillSetStatus:
     """Open the active skill set for serving. NEVER raises.
 
-    Skill dispatch is an addition to Cerebro, not a precondition for it, so a broken skills layer
+    Skill dispatch is an addition to Bruriah, not a precondition for it, so a broken skills layer
     must degrade to "no skills" and must never take down `serve`, `doctor`, or corpus retrieval. The
     failure is reported as a typed `skillset_unreadable:<code>` warning that keeps the underlying
     cause visible rather than swallowing it.

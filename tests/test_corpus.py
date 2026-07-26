@@ -11,7 +11,7 @@ from conftest import requires_vault
 pytestmark = requires_vault
 import yaml
 
-from cerebro_router.corpus import (
+from bruriah.corpus import (
     CorpusPolicy,
     CorpusPolicyError,
     RefAliases,

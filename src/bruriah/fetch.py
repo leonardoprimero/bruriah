@@ -72,7 +72,7 @@ _REDIRECT_STATUSES = frozenset({301, 302, 303, 307, 308})
 _METADATA_IPS = frozenset({"169.254.169.254", "fd00:ec2::254"})
 _ALLOWED_MIME_PREFIXES = ("text/",)
 _ALLOWED_MIME_EXACT = frozenset({"application/pdf", "application/json"})
-_USER_AGENT = "cerebro-router/1 (+policy-gated, local-only research)"
+_USER_AGENT = "bruriah/1 (+policy-gated, local-only research)"
 _CHUNK_SIZE = 65_536
 _BLOCKED_CODES = frozenset({
     "unsupported_scheme", "unsupported_method", "invalid_url", "host_not_allowlisted",

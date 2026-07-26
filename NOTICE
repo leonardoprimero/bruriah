@@ -1,4 +1,4 @@
-Cerebro
+Bruriah
 Copyright 2026 Leonardo Caliva
 
 Licensed under the Apache License, Version 2.0 (the "License");
@@ -16,6 +16,6 @@ limitations under the License.
 ---
 
 Third-party components are used under their own terms. The bundled policy
-packs in src/cerebro_router/data/ carry their own licence declarations in
+packs in src/bruriah/data/ carry their own licence declarations in
 the pack metadata, and the sources those packs describe remain governed by
 their publishers' terms, which this project neither grants nor overrides.

@@ -2,7 +2,7 @@
   "schema_version": "1",
   "pack_id": "project.memory",
   "version": "1.0.0",
-  "maintainer": "Cerebro release maintainers",
+  "maintainer": "Bruriah release maintainers",
   "min_router_version": "0.1.0",
   "max_router_version": "0.9.9",
   "reviewed_at": "2026-07-25",
@@ -15,7 +15,7 @@
   "languages": ["en", "es"],
   "update_cadence": "Review annually; the policy describes how to read a project's own record, not the record itself",
   "license": "CC0-1.0 policy metadata; the project's own content remains under its own terms",
-  "provenance": "Bundled Cerebro policy for a project's own decision record. Declares the classifier domains 'general' and 'programming' so that questions about a project's own history resolve instead of abstaining. Abstention exists to stop Cerebro answering about an external body of knowledge it has no policy for; a project's own history is not external, and refusing to read it protects nobody.",
+  "provenance": "Bundled Bruriah policy for a project's own decision record. Declares the classifier domains 'general' and 'programming' so that questions about a project's own history resolve instead of abstaining. Abstention exists to stop Bruriah answering about an external body of knowledge it has no policy for; a project's own history is not external, and refusing to read it protects nobody.",
   "sources": [
     {
       "source_id": "project-decision-record",

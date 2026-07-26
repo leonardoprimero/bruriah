@@ -1,7 +1,7 @@
 # Client Launch Guidance
 
 This document is rendered from the same canonical launch manifest that
-`src/cerebro_router/clients.py` uses to generate every client's config
+`src/bruriah/clients.py` uses to generate every client's config
 snippet. There is exactly one source of truth for how the server is
 launched -- an absolute `command`, `args`, and `env` -- and every client
 below launches that identical process. No client redefines the public
@@ -12,15 +12,15 @@ The example manifest used throughout this document is:
 
 ```json
 {
-  "command": "/usr/local/bin/cerebro-mcp",
+  "command": "/usr/local/bin/bruriah",
   "args": ["serve", "--config-dir", "/home/u/.config/cerebro"],
   "env": {}
 }
 ```
 
-Substitute the real absolute path to your installed `cerebro-mcp`
+Substitute the real absolute path to your installed `bruriah`
 console script (from Slice 8B's packaging) and your private config
-directory. `cerebro-mcp serve` is the only command any client config
+directory. `bruriah serve` is the only command any client config
 below should ever launch.
 
 Diagnostics for every client are stderr-only; nothing this server writes
@@ -29,7 +29,7 @@ ever lands on stdout, which is the JSON-RPC transport channel itself.
 ## Version visibility
 
 Every launch manifest carries a `router_version` field, defaulting to the
-installed `cerebro_router.__version__` (currently `0.1.0`) at the moment the
+installed `bruriah.__version__` (currently `0.1.0`) at the moment the
 manifest is constructed. This gives version visibility (spec
 `K-Canonical Client Launch Manifest and Adapters`: "Adapters MUST use
 absolute executable semantics, explicit arguments/environment, version
@@ -47,10 +47,10 @@ manifest/API level (`LaunchManifest.router_version`) and in this document.
 To check the installed router version directly:
 
 ```bash
-python3 -c "import cerebro_router; print(cerebro_router.__version__)"
+python3 -c "import bruriah; print(bruriah.__version__)"
 ```
 
-A dedicated `cerebro-mcp --version` CLI flag would be the natural
+A dedicated `bruriah --version` CLI flag would be the natural
 user-facing counterpart to this, but wiring it in requires touching
 `cli.py`, which stays frozen for this slice -- tracked as a possible
 follow-up alongside 12B-2 (wiring `clients.py` into `cli.py`'s `init`).
@@ -66,8 +66,8 @@ follow-up alongside 12B-2 (wiring `clients.py` into `cli.py`'s `init`).
 ```json
 {
   "mcpServers": {
-    "cerebro-router": {
-      "command": "/usr/local/bin/cerebro-mcp",
+    "bruriah": {
+      "command": "/usr/local/bin/bruriah",
       "args": ["serve", "--config-dir", "/home/u/.config/cerebro"],
       "env": {}
     }
@@ -90,10 +90,10 @@ follow-up alongside 12B-2 (wiring `clients.py` into `cli.py`'s `init`).
 ```json
 {
   "mcp": {
-    "cerebro-router": {
+    "bruriah": {
       "type": "local",
       "command": [
-        "/usr/local/bin/cerebro-mcp",
+        "/usr/local/bin/bruriah",
         "serve",
         "--config-dir",
         "/home/u/.config/cerebro"
@@ -114,8 +114,8 @@ follow-up alongside 12B-2 (wiring `clients.py` into `cli.py`'s `init`).
 ```json
 {
   "mcpServers": {
-    "cerebro-router": {
-      "command": "/usr/local/bin/cerebro-mcp",
+    "bruriah": {
+      "command": "/usr/local/bin/bruriah",
       "args": ["serve", "--config-dir", "/home/u/.config/cerebro"],
       "env": {}
     }
@@ -133,8 +133,8 @@ follow-up alongside 12B-2 (wiring `clients.py` into `cli.py`'s `init`).
 ```json
 {
   "mcpServers": {
-    "cerebro-router": {
-      "command": "/usr/local/bin/cerebro-mcp",
+    "bruriah": {
+      "command": "/usr/local/bin/bruriah",
       "args": ["serve", "--config-dir", "/home/u/.config/cerebro"],
       "env": {}
     }
@@ -158,8 +158,8 @@ follow-up alongside 12B-2 (wiring `clients.py` into `cli.py`'s `init`).
 ```json
 {
   "mcpServers": {
-    "cerebro-router": {
-      "command": "/usr/local/bin/cerebro-mcp",
+    "bruriah": {
+      "command": "/usr/local/bin/bruriah",
       "args": ["serve", "--config-dir", "/home/u/.config/cerebro"],
       "env": {}
     }
@@ -182,7 +182,7 @@ follow-up alongside 12B-2 (wiring `clients.py` into `cli.py`'s `init`).
 ```json
 {
   "args": ["serve", "--config-dir", "/home/u/.config/cerebro"],
-  "command": "/usr/local/bin/cerebro-mcp",
+  "command": "/usr/local/bin/bruriah",
   "env": {}
 }
 ```

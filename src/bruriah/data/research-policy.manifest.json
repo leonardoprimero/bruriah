@@ -1,0 +1,8 @@
+{
+  "pack_id": "research.minimal",
+  "schema_version": "1",
+  "sha256": "41b851aec44dfd3cf84ad268d606b9a237949e495aa4b98ec7a65b9c13703ae0",
+  "signature": "WiGUcRTMNe4+nx15sb/HJGyLLilwjs0AolePq5auWHqhRlx5MNIUQ3dBQVRamKFkE6LLTlCWJnfH7Du6wZ4gAQ==",
+  "signer": "bruriah-release",
+  "version": "1.0.0"
+}

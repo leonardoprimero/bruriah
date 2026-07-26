@@ -1,8 +1,0 @@
-{
-  "pack_id": "project.memory",
-  "schema_version": "1",
-  "sha256": "7800cc4465da2c6990ad8b41f93237bb15a1c3410115c5a878267362b7d92daa",
-  "signature": "UsKGc+/AGT3cMAqzvYG+CQLu2VtA3HvHg2FMj1dED7Ko07ZYgx5/7m+a8aG7wigBRajhDcKk2hnWpQtC2KHXCA==",
-  "signer": "cerebro-release",
-  "version": "1.0.0"
-}

@@ -1,8 +1,10 @@
-# Cerebro
+# Bruriah
 
 **Point it at your repo. Your agent learns why the code is the way it is — with the commit that proves it and the date it was decided.**
 
 An MCP server that lets an agent consult your knowledge without letting your knowledge instruct the agent.
+
+*Named after [Bruriah](#the-name) (ברוריה), the one woman in the Talmud whose rulings are cited by name.*
 
 ---
 
@@ -20,7 +22,7 @@ Three things go wrong, every time:
 
 **Silence looks exactly like ignorance.** Ask about something the system knows nothing about and you get the closest-looking passages anyway, with the same confidence as a real answer.
 
-## What Cerebro does instead
+## What Bruriah does instead
 
 It answers one question deterministically: *given this task, what do I actually know that bears on it, and how far can I be trusted about it?*
 
@@ -36,7 +38,7 @@ flowchart TD
     style E fill:#1e3a2f,stroke:#2d6a4f,color:#fff
 ```
 
-That abstain branch is not a failure path. **It is the feature.** Cerebro would rather tell your agent *"I have no approved policy for employment law, I am not answering this"* than hand it the nearest-looking paragraph.
+That abstain branch is not a failure path. **It is the feature.** Bruriah would rather tell your agent *"I have no approved policy for employment law, I am not answering this"* than hand it the nearest-looking paragraph.
 
 ## Try it on your own repo, in three commands
 
@@ -47,10 +49,10 @@ Your reasoning already exists. It is in the commit messages that explain **why**
 python scripts/git_corpus.py --repo . --out ./corpus
 
 # 2. index it
-cerebro-mcp index --corpus-root ./corpus --policy ./policy.yaml
+bruriah index --corpus-root ./corpus --policy ./policy.yaml
 
 # 3. wire it into your client
-cerebro-mcp init
+bruriah init
 ```
 
 A minimal `policy.yaml`:
@@ -88,11 +90,11 @@ The eval lives in [`evals/project-memory/`](evals/project-memory/) so you can re
 
 **Everything is read-only.** The MCP surface is exactly two tools and neither writes anything. All mutation — indexing, approval, activation — lives in a CLI a human runs.
 
-**Claims carry state.** Each one is explicitly supported, stale, expired, or of unknown provenance. *"I found something"* and *"I found something current and authoritative"* are different answers, and Cerebro tells you which one you got.
+**Claims carry state.** Each one is explicitly supported, stale, expired, or of unknown provenance. *"I found something"* and *"I found something current and authoritative"* are different answers, and Bruriah tells you which one you got.
 
 ## The skills layer
 
-Instead of flooding your agent's context with every skill you own, Cerebro dispatches the ones that apply — and discloses what permissions each one declares.
+Instead of flooding your agent's context with every skill you own, Bruriah dispatches the ones that apply — and discloses what permissions each one declares.
 
 ```mermaid
 flowchart LR
@@ -114,7 +116,7 @@ Your own skills live alongside them, stay local, and are never redistributed.
 
 ## Trust model
 
-Cerebro assumes the corpus may be hostile.
+Bruriah assumes the corpus may be hostile.
 
 - **Provenance is attribution, not safety.** A valid signature establishes *who* published a pack. It is never evidence the content is correct or safe, and the code says so at the point where it verifies signatures.
 - **Default-deny by absence.** Permission envelopes start empty and "allow everything" is *not expressible* — no wildcard exists in the host or path grammars, so a broad grant cannot be written even by a correctly signed pack.
@@ -140,7 +142,7 @@ Honest state as of 2026-07-25.
 - Skill dispatch requires the client to send `host_skills`. Omitting it returns a byte-identical pre-skills response — intentional, but the layer stays invisible until a client opts in.
 - Only macOS/POSIX is validated. `index.py` uses POSIX-only primitives and will not import on Windows.
 - Live web research exists but is **deliberately inert**: it needs an operator-defined allowlist that does not ship by default. The absence is a posture, not an oversight.
-- There is no generative model anywhere in this project. Cerebro retrieves, classifies and discloses. It does not write prose.
+- There is no generative model anywhere in this project. Bruriah retrieves, classifies and discloses. It does not write prose.
 
 ## Install
 
@@ -148,8 +150,8 @@ Requires **Python 3.12** on macOS or Linux. Not 3.13 — the project pins `>=3.1
 
 ```bash
 uv sync
-uv run cerebro-mcp doctor   # read-only health check, safe at any time
-uv run cerebro-mcp serve    # the MCP server, over stdio
+uv run bruriah doctor   # read-only health check, safe at any time
+uv run bruriah serve    # the MCP server, over stdio
 ```
 
 ## Design notes
@@ -157,6 +159,14 @@ uv run cerebro-mcp serve    # the MCP server, over stdio
 [`openspec/`](../openspec/) carries the specifications, the architecture decisions and a per-unit implementation record — including what was rejected and why. If you want to understand a decision rather than read the code, start there.
 
 Every unit shipped with a **falsifiability probe**: the invariant just written was broken on purpose and the suite re-run to confirm the right tests failed. Roughly one probe in three found something. One of them removed a guard and *wrote a live private key into the package directory* instead of merely failing an assertion — which is how I know that guard was the only thing standing there.
+
+## The name
+
+**Bruriah** (ברוריה) is the only woman in the Talmud whose halakhic opinions are recorded, cited, and argued with as a peer's. She is remembered for two habits in particular: she carried an enormous body of tradition *with the attribution intact* — which teacher each ruling came from, and under what circumstances — and when she overturned an argument she did it on the reasoning, never by pulling rank.
+
+That is the whole specification of this tool, written about eighteen centuries early. Return what is known. Say who said it, when, and whether it still holds. Never win by asserting an authority you do not have.
+
+The project was called **Cerebro** while it was being built, and the decision records under [`openspec/`](../openspec/) still say so. They are left that way deliberately: a record you rewrite retroactively to match the present is no longer a record — which is, more or less, the problem this whole project exists to solve.
 
 ## Licence
 

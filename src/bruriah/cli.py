@@ -28,7 +28,7 @@ from .platform import (
 )
 from .service import ServiceDeps
 
-# Slice 8A-2: `cerebro-mcp {init,serve,index,doctor}` over Slice 8A-1's `platform.py` loader.
+# Slice 8A-2: `bruriah {init,serve,index,doctor}` over Slice 8A-1's `platform.py` loader.
 # `_embedding_fingerprint`/`main` below stay unchanged (Slice-3 entry point, imported by name).
 # Slice 12B-2: `init` now also renders and writes all six `clients.py` client configs (see
 # `_build_launch_manifest`/`run_client_configs` below) under a private `clients/` subdir.
@@ -46,7 +46,7 @@ EmbedderFactory = Callable[[str], tuple[Embedder, str, int]]
 
 
 class CliError(ValueError):
-    """Typed failure for every `cerebro-mcp` command, mirroring `PlatformError`/`ServiceError`."""
+    """Typed failure for every `bruriah` command, mirroring `PlatformError`/`ServiceError`."""
 
     def __init__(self, code: str):
         self.code = code
@@ -88,7 +88,7 @@ def _embedding_fingerprint(model: TextEmbedding) -> str:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(prog="cerebro-router")
+    parser = argparse.ArgumentParser(prog="bruriah")
     parser.add_argument("root", type=Path)
     parser.add_argument("policy", type=Path)
     parser.add_argument("candidate", type=Path)
@@ -226,15 +226,15 @@ def run_init(paths: PlatformPaths) -> Path:
 def _build_launch_manifest(paths: PlatformPaths) -> clients.LaunchManifest:
     """The one manifest every rendered client config derives from (Slice 12B-2): invokes this
     module directly via `sys.executable` (absolute, always importable) rather than a `which
-    cerebro-mcp` lookup -- no packaged console-script entry point exists until Slice 8B."""
+    bruriah` lookup -- no packaged console-script entry point exists until Slice 8B."""
     return clients.LaunchManifest(
         command=sys.executable,
         args=(
-            "-m", "cerebro_router.cli", "serve",
+            "-m", "bruriah.cli", "serve",
             "--config-dir", str(paths.config_dir), "--data-dir", str(paths.data_dir),
             "--cache-dir", str(paths.cache_dir), "--log-dir", str(paths.log_dir),
         ),
-        server_name="cerebro-router",
+        server_name="bruriah",
     )
 
 
@@ -603,7 +603,7 @@ def _add_platform_arguments(parser: argparse.ArgumentParser) -> None:
 
 
 def _build_cli_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(prog="cerebro-mcp")
+    parser = argparse.ArgumentParser(prog="bruriah")
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     def add(name: str, help_text: str, handler: Callable) -> argparse.ArgumentParser:
@@ -645,19 +645,19 @@ def _build_cli_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def cerebro_mcp_main(argv: list[str] | None = None) -> int:
-    """Dispatch `cerebro-mcp {init,serve,index,doctor}`; every failure is one typed `CliError`."""
+def bruriah_main(argv: list[str] | None = None) -> int:
+    """Dispatch `bruriah {init,serve,index,doctor}`; every failure is one typed `CliError`."""
     args = _build_cli_parser().parse_args(argv)
     try:
         return args.handler(args)
     except CliError as error:
-        print(f"cerebro-mcp: error: {error.code}", file=sys.stderr)
+        print(f"bruriah: error: {error.code}", file=sys.stderr)
         return 1
     except Exception as error:  # noqa: BLE001 -- CLI boundary: no bare traceback ever, closing the
         # untyped-escape class (KeyboardInterrupt is a BaseException and still propagates for shutdown).
-        print(f"cerebro-mcp: error: {type(error).__name__}", file=sys.stderr)
+        print(f"bruriah: error: {type(error).__name__}", file=sys.stderr)
         return 1
 
 
 if __name__ == "__main__":
-    raise SystemExit(cerebro_mcp_main())
+    raise SystemExit(bruriah_main())

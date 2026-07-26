@@ -7,7 +7,7 @@ import stat
 from datetime import datetime, timezone
 from pathlib import Path
 
-from cerebro_router.audit import AuditRecord, append_audit, read_audit_records
+from bruriah.audit import AuditRecord, append_audit, read_audit_records
 
 _TIMESTAMP = datetime(2026, 7, 24, 12, 0, 0, tzinfo=timezone.utc)
 

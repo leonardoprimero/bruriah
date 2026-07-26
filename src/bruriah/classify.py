@@ -101,7 +101,7 @@ _CAPABILITY_WORDS = frozenset({
     "tool", "library", "skill", "package", "mcp", "server", "dataset", "method",
     "herramienta", "biblioteca", "paquete", "servidor", "metodo", "método",
 })
-# Requirement "Read-Only Informational Boundary and Host Actions": Cerebro "SHALL provide
+# Requirement "Read-Only Informational Boundary and Host Actions": Bruriah "SHALL provide
 # evidence-linked information, not legal, accounting, security, medical, or other professional
 # conclusions." Detecting a request FOR such a conclusion is classification, not concluding.
 _PROFESSIONAL_CONCLUSION_WORDS = frozenset({

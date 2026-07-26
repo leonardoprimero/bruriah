@@ -17,12 +17,12 @@ from datetime import date
 from pathlib import Path
 
 import anyio
-from cerebro_router.corpus import CorpusPolicy
-from cerebro_router.index import BuildConfig, build_candidate, promote_candidate, snapshot_active
-from cerebro_router.mcp_server import INVESTIGATE_TOOL, READ_TOOL, build_server
-from cerebro_router.packs import load_pack
-from cerebro_router.registries import Registry
-from cerebro_router.service import ServiceDeps
+from bruriah.corpus import CorpusPolicy
+from bruriah.index import BuildConfig, build_candidate, promote_candidate, snapshot_active
+from bruriah.mcp_server import INVESTIGATE_TOOL, READ_TOOL, build_server
+from bruriah.packs import load_pack
+from bruriah.registries import Registry
+from bruriah.service import ServiceDeps
 from mcp.shared.memory import create_connected_server_and_client_session
 
 FINGERPRINT = (
@@ -30,7 +30,7 @@ FINGERPRINT = (
     + '","pooling":"mean","runtime":"fastembed==0.8.0","snapshot":"snapshot-a","source":"example/model"}'
 )
 _SRC = Path(__file__).resolve().parents[1] / "src"
-_DATA = _SRC / "cerebro_router" / "data"
+_DATA = _SRC / "bruriah" / "data"
 _FILLER = "Unrelated filler sentence for padding purposes only. " * 6
 _TASK = "Find a python schema validation library, apple pie baking recipe"
 

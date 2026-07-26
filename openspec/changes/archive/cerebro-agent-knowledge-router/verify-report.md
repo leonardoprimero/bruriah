@@ -1708,7 +1708,7 @@ Task `5B` explicitly owns the following. Their absence in 5A is **by design** an
 
 ### Repository and Review Boundary
 
-- Repository `the repository root`, branch `main`, HEAD `9f2f2c8`.
+- Repository the repository root, branch `main`, HEAD `9f2f2c8`.
 - Slice 5A files are untracked, so Git cannot derive a per-unit numstat. The boundary is therefore measured as total authored lines across the exact 8-file set:
 
 ```text
@@ -1955,7 +1955,7 @@ The current remediation closes both residual Slice 4 defects. Fresh canonical-co
 
 ### Repository and Review Boundary
 
-- Repository: `the repository root`, branch `main`, HEAD `9f2f2c869650fc12a705e592fe11d5a1dc27b1d6`.
+- Repository: the repository root, branch `main`, HEAD `9f2f2c869650fc12a705e592fe11d5a1dc27b1d6`.
 - Current implementation files are untracked; Git therefore cannot derive their per-unit numstat. Current lengths are 674 lines for `index.py` and 530 lines for `test_index.py`.
 - Cumulative apply-progress records the final corrective unit at **171 human-authored changed lines**: `index.py` +59/-59 and `test_index.py` +53. It remains independently below the 400-line review limit; no size exception applies.
 - The pre-existing tracked `.gitignore` edit and untracked Higgsfield note remain present and untouched.

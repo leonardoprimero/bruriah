@@ -8,7 +8,7 @@ deliberately: this repo is its own test case, the same way `verify_legacy_baseli
 
 ```bash
 python scripts/git_corpus.py --repo .. --out /tmp/corpus
-cerebro-mcp index --corpus-root /tmp/corpus --policy policy.yaml --data-dir /tmp/data
+bruriah index --corpus-root /tmp/corpus --policy policy.yaml --data-dir /tmp/data
 # then score search() against decisions-{es,en}.jsonl with evals/retrieval/metrics.py
 ```
 

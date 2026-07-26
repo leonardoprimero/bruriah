@@ -4,8 +4,8 @@ import json
 from pathlib import Path
 
 import pytest
-import cerebro_router
-from cerebro_router.clients import (
+import bruriah
+from bruriah.clients import (
     CLIENT_CAPABILITIES,
     ClientCapability,
     ClientError,
@@ -22,9 +22,9 @@ from cerebro_router.clients import (
     render_opencode,
 )
 
-_COMMAND = "/usr/local/bin/cerebro-mcp"
+_COMMAND = "/usr/local/bin/bruriah"
 _MANIFEST = LaunchManifest(command=_COMMAND, args=("serve", "--config-dir", "/home/u/.config/cerebro"))
-_SPACED_COMMAND = "/Users/x/Library/Application Support/cerebro/cerebro-mcp"
+_SPACED_COMMAND = "/Users/x/Library/Application Support/cerebro/bruriah"
 
 _MCP_SERVERS_RENDERERS = {
     ClientId.CLAUDE_CODE: render_claude_code,
@@ -39,11 +39,11 @@ _MCP_SERVERS_RENDERERS = {
 
 def test_manifest_rejects_relative_command() -> None:
     with pytest.raises(ClientError) as excinfo:
-        LaunchManifest(command="cerebro-mcp")
+        LaunchManifest(command="bruriah")
     assert excinfo.value.code == "command_not_absolute"
 
 
-@pytest.mark.parametrize("bad_command", ["/usr/bin/cerebro-mcp; rm -rf /", "/usr/bin/$(whoami)", "/usr/bin/`id`"])
+@pytest.mark.parametrize("bad_command", ["/usr/bin/bruriah; rm -rf /", "/usr/bin/$(whoami)", "/usr/bin/`id`"])
 def test_manifest_rejects_shell_metacharacters_in_command(bad_command: str) -> None:
     with pytest.raises(ClientError) as excinfo:
         LaunchManifest(command=bad_command)
@@ -86,7 +86,7 @@ def test_manifest_rejects_none_command_with_typed_error_not_type_error() -> None
     assert excinfo.value.code == "command_not_string"
 
 
-@pytest.mark.parametrize("bad_command", [None, 123, ["/usr/local/bin/cerebro-mcp"], 1.5])
+@pytest.mark.parametrize("bad_command", [None, 123, ["/usr/local/bin/bruriah"], 1.5])
 def test_manifest_rejects_non_string_command_with_typed_error(bad_command: object) -> None:
     with pytest.raises(ClientError) as excinfo:
         LaunchManifest(command=bad_command)  # type: ignore[arg-type]
@@ -175,7 +175,7 @@ def test_render_renders_spaced_absolute_command_path_as_single_argv_element(clie
 
 def test_manifest_exposes_router_version_defaulting_to_package_version() -> None:
     manifest = LaunchManifest(command=_COMMAND)
-    assert manifest.router_version == cerebro_router.__version__
+    assert manifest.router_version == bruriah.__version__
 
 
 def test_manifest_router_version_is_overridable_and_still_typed() -> None:
@@ -248,7 +248,7 @@ def test_cross_client_core_equivalence_same_argv_across_all_six() -> None:
 
 
 def test_cross_client_core_equivalence_same_env_across_all_six() -> None:
-    manifest = LaunchManifest(command=_COMMAND, env=(("CEREBRO_NETWORK_ENABLED", "false"),))
+    manifest = LaunchManifest(command=_COMMAND, env=(("BRURIAH_NETWORK_ENABLED", "false"),))
     rendered = render_all(manifest)
     envs = {client_id: _extract_env(client_id, json.loads(text)) for client_id, text in rendered.items()}
     assert all(env == manifest.env_dict for env in envs.values())

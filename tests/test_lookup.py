@@ -11,8 +11,8 @@ from datetime import date
 from pathlib import Path
 
 import pytest
-from cerebro_router.classify import Domain, RequestClassification
-from cerebro_router.lookup import (
+from bruriah.classify import Domain, RequestClassification
+from bruriah.lookup import (
     LookupError,
     LookupResult,
     SourceMatch,
@@ -20,12 +20,12 @@ from cerebro_router.lookup import (
     resolve_capability,
     resolve_source,
 )
-from cerebro_router.packs import DomainPack, load_pack
-from cerebro_router.registries import Registry
+from bruriah.packs import DomainPack, load_pack
+from bruriah.registries import Registry
 
 _SRC = Path(__file__).resolve().parents[1] / "src"
-_LOOKUP_MODULE = _SRC / "cerebro_router" / "lookup.py"
-_DATA = _SRC / "cerebro_router" / "data"
+_LOOKUP_MODULE = _SRC / "bruriah" / "lookup.py"
+_DATA = _SRC / "bruriah" / "data"
 
 
 def _real_bundled_registry() -> Registry:
@@ -102,10 +102,10 @@ def test_determinism_across_hash_seeds() -> None:
     pack_data = _pack_data(sources=[_source_data(jurisdictions=("AR",))], capabilities=[_capability_data()])
     script = (
         "import json, sys; sys.path.insert(0, %r);"
-        "from cerebro_router.classify import RequestClassification;"
-        "from cerebro_router.lookup import discover;"
-        "from cerebro_router.packs import DomainPack;"
-        "from cerebro_router.registries import Registry;"
+        "from bruriah.classify import RequestClassification;"
+        "from bruriah.lookup import discover;"
+        "from bruriah.packs import DomainPack;"
+        "from bruriah.registries import Registry;"
         "pack = DomainPack.model_validate_json(json.dumps(%r));"
         "registry = Registry.from_packs([pack]);"
         "classification = RequestClassification(intent='investigate', domain='programming', "
@@ -273,8 +273,8 @@ def test_module_performs_no_io_or_network_imports() -> None:
 # --- domain-gated skill matching (Unit 5) --------------------------------------------------------
 # Fixture builders come from `test_skills`, following the `test_service` -> `test_research` precedent.
 
-from cerebro_router.lookup import SkillMatch  # noqa: E402
-from cerebro_router.skills import SkillPack, SkillSet  # noqa: E402
+from bruriah.lookup import SkillMatch  # noqa: E402
+from bruriah.skills import SkillPack, SkillSet  # noqa: E402
 from test_skills import _pack as _skill_pack  # noqa: E402
 from test_skills import _skill  # noqa: E402
 
@@ -303,7 +303,7 @@ def test_a_skill_matches_only_its_declared_domain() -> None:
     skills = _skill_set()
     matched = discover(_request("programming"), _real_bundled_registry(), skills).skills
     assert [item.skill.skill_id for item in matched] == ["design.ui-review"]
-    assert matched[0].pack_id == "cerebro.skills"
+    assert matched[0].pack_id == "bruriah.skills"
 
 
 def test_a_skill_whose_domains_exclude_the_request_disappears() -> None:

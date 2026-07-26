@@ -12,8 +12,8 @@ from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
 from pydantic import ValidationError
 
-from cerebro_router.packs import PackError
-from cerebro_router.skills import (
+from bruriah.packs import PackError
+from bruriah.skills import (
     FilesystemAccess,
     NetworkAccess,
     PermissionEnvelope,
@@ -48,9 +48,9 @@ def _skill(**overrides: Any) -> dict:
 def _pack(**overrides: Any) -> dict:
     pack = {
         "schema_version": "1",
-        "pack_id": "cerebro.skills",
+        "pack_id": "bruriah.skills",
         "version": "1.0.0",
-        "maintainer": "Cerebro",
+        "maintainer": "Bruriah",
         "min_router_version": "0.1.0",
         "max_router_version": "1.0.0",
         "reviewed_at": "2026-07-20",
@@ -74,7 +74,7 @@ def _skill_error(**overrides: Any) -> str:
 
 def test_minimal_pack_loads_and_exposes_its_skill() -> None:
     pack = _load(_pack())
-    assert pack.pack_id == "cerebro.skills"
+    assert pack.pack_id == "bruriah.skills"
     assert [skill.skill_id for skill in pack.skills] == ["design.ui-review"]
     assert pack.skills[0].body_digest == DIGEST
 def test_permissions_default_to_deny_by_absence() -> None:
@@ -239,7 +239,7 @@ def _signed_code(tmp_path: Path, payload: dict, **kwargs: Any) -> str:
 def test_signed_skill_pack_loads(tmp_path: Path) -> None:
     pack_path, manifest_path, roots = _sign(tmp_path, _pack())
     pack = load_skill_pack(pack_path, manifest_path, roots, today=date(2026, 7, 25))
-    assert pack.pack_id == "cerebro.skills" and pack.skills[0].skill_id == "design.ui-review"
+    assert pack.pack_id == "bruriah.skills" and pack.skills[0].skill_id == "design.ui-review"
 def test_unsigned_local_pack_is_permitted_only_for_local_tier(tmp_path: Path) -> None:
     local = _pack(skills=[_skill(tier="local")])
     path = tmp_path / "local.json"
@@ -295,7 +295,7 @@ def test_executable_payload_is_refused_before_schema_validation(tmp_path: Path) 
         ({"signature": base64.b64encode(bytes(64)).decode()}, "invalid_signature"),
         ({"today": date(2030, 1, 1)}, "expired_pack"),
         ({"router_version": "9.9.9"}, "incompatible_pack"),
-        ({"minimum_versions": {"cerebro.skills": "2.0.0"}}, "version_rollback"),
+        ({"minimum_versions": {"bruriah.skills": "2.0.0"}}, "version_rollback"),
     ],
 )
 def test_signed_pack_gates_fail_closed(tmp_path: Path, kwargs: dict, code: str) -> None:
@@ -337,7 +337,7 @@ def _second_pack() -> dict:
 def test_skillset_is_deterministic_regardless_of_input_order() -> None:
     first = SkillSet.from_packs([_load(_pack()), _load(_second_pack())])
     second = SkillSet.from_packs([_load(_second_pack()), _load(_pack())])
-    assert first.pack_ids == second.pack_ids == ("another.skills", "cerebro.skills")
+    assert first.pack_ids == second.pack_ids == ("another.skills", "bruriah.skills")
     assert first.skill_ids == second.skill_ids == ("security.threat-model", "design.ui-review")
 def test_skillset_sorts_skills_within_each_pack() -> None:
     crowded = _pack(skills=[_skill(skill_id="z.last"), _skill(skill_id="a.first")])

@@ -15,10 +15,10 @@ import pytest
 
 from conftest import requires_vault
 
-import cerebro_router.index as index_module
-from cerebro_router.corpus import CorpusPolicy
-from cerebro_router.cli import _embedding_fingerprint
-from cerebro_router.index import (
+import bruriah.index as index_module
+from bruriah.corpus import CorpusPolicy
+from bruriah.cli import _embedding_fingerprint
+from bruriah.index import (
     BuildConfig,
     IndexLifecycleError,
     build_candidate,

@@ -31,16 +31,16 @@ def wheel(tmp_path_factory: pytest.TempPathFactory) -> zipfile.ZipFile:
 
 def test_wheel_bundles_the_package_and_its_signed_pack_data(wheel: zipfile.ZipFile) -> None:
     names = set(wheel.namelist())
-    assert {"cerebro_router/__init__.py", "cerebro_router/cli.py", "cerebro_router/platform.py"} <= names
+    assert {"bruriah/__init__.py", "bruriah/cli.py", "bruriah/platform.py"} <= names
     # The loader reads bundled data via Path(__file__).parent/"data"; the wheel must carry it.
-    assert "cerebro_router/data/research-policy.json" in names
-    assert "cerebro_router/data/research-policy.manifest.json" in names
-    assert "cerebro_router/data/trust-roots.json" in names
+    assert "bruriah/data/research-policy.json" in names
+    assert "bruriah/data/research-policy.manifest.json" in names
+    assert "bruriah/data/trust-roots.json" in names
 
 
 def test_wheel_exposes_the_cerebro_mcp_console_script(wheel: zipfile.ZipFile) -> None:
     entry = next(name for name in wheel.namelist() if name.endswith("entry_points.txt"))
-    assert "cerebro-mcp = cerebro_router.cli:cerebro_mcp_main" in wheel.read(entry).decode()
+    assert "bruriah = bruriah.cli:bruriah_main" in wheel.read(entry).decode()
 
 
 def test_wheel_is_self_contained_and_excludes_the_legacy_runtime(wheel: zipfile.ZipFile) -> None:
@@ -70,10 +70,10 @@ _SKILL_BODIES = (
 def test_wheel_bundles_the_skill_pack_and_every_body(wheel: zipfile.ZipFile) -> None:
     """A pack whose bodies did not ship is a dispatcher pointing at nothing."""
     names = set(wheel.namelist())
-    assert "cerebro_router/data/practices-pack.json" in names
-    assert "cerebro_router/data/practices-pack.manifest.json" in names
+    assert "bruriah/data/practices-pack.json" in names
+    assert "bruriah/data/practices-pack.manifest.json" in names
     for body in _SKILL_BODIES:
-        assert f"cerebro_router/data/skills/{body}" in names, body
+        assert f"bruriah/data/skills/{body}" in names, body
 
 
 def test_every_declared_digest_matches_the_body_that_shipped(wheel: zipfile.ZipFile) -> None:
@@ -83,9 +83,9 @@ def test_every_declared_digest_matches_the_body_that_shipped(wheel: zipfile.ZipF
     signed would still look consistent on disk while shipping broken."""
     import hashlib
 
-    pack = json.loads(wheel.read("cerebro_router/data/practices-pack.json"))
+    pack = json.loads(wheel.read("bruriah/data/practices-pack.json"))
     for skill in pack["skills"]:
-        shipped = wheel.read(f"cerebro_router/data/skills/{skill['body_locator']}")
+        shipped = wheel.read(f"bruriah/data/skills/{skill['body_locator']}")
         assert skill["body_digest"] == "sha256:" + hashlib.sha256(shipped).hexdigest(), \
             skill["skill_id"]
 
@@ -93,13 +93,13 @@ def test_every_declared_digest_matches_the_body_that_shipped(wheel: zipfile.ZipF
 def test_the_bundled_pack_loads_from_the_installed_location() -> None:
     from datetime import date
 
-    from cerebro_router.platform import load_bundled_skills
+    from bruriah.platform import load_bundled_skills
 
     skills = load_bundled_skills(today=date(2026, 7, 25))
     assert skills.skill_ids == (
-        "cerebro.falsifiability-probe", "cerebro.find-the-time-bomb",
-        "cerebro.make-it-inexpressible", "cerebro.preserve-behaviour-when-refactoring",
-        "cerebro.undiscoverable-is-unbuilt", "cerebro.verify-before-asserting",
+        "bruriah.falsifiability-probe", "bruriah.find-the-time-bomb",
+        "bruriah.make-it-inexpressible", "bruriah.preserve-behaviour-when-refactoring",
+        "bruriah.undiscoverable-is-unbuilt", "bruriah.verify-before-asserting",
     )
     assert all(skill.tier == "first_party" for skill in skills.skills)
 
@@ -109,7 +109,7 @@ def test_every_bundled_skill_grants_nothing() -> None:
     # real anywhere.
     from datetime import date
 
-    from cerebro_router.platform import load_bundled_skills
+    from bruriah.platform import load_bundled_skills
 
     for skill in load_bundled_skills(today=date(2026, 7, 25)).skills:
         assert skill.permissions.grants_nothing(), skill.skill_id
@@ -121,7 +121,7 @@ def test_every_bundled_skill_states_its_limits() -> None:
     # as a test, because content is what decides whether the pack is worth installing.
     from datetime import date
 
-    from cerebro_router.platform import load_bundled_skills
+    from bruriah.platform import load_bundled_skills
 
     for skill in load_bundled_skills(today=date(2026, 7, 25)).skills:
         assert skill.limitations, skill.skill_id
@@ -132,11 +132,11 @@ def test_the_bundled_skills_dispatch_for_their_declared_domain() -> None:
     """End to end: a real programming request reaches the shipped skills."""
     from datetime import date
 
-    from cerebro_router.classify import RequestClassification
-    from cerebro_router.contracts import HostSkill
-    from cerebro_router.dispatch import DEFAULT_SKILL_CEILING, dispatch
-    from cerebro_router.lookup import discover
-    from cerebro_router.platform import load_bundled_skills, load_registry
+    from bruriah.classify import RequestClassification
+    from bruriah.contracts import HostSkill
+    from bruriah.dispatch import DEFAULT_SKILL_CEILING, dispatch
+    from bruriah.lookup import discover
+    from bruriah.platform import load_bundled_skills, load_registry
 
     today = date(2026, 7, 25)
     skills = load_bundled_skills(today=today)
@@ -163,9 +163,9 @@ def test_a_non_programming_request_gets_no_bundled_skills() -> None:
     # The negative control: dispatch is domain-gated, not "always send everything we ship".
     from datetime import date
 
-    from cerebro_router.classify import RequestClassification
-    from cerebro_router.lookup import discover
-    from cerebro_router.platform import load_bundled_skills, load_registry
+    from bruriah.classify import RequestClassification
+    from bruriah.lookup import discover
+    from bruriah.platform import load_bundled_skills, load_registry
 
     today = date(2026, 7, 25)
     lookup = discover(

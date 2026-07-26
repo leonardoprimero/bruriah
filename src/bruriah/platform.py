@@ -1,5 +1,5 @@
 # Platform lifecycle (Slice 8A): resolves user-private config/data/cache/log dirs via
-# `platformdirs` and assembles the real `ServiceDeps` the `cerebro-mcp` `serve`/`doctor` commands
+# `platformdirs` and assembles the real `ServiceDeps` the `bruriah` `serve`/`doctor` commands
 # need. Owns no retrieval/routing/protocol logic; composes only frozen index/packs/registries/
 # service primitives. Windows durability (descriptor/no-follow, share-mode identity) is NOT
 # VALIDATED on this Darwin host -- index.py's activation is POSIX-only (fcntl, O_NOFOLLOW, /dev/fd).
@@ -22,8 +22,8 @@ from .approvals import load_approvals
 from .skills import SkillSet, load_skill_pack
 from .skillset import open_skillset
 
-APP_NAME = "cerebro-router"
-ENV_PREFIX = "CEREBRO_ROUTER_"
+APP_NAME = "bruriah"
+ENV_PREFIX = "BRURIAH_"
 _BUNDLED_DATA = Path(__file__).resolve().parent / "data"
 # Fixed order, so the reported `registry_load_failed` code is deterministic when more than one pack
 # is unverifiable. `Registry.from_packs` sorts by pack id, so this order does not affect the result.

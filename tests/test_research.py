@@ -15,10 +15,10 @@ from collections.abc import Callable
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-from cerebro_router.audit import read_audit_records
-from cerebro_router.cache import cache_key, read_cache
-from cerebro_router.contracts import Budgets, InvestigationRequest
-from cerebro_router.research import (
+from bruriah.audit import read_audit_records
+from bruriah.cache import cache_key, read_cache
+from bruriah.contracts import Budgets, InvestigationRequest
+from bruriah.research import (
     AccessPolicy, ConcurrencyLimiter, ResearchDeps, ResearchOutcome, build_proxy_connect, research,
 )
 

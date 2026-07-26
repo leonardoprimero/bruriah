@@ -1,7 +1,7 @@
 [project]
-name = "cerebro-router"
+name = "bruriah"
 version = "0.1.0"
-description = "Read-only MCP knowledge router for the Cerebro corpus"
+description = "Work-intelligence MCP server: evidence-backed answers from your own history"
 requires-python = ">=3.12,<3.13"
 license = "Apache-2.0"
 license-files = ["LICENSE", "NOTICE"]
@@ -16,7 +16,7 @@ dependencies = [
 ]
 
 [project.scripts]
-cerebro-mcp = "cerebro_router.cli:cerebro_mcp_main"
+bruriah = "bruriah.cli:bruriah_main"
 
 [build-system]
 requires = ["uv_build>=0.11,<0.12"]
@@ -24,7 +24,7 @@ build-backend = "uv_build"
 
 [tool.uv.build-backend]
 module-root = "src"
-module-name = "cerebro_router"
+module-name = "bruriah"
 
 [dependency-groups]
 dev = [
