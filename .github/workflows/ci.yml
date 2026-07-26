@@ -1,7 +1,11 @@
 # The suite ran green on my laptop, which is a claim about my laptop. This runs it on machines I
-# do not control, on both supported Python versions, and then installs the built wheel into a clean
+# do not control, on every supported Python version, and then installs the built wheel into a clean
 # environment and uses it -- because the two defects that made this package unpublishable were both
 # invisible to a suite running from a clone.
+#
+# Windows is in the matrix because it is now supported, and because the defect that made a Windows
+# checkout arrive corrupt -- CRLF rewriting digest-verified packs -- is invisible to every other
+# runner by construction. A platform nobody runs in CI is a platform nobody supports.
 name: CI
 
 on:
@@ -24,8 +28,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest]
-        python: ["3.12", "3.13"]
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        python: ["3.12", "3.13", "3.14"]
     steps:
       - uses: actions/checkout@v6
         with:
