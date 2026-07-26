@@ -14,12 +14,16 @@ dist/
 .coverage
 htmlcov/
 
-# Local corpora, indexes and operator state -- never redistributed
+# Local corpora, indexes and operator state -- never redistributed. The demo fixtures are
+# checked in on purpose: they ARE the demo, and a rule meant to keep private corpora out
+# silently swallowed them, so the published repo shipped a demo that could not run.
 corpus/
+!demo/injection/corpus/
 *.db
 *.db-wal
 *.db-shm
 policy.yaml
+!demo/injection/policy.yaml
 corpus-policy.yaml
 ref-aliases.json
 recovery/

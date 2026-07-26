@@ -9,6 +9,8 @@ from __future__ import annotations
 
 import subprocess
 import sys
+
+import pytest
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -25,6 +27,25 @@ def test_the_published_injection_demo_still_holds() -> None:
     assert "Payload fragments present: none" in result.stdout
     assert "the routing decision is identical: True" in result.stdout
     assert "All three properties hold." in result.stdout
+
+
+def test_every_file_the_demo_needs_is_tracked_in_git() -> None:
+    """Present on disk is not the same as published, and the difference is invisible locally.
+
+    The first published version of this demo shipped without its corpus: `.gitignore` carried a
+    `corpus/` rule meant to keep private corpora out, and it silently swallowed the fixtures. The
+    suite passed, because the files existed in the working tree. Only a fresh clone failed. So the
+    assertion has to be about what git tracks, not about what the filesystem happens to hold."""
+    tracked = subprocess.run(["git", "ls-files", "demo/injection"], cwd=ROOT,
+                             capture_output=True, text=True, timeout=60)
+    if tracked.returncode != 0:
+        pytest.skip("not a git checkout")
+    published = set(tracked.stdout.split())
+    required = {"demo/injection/run.py", "demo/injection/policy.yaml",
+                "demo/injection/corpus/onboarding-notes.md",
+                "demo/injection/corpus/deploy-policy.md",
+                "demo/injection/corpus/database-choice.md"}
+    assert required <= published, f"the demo would not run from a clone; missing: {required - published}"
 
 
 def test_the_readme_quotes_the_demo_it_actually_ships() -> None:

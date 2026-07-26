@@ -5,7 +5,7 @@
 </p>
 
 <p align="center">
-  <img alt="tests" src="https://img.shields.io/badge/tests-851%20passing-2d6a4f?style=flat-square"/>
+  <img alt="tests" src="https://img.shields.io/badge/tests-852%20passing-2d6a4f?style=flat-square"/>
   <img alt="python" src="https://img.shields.io/badge/python-3.12-3776ab?style=flat-square"/>
   <img alt="MCP" src="https://img.shields.io/badge/MCP-2%20read--only%20tools-6a4c93?style=flat-square"/>
   <img alt="generative model" src="https://img.shields.io/badge/generative%20model-none-8b3c3c?style=flat-square"/>
@@ -218,7 +218,7 @@ Bruriah assumes the corpus may be hostile.
 
 Honest state as of 2026-07-25.
 
-**Working and tested** — 851 tests pass on a fresh clone (18 more need the author's private corpus and skip)
+**Working and tested** — 852 tests pass on a fresh clone (18 more need the author's private corpus and skip)
 - Hybrid retrieval (BM25 + local vectors via `sqlite-vec`) over your corpus
 - The two-tool MCP contract, structured output, typed failures
 - Signed policy packs with Ed25519 manifests and fail-closed loading
