@@ -20,6 +20,38 @@ Without that the scorer reports 0% and looks like a retrieval collapse rather th
 `tests/test_project_memory_eval.py` asserts every ground-truth document is still produced by this
 repository's own history, so the numbers below stay reproducible from the published repository.
 
+## The obvious next model is worse, measured 2026-07-26
+
+The README says closing the cross-lingual gap "needs a better multilingual signal, not better
+weighting". That is a hypothesis about the embedding, and it is cheap to test: same corpus, same
+questions, same scoring, one variable changed. So it was tested, on 216 passages from this
+repository's history.
+
+| model | size | dim | en recall@3 | en MRR@10 | es recall@3 | es recall@10 | es MRR@10 |
+|---|---|---|---|---|---|---|---|
+| `paraphrase-multilingual-MiniLM-L12-v2` *(shipped)* | 0.22 GB | 384 | **0.833** | **0.705** | **0.583** | **0.917** | **0.463** |
+| `paraphrase-multilingual-mpnet-base-v2` | 1.0 GB | 768 | 0.500 | 0.480 | 0.250 | 0.333 | 0.219 |
+
+Five times the download, half the recall, and Spanish recall@10 collapses from 92% to 33%. The
+larger sibling from the same family, same training objective, same mean pooling — and both emit
+comparably scaled vectors (‖v‖ 2.91 and 2.45), so this is not a normalisation artefact hiding a
+good model.
+
+**What this does and does not establish.** It does not say mpnet is a worse encoder; it says the
+model is **not a drop-in variable in this pipeline**. Queries and passages are embedded
+identically, with no prefix and no per-model normalisation, so any model whose contract expects
+something else — `intfloat/multilingual-e5-large` wants `query:` / `passage:` prefixes, for
+instance — will be measured unfairly by exactly this experiment. That is the reason e5 was *not*
+run: a number produced by a knowingly misconfigured pipeline is worse than no number.
+
+So the open work is not "find a better multilingual model". It is "give the pipeline the per-model
+contract that would let a fair comparison happen at all" — and only then compare. Twelve questions
+per language remains the sample size; treat the direction as established and the figures as
+indicative, as everywhere else here.
+
+Reproduce it with `evals/retrieval/metrics.py` and the recipe above, indexing once per model
+against one corpus build.
+
 ## Baseline, measured 2026-07-25
 
 76 commits carrying an explanatory body, 152 passages.
