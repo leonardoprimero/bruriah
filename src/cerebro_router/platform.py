@@ -18,7 +18,9 @@ from .index import ActiveSnapshot, BuildConfig, IndexLifecycleError, snapshot_ac
 from .packs import PackError, load_pack
 from .registries import Registry
 from .service import ServiceDeps
+from .approvals import load_approvals
 from .skills import SkillSet, load_skill_pack
+from .skillset import open_skillset
 
 APP_NAME = "cerebro-router"
 ENV_PREFIX = "CEREBRO_ROUTER_"
@@ -181,8 +183,8 @@ def load_bundled_skills(today: date | None = None) -> SkillSet:
     The human approval gate exists to protect a user from content THEY did not vet; it is not a
     ceremony for content that shipped signed.
 
-    A user's own activated skill set is separate and lives under `data_dir`; `load_deps` merges the
-    two, and an id collision fails loudly rather than one silently shadowing the other.
+    A user's own activated skill set lives separately under `data_dir`; `load_active_skills` is what
+    merges the two and is what `load_deps` calls.
 
     Signature, digest and schema are still enforced absolutely. Only the CURRENCY gate is relaxed,
     and deliberately: an expiry date says the review is old, and answering that by refusing to start
@@ -198,6 +200,31 @@ def load_bundled_skills(today: date | None = None) -> SkillSet:
     except PackError as error:
         raise PlatformError(f"skills_load_failed:{error.code}") from error
     return SkillSet.from_packs([pack])
+
+
+def load_active_skills(paths: PlatformPaths, today: date | None = None) -> SkillSet:
+    """The bundled first-party skills PLUS whatever the user activated under `data_dir`.
+
+    This is what `serve` actually dispatches from, and it is the whole point of the CLI lifecycle:
+    a user who ingests, approves and activates their own pack must see those skills reach the tool
+    surface, or the entire review gate was ceremony over a file nobody reads.
+
+    Fail-soft on the user's set, strict on the bundled one. A broken or absent user pointer leaves
+    the shipped skills working and is reported by `skill-status`; the bundled pack failing is a
+    packaging fault and should be loud. An id collision between the two raises, rather than letting
+    a local skill silently shadow a signed first-party one -- shadowing is precisely how a trusted
+    name gets quietly replaced."""
+    bundled = load_bundled_skills(today)
+    status = open_skillset(
+        paths.data_dir / "skills" / "active.json", load_trust_roots(),
+        load_approvals(paths.data_dir), today=today,
+    )
+    if status.skill_set is None:
+        return bundled
+    try:
+        return SkillSet.from_packs([*bundled.packs, *status.skill_set.packs])
+    except PackError as error:
+        raise PlatformError(f"skills_collision:{error.code}") from error
 
 
 def load_registry(today: date | None = None) -> Registry:
@@ -250,11 +277,11 @@ def load_deps(
     `build_serve_deps`'s job to build and inject for `serve`."""
     return ServiceDeps(
         registry=load_registry(today), snapshot=open_snapshot(paths), embed_query=embed_query,
-        skill_set=load_bundled_skills(today),
+        skill_set=load_active_skills(paths, today),
     )
 
 
 __all__ = [
     "PlatformError", "PlatformPaths", "ensure_private_dirs", "load_build_descriptor",
-    "load_bundled_skills", "load_deps", "load_registry", "load_trust_roots", "open_snapshot", "resolve_paths", "write_build_descriptor",
+    "load_active_skills", "load_bundled_skills", "load_deps", "load_registry", "load_trust_roots", "open_snapshot", "resolve_paths", "write_build_descriptor",
 ]

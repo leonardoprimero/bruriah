@@ -287,3 +287,82 @@ def test_every_bundled_pack_ships_with_a_verifiable_manifest() -> None:
         # The skill pack versions independently of the domain packs: it gained three skills.
         expected = "1.1.0" if pack.stem == "practices-pack" else "1.0.0"
         assert loader(pack, manifest, roots, today=_TODAY).version == expected
+
+
+# --- the user's own skills have to reach serve (or the CLI lifecycle is ceremony) ------------------
+
+
+def _local_pack(tmp_path: Path, skill_id: str = "leo.deploy") -> Path:
+    import hashlib
+
+    body = tmp_path / "body.md"
+    body.write_text("# Deploy\nNever on a Friday.\n")
+    pack = {
+        "schema_version": "1", "pack_id": f"{skill_id}.pack", "version": "1.0.0",
+        "maintainer": "Leo", "min_router_version": "0.1.0", "max_router_version": "0.9.9",
+        "reviewed_at": "2026-07-25", "expires_at": "2027-07-25", "freshness_days": 365,
+        "license": "private", "provenance": "internal conventions",
+        "skills": [{
+            "skill_id": skill_id, "version": "1.0.0", "tier": "local", "payload": "prose",
+            "summary": "How deploys work on this project, written by the person who runs them.",
+            "domains": ["programming"], "body_locator": "body.md",
+            "body_digest": "sha256:" + hashlib.sha256(body.read_bytes()).hexdigest(),
+            "provenance": "internal", "license": "private", "advisories": [],
+            "limitations": ["Specific to this project."],
+        }],
+    }
+    path = tmp_path / f"{skill_id}.json"
+    path.write_text(json.dumps(pack))
+    return path
+
+
+def _activate_local(tmp_path: Path, paths, skill_id: str = "leo.deploy") -> None:
+    from cerebro_router import cli
+
+    candidate = _local_pack(tmp_path, skill_id)
+    cli.run_skill_approve(paths, candidate, [], today=_TODAY)
+    cli.run_skill_activate(paths, [candidate], allow_unsigned_local=True, today=_TODAY)
+
+
+def test_a_users_own_activated_skill_reaches_serve(tmp_path: Path) -> None:
+    """The whole CLI lifecycle exists so this is true.
+
+    Regression test for a real defect: `load_deps` loaded only the bundled pack while a docstring
+    claimed it merged the user's set. Everything the CLI did -- ingest, analyse, approve, activate --
+    ended in a file the server never read, and no test caught it because every dispatch test built
+    its SkillSet by hand."""
+    from cerebro_router.platform import load_active_skills
+
+    paths = resolve_paths(cli_data_dir=tmp_path / "data", cli_config_dir=tmp_path / "cfg", env={})
+    before = load_active_skills(paths, today=_TODAY)
+    _activate_local(tmp_path, paths)
+    after = load_active_skills(paths, today=_TODAY)
+
+    assert "leo.deploy" not in before.skill_ids
+    assert "leo.deploy" in after.skill_ids
+    assert len(after.skill_ids) == len(before.skill_ids) + 1
+    assert set(before.skill_ids) < set(after.skill_ids), "bundled skills must survive the merge"
+
+
+def test_a_broken_user_pointer_leaves_the_shipped_skills_working(tmp_path: Path) -> None:
+    # Fail-soft on the user's set, strict on the bundled one: a local mistake must not disarm the
+    # skills that shipped signed.
+    from cerebro_router.platform import load_active_skills, load_bundled_skills
+
+    paths = resolve_paths(cli_data_dir=tmp_path / "data", cli_config_dir=tmp_path / "cfg", env={})
+    _activate_local(tmp_path, paths)
+    (paths.data_dir / "skills" / "active.json").write_text("{not json")
+    assert load_active_skills(paths, today=_TODAY).skill_ids == \
+        load_bundled_skills(today=_TODAY).skill_ids
+
+
+def test_a_local_skill_cannot_silently_shadow_a_first_party_one(tmp_path: Path) -> None:
+    # Shadowing is exactly how a trusted name gets quietly replaced, so a collision raises rather
+    # than letting the local copy win.
+    from cerebro_router.platform import load_active_skills
+
+    paths = resolve_paths(cli_data_dir=tmp_path / "data", cli_config_dir=tmp_path / "cfg", env={})
+    _activate_local(tmp_path, paths, skill_id="cerebro.falsifiability-probe")
+    with pytest.raises(PlatformError) as error:
+        load_active_skills(paths, today=_TODAY)
+    assert error.value.code == "skills_collision:duplicate_skill_id"
