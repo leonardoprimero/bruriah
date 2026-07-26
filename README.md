@@ -1,4 +1,9 @@
-<h1 align="center">Bruriah <sub><sub>ברוריה</sub></sub></h1>
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/leonardoprimero/bruriah/main/brand/logo-dark.svg"/>
+    <img alt="Bruriah — ברוריה" src="https://raw.githubusercontent.com/leonardoprimero/bruriah/main/brand/logo-light.svg" width="520"/>
+  </picture>
+</p>
 
 <p align="center">
   <b>Project memory for coding agents.</b><br/>
@@ -375,6 +380,17 @@ Every unit shipped with a **falsifiability probe**: the invariant just written w
 **Bruriah** (ברוריה) is the only woman in the Talmud whose halakhic opinions are recorded, cited, and argued with as a peer's. She is remembered for two habits in particular: she carried an enormous body of tradition *with the attribution intact* — which teacher each ruling came from, and under what circumstances — and when she overturned an argument she did it on the reasoning, never by pulling rank.
 
 That is the whole specification of this tool, written about eighteen centuries early. Return what is known. Say who said it, when, and whether it still holds. Never win by asserting an authority you do not have.
+
+The mark is a **[folio of the Talmud](https://github.com/leonardoprimero/bruriah/blob/main/brand/mark.svg)**, abstracted: the heavy central column is
+the Gemara, the two fine columns flanking it are Rashi on the inner margin and Tosafot on the outer,
+and beneath the text the commentary closes in. It is not decoration. That page *is* the argument of
+this project — a central claim, surrounded by attributed commentary, every layer knowing whose it is,
+disagreeing without erasing what came before. Evidence with provenance, laid out eight centuries early.
+
+The `2a` beside the name is the folio number. **No tractate of the Talmud begins on page 1** — every
+one starts at daf 2. The reason given is that however completely you study a tractate, you can never
+claim to have finished its first page, because there is none: you are always entering a conversation
+already under way. Which is the situation of every agent this is built for.
 
 The project was called **Cerebro** while it was being built, and the decision records under [`openspec/`](https://github.com/leonardoprimero/bruriah/blob/main/openspec/) still say so. They are left that way deliberately: a record you rewrite retroactively to match the present is no longer a record — which is, more or less, the problem this whole project exists to solve.
 
