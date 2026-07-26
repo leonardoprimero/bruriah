@@ -36,7 +36,7 @@ def test_every_file_the_demo_needs_is_tracked_in_git() -> None:
     `corpus/` rule meant to keep private corpora out, and it silently swallowed the fixtures. The
     suite passed, because the files existed in the working tree. Only a fresh clone failed. So the
     assertion has to be about what git tracks, not about what the filesystem happens to hold."""
-    tracked = subprocess.run(["git", "ls-files", "demo/injection"], cwd=ROOT,
+    tracked = subprocess.run(["git", "ls-files", "demo"], cwd=ROOT,
                              capture_output=True, text=True, timeout=60)
     if tracked.returncode != 0:
         pytest.skip("not a git checkout")
@@ -48,7 +48,9 @@ def test_every_file_the_demo_needs_is_tracked_in_git() -> None:
                 # The README embeds this. Untracked, GitHub renders a broken image at the top of
                 # the front page -- the same class of failure as the missing corpus, and just as
                 # invisible from a working tree that has the file.
-                "demo/injection/demo.gif"}
+                "demo/injection/demo.gif",
+                # The README embeds this one at the top of the page.
+                "demo/ask.gif", "demo/ask.tape"}
     assert required <= published, f"the demo would not run from a clone; missing: {required - published}"
 
 

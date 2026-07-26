@@ -22,6 +22,17 @@ bruriah index --corpus-root ./corpus --policy ./policy.yaml
 bruriah init                                        # writes your MCP client config
 ```
 
+Then ask it something, from the terminal, before wiring up any client:
+
+<p align="center">
+  <img src="https://raw.githubusercontent.com/leonardoprimero/bruriah/main/demo/ask.gif" alt="bruriah ask returns references with authority 'unknown', not document text; reading one explicitly returns the exact commit that decided it." width="100%"/>
+</p>
+
+```bash
+bruriah ask "why did this project avoid FastMCP"     # references, provenance, no prose
+bruriah ask "why did this project avoid FastMCP" --read 2   # the exact lines, on request
+```
+
 An MCP server that lets an agent consult your project's decisions **without letting those documents
 instruct the agent**. Local, read-only, no generative model, no telemetry, two tools.
 

@@ -26,7 +26,8 @@ from .platform import (
     PlatformError, PlatformPaths, ensure_private_dirs, load_build_descriptor, load_deps,
     load_registry, open_snapshot, resolve_paths, write_build_descriptor,
 )
-from .service import ServiceDeps
+from .contracts import InvestigationRequest, ReadRequest
+from .service import ServiceDeps, investigate, read
 
 # Slice 8A-2: `bruriah {init,serve,index,doctor}` over Slice 8A-1's `platform.py` loader.
 # `_embedding_fingerprint`/`main` below stay unchanged (Slice-3 entry point, imported by name).
@@ -605,6 +606,68 @@ def _cmd_serve(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_ask(
+    args: argparse.Namespace, *, embedder_factory: EmbedderFactory = _default_embedder_factory,
+) -> int:
+    """Run one investigation from the terminal and show what came back.
+
+    This exists because until it did, there was no way to see the central capability work. You
+    installed, you indexed, and then you had to wire up an entire MCP client before anything was
+    observable -- which is exactly the failure `undiscoverable-is-unbuilt` describes, sitting in
+    the middle of the product it shipped with.
+
+    It is a VIEWER, not a third tool. It answers nothing: there is no generative model here, so
+    what it prints is the evidence and the disclosure, in the same two steps an agent takes. The
+    MCP surface is still exactly `investigate_work` and `read_evidence`.
+    """
+    paths = _resolve_paths(args)
+    deps = build_serve_deps(paths, embedder_factory=embedder_factory)
+    result = investigate(InvestigationRequest(task=args.question, host_skills=[]), deps)
+    payload = result.model_dump(mode="json")
+    if args.json:
+        print(json.dumps(payload, indent=2, sort_keys=True))
+        return 0
+
+    local = [item for item in payload["evidence"] if item["kind"] == "local"]
+    print(f"\n  status: {payload['status']} · {len(local)} references")
+    for note in payload["degradation"]:
+        print(f"  disclosed: {note}")
+    for gap in payload["gaps"]:
+        print(f"  gap: {gap}")
+    if payload["status"] == "abstained":
+        print("\n  No approved policy covers this domain, so nothing is returned rather than the\n"
+              "  nearest-looking passage. That is the designed answer, not a failure.\n")
+        return 0
+
+    # When a reference was named, list only it: relisting eight results above the text you
+    # asked for buries the thing you asked for.
+    shown = [(n, item) for n, item in enumerate(local, start=1)
+             if not args.read or n in args.read][: args.limit if not args.read else None]
+    for position, item in shown:
+        print(f"\n  [{position}] {item['citation_locator']}")
+        print(f"      authority: {item['authority']} ({item['authority_rationale']})")
+        print(f"      {item['digest']}")
+    if not local:
+        print("\n  Nothing in this corpus bears on that question.\n")
+        return 0
+
+    if args.read:
+        chosen = [local[index - 1]["ref"] for index in args.read if 1 <= index <= len(local)]
+        if not chosen:
+            raise CliError("no_such_reference")
+        print()
+        for item in read(ReadRequest(refs=chosen), deps).model_dump(mode="json")["items"]:
+            print(f"  ── {item['ref'][:24]}… lines {item['start']}-{item['end']} " + "─" * 24)
+            for line in item["content"].splitlines():
+                print(f"  {line}")
+            print()
+        return 0
+
+    print(f"\n  Nothing above is the document's text -- only references to it. That is the whole\n"
+          f"  design: read one explicitly with  bruriah ask \"{args.question[:34]}…\" --read 1\n")
+    return 0
+
+
 def _cmd_doctor(args: argparse.Namespace) -> int:
     paths = _resolve_paths(args)
     report = run_doctor(paths)
@@ -635,6 +698,12 @@ def _build_cli_parser() -> argparse.ArgumentParser:
     corpus_parser.add_argument("--repo", type=Path, default=Path("."), help="repository to read")
     corpus_parser.add_argument("--out", type=Path, required=True, help="directory to write into")
     corpus_parser.add_argument("--limit", type=int, default=None, help="most recent N commits only")
+    ask = add("ask", "Run one investigation and show the evidence.", _cmd_ask)
+    ask.add_argument("question", help="what you want to know about your own corpus")
+    ask.add_argument("--read", type=int, action="append", metavar="N",
+                     help="read reference N's exact text. Repeat to read several.")
+    ask.add_argument("--limit", type=int, default=8, help="references to list (default 8)")
+    ask.add_argument("--json", action="store_true", help="the raw investigate_work result")
     index_parser = add("index", "Build and promote a candidate index.", _cmd_index)
     index_parser.add_argument("--corpus-root", type=Path, required=True)
     index_parser.add_argument("--policy", type=Path, required=True)
