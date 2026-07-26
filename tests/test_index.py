@@ -368,8 +368,16 @@ def test_active_target_rejects_escape_corruption_and_missing_file(tmp_path: Path
     build_candidate(config(root, policy_path), inside, policy, fake_embeddings)
     pointer.unlink()
     promote_candidate(inside, pointer, config(root, policy_path), policy)
-    with sqlite3.connect(inside) as database:
+    # `with sqlite3.connect(...)` is a TRANSACTION context manager, not a closing one -- it commits
+    # and leaves the connection open. The `inside.unlink()` below then tried to delete a file this
+    # test still had open, which POSIX permits and Windows refuses. Closing explicitly is what the
+    # test always meant; the leak was simply invisible on one platform.
+    database = sqlite3.connect(inside)
+    try:
         database.execute("UPDATE passages SET vector = X'00' WHERE ref = (SELECT ref FROM passages LIMIT 1)")
+        database.commit()
+    finally:
+        database.close()
     with pytest.raises(IndexLifecycleError) as corrupt:
         snapshot_active(pointer, config(root, policy_path))
     assert corrupt.value.code == "invalid_active_target"
@@ -412,18 +420,27 @@ def test_promotion_reports_directory_fsync_outcome_and_runs_smoke_gate(
     build_candidate(config(root, policy_path), first, policy, fake_embeddings)
     second_result = build_candidate(config(root, policy_path), second, policy, fake_embeddings)
     promote_candidate(first, pointer, config(root, policy_path), policy)
-    real_fsync = os.fsync
-    def fail_directory_fsync(file_descriptor: int) -> None:
-        if stat.S_ISDIR(os.fstat(file_descriptor).st_mode):
-            raise OSError("injected directory fsync failure")
-        real_fsync(file_descriptor)
-    monkeypatch.setattr(index_module.os, "fsync", fail_directory_fsync)
-    outcome = promote_candidate(second, pointer, config(root, policy_path), policy)
+    # The point is that a durability failure is REPORTED rather than crashed on, and that the
+    # promotion still publishes. Only the failure can be injected on POSIX: Windows has no
+    # per-directory flush to fail, because NTFS journals the rename itself -- so there the same
+    # promotion is genuinely durable and must say so. Asserting `durable` in both directions keeps
+    # this a test of the flag's honesty rather than of one platform's plumbing.
+    if os.name == "posix":
+        real_fsync = os.fsync
+        def fail_directory_fsync(file_descriptor: int) -> None:
+            if stat.S_ISDIR(os.fstat(file_descriptor).st_mode):
+                raise OSError("injected directory fsync failure")
+            real_fsync(file_descriptor)
+        monkeypatch.setattr(index_module.os, "fsync", fail_directory_fsync)
+        outcome = promote_candidate(second, pointer, config(root, policy_path), policy)
+        assert not outcome.durable
+        monkeypatch.setattr(index_module.os, "fsync", real_fsync)
+    else:
+        outcome = promote_candidate(second, pointer, config(root, policy_path), policy)
+        assert outcome.durable
     assert outcome.build_id == second_result.build_id
-    assert not outcome.durable
     with snapshot_active(pointer, config(root, policy_path)) as snapshot:
         assert snapshot.build_id == second_result.build_id
-    monkeypatch.setattr(index_module.os, "fsync", real_fsync)
     original = pointer.read_bytes()
     fail_query = lambda _: (_ for _ in ()).throw(IndexLifecycleError("representative_query_failed"))
     monkeypatch.setattr(index_module, "_representative_queries", fail_query)
@@ -442,15 +459,46 @@ def test_promotion_rejects_candidate_path_swap_after_validation(
     build_candidate(config(root, policy_path), candidate, policy, fake_embeddings)
     build_candidate(config(root, policy_path), replacement, policy, fake_embeddings)
     real_validate = index_module.validate_candidate
+    swap_succeeded = False
+
     def swap_after_validation(path: Path, build: BuildConfig, corpus: CorpusPolicy):
+        # The GUARANTEE is that a swap here never publishes the swapped file. There are two honest
+        # ways to keep it and the platforms use different ones, so the test asserts the outcome
+        # rather than the mechanism -- otherwise the stronger implementation fails the test written
+        # for the weaker one. POSIX cannot stop the rename, so the code must DETECT it afterwards
+        # via the identity re-check. Windows opens the candidate pinned, so the rename is REFUSED
+        # by the OS and the attack never lands at all.
+        nonlocal swap_succeeded
         metadata = real_validate(path, build, corpus)
-        os.replace(replacement, candidate)
+        try:
+            os.replace(replacement, candidate)
+            swap_succeeded = True
+        except OSError:
+            swap_succeeded = False
         return metadata
+
     monkeypatch.setattr(index_module, "validate_candidate", swap_after_validation)
-    with pytest.raises(IndexLifecycleError) as changed:
-        promote_candidate(candidate, tmp_path / "active.json", config(root, policy_path), policy)
-    assert changed.value.code == "candidate_changed_during_validation"
-    assert not (tmp_path / "active.json").exists()
+    pointer = tmp_path / "active.json"
+    code = None
+    try:
+        promote_candidate(candidate, pointer, config(root, policy_path), policy)
+        published = True
+    except IndexLifecycleError as error:
+        published, code = False, error.code
+
+    if swap_succeeded:
+        # The OS allowed the attack, so DETECTION is the only thing standing between it and a
+        # published impostor. Nothing may be published.
+        assert not published and code == "candidate_changed_during_validation"
+        assert not pointer.exists()
+    else:
+        # The OS refused the attack, so there is nothing to detect and promotion is free to
+        # succeed -- what it publishes is provably the file that was validated.
+        assert published and pointer.exists()
+
+    # Guard against the test quietly stopping to exercise anything: on POSIX the swap MUST be
+    # possible, or this passed for the wrong reason.
+    assert swap_succeeded or os.name != "posix"
 
 
 @pytest.mark.parametrize("corruption", [
@@ -486,14 +534,26 @@ def test_transient_aba_swap_cannot_publish_other_database_identity(
     original = build_candidate(config(root, policy_path), candidate, policy, fake_embeddings)
     swapped = build_candidate(config(root, policy_path), replacement, policy, fake_embeddings)
     real_validate = index_module.validate_candidate
+    aba_succeeded = False
+
     def aba_validate(subject, build: BuildConfig, corpus: CorpusPolicy):
-        os.replace(candidate, parked)
-        os.replace(replacement, candidate)
+        # An A-B-A swap puts the name back before anyone looks, so a comparison of PATHS would see
+        # nothing wrong -- which is why promotion pins identity, not the name. Whether the swap can
+        # be staged at all is platform-dependent, so the assertion below is about what gets
+        # PUBLISHED, which is the same on both: the identity that was validated, never the impostor.
+        nonlocal aba_succeeded
+        try:
+            os.replace(candidate, parked)
+            os.replace(replacement, candidate)
+            aba_succeeded = True
+        except OSError:
+            return real_validate(subject, build, corpus)
         try:
             return real_validate(subject, build, corpus)
         finally:
             os.replace(candidate, replacement)
             os.replace(parked, candidate)
+
     monkeypatch.setattr(index_module, "validate_candidate", aba_validate)
 
     result = promote_candidate(candidate, tmp_path / "active.json", config(root, policy_path), policy)
@@ -501,6 +561,9 @@ def test_transient_aba_swap_cannot_publish_other_database_identity(
     assert result.build_id == original.build_id != swapped.build_id
     with snapshot_active(tmp_path / "active.json", config(root, policy_path)) as snapshot:
         assert snapshot.build_id == original.build_id
+    # Guard against passing for the wrong reason: on POSIX the swap MUST have been stageable, or
+    # the identity pinning was never actually exercised.
+    assert aba_succeeded or os.name != "posix"
 
 
 def test_concurrent_readers_and_promoters_keep_complete_history(tmp_path: Path) -> None:

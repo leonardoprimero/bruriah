@@ -107,25 +107,53 @@ def test_the_built_wheel_actually_contains_it(tmp_path: Path) -> None:
     assert sum(name.endswith("SKILL.md") for name in names) == 6
 
 
-def test_windows_is_refused_with_an_answer_rather_than_a_traceback() -> None:
-    """The wheel is py3-none-any, so pip installs it on Windows and the first command exploded.
+def _import_bruriah_fresh(hide_fcntl: bool, os_name: str | None = None):
+    """Import `bruriah` from scratch under a chosen platform disguise, and restore everything.
 
-    A bare `ModuleNotFoundError: No module named 'fcntl'` from several frames deep reads as a
-    broken package, not an unsupported platform. Verified by importing the module fresh with
-    `fcntl` made invisible -- the way Windows presents it -- rather than by reading the source."""
+    `fcntl` is made invisible the way a non-POSIX interpreter presents it, and `os.name` can be set
+    to whatever the gate should see. Both halves of the platform contract are then observable from
+    the POSIX suite, rather than only from whichever machine happens to run the tests."""
     import importlib
+    import os as os_module
 
-    real_find = importlib.util.find_spec
-    module = "bruriah"
-    saved = {name: sys.modules.pop(name) for name in list(sys.modules) if name.startswith(module)}
+    real_find, real_name = importlib.util.find_spec, os_module.name
+    saved = {name: sys.modules.pop(name) for name in list(sys.modules) if name.startswith("bruriah")}
     try:
-        importlib.util.find_spec = lambda name, *a, **k: (
-            None if name == "fcntl" else real_find(name, *a, **k))
-        with pytest.raises(ImportError) as raised:
-            importlib.import_module(module)
+        if hide_fcntl:
+            importlib.util.find_spec = lambda name, *a, **k: (
+                None if name == "fcntl" else real_find(name, *a, **k))
+        if os_name is not None:
+            os_module.name = os_name
+        return importlib.import_module("bruriah")
     finally:
         importlib.util.find_spec = real_find
+        os_module.name = real_name
         sys.modules.update(saved)
+
+
+def test_an_unsupported_platform_is_refused_with_an_answer_rather_than_a_traceback() -> None:
+    """The wheel is py3-none-any, so pip installs it anywhere and the first command exploded.
+
+    A bare `ModuleNotFoundError: No module named 'fcntl'` from several frames deep reads as a broken
+    package, not an unsupported platform. Verified by importing fresh with neither primitive family
+    visible, rather than by reading the source."""
+    with pytest.raises(ImportError) as raised:
+        _import_bruriah_fresh(hide_fcntl=True, os_name="unsupported")
     message = str(raised.value)
-    assert "macOS or Linux" in message and "WSL" in message
-    assert "open an issue" in message, "a refusal should say what would change it"
+    assert "Linux, macOS or Windows" in message
+    # A refusal has to say what would change it. It used to say "open an issue"; now that a second
+    # implementation exists, the honest answer is more specific -- name the three capabilities and
+    # point at the worked example of providing them.
+    assert "winfs.py" in message
+    for requirement in ("exclusive lock", "no-follow open", "rename"):
+        assert requirement in message, f"the refusal should name {requirement!r} as a requirement"
+
+
+def test_windows_is_supported_rather_than_refused() -> None:
+    """The positive half of the same contract, and the one that had no test at all.
+
+    Windows reaches the gate exactly as an unsupported platform does -- no `fcntl` -- and must be
+    let through, because `winfs.py` provides the same three guarantees through Win32. Asserting this
+    from the POSIX suite means the day someone tightens the gate back to a POSIX-only check, CI says
+    so on Linux instead of only on a Windows machine nobody runs."""
+    assert _import_bruriah_fresh(hide_fcntl=True, os_name="nt").__version__

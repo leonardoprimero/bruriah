@@ -8,15 +8,18 @@ license-files = ["LICENSE", "NOTICE"]
 readme = "README.md"
 authors = [{ name = "Leonardo Caliva" }]
 keywords = ["mcp", "model-context-protocol", "retrieval", "provenance", "prompt-injection", "agents"]
-# The wheel is py3-none-any, so nothing stops pip installing it on Windows -- these classifiers are
-# the only place a reader finds out before the import fails. `bruriah/__init__.py` says the same
-# thing again at runtime, with the WSL instructions, because most people never read classifiers.
+# The wheel is py3-none-any and now genuinely runs on all three families. Windows activation is
+# implemented in `src/bruriah/winfs.py` against the Win32 primitives, not emulated: it needs
+# Windows 10 1607+ on NTFS for POSIX-semantics rename, which `winfs.posix_replace` enforces at use
+# time rather than pretending about here. `bruriah/__init__.py` states the same requirement as a
+# capability check, because most people never read classifiers.
 classifiers = [
   "Development Status :: 4 - Beta",
   "Environment :: Console",
   "Intended Audience :: Developers",
   "License :: OSI Approved :: Apache Software License",
   "Operating System :: MacOS :: MacOS X",
+  "Operating System :: Microsoft :: Windows :: Windows 10",
   "Operating System :: POSIX :: Linux",
   "Programming Language :: Python :: 3.12",
   "Programming Language :: Python :: 3.13",

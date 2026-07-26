@@ -8,6 +8,8 @@ from typing import Any
 
 import pytest
 
+from conftest import requires_posix_permissions
+
 from bruriah.approvals import (
     ApprovalError,
     ApprovalRecord,
@@ -168,6 +170,7 @@ def test_hidden_control_characters_cannot_be_approved(tmp_path: Path) -> None:
 # --- storage ----------------------------------------------------------------------------------
 
 
+@requires_posix_permissions
 def test_records_are_owner_readable_only(tmp_path: Path) -> None:
     _approve(tmp_path)
     path = tmp_path / "data" / "skills" / "approvals" / "design.ui-review.json"

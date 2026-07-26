@@ -8,6 +8,8 @@ from pathlib import Path
 
 import pytest
 
+from conftest import requires_posix_permissions
+
 from bruriah import signing
 from bruriah.packs import PackError, load_pack
 from bruriah.signing import SigningError, generate_key, load_public, sign_pack
@@ -53,6 +55,7 @@ def test_keygen_returns_only_the_public_half(tmp_path: Path) -> None:
     assert b"PRIVATE KEY" in path.read_bytes()
 
 
+@requires_posix_permissions
 def test_keygen_writes_an_owner_only_file(tmp_path: Path) -> None:
     path = tmp_path / "release-key.pem"
     generate_key(path)
