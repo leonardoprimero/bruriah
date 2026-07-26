@@ -147,7 +147,7 @@ def write_build_descriptor(paths: PlatformPaths, config: BuildConfig) -> None:
     payload = {field: str(getattr(config, field)) if field in {"root", "policy_path"}
                else getattr(config, field) for field in _BUILD_DESCRIPTOR_FIELDS}
     (paths.data_dir / "build-config.json").write_text(
-        json.dumps(payload, sort_keys=True), encoding="utf-8"
+        json.dumps(payload, sort_keys=True), encoding="utf-8", newline="\n"
     )
 
 

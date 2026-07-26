@@ -220,7 +220,8 @@ def run_init(paths: PlatformPaths) -> Path:
     config_file = paths.config_dir / "config.json"
     if not config_file.exists():
         default = json.dumps({"network_enabled": False}, sort_keys=True) + "\n"
-        config_file.write_text(default, encoding="utf-8")
+        config_file.write_text(default, encoding="utf-8", newline="
+")
     return config_file
 
 
@@ -251,7 +252,8 @@ def run_client_configs(
     written: dict[clients.ClientId, Path] = {}
     for client_id, rendered in clients.render_all(manifest).items():
         target = clients_dir / f"{client_id.value}.json"
-        target.write_text(rendered, encoding="utf-8")
+        target.write_text(rendered, encoding="utf-8", newline="
+")
         written[client_id] = target
     if os.name == "posix":
         os.chmod(clients_dir, 0o700)

@@ -172,7 +172,7 @@ def write_cache_atomic(cache_dir: Path, canonical_url: str, entry: CacheEntry) -
     final_path = _cache_path(cache_dir, canonical_url)
     fd, tmp_name = tempfile.mkstemp(dir=cache_dir, prefix=".tmp-cache-")
     try:
-        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+        with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as handle:
             handle.write(_encode(entry))
         os.chmod(tmp_name, 0o600)
         os.replace(tmp_name, final_path)

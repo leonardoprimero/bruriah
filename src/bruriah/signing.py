@@ -115,7 +115,13 @@ def sign_pack(
         "signature": base64.b64encode(key.sign(signed)).decode("ascii"),
     }
     destination = manifest_path or pack_path.with_suffix(".manifest.json")
-    destination.write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    # `newline="\n"` is load-bearing, not tidiness: this manifest is later re-read and compared
+    # against a digest. Text mode translates "\n" to the platform separator on write, so a manifest
+    # produced on Windows would be CRLF, hash differently from the identical manifest produced
+    # anywhere else, and fail its own verification. Machine-verified bytes get written explicitly.
+    destination.write_text(
+        json.dumps(manifest, indent=2, sort_keys=True) + "\n", encoding="utf-8", newline="\n"
+    )
     return destination
 
 
