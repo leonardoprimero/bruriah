@@ -5,7 +5,7 @@
 </p>
 
 <p align="center">
-  <img alt="tests" src="https://img.shields.io/badge/tests-852%20passing-2d6a4f?style=flat-square"/>
+  <img alt="tests" src="https://img.shields.io/badge/tests-879%20passing-2d6a4f?style=flat-square"/>
   <img alt="python" src="https://img.shields.io/badge/python-3.12-3776ab?style=flat-square"/>
   <img alt="MCP" src="https://img.shields.io/badge/MCP-2%20read--only%20tools-6a4c93?style=flat-square"/>
   <img alt="generative model" src="https://img.shields.io/badge/generative%20model-none-8b3c3c?style=flat-square"/>
@@ -163,12 +163,16 @@ Twelve "why was this decided" questions against this repository's own history �
 
 | question language | recall@3 | recall@10 | MRR@10 |
 |---|---|---|---|
-| English — matches the corpus | **75%** | 92% | 0.73 |
-| Spanish — corpus is 95% English | **25%** | 92% | 0.29 |
+| English — matches the corpus | 83% | 92% | 0.80 |
+| Spanish — corpus is 95% English | **33% → 58%** | **83% → 92%** | **0.29 → 0.50** |
 
-`recall@10` is identical, so **the right document is always retrieved — the entire gap is ranking.** Cross-lingual retrieval costs two thirds of the top-3 precision, and that matters because "Spanish-speaking dev writing English commits" is the common case, not an edge one. It is the next piece of work, and it now has a number to beat instead of an impression to argue about.
+The first measurement said Spanish cost two thirds of the top-3 precision. Then I measured each retrieval leg separately, and the answer was not what "cross-lingual is hard" suggests:
 
-The eval lives in [`evals/project-memory/`](evals/project-memory/) so you can reproduce it, or beat it.
+**The fusion was worse than one of its own halves.** Asked in Spanish, the multilingual vector leg alone reached 58% — it *was* finding the right document, at rank 1 or 2. Reciprocal-rank fusion then averaged that against a BM25 leg which cannot match across languages at all, and the correct document fell out of the top three. Equal weight, 33%. The lexical leg was not failing to help; it was actively deleting the answer.
+
+So the lexical leg is now discounted to 0.1 when the query language and the corpus language differ — measured, disclosed in the response, and never applied when the two agree. English is untouched, because there BM25 is the *stronger* leg (83% against the vector leg's 58%) and dropping it would have traded one language's problem for the other's.
+
+The [eval](evals/project-memory/) carries the per-leg numbers, the weight sweep, and what is still not solved: 58% is the vector leg's own ceiling, so this recovers what fusion was destroying rather than making cross-lingual retrieval as good as same-language retrieval.
 
 ## What makes it different
 
@@ -224,7 +228,7 @@ Bruriah assumes the corpus may be hostile.
 
 Honest state as of 2026-07-25.
 
-**Working and tested** — 852 tests pass on a fresh clone (18 more need the author's private corpus and skip)
+**Working and tested** — 879 tests pass on a fresh clone (18 more need the author's private corpus and skip)
 - Hybrid retrieval (BM25 + local vectors via `sqlite-vec`) over your corpus
 - The two-tool MCP contract, structured output, typed failures
 - Signed policy packs with Ed25519 manifests and fail-closed loading
@@ -233,7 +237,7 @@ Honest state as of 2026-07-25.
 - The full skill lifecycle from the terminal
 
 **Limits, stated rather than buried**
-- Cross-lingual retrieval rates a third of same-language. Measured above.
+- Cross-lingual retrieval still trails same-language: 58% against 83% at recall@3, after the fusion fix above recovered it from 33%. That 58% is the vector leg's own ceiling, so closing the rest needs a better multilingual signal, not better weighting. The language detector is a function-word counter and abstains often; when it abstains, nothing changes.
 - Six bundled skills is a starting point, not a library. The mechanism is finished; the content is deliberately small.
 - The dispatch ceiling is five refs and six skills ship, so one is reported as a gap. The ceiling was *not* raised to fit the pack — six refs measured 6.6 KB, a third of the default output budget. The cut is alphabetical: deterministic and non-injectable by design, but unrelated to relevance. Making it operator-configurable is the obvious next step.
 - Skill dispatch requires the client to send `host_skills`. Omitting it returns a byte-identical pre-skills response — intentional, but the layer stays invisible until a client opts in.

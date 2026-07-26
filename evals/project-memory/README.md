@@ -62,3 +62,35 @@ is a different situation from "improve cross-lingual retrieval".
 
 Note that English loses nothing from BM25 — there it is the *strong* leg, 83% against the vector
 leg's 58%. Any fix has to keep that, which rules out simply dropping the lexical leg.
+
+## Result, measured 2026-07-26
+
+`retrieval._fuse` now scales the lexical leg's contribution, and `search` discounts it to **0.1**
+when the query language and the corpus language are identified and differ. Same 84 documents:
+
+| | recall@3 | recall@10 | MRR@10 |
+|---|---|---|---|
+| English, before | 83% | 92% | 0.80 |
+| English, after | 83% | 92% | 0.80 |
+| Spanish, before | 33% | 83% | 0.29 |
+| **Spanish, after** | **58%** | **92%** | **0.50** |
+
+Spanish recall@3 closes to the vector leg's ceiling, `recall@10` reaches parity with English, and
+MRR@10 nearly doubles. English is untouched — not "within noise", identical, because the discount
+only fires on a mismatch and there is none.
+
+**The weight was chosen, not fitted.** The sweep reads 1.0 → 33%, 0.5 → 50%, 0.25 → 50%,
+0.1 → 58%, 0 → 58%. The gap between 0.25 and 0.1 is a single question out of twelve — noise at
+this sample size, and not the reason for the choice. 0.1 was picked because of what it does
+arithmetically: a lexical rank-1 hit then contributes 0.1/61 against a vector rank-1 hit's 1/61,
+so the leg can only separate candidates the vector leg already ranked together. A tiebreaker, not
+a voter. That is the role the measurement says it should have when it cannot read the language it
+is being asked in.
+
+**What is still not solved.** 58% is the vector leg's own ceiling — this recovers what fusion was
+destroying, it does not make cross-lingual retrieval as good as same-language retrieval. Twelve
+questions is a small sample and this is one corpus in two languages; treat the direction as
+established and the exact figures as indicative. The language signal is a function-word counter
+(`bruriah/language.py`), deliberately not a model, and it abstains often — on abstention nothing
+changes, which is the safe direction but also means short or identifier-heavy questions get no
+help at all.

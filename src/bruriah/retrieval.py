@@ -19,6 +19,7 @@ from array import array
 from collections.abc import Callable
 from dataclasses import dataclass
 
+from . import language
 from .contracts import Budgets, EvidenceRecord
 from .index import ActiveSnapshot
 
@@ -27,6 +28,24 @@ _TOKEN_PATTERN = re.compile(r"\w+", re.UNICODE)
 _BM25_K1 = 1.5
 _BM25_B = 0.75
 _RRF_K = 60
+
+# How much the lexical leg still counts when the query language does not match the corpus.
+#
+# Not zero: a cross-language question can still carry an identifier, a file name or a proper noun
+# that BM25 matches exactly and embeddings blur. At this weight a lexical rank-1 hit contributes
+# 0.1/61 against a vector rank-1 hit's 1/61, so the leg can only separate candidates the vector
+# leg already ranked together -- a tiebreaker, not a voter. That is the role the measurement says
+# it should have when it cannot read the query's language: 17% recall@3 on its own, against 58%.
+#
+# The sweep (evals/project-memory) reads 1.0 -> 33%, 0.5 -> 50%, 0.25 -> 50%, 0.1 -> 58%, 0 -> 58%.
+# Anything at or below 0.25 recovers most of the loss, and the gap between 0.25 and 0.1 is a SINGLE
+# question out of twelve -- noise at this sample size, and not the reason for the choice.
+_CROSS_LINGUAL_LEXICAL_WEIGHT = 0.1
+
+# Corpus language is decided from a bounded, deterministic sample: passages arrive ordered by ref,
+# so the same snapshot yields the same verdict without scanning every byte on every query.
+_LANGUAGE_SAMPLE_PASSAGES = 64
+_LANGUAGE_SAMPLE_CHARS = 400
 _SNIPPET_CHARS = 500
 _MAX_QUERY_CHARS = 4096
 _CLOCK_EVERY = 64
@@ -219,15 +238,36 @@ def _vector_ranks(
     return _ranked(scored), stopped
 
 
+def _corpus_language(passages: list[_Passage]) -> str | None:
+    """The language a bounded, deterministic sample of the corpus is written in.
+
+    Passages arrive ordered by ref, so the sample is the same for the same snapshot on every query
+    and the verdict cannot drift between two identical requests. Reading a prefix of each passage
+    rather than all of it keeps this a rounding error against the BM25 scan that follows.
+    """
+    return language.dominant(
+        passage.text[:_LANGUAGE_SAMPLE_CHARS] for passage in passages[:_LANGUAGE_SAMPLE_PASSAGES]
+    )
+
+
 def _fuse(
-    lexical_ranks: dict[str, int] | None, vector_ranks: dict[str, int] | None
+    lexical_ranks: dict[str, int] | None, vector_ranks: dict[str, int] | None,
+    lexical_weight: float = 1.0,
 ) -> list[tuple[str, int | None, int | None]]:
+    """Reciprocal-rank fusion, with the lexical leg's contribution scalable.
+
+    `lexical_weight` exists for one measured reason. Asked in Spanish against an English corpus,
+    the vector leg alone reaches 58% recall@3 and the equal-weight fusion reaches 33%: BM25 cannot
+    match across languages, so it contributes rank noise that drags correct documents out of the
+    top three. Asked in English the same leg is the STRONGER one (83% against 58%), so it cannot
+    simply be removed -- only discounted where it is known not to apply.
+    """
     lexical_ranks = lexical_ranks or {}
     vector_ranks = vector_ranks or {}
     fused: list[tuple[float, str, int | None, int | None]] = []
     for ref in set(lexical_ranks) | set(vector_ranks):
         lexical_rank, vector_rank = lexical_ranks.get(ref), vector_ranks.get(ref)
-        score = (1.0 / (_RRF_K + lexical_rank) if lexical_rank is not None else 0.0) + (
+        score = (lexical_weight / (_RRF_K + lexical_rank) if lexical_rank is not None else 0.0) + (
             1.0 / (_RRF_K + vector_rank) if vector_rank is not None else 0.0
         )
         fused.append((score, ref, lexical_rank, vector_rank))
@@ -285,11 +325,23 @@ def search(
     if scan_stopped or lexical_stopped or vector_stopped:
         degradation.append("max_elapsed_ms_exceeded")
 
+    # Discount the lexical leg when the question is not in the language the corpus is written in.
+    # Both legs still run and both ranks are still reported: this changes the weight of evidence,
+    # never which evidence exists. Disclosed in `degradation` rather than applied silently, because
+    # a caller comparing two result sets is entitled to know the ranking rule was not the same.
+    lexical_weight = 1.0
+    query_language = language.detect(query)
+    corpus_language = _corpus_language(passages)
+    if query_language is not None and corpus_language is not None \
+            and query_language != corpus_language:
+        lexical_weight = _CROSS_LINGUAL_LEXICAL_WEIGHT
+        degradation.append(f"lexical_leg_discounted:{query_language}_query_{corpus_language}_corpus")
+
     by_ref = {passage.ref: passage for passage in passages}
     matches: list[RetrievalMatch] = []
     truncated = False
     extracted = 0
-    for rank, (ref, lexical_rank, vector_rank) in enumerate(_fuse(lexical_ranks, vector_ranks), start=1):
+    for rank, (ref, lexical_rank, vector_rank) in enumerate(_fuse(lexical_ranks, vector_ranks, lexical_weight), start=1):
         if len(matches) >= budgets.max_candidates:
             truncated = True
             degradation.append("max_candidates_exceeded")
