@@ -182,11 +182,18 @@ def load_bundled_skills(today: date | None = None) -> SkillSet:
     ceremony for content that shipped signed.
 
     A user's own activated skill set is separate and lives under `data_dir`; `load_deps` merges the
-    two, and an id collision fails loudly rather than one silently shadowing the other."""
+    two, and an id collision fails loudly rather than one silently shadowing the other.
+
+    Signature, digest and schema are still enforced absolutely. Only the CURRENCY gate is relaxed,
+    and deliberately: an expiry date says the review is old, and answering that by refusing to start
+    the server is a far worse outcome than answering it by refusing to dispatch. `dispatch` demotes
+    an aged pack's skills to candidates, so they are disclosed as stale rather than offered as
+    vetted. Activation keeps the strict gate -- you do not put expired content INTO service, you
+    only keep serving content that expired WHILE in service."""
     try:
         pack = load_skill_pack(
             _BUNDLED_DATA / "practices-pack.json", _BUNDLED_DATA / "practices-pack.manifest.json",
-            load_trust_roots(), today=today,
+            load_trust_roots(), today=today, enforce_currency=False,
         )
     except PackError as error:
         raise PlatformError(f"skills_load_failed:{error.code}") from error

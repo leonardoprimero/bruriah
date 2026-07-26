@@ -523,7 +523,9 @@ def test_opting_in_emits_a_skill_ref_with_provenance_and_envelope(deps) -> None:
     assert record.ref == "skill:design.ui-review@1.4.0"
     assert record.digest == DIGEST
     assert set(record.provenance_chain) == {
-        "tier:first_party", "pack:cerebro.skills", "availability:installed"}
+        "tier:first_party", "pack:cerebro.skills", "availability:installed",
+        "currency:current", "trusted:true"}
+    assert record.freshness == "current"
     assert record.envelope is not None and record.envelope.network_hosts == []
 
 
@@ -591,3 +593,75 @@ def test_skill_refs_still_respect_the_declared_evidence_budget(deps) -> None:
     result = investigate(request, _skill_deps(deps))
     assert len(result.evidence) == 1
     assert "max_evidence_exceeded" in result.degradation
+
+
+def _aged_skills(days_past: int) -> SkillSet:
+    """A pack whose review window has closed, so its skills demote."""
+    payload = _skill_pack(reviewed_at="2020-01-01", expires_at="2020-06-01", freshness_days=30,
+                          skills=[_skill_entry(domains=["programming"])])
+    return SkillSet.from_packs([SkillPack.model_validate_json(json.dumps(payload))])
+
+
+def test_an_expired_skill_is_demoted_not_dispatched_as_trusted(deps) -> None:
+    service_deps = dataclasses.replace(deps, skill_set=_aged_skills(1))
+    result = investigate(
+        InvestigationRequest(task=_SKILL_TASK, host_skills=_installed()), service_deps)
+    record = _skill_records(result)[0]
+    assert record.freshness == "expired"
+    assert "trusted:false" in record.provenance_chain
+    assert f"skill_expired:{record.ref}" in result.gaps
+
+
+def test_demotion_never_mutates_the_approved_body(deps) -> None:
+    # The digest is what approval is bound to. An overdue review is a fact about the review, not
+    # about the content, so the record must point at exactly the same bytes it always did.
+    fresh = investigate(InvestigationRequest(task=_SKILL_TASK, host_skills=_installed()),
+                        _skill_deps(deps))
+    aged = investigate(InvestigationRequest(task=_SKILL_TASK, host_skills=_installed()),
+                       dataclasses.replace(deps, skill_set=_aged_skills(1)))
+    assert _skill_records(aged)[0].digest == _skill_records(fresh)[0].digest == DIGEST
+    assert _skill_records(aged)[0].locator == _skill_records(fresh)[0].locator
+
+
+def test_an_expired_skill_stays_readable_for_re_approval(deps) -> None:
+    service_deps = dataclasses.replace(deps, skill_set=_aged_skills(1))
+    item = read(ReadRequest(refs=["skill:design.ui-review@1.4.0"]), service_deps).items[0]
+    assert item.status == "ok"
+    assert json.loads(item.content)["skill_id"] == "design.ui-review"
+
+
+def test_a_domain_with_no_trusted_skill_asks_the_host_to_draft_one(deps) -> None:
+    # Cerebro has no generative model, so the only honest response to a gap is to name it.
+    service_deps = dataclasses.replace(deps, skill_set=_aged_skills(1))
+    result = investigate(
+        InvestigationRequest(task=_SKILL_TASK, host_skills=_installed()), service_deps)
+    action = next(item for item in result.host_actions if item.kind == "draft_skill_candidate")
+    assert action.target == "programming"
+    assert "no_skill_for_domain:programming" in result.gaps
+
+
+def test_the_drafting_brief_carries_no_generated_content(deps) -> None:
+    # A suggested draft written here would be exactly the obeyable instruction text this design
+    # refuses to emit. The brief names the gap and the route back in; nothing more.
+    service_deps = dataclasses.replace(deps, skill_set=_aged_skills(1))
+    result = investigate(
+        InvestigationRequest(task=_SKILL_TASK, host_skills=_installed()), service_deps)
+    action = next(item for item in result.host_actions if item.kind == "draft_skill_candidate")
+    assert "skill-ingest" in action.reason and "human approval" in action.reason
+    assert len(action.reason) < 400
+
+
+def test_a_covered_domain_asks_for_no_draft(deps) -> None:
+    # The negative control: drafting fires on absence of TRUSTED coverage, not on every request.
+    result = investigate(
+        InvestigationRequest(task=_SKILL_TASK, host_skills=_installed()), _skill_deps(deps))
+    assert not any(item.kind == "draft_skill_candidate" for item in result.host_actions)
+    assert not any(gap.startswith("no_skill_for_domain") for gap in result.gaps)
+
+
+def test_a_client_that_did_not_opt_in_gets_no_drafting_action(deps) -> None:
+    # The gate covers the new action kind too: a pre-skills client never sees a new enum member.
+    result = investigate(InvestigationRequest(task=_SKILL_TASK),
+                         dataclasses.replace(deps, skill_set=_aged_skills(1)))
+    assert result.host_actions == [] or all(
+        item.kind not in {"draft_skill_candidate", "install_skill"} for item in result.host_actions)

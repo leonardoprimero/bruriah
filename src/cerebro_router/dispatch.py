@@ -4,8 +4,11 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Literal
 
+from datetime import date
+
 from .contracts import HostSkill
 from .lookup import LookupResult, SkillMatch
+from .skills import pack_currency
 
 # Pure, bounded skill dispatch: decide WHICH vetted skills apply to a request and what the host's
 # copy of each one looks like. No I/O, no model, no corpus input, no scoring.
@@ -31,6 +34,7 @@ DEFAULT_SKILL_CEILING = 5
 # every other kind of evidence out of that budget.
 
 Availability = Literal["installed", "not_installed", "digest_divergent"]
+Currency = Literal["current", "stale", "expired"]
 
 
 @dataclass(frozen=True)
@@ -44,6 +48,16 @@ class SkillDispatch:
     skill: SkillMatch
     availability: Availability
     host_version: str | None = None
+    # `stale` or `expired` DEMOTES the skill: it is still reported, still readable, and still
+    # available for re-approval, but it is no longer offered as trusted. Removing it outright would
+    # be worse -- the host would see a skill silently vanish and have no way to learn why, and the
+    # operator would lose the one signal that tells them a review is overdue.
+    currency: Currency = "current"
+
+    @property
+    def trusted(self) -> bool:
+        """Whether this may be offered as vetted guidance. A demoted skill is a candidate again."""
+        return self.currency == "current"
 
 
 @dataclass(frozen=True)
@@ -57,6 +71,7 @@ def dispatch(
     host_skills: Sequence[HostSkill],
     *,
     ceiling: int = DEFAULT_SKILL_CEILING,
+    today: date | None = None,
 ) -> DispatchResult:
     """Order, bound, and annotate the skills a lookup already matched.
 
@@ -76,11 +91,13 @@ def dispatch(
 
     # Only now is the untrusted host inventory consulted, and only to describe what it has.
     installed = _by_skill_id(host_skills)
+    now = today or date.today()
     skills = tuple(
         SkillDispatch(
             skill=match,
             availability=_availability(match, installed.get(match.skill.skill_id)),
             host_version=getattr(installed.get(match.skill.skill_id), "version", None),
+            currency=pack_currency(match.pack, now),
         )
         for match in selected
     )
@@ -113,6 +130,7 @@ def _availability(match: SkillMatch, installed: HostSkill | None) -> Availabilit
 __all__ = [
     "DEFAULT_SKILL_CEILING",
     "Availability",
+    "Currency",
     "DispatchResult",
     "SkillDispatch",
     "dispatch",

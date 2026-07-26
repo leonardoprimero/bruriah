@@ -197,11 +197,35 @@ def _skill_evidence_record(entry: SkillDispatch) -> EvidenceRecord:
         digest=skill.body_digest,
         provenance_chain=[
             f"tier:{skill.tier}", f"pack:{entry.skill.pack_id}", f"availability:{entry.availability}",
+            f"currency:{entry.currency}", f"trusted:{str(entry.trusted).lower()}",
         ],
         authority="unknown",
         authority_rationale=skill.summary,
-        freshness="unknown", license="unknown", conflict="unknown",
+        # `freshness` speaks the contract's existing three words. A demoted skill says so HERE,
+        # in the field a client already reads, rather than in a new channel nobody parses.
+        freshness=entry.currency, license="unknown", conflict="unknown",
         envelope=_disclose_envelope(skill.permissions),
+    )
+
+
+def _drafting_action(classification, dispatched) -> HostAction | None:
+    """Ask the HOST to draft a candidate when a supported domain has no trusted skill covering it.
+
+    Cerebro generates nothing. It has no generative model at all -- the dependency list is embeddings
+    and protocol -- so the only honest move on detecting a gap is to name the gap and hand the work
+    to whoever can do it. The brief is bounded and carries NO proposed content: a suggested draft
+    written here would be exactly the obeyable instruction text this whole design refuses to emit.
+
+    Fires only when nothing TRUSTED remains, so a domain covered solely by demoted skills is treated
+    as uncovered -- which it is."""
+    if any(entry.trusted for entry in dispatched.skills):
+        return None
+    return HostAction(
+        kind="draft_skill_candidate",
+        reason=f"No vetted skill covers the {classification.domain} domain for this request. "
+               "Draft one and submit it through `cerebro-mcp skill-ingest`; it enters as a "
+               "candidate and still requires analysis and human approval before it is dispatched.",
+        target=classification.domain,
     )
 
 
@@ -211,6 +235,17 @@ def _skill_outcomes(entries: tuple[SkillDispatch, ...]) -> tuple[list[str], list
     actions: list[HostAction] = []
     for entry in entries:
         ref = _skill_ref(entry.skill)
+        if not entry.trusted:
+            # Demotion is REPORTED, never applied by editing anything. The approved body and its
+            # digest are untouched: an overdue review is a fact about the review, not about the
+            # content, and the skill stays available for re-approval exactly as it was.
+            gaps.append(f"skill_{entry.currency}:{ref}")
+            actions.append(HostAction(
+                kind="inspect_capability",
+                reason=f"This skill's pack is {entry.currency}; it is disclosed as a candidate "
+                       "rather than as vetted guidance until it is reviewed again.",
+                target=ref,
+            ))
         if entry.availability == "not_installed":
             gaps.append(f"skill_not_installed:{ref}")
             actions.append(HostAction(kind="install_skill", reason=entry.skill.skill.summary, target=ref))
@@ -387,6 +422,10 @@ def investigate(request: InvestigationRequest, deps: ServiceDeps) -> Investigati
             skill_gaps, skill_actions = _skill_outcomes(skill_dispatch.skills)
             extra_gaps = list(skill_dispatch.gaps) + skill_gaps
             host_actions = host_actions + skill_actions
+            drafting = _drafting_action(classification, skill_dispatch)
+            if drafting is not None:
+                extra_gaps.append(f"no_skill_for_domain:{classification.domain}")
+                host_actions = host_actions + [drafting]
 
     return InvestigationResult(
         schema_version="1", status=status, request_id=request_id, evidence=evidence,

@@ -315,7 +315,7 @@ def _skill_only_lookup() -> LookupResult:
     pack = SkillPack.model_validate_json(json.dumps(_skill_pack()))
     return LookupResult(
         domain_supported=False, sources=(), capabilities=(),
-        skills=(SkillMatch(skill=pack.skills[0], pack_id=pack.pack_id),),
+        skills=(SkillMatch(skill=pack.skills[0], pack=pack),),
     )
 
 
@@ -350,7 +350,7 @@ def test_skills_only_add_evidence_and_never_remove_it() -> None:
     pack = SkillPack.model_validate_json(json.dumps(_skill_pack()))
     supported = LookupResult(domain_supported=True, sources=(), capabilities=(), skills=())
     with_skills = dataclasses.replace(
-        supported, skills=(SkillMatch(skill=pack.skills[0], pack_id=pack.pack_id),)
+        supported, skills=(SkillMatch(skill=pack.skills[0], pack=pack),)
     )
     request = InvestigationRequest(task="review this ui")
     assert route(_investigate(), supported, request).outcome == route(_investigate(), with_skills, request).outcome

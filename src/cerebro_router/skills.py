@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass
-from datetime import date
+from datetime import date, timedelta
 from pathlib import Path
 from typing import Annotated, Literal
 
@@ -142,6 +142,18 @@ class SkillPack(ClosedModel):
         if len(set(identifiers)) != len(identifiers):
             raise ValueError("duplicate_skill_id")
         return self
+def pack_currency(pack: "SkillPack", today: date) -> str:
+    """`current`, `stale`, or `expired` for a loaded pack.
+
+    The same three words `EvidenceRecord.freshness` already uses, so a demoted skill reports its
+    state in the vocabulary the contract has always spoken rather than in a new one."""
+    if pack.expires_at < today:
+        return "expired"
+    if pack.reviewed_at + timedelta(days=pack.freshness_days) < today:
+        return "stale"
+    return "current"
+
+
 @dataclass(frozen=True)
 class SkillSet:
     """Frozen, deterministically ordered set of loaded skill packs. Mirrors `registries.Registry`:
@@ -190,6 +202,7 @@ def load_skill_pack_bytes(
     router_version: str = "0.1.0",
     minimum_versions: dict[str, str] | None = None,
     allow_unsigned_local: bool = False,
+    enforce_currency: bool = True,
 ) -> SkillPack:
     """Verify a skill pack already held in memory, failing closed on every gate.
 
@@ -229,7 +242,13 @@ def load_skill_pack_bytes(
             raise PackError("malformed_manifest") from error
         verify_manifest_bytes(raw, manifest_raw, trust_roots, pack.pack_id, pack.version)
     now = today or date.today()
-    check_review_window(pack.reviewed_at, pack.expires_at, pack.freshness_days, now)
+    # `enforce_currency=False` is for the SERVING path only, where an aged pack must demote its own
+    # skills rather than take the server down with it -- an expiry date is a statement about how
+    # stale the review is, and answering it by refusing to start is a far worse outcome than
+    # answering it by refusing to dispatch. Activation keeps the gate: you do not put expired
+    # content into service, you only keep serving content that expired while in service.
+    if enforce_currency:
+        check_review_window(pack.reviewed_at, pack.expires_at, pack.freshness_days, now)
     check_router_compatibility(pack.min_router_version, pack.max_router_version, router_version)
     check_version_floor(pack.pack_id, pack.version, minimum_versions)
     return pack
@@ -242,6 +261,7 @@ def load_skill_pack(
     router_version: str = "0.1.0",
     minimum_versions: dict[str, str] | None = None,
     allow_unsigned_local: bool = False,
+    enforce_currency: bool = True,
 ) -> SkillPack:
     """Load and verify a skill pack from disk. The ceiling-checked read is the only step that needs a
     path; `manifest_path.read_bytes` is passed unevaluated so the manifest is touched at the same
@@ -256,6 +276,7 @@ def load_skill_pack(
         router_version=router_version,
         minimum_versions=minimum_versions,
         allow_unsigned_local=allow_unsigned_local,
+        enforce_currency=enforce_currency,
     )
 def reject_executable_payload(data: dict) -> None:
     """A candidate declaring a non-prose payload is REFUSED with its own code, never silently
@@ -278,6 +299,7 @@ __all__ = [
     "SubprocessAccess",
     "Tier",
     "load_skill_pack",
+    "pack_currency",
     "load_skill_pack_bytes",
     "reject_executable_payload",
 ]

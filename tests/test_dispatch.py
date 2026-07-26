@@ -18,7 +18,7 @@ OTHER_DIGEST = "sha256:" + "c" * 64
 
 def _match(skill_id: str = "design.ui-review", **overrides: Any) -> SkillMatch:
     pack = SkillPack.model_validate_json(json.dumps(_pack(skills=[_skill(skill_id=skill_id, **overrides)])))
-    return SkillMatch(skill=pack.skills[0], pack_id=pack.pack_id)
+    return SkillMatch(skill=pack.skills[0], pack=pack)
 
 
 def _lookup(*matches: SkillMatch) -> LookupResult:

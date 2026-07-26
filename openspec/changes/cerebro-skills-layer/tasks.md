@@ -445,7 +445,30 @@ Apply to every unit without exception.
   Verification: activation is atomic end-to-end from the CLI; rollback restores without rebuild; prune deletes only unreferenced generations and refuses to touch active or retained ones.
   Rollback: remove subcommands; generations stay on disk. [K-Atomic Skill Set Activation, Retention, and Rollback; S-Read-Only Boundary and CLI-Confined Mutation]
 
-- [ ] **10. Expiry demotion, advisories, and gap-driven drafting.** Expired or stale skills are demoted from trusted to candidate and MUST NOT be dispatched as trusted. Upstream drift surfaces as an advisory attached to the affected skill ref paired with a host action, and MUST NOT mutate the approved body. On detecting a domain gap with no covering skill, emit a bounded `draft_skill_candidate` host action; Cerebro performs no generation itself.
+- [x] **10. Expiry demotion, advisories, and gap-driven drafting.** DONE 2026-07-25. Aged skills demote to candidates instead of taking the server down, and an uncovered domain asks the host to draft.
+
+  Files: `skills.py`, `lookup.py`, `dispatch.py`, `service.py`, `platform.py`, respective tests (+180/-15).
+  Estimate: 90 + 140 tests = **~230**. **Actual: 195** — 0.85x.
+
+  **This unit fixed a time bomb I planted in Unit 11 two commits earlier.** `load_bundled_skills` called `load_skill_pack` with the currency gate on, and `load_deps` calls it — so on **2027-07-26**, when the bundled pack expires, `serve` would simply have refused to start. Exactly the failure found in `research-policy` during 6b, reintroduced by me. Verified before and after: it fails on that date with the old code and starts cleanly with the new one.
+
+  **The decision that resolves it, and the shape of the whole unit: fail-closed at ACTIVATION, demote at SERVICE.** You do not put expired content INTO service — `compile`/`validate`/`promote` keep the strict gate. But content that expires WHILE in service must not take the server with it: an expiry date is a statement about how old a review is, and answering that by refusing to boot is a far worse outcome than answering it by refusing to dispatch. `enforce_currency=False` exists solely for the serving path and is documented as such; signature, digest and schema stay absolute.
+
+  Implementation notes:
+  - `pack_currency` returns `current` / `stale` / `expired` — **the same three words `EvidenceRecord.freshness` already uses**, so a demoted skill reports itself in the vocabulary the contract has always spoken rather than in a new channel nobody parses.
+  - `SkillMatch` now carries the owning `SkillPack` rather than just `pack_id` (kept as a property), because dispatch cannot evaluate a review window it cannot see.
+  - **A demoted skill is reported, not removed.** It stays readable and available for re-approval, with `trusted:false` in its provenance chain and a `skill_expired:<ref>` gap. Dropping it silently would leave the host unable to learn why a skill vanished and the operator without the one signal saying a review is overdue.
+  - **Demotion never mutates anything.** The approved body and its digest are untouched — an overdue review is a fact about the review, not about the content — pinned by a test comparing digests before and after aging.
+  - **Drafting fires only when nothing TRUSTED remains**, so a domain covered solely by demoted skills counts as uncovered, which it is. The brief carries no proposed content: a suggested draft written here would be exactly the obeyable instruction text this design refuses to emit. Cerebro has no generative model at all, so naming the gap and handing the work back is the only honest move.
+
+  **Falsifiability probes: three.** (1) Making `trusted` always True failed the demotion test. (2) Emitting the drafting action unconditionally failed the covered-domain negative control. (3) Relaxing the currency gate at activation failed five `test_skillset` tests, confirming activation is still fail-closed.
+
+  **The intermittent test failures are diagnosed and are NOT a code fault.** Twice, two legacy-adapter tests failed while the suite took 49-52s instead of 25s. Root cause found: the LaunchAgent `com.leguillo.cerebro-reindex` runs every **1200 seconds** and rewrites `cerebro.db`; `mtime` confirmed changing mid-session. When it lands during a run, tests asserting the legacy database is not mutated see the file move under them. The rebuild is content-identical — the pin is still `03e9f3c5` afterwards — so this is a RACE, not corruption. Anyone contributing on a machine with that agent loaded will hit it. Left as a documented environmental hazard rather than silenced.
+
+  Verification (all passed): 849 → **856 passed** (+7); `verify_legacy_baseline.py` `status: pass`, `errors: []`; pins unchanged; `uv lock --check` and `git diff --check` clean.
+  Rollback: revert; demotion defaults to `current` and drafting simply never fires. [S-Currency, Advisories, and Demotion; S-Host-Delegated Authoring on Gap Detection]
+
+- [ ] ~~10 (original)~~ Expiry demotion, advisories, and gap-driven drafting. Expired or stale skills are demoted from trusted to candidate and MUST NOT be dispatched as trusted. Upstream drift surfaces as an advisory attached to the affected skill ref paired with a host action, and MUST NOT mutate the approved body. On detecting a domain gap with no covering skill, emit a bounded `draft_skill_candidate` host action; Cerebro performs no generation itself.
 
   Files: `dispatch.py`, `service.py`, `skillset.py`, respective tests.
   Estimate: 90 + 140 tests = **~230**.

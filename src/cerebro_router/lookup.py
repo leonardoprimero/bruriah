@@ -61,7 +61,7 @@ from dataclasses import dataclass
 from .classify import RequestClassification
 from .packs import CapabilityPolicy, SourcePolicy
 from .registries import Registry
-from .skills import SkillPolicy, SkillSet
+from .skills import SkillPack, SkillPolicy, SkillSet
 
 _GLOBAL_JURISDICTION = "GLOBAL"
 
@@ -86,12 +86,17 @@ class SourceMatch:
 class SkillMatch:
     """A skill whose declared domains include the classification's domain.
 
-    Carries `pack_id` because `SkillPolicy` does not: the pack is where provenance lives (signer,
-    tier, review window), and the dispatch layer has to disclose it without searching for the owning
-    pack a second time. `skill` is the loaded set's own instance, never cloned."""
+    Carries the owning PACK, not just its id: provenance and the review window both live there, and
+    dispatch has to evaluate currency without searching for the pack a second time. `pack_id` stays
+    available as a property so callers that only need the name read the same as before. Both `skill`
+    and `pack` are the loaded set's own instances, never cloned."""
 
     skill: SkillPolicy
-    pack_id: str
+    pack: SkillPack
+
+    @property
+    def pack_id(self) -> str:
+        return self.pack.pack_id
 
 
 @dataclass(frozen=True)
@@ -170,7 +175,7 @@ def _domain_applicable_skills(skill_set: SkillSet | None, domain: str) -> tuple[
     if skill_set is None:
         return ()
     return tuple(
-        SkillMatch(skill=skill, pack_id=pack.pack_id)
+        SkillMatch(skill=skill, pack=pack)
         for pack in skill_set.packs
         for skill in pack.skills
         if domain in skill.domains
