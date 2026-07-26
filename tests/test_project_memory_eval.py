@@ -40,10 +40,15 @@ def _ground_truth() -> set[str]:
 
 
 def test_every_ground_truth_document_exists_in_the_generated_corpus() -> None:
-    if not (ROOT / ".git").exists() and not (ROOT.parent / ".git").exists():
+    # The generator needs the repository ROOT, and this package is not always at it: in the
+    # standalone repo it is, in the monorepo it lives one directory down. Asking git rather than
+    # assuming keeps the same assertion true in both layouts.
+    toplevel = subprocess.run(["git", "rev-parse", "--show-toplevel"], cwd=ROOT,
+                              capture_output=True, text=True, timeout=60)
+    if toplevel.returncode != 0:
         pytest.skip("not a git checkout")
     with tempfile.TemporaryDirectory() as workspace:
-        built = subprocess.run([sys.executable, str(GENERATOR), "--repo", str(ROOT),
+        built = subprocess.run([sys.executable, str(GENERATOR), "--repo", toplevel.stdout.strip(),
                                 "--out", workspace], capture_output=True, text=True, timeout=300)
         assert built.returncode == 0, built.stdout + built.stderr
         produced = {_SHA.sub(r"\1-", path.name) for path in Path(workspace).glob("*.md")}
