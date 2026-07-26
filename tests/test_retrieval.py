@@ -7,6 +7,8 @@ from dataclasses import fields
 from pathlib import Path
 from types import SimpleNamespace
 import pytest
+
+from conftest import requires_vault
 from cerebro_router.contracts import Budgets, EvidenceRecord
 from cerebro_router.corpus import CorpusPolicy
 from cerebro_router.index import BuildConfig, build_candidate, promote_candidate, snapshot_active
@@ -201,6 +203,7 @@ def test_deadline_truncating_tokenization_never_escapes_untyped() -> None:
             return 2.0 if calls["count"] == _target else 0.0
         outcome = search(_raw_snapshot(rows), "apple pie", Budgets(max_elapsed_ms=1000), clock=fake_clock)
         assert "max_elapsed_ms_exceeded" in outcome.degradation
+@requires_vault
 def test_eval_fixtures_are_bilingual_and_reference_real_corpus_notes() -> None:
     vault = Path(__file__).resolve().parents[2] / "Cerebro-IA"
     lines = (Path(__file__).parents[1] / "evals/local-routing.jsonl").read_text(encoding="utf-8").splitlines()

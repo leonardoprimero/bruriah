@@ -4,6 +4,11 @@ import hashlib
 from pathlib import Path
 
 import pytest
+
+from conftest import requires_vault
+
+# Every test here asserts about a resource that is not distributed with this project.
+pytestmark = requires_vault
 import yaml
 
 from cerebro_router.corpus import (

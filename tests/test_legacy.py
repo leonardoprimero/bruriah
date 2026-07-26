@@ -14,6 +14,11 @@ from pathlib import Path
 from types import ModuleType
 
 import pytest
+
+from conftest import requires_legacy_database
+
+# Every test here asserts about a resource that is not distributed with this project.
+pytestmark = requires_legacy_database
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
 

@@ -12,6 +12,8 @@ from pathlib import Path
 
 import anyio
 import pytest
+
+from conftest import requires_legacy_database
 from cerebro_router.corpus import CorpusPolicy
 from cerebro_router.index import BuildConfig, build_candidate, promote_candidate
 from cerebro_router.mcp_server import build_server
@@ -166,6 +168,7 @@ def test_real_index_then_load_deps_produces_a_working_service_deps(tmp_path: Pat
         deps.snapshot.database.close()
 
 
+@requires_legacy_database
 def test_loader_never_touches_live_cerebro_db(tmp_path: Path) -> None:
     data_dir = tmp_path / "data"
     config = _build_and_promote(tmp_path, data_dir)

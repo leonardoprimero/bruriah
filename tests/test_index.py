@@ -13,6 +13,8 @@ from types import SimpleNamespace
 
 import pytest
 
+from conftest import requires_vault
+
 import cerebro_router.index as index_module
 from cerebro_router.corpus import CorpusPolicy
 from cerebro_router.cli import _embedding_fingerprint
@@ -237,6 +239,7 @@ def test_fastembed_fingerprint_binds_pooling_source_snapshot_and_artifact(tmp_pa
     }
 
 
+@requires_vault
 def test_real_corpus_candidate_has_expected_counts(tmp_path: Path) -> None:
     repository = Path(__file__).resolve().parents[2]
     root = repository / "Cerebro-IA"

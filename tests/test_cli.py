@@ -14,6 +14,8 @@ from pathlib import Path
 import anyio
 import platformdirs
 import pytest
+
+from conftest import requires_vault
 from cerebro_router import cache, cli, clients
 from cerebro_router.contracts import EvidenceRecord
 from cerebro_router.platform import load_deps, resolve_paths
@@ -82,6 +84,7 @@ def _write_cache_entry(cache_dir: Path, url: str, *, retrieved_at: datetime) -> 
     cache.write_cache_atomic(cache_dir, url, entry)
 
 
+@requires_vault
 def test_end_to_end_init_index_serve_doctor(tmp_path: Path, capsys: pytest.CaptureFixture) -> None:
     root, policy_path = _corpus(tmp_path)
     paths = _paths(tmp_path)

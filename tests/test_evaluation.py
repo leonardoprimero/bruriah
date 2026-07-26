@@ -15,6 +15,8 @@ from datetime import date, datetime, timezone
 from pathlib import Path
 
 import pytest
+
+from conftest import requires_baseline_script
 from cerebro_router.contracts import ClosedModel
 from cerebro_router.corpus import CorpusPolicy
 from cerebro_router.evaluation import (
@@ -288,6 +290,7 @@ def test_run_package_os_client_gate_never_reports_an_unreachable_cell_as_pass(de
 # --- Dimension 7: rollback + preservation ----------------------------------------------------------
 
 
+@requires_baseline_script
 def test_run_rollback_preservation_gate_runs_the_real_baseline_script() -> None:
     cells = run_rollback_preservation_gate(_ROOT, baseline_script=_BASELINE_SCRIPT)
     by_id = {cell.cell_id: cell for cell in cells}
@@ -385,6 +388,7 @@ def test_run_gate_matrix_missing_utility_case_is_a_typed_error_never_indexerror(
     assert error.value.code == "missing_fixture_case:utility"
 
 
+@requires_baseline_script
 def test_run_gate_matrix_end_to_end_produces_a_full_honest_report(deps, tmp_path, investigation_cases, domain_cases) -> None:
     context = EvaluationContext(
         deps=deps, today=_TODAY, investigation_cases=investigation_cases, domain_cases=domain_cases,
