@@ -1,0 +1,33 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+build/
+dist/
+
+# Tooling
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+
+# Local corpora, indexes and operator state -- never redistributed
+corpus/
+*.db
+*.db-wal
+*.db-shm
+policy.yaml
+corpus-policy.yaml
+ref-aliases.json
+recovery/
+
+# Release signing keys. The private half must never leave the machine that made it.
+*.pem
+!tests/fixtures/fetch/testcert.pem
+!tests/fixtures/fetch/testkey.pem
+
+# OS
+.DS_Store
