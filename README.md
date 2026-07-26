@@ -6,7 +6,7 @@
 
 <p align="center">
   <a href="https://pypi.org/project/bruriah/"><img alt="PyPI" src="https://img.shields.io/pypi/v/bruriah?style=flat-square&color=2d6a4f"/></a>
-  <img alt="tests" src="https://img.shields.io/badge/tests-887%20passing-2d6a4f?style=flat-square"/>
+  <a href="https://github.com/leonardoprimero/bruriah/actions/workflows/ci.yml"><img alt="CI" src="https://img.shields.io/github/actions/workflow/status/leonardoprimero/bruriah/ci.yml?branch=main&style=flat-square&label=tests"/></a>
   <img alt="python" src="https://img.shields.io/badge/python-3.12%20%7C%203.13-3776ab?style=flat-square"/>
   <img alt="MCP" src="https://img.shields.io/badge/MCP-2%20read--only%20tools-6a4c93?style=flat-square"/>
   <img alt="generative model" src="https://img.shields.io/badge/generative%20model-none-8b3c3c?style=flat-square"/>
