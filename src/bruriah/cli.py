@@ -17,7 +17,7 @@ import mcp.server.stdio
 import yaml
 from fastembed import TextEmbedding
 
-from . import cache, clients
+from . import cache, clients, gitcorpus
 from .corpus import CorpusPolicy, CorpusPolicyError
 from .index import BuildConfig, BuildResult, Embedder, IndexLifecycleError, build_candidate, promote_candidate
 from .mcp_server import build_server
@@ -554,6 +554,24 @@ def _cmd_init(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_corpus(args: argparse.Namespace) -> int:
+    """Step one of the documented workflow, and for a while the only one you could not install.
+
+    It lived in `scripts/git_corpus.py`, which no wheel ships, so the front page opened by telling
+    a reader to run a file that `pip install bruriah` had never put on their disk."""
+    if not (args.repo / ".git").exists():
+        raise CliError("not_a_git_repository")
+    written = gitcorpus.build(args.repo, args.out, args.limit)
+    print(json.dumps({"documents": written, "out": str(args.out)}, indent=2, sort_keys=True))
+    if written == 0:
+        print(
+            "No commit carried an explanatory body. This history records what changed but not why, "
+            "so there is no reasoning to retrieve -- retrieval quality cannot compensate for that.",
+            file=sys.stderr,
+        )
+    return 0
+
+
 def _cmd_index(
     args: argparse.Namespace, *, embedder_factory: EmbedderFactory = _default_embedder_factory,
 ) -> int:
@@ -613,6 +631,10 @@ def _build_cli_parser() -> argparse.ArgumentParser:
         return sub
 
     add("init", "Create private config and print client snippets.", _cmd_init)
+    corpus_parser = add("corpus", "Turn a git history's reasoning into a corpus.", _cmd_corpus)
+    corpus_parser.add_argument("--repo", type=Path, default=Path("."), help="repository to read")
+    corpus_parser.add_argument("--out", type=Path, required=True, help="directory to write into")
+    corpus_parser.add_argument("--limit", type=int, default=None, help="most recent N commits only")
     index_parser = add("index", "Build and promote a candidate index.", _cmd_index)
     index_parser.add_argument("--corpus-root", type=Path, required=True)
     index_parser.add_argument("--policy", type=Path, required=True)

@@ -1,80 +1,24 @@
 #!/usr/bin/env python3
-"""Turn a repository's decision record into a corpus Bruriah can index.
+"""Deprecated entry point. Use `bruriah corpus` instead.
 
-A project's reasoning already exists: it is in the commit messages that explain WHY, written by the
-person deciding at the moment of deciding. This reads that history and writes one Markdown document
-per decision, so `bruriah index` can take it from there.
+The logic moved into the package as `bruriah.gitcorpus`, because this file was step ONE of the
+documented workflow and no wheel ships `scripts/`: anyone who installed Bruriah rather than cloning
+it was told, on the front page, to run a file they did not have.
 
-    python scripts/git_corpus.py --repo . --out ./cerebro-corpus
-    bruriah index --corpus-root ./cerebro-corpus --policy ./policy.yaml
+    bruriah corpus --repo . --out ./corpus
 
-Commits with no explanatory body are skipped: a subject line records what changed, never why, and
-including them adds noise without reasoning. Merge commits are skipped for the same reason.
-
-Nothing is written to the repository being read. This script only reads.
+This wrapper stays so the command in older notes and shell histories keeps working. It calls the
+same code the subcommand does -- there is no second implementation to drift.
 """
 from __future__ import annotations
 
 import argparse
-import re
-import subprocess
 import sys
 from pathlib import Path
 
-# git's own escapes, NOT literal control bytes: a process argument cannot contain a NUL, so
-# building the format string with real \x00 raises ValueError before git is ever invoked. git
-# expands these itself, and the output is then split on the real bytes.
-_SEPARATOR_FMT, _RECORD_FMT = "%x00", "%x01"
-_SEPARATOR, _RECORD = "\x00", "\x01"
-_MAX_BODY = 16_000
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
-
-def _git(repo: Path, *args: str) -> str:
-    try:
-        result = subprocess.run(
-            ["git", *args], cwd=repo, capture_output=True, text=True, check=True
-        )
-    except FileNotFoundError:
-        raise SystemExit("error: git is not on PATH")
-    except subprocess.CalledProcessError as error:
-        raise SystemExit(f"error: git failed: {error.stderr.strip() or error}")
-    return result.stdout
-
-
-def _slug(text: str) -> str:
-    return re.sub(r"[^a-z0-9]+", "-", text.lower())[:60].strip("-") or "untitled"
-
-
-def build(repo: Path, out: Path, limit: int | None = None) -> int:
-    """Write one document per commit that carries reasoning. Returns how many were written."""
-    fmt = _SEPARATOR_FMT.join(["%H", "%aI", "%an", "%s", "%b"]) + _RECORD_FMT
-    args = ["log", "--no-merges", f"--format={fmt}"]
-    if limit:
-        args.append(f"-{limit}")
-    out.mkdir(parents=True, exist_ok=True)
-
-    written = 0
-    for entry in _git(repo, *args).split(_RECORD):
-        parts = entry.strip("\n").split(_SEPARATOR)
-        if len(parts) < 5:
-            continue
-        sha, when, author, subject, body = (part.strip() for part in parts[:5])
-        if not body:
-            continue  # a subject records what changed, never why
-        files = _git(repo, "show", "--stat", "--format=", "--name-only", sha).split()
-
-        document = (
-            f"# {subject}\n\n"
-            f"**Decided:** {when[:10]} · **Commit:** `{sha[:12]}` · **Author:** {author}\n\n"
-            f"{body[:_MAX_BODY]}\n\n"
-            "## Files this decision touched\n"
-            + "".join(f"- `{item}`\n" for item in sorted(set(files))[:12])
-        )
-        (out / f"{when[:10]}-{sha[:8]}-{_slug(subject)}.md").write_text(
-            document, encoding="utf-8"
-        )
-        written += 1
-    return written
+from bruriah.gitcorpus import build  # noqa: E402
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -84,6 +28,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--limit", type=int, default=None, help="most recent N commits only")
     args = parser.parse_args(argv)
 
+    print("note: `scripts/git_corpus.py` is deprecated; use `bruriah corpus`.", file=sys.stderr)
     if not (args.repo / ".git").exists():
         print(f"error: {args.repo} is not a git repository", file=sys.stderr)
         return 1

@@ -5,8 +5,8 @@
 </p>
 
 <p align="center">
-  <img alt="tests" src="https://img.shields.io/badge/tests-879%20passing-2d6a4f?style=flat-square"/>
-  <img alt="python" src="https://img.shields.io/badge/python-3.12-3776ab?style=flat-square"/>
+  <img alt="tests" src="https://img.shields.io/badge/tests-886%20passing-2d6a4f?style=flat-square"/>
+  <img alt="python" src="https://img.shields.io/badge/python-3.12%20%7C%203.13-3776ab?style=flat-square"/>
   <img alt="MCP" src="https://img.shields.io/badge/MCP-2%20read--only%20tools-6a4c93?style=flat-square"/>
   <img alt="generative model" src="https://img.shields.io/badge/generative%20model-none-8b3c3c?style=flat-square"/>
   <img alt="licence" src="https://img.shields.io/badge/licence-Apache%202.0-555?style=flat-square"/>
@@ -97,7 +97,7 @@ Your reasoning already exists. It is in the commit messages that explain **why**
 
 ```bash
 # 1. turn your history into a corpus (reads only; writes nothing to your repo)
-python scripts/git_corpus.py --repo . --out ./corpus
+bruriah corpus --repo . --out ./corpus
 
 # 2. index it
 bruriah index --corpus-root ./corpus --policy ./policy.yaml
@@ -228,7 +228,7 @@ Bruriah assumes the corpus may be hostile.
 
 Honest state as of 2026-07-25.
 
-**Working and tested** — 879 tests pass on a fresh clone (18 more need the author's private corpus and skip)
+**Working and tested** — 886 tests pass on a fresh clone (18 more need the author's private corpus and skip)
 - Hybrid retrieval (BM25 + local vectors via `sqlite-vec`) over your corpus
 - The two-tool MCP contract, structured output, typed failures
 - Signed policy packs with Ed25519 manifests and fail-closed loading
@@ -247,7 +247,7 @@ Honest state as of 2026-07-25.
 
 ## Install
 
-Requires **Python 3.12** on macOS or Linux. Not 3.13 — the project pins `>=3.12,<3.13` because the embedding runtime is validated against exactly that version.
+Requires **Python 3.12 or 3.13** on macOS or Linux. The suite runs green on both (879 and 877 tests; the two extra skips on 3.13 are git-checkout guards, not failures). 3.14 is excluded until the embedding runtime is validated against it -- the pin states what was tested, not what is possible.
 
 ```bash
 uv sync
