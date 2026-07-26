@@ -581,9 +581,18 @@ def _cmd_index(
         raise CliError("corpus_root_not_found")
     if not args.policy.is_file():
         raise CliError("policy_not_found")
+    # Resolve BEFORE building: these two paths are persisted in the build descriptor and read back
+    # by `serve` and `doctor`, in a different process whose working directory nobody controls. An
+    # MCP host launches the server from wherever it happens to be, so a relative `--policy` that
+    # worked at index time names nothing at serve time, `_validate_stored` fails to re-read it, and
+    # the user is told `snapshot_unreadable:invalid_active_target` -- an error about the snapshot,
+    # which is intact, rather than about the path. Storing what the user typed only works while the
+    # working directory never changes, and for a server that is never.
+    corpus_root = args.corpus_root.resolve()
+    policy = args.policy.resolve()
     try:
         result = run_index(
-            paths, args.corpus_root, args.policy, model_name=args.model,
+            paths, corpus_root, policy, model_name=args.model,
             embedder_factory=embedder_factory,
         )
     except (CorpusPolicyError, IndexLifecycleError, FileExistsError, ValueError, OSError, yaml.YAMLError) as error:
