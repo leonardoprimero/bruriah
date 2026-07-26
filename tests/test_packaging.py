@@ -61,6 +61,9 @@ _SKILL_BODIES = (
     "falsifiability-probe/SKILL.md",
     "verify-before-asserting/SKILL.md",
     "make-it-inexpressible/SKILL.md",
+    "preserve-behaviour-when-refactoring/SKILL.md",
+    "find-the-time-bomb/SKILL.md",
+    "undiscoverable-is-unbuilt/SKILL.md",
 )
 
 
@@ -94,8 +97,9 @@ def test_the_bundled_pack_loads_from_the_installed_location() -> None:
 
     skills = load_bundled_skills(today=date(2026, 7, 25))
     assert skills.skill_ids == (
-        "cerebro.falsifiability-probe", "cerebro.make-it-inexpressible",
-        "cerebro.verify-before-asserting",
+        "cerebro.falsifiability-probe", "cerebro.find-the-time-bomb",
+        "cerebro.make-it-inexpressible", "cerebro.preserve-behaviour-when-refactoring",
+        "cerebro.undiscoverable-is-unbuilt", "cerebro.verify-before-asserting",
     )
     assert all(skill.tier == "first_party" for skill in skills.skills)
 
@@ -130,7 +134,7 @@ def test_the_bundled_skills_dispatch_for_their_declared_domain() -> None:
 
     from cerebro_router.classify import RequestClassification
     from cerebro_router.contracts import HostSkill
-    from cerebro_router.dispatch import dispatch
+    from cerebro_router.dispatch import DEFAULT_SKILL_CEILING, dispatch
     from cerebro_router.lookup import discover
     from cerebro_router.platform import load_bundled_skills, load_registry
 
@@ -141,12 +145,18 @@ def test_the_bundled_skills_dispatch_for_their_declared_domain() -> None:
                               risk="low", jurisdiction="unknown"),
         load_registry(today=today), skills,
     )
-    assert len(lookup.skills) == 3
+    assert len(lookup.skills) == 6
     installed = [HostSkill(skill_id=match.skill.skill_id, version=match.skill.version,
                            digest=match.skill.body_digest) for match in lookup.skills]
     result = dispatch(lookup, installed)
-    assert [item.availability for item in result.skills] == ["installed"] * 3
-    assert result.gaps == ()
+    assert [item.availability for item in result.skills] == ["installed"] * DEFAULT_SKILL_CEILING
+    # Six bundled skills against a ceiling of five: one is reported as a gap rather than dropped.
+    # The ceiling is NOT raised to fit the shipped pack -- choosing a parameter so that your own
+    # content squeaks through is how a limit stops meaning anything. Measured, six refs cost ~6.6 KB,
+    # a third of the default output budget, so five is a defensible ceiling and the pack is simply
+    # larger than it. The trade-off this exposes is real and documented: the cut is alphabetical by
+    # skill_id, which is deterministic and non-injectable but has nothing to do with relevance.
+    assert result.gaps == ("skill_ceiling_exceeded:1",)
 
 
 def test_a_non_programming_request_gets_no_bundled_skills() -> None:

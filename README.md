@@ -53,13 +53,14 @@ Honest state, current as of 2026-07-25.
 - Signed domain-policy packs with Ed25519 release manifests and fail-closed loading
 - Deterministic source discovery, domain-gated, with explicit abstention
 - Atomic index build / promote / rollback with retained generations
-- 849 tests
+- 859 tests
 
 - The **skills layer**, end to end. `investigate_work` returns skill refs with provenance and a declared permission envelope; the full lifecycle — `skill-ingest`, `skill-analyze`, `skill-approve`, `skill-sign`, `skill-activate`, `skill-rollback`, `skill-status`, `skill-prune` — runs from the terminal.
-- **Three first-party skills ship and are active on install**: running falsifiability probes, verifying claims before asserting them, and making invalid states inexpressible. They are signed with the release key, they grant nothing, and each states its own limits. Every one of them was used to build this project and found real defects while doing it.
+- **Six first-party skills ship and are active on install**: running falsifiability probes, verifying claims before asserting them, making invalid states inexpressible, refactoring without touching a test file, sweeping the clock forward to find time bombs, and reading your own interface as a stranger. They are signed with the release key, they grant nothing, and each states its own limits. Every one was used to build this project and found real defects while doing it — two expiry time bombs, a security hole in a control-character check, and a complete feature that was unreachable in production.
 
 **Known limits, stated rather than buried**
-- Three bundled skills is a starting point, not a library. The mechanism is finished; the content is deliberately small, and whether it grows well is the open question.
+- Six bundled skills is a starting point, not a library. The mechanism is finished; the content is deliberately small, and whether it grows well is the open question.
+- The dispatch ceiling is five refs, and six skills ship, so one is reported as a gap on every programming request. The ceiling was NOT raised to fit the pack: measured, six refs cost about 6.6 KB, a third of the default output budget. The cut is alphabetical by `skill_id` — deterministic and non-injectable by design, but unrelated to relevance. Making the ceiling operator-configurable is the obvious next step and is not done.
 - Skill dispatch is gated on the client sending `host_skills`. A client that does not opt in gets a byte-identical response to the pre-skills contract, which is intentional but does mean the layer is invisible until a client asks for it.
 - Only macOS/POSIX is validated. `index.py` uses POSIX-only primitives and will not import on Windows.
 - Live web research is present in the codebase but **deliberately inert**: it needs an operator-defined destination allowlist that does not ship by default. The absence is a safety posture, not an oversight.

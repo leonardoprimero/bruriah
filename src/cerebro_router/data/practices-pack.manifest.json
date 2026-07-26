@@ -1,8 +1,8 @@
 {
   "pack_id": "cerebro.practices",
   "schema_version": "1",
-  "sha256": "ada644e3e9414a433c2bbc1f4fd00ba014c1ef8cfdcd7246fff8e7c21259baea",
-  "signature": "UfZjIYrWjyJBFp5GTIWdhLsnd2WbRZ1dZ531qHdxy+RFEt6BzcvvcjZE9RH6V35HX9YMxMGyu2fqOcQS0aRvCg==",
+  "sha256": "67b29ec77e4df6d499c6d3a0b3ab64c5aad8175b915935cf9220414f1ace691e",
+  "signature": "+7tWRrL0MRhl23hyTfyU8LimVuxnrF1nDd81rKWEgSLJk6Ejtf3H9ln4zdi3tBYhPTqDy9C0kD2hmATg1NSRBw==",
   "signer": "cerebro-release",
-  "version": "1.0.0"
+  "version": "1.1.0"
 }

@@ -284,4 +284,6 @@ def test_every_bundled_pack_ships_with_a_verifiable_manifest() -> None:
         # A skill pack is not a domain pack; loading each through the other's path would either fail
         # or, worse, appear to succeed against the wrong schema.
         loader = load_skill_pack if pack.stem == "practices-pack" else load_pack
-        assert loader(pack, manifest, roots, today=_TODAY).version == "1.0.0"
+        # The skill pack versions independently of the domain packs: it gained three skills.
+        expected = "1.1.0" if pack.stem == "practices-pack" else "1.0.0"
+        assert loader(pack, manifest, roots, today=_TODAY).version == expected
