@@ -37,8 +37,22 @@ jobs:
       - uses: astral-sh/setup-uv@v7
         with:
           enable-cache: true
+      # Nine jobs downloading the same ~130 MB embedding model at once is what widening this matrix
+      # actually bought, and Hugging Face answered with 429s -- one cell went red for a reason that
+      # had nothing to do with the code in it. Caching it removes the flake and the rudeness at the
+      # same time. The key hashes `cli.py` because that is where the model is pinned: any edit there
+      # busts the cache, which over-invalidates slightly and can never serve the wrong model. A
+      # needless download costs a minute; a stale one would silently embed against a different
+      # space, which is the failure `index` fails closed on and CI should never manufacture.
+      - name: cache the embedding model
+        uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/fastembed_cache
+          key: fastembed-${{ runner.os }}-${{ hashFiles('src/bruriah/cli.py') }}
       - run: uv sync --locked --python ${{ matrix.python }}
       - name: pytest
+        env:
+          FASTEMBED_CACHE_PATH: ${{ runner.temp }}/fastembed_cache
         run: uv run --no-sync python -m pytest tests -q -p no:randomly -rs
 
   package:
