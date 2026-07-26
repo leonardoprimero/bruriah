@@ -53,14 +53,14 @@ Honest state, current as of 2026-07-25.
 - Signed domain-policy packs with Ed25519 release manifests and fail-closed loading
 - Deterministic source discovery, domain-gated, with explicit abstention
 - Atomic index build / promote / rollback with retained generations
-- 828 tests
+- 849 tests
 
-**Working, but with nothing to dispatch yet**
-- The **skills layer**: dispatching to a vetted skill instead of flooding context with all of them. The machinery is complete and wired — `investigate_work` returns skill refs with provenance and a permission envelope, and `skill-ingest` / `skill-analyze` / `skill-approve` / `skill-sign` run the review gate from the terminal.
-- **What is missing is content.** No first-party skill pack ships yet, so a fresh install has the dispatcher and no skills for it to dispatch. You can author and approve your own today; a curated pack is the next piece of work, and it is the piece that decides whether any of this is actually useful.
+- The **skills layer**, end to end. `investigate_work` returns skill refs with provenance and a declared permission envelope; the full lifecycle — `skill-ingest`, `skill-analyze`, `skill-approve`, `skill-sign`, `skill-activate`, `skill-rollback`, `skill-status`, `skill-prune` — runs from the terminal.
+- **Three first-party skills ship and are active on install**: running falsifiability probes, verifying claims before asserting them, and making invalid states inexpressible. They are signed with the release key, they grant nothing, and each states its own limits. Every one of them was used to build this project and found real defects while doing it.
 
 **Known limits, stated rather than buried**
-- Skill **activation** (promoting an approved set so `serve` uses it) is not yet exposed as a subcommand, so the layer is currently driven through the Python API rather than end-to-end from the CLI.
+- Three bundled skills is a starting point, not a library. The mechanism is finished; the content is deliberately small, and whether it grows well is the open question.
+- Skill dispatch is gated on the client sending `host_skills`. A client that does not opt in gets a byte-identical response to the pre-skills contract, which is intentional but does mean the layer is invisible until a client asks for it.
 - Only macOS/POSIX is validated. `index.py` uses POSIX-only primitives and will not import on Windows.
 - Live web research is present in the codebase but **deliberately inert**: it needs an operator-defined destination allowlist that does not ship by default. The absence is a safety posture, not an oversight.
 - Retrieval quality is measured against a 61-query evaluation set, not against a public benchmark.
