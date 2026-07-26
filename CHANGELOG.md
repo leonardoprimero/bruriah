@@ -3,10 +3,11 @@
 Notable changes, newest first. This project follows [semantic versioning](https://semver.org/),
 and the entries here name what changed for *you* rather than which files moved.
 
-## [Unreleased]
+## [0.2.0] — 2026-07-26
 
-Everything here is on `main` and **not** in the published `0.1.0`. If you installed from PyPI, you
-do not have it yet — including `bruriah ask`, which the README documents.
+The release that makes the published package match its own front page. `0.1.0` shipped without
+`bruriah ask` while the README documented it, so the first command a reader tried did not exist.
+That is fixed by publishing rather than by editing the README, because the README was right.
 
 ### Native Windows support
 
@@ -56,10 +57,19 @@ ships 3.14 and carries no older interpreter. The suite result is now identical o
   both platforms — a permanently-false durability flag is a false alarm, which costs the same trust
   as a false assurance.
 
-### Added earlier on `main`, still unreleased
+### Added
 
 - `bruriah ask` — query from the terminal, with `--read N` to pull the exact lines, before wiring
-  up any MCP client.
+  up any MCP client. Present on `main` since before `0.1.0` and documented in the README the whole
+  time; this is the release that actually ships it.
+
+### If you already have an index
+
+Nothing forces a rebuild: `parser_version`, `service_version` and the snapshot schema are
+unchanged, so an existing index keeps validating. One exception worth knowing — if you built one
+from a working tree checked out with CRLF line endings, its passages contain `` and its
+retrieval is subtly worse. Re-run `bruriah index` and it will be correct; there is no way for the
+tool to detect that from the outside, which is why it is written here.
 
 ## [0.1.0] — 2026-07-26
 
@@ -120,5 +130,7 @@ First release. Published as [`bruriah`](https://pypi.org/project/bruriah/) on Py
 - Six bundled skills is a starting point, not a library.
 - Live web research ships inert: it needs an operator-defined allowlist that is not distributed.
 
-[Unreleased]: https://github.com/leonardoprimero/bruriah/compare/main...HEAD
-[0.1.0]: https://github.com/leonardoprimero/bruriah/releases/tag/v0.1.0
+[0.2.0]: https://github.com/leonardoprimero/bruriah/releases/tag/v0.2.0
+<!-- 0.1.0 was published to PyPI without a git tag, so it links to the artifact that actually
+     exists rather than to a release page that never did. -->
+[0.1.0]: https://pypi.org/project/bruriah/0.1.0/
