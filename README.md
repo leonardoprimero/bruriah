@@ -163,3 +163,9 @@ Every unit shipped with a **falsifiability probe**: the invariant just written w
 Apache 2.0. See [`LICENSE`](LICENSE) and [`NOTICE`](NOTICE).
 
 Chosen over MIT for the explicit patent grant: a project whose whole argument is about trust boundaries should not leave a patent question open. Chosen over AGPL because the goal is adoption, and a copyleft reaching across a network would keep exactly the people this is built for from trying it.
+
+---
+
+Built by **Leonardo I** (a.k.a. [@leonardoprimero](https://github.com/leonardoprimero))
+
+If you try it, I want to hear where it broke. The limits above are the ones I found; the interesting ones are the ones I did not.
