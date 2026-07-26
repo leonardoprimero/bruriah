@@ -1,10 +1,24 @@
-# Bruriah
+<h1 align="center">Bruriah <sub><sub>ברוריה</sub></sub></h1>
 
-**Point it at your repo. Your agent learns why the code is the way it is — with the commit that proves it and the date it was decided.**
+<p align="center">
+  <b>Point it at your repo. Your agent learns why the code is the way it is —<br/>with the commit that proves it and the date it was decided.</b>
+</p>
 
-An MCP server that lets an agent consult your knowledge without letting your knowledge instruct the agent.
+<p align="center">
+  <img alt="tests" src="https://img.shields.io/badge/tests-867%20passing-2d6a4f?style=flat-square"/>
+  <img alt="python" src="https://img.shields.io/badge/python-3.12-3776ab?style=flat-square"/>
+  <img alt="MCP" src="https://img.shields.io/badge/MCP-2%20read--only%20tools-6a4c93?style=flat-square"/>
+  <img alt="generative model" src="https://img.shields.io/badge/generative%20model-none-8b3c3c?style=flat-square"/>
+  <img alt="licence" src="https://img.shields.io/badge/licence-Apache%202.0-555?style=flat-square"/>
+</p>
 
-*Named after [Bruriah](#the-name) (ברוריה), the one woman in the Talmud whose rulings are cited by name.*
+<p align="center">
+  An MCP server that lets an agent consult your knowledge<br/><b>without letting your knowledge instruct the agent.</b>
+</p>
+
+<p align="center">
+  <i>Named after <a href="#the-name">Bruriah</a>, the one woman in the Talmud whose rulings are cited by name.</i>
+</p>
 
 ---
 
@@ -67,11 +81,46 @@ exclude: ['private/**']
 
 Now ask your agent *"why did we choose X?"* and it gets the commit, the date and the reasoning — instead of an invention.
 
+## See it answer a real question
+
+This is not a mock-up. It is the actual output of running the three commands above against **this repository's own history**, 81 decisions and 162 passages.
+
+The agent asks *"why is the MCP surface limited to two read-only tools"*. First it gets a **reference**, not prose:
+
+```jsonc
+{
+  "ref": "chunk:v1:6d4329329f9ab6ea67e3d34ec31da3567a07b51041f0787c800d6b1bd73fb1c4",
+  "kind": "local",
+  "publisher": "2026-07-23-e8f3003b-feat-cerebro-router-add-the-two-tool-mcp-protocol-server.md",
+  "citation_locator": "2026-07-23-e8f3003b-feat-cerebro-router-add-the-two-tool-mcp-protocol-server.md#1-28",
+  "digest": "sha256:5bfcda316ae7f376c75729c07c7f90d2d39af10b8072be11067cc791a29b290d",
+  "authority": "unknown",
+  "authority_rationale": "not_assessed_by_retrieval"
+}
+```
+
+Read that last pair again, because it is the whole design in two fields. Bruriah found the document and **says outright that it did not assess its authority**. It does not round "I retrieved this" up to "you can trust this". A system that cannot tell you *how far* it should be believed is a system you cannot calibrate against.
+
+Only if the agent wants the text does it call `read_evidence`, and it gets exact, bounded, unmodified lines:
+
+```
+# feat(cerebro-router): add the two-tool MCP protocol server
+
+Decided: 2026-07-23 · Commit: e8f3003bda26 · Author: Leonardo Caliva
+
+built on mcp.server.lowlevel.Server, not FastMCP: FastMCP derives its argument
+model without extra="forbid", so an unknown field is silently dropped before
+any handler runs — defeating authoritative server-side validation. Proven
+empirically against a real FastMCP counter-example during review.
+```
+
+That is a real answer to *why*, written by the person deciding at the moment of deciding, with the commit hash that proves it. No model wrote that sentence — not then, not now. It was already sitting in your repository. Nothing your agent had could reach it.
+
 ## What I measured
 
 I do not want you to take my word for any of this, so here are the numbers, including the bad one.
 
-Twelve "why was this decided" questions against this repository's own history — 76 commits carrying real reasoning, 152 passages. Ground truth is known because I wrote those commits deliberately.
+Twelve "why was this decided" questions against this repository's own history — 76 commits carrying real reasoning, 152 passages at the time it was run; the corpus above is the same one, later. Ground truth is known because I wrote those commits deliberately.
 
 | question language | recall@3 | recall@10 | MRR@10 |
 |---|---|---|---|
@@ -156,7 +205,7 @@ uv run bruriah serve    # the MCP server, over stdio
 
 ## Design notes
 
-[`openspec/`](../openspec/) carries the specifications, the architecture decisions and a per-unit implementation record — including what was rejected and why. If you want to understand a decision rather than read the code, start there.
+[`openspec/`](openspec/) carries the specifications, the architecture decisions and a per-unit implementation record — including what was rejected and why. If you want to understand a decision rather than read the code, start there.
 
 Every unit shipped with a **falsifiability probe**: the invariant just written was broken on purpose and the suite re-run to confirm the right tests failed. Roughly one probe in three found something. One of them removed a guard and *wrote a live private key into the package directory* instead of merely failing an assertion — which is how I know that guard was the only thing standing there.
 
@@ -166,7 +215,7 @@ Every unit shipped with a **falsifiability probe**: the invariant just written w
 
 That is the whole specification of this tool, written about eighteen centuries early. Return what is known. Say who said it, when, and whether it still holds. Never win by asserting an authority you do not have.
 
-The project was called **Cerebro** while it was being built, and the decision records under [`openspec/`](../openspec/) still say so. They are left that way deliberately: a record you rewrite retroactively to match the present is no longer a record — which is, more or less, the problem this whole project exists to solve.
+The project was called **Cerebro** while it was being built, and the decision records under [`openspec/`](openspec/) still say so. They are left that way deliberately: a record you rewrite retroactively to match the present is no longer a record — which is, more or less, the problem this whole project exists to solve.
 
 ## Licence
 
