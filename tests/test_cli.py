@@ -18,7 +18,7 @@ import pytest
 from conftest import requires_vault
 from bruriah import cache, cli, clients
 from bruriah.contracts import EvidenceRecord
-from bruriah.platform import load_deps, resolve_paths
+from bruriah.platform import load_deps, open_snapshot, resolve_paths
 from bruriah.retrieval import search as router_search
 from mcp.shared.memory import create_connected_server_and_client_session
 
@@ -293,6 +293,43 @@ def test_cli_index_dispatch_builds_only_under_private_data_dir(tmp_path: Path) -
     assert exit_code == 0
     assert (data_dir / "active.json").is_file()
     assert all(path.parent == data_dir for path in data_dir.rglob("candidate-*.sqlite3"))
+
+
+def test_index_persists_absolute_paths_so_serve_survives_a_different_working_directory(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Indexing with RELATIVE `--corpus-root`/`--policy` must still produce a snapshot that opens
+    from anywhere. The build descriptor is read back by `serve` in a separate process whose working
+    directory is chosen by the MCP host, not by the user who built the index. When the relative
+    string was persisted verbatim, `_validate_stored` could not re-read the policy from the new
+    directory and the failure surfaced as `snapshot_unreadable:invalid_active_target` -- blaming an
+    intact snapshot for a path that no longer resolved."""
+    root, policy_path = _corpus(tmp_path)
+    config_dir, data_dir = tmp_path / "config", tmp_path / "data"
+
+    monkeypatch.chdir(tmp_path)
+    args = cli._build_cli_parser().parse_args([
+        "index", "--config-dir", str(config_dir), "--data-dir", str(data_dir),
+        "--corpus-root", str(root.relative_to(tmp_path)),
+        "--policy", str(policy_path.relative_to(tmp_path)),
+    ])
+    assert not args.corpus_root.is_absolute() and not args.policy.is_absolute()
+    assert cli._cmd_index(args, embedder_factory=_fake_embedder_factory) == 0
+
+    descriptor = json.loads((data_dir / "build-config.json").read_text(encoding="utf-8"))
+    assert Path(descriptor["root"]).is_absolute()
+    assert Path(descriptor["policy_path"]).is_absolute()
+
+    # The real assertion: open the promoted snapshot from somewhere the relative paths mean nothing.
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    monkeypatch.chdir(elsewhere)
+    paths = resolve_paths(cli_config_dir=config_dir, cli_data_dir=data_dir)
+    snapshot = open_snapshot(paths)
+    try:
+        assert snapshot.build_id
+    finally:
+        snapshot.database.close()
 
 
 # ---------------------------------------------------------------------------
