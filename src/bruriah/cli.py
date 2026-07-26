@@ -187,7 +187,22 @@ def run_doctor(
             "config": paths.config_dir.is_dir(), "data": paths.data_dir.is_dir(),
             "cache": paths.cache_dir.is_dir(), "log": paths.log_dir.is_dir(),
         },
-        "network_enabled": paths.network_enabled, "warnings": [],
+        "network_enabled": paths.network_enabled,
+        # Every site that narrows permissions is already guarded by `os.name == "posix"`, so on
+        # Windows those calls correctly do nothing rather than pretending -- `os.chmod` there only
+        # toggles a read-only attribute and would be theatre. What was missing is that the user had
+        # no way to LEARN this. In practice the data lives under the per-user profile directory,
+        # whose inherited ACL already denies other standard users, so the protection is real; it is
+        # just not the one the code asked for, and not one this process verified. Writing an
+        # explicit DACL was considered and rejected: a hand-rolled ACL that looks restrictive while
+        # inheriting something permissive is precisely the silently-weaker outcome this codebase
+        # refuses everywhere else. Saying so out loud is the honest version.
+        "owner_only_file_modes": os.name == "posix",
+        "warnings": (
+            [] if os.name == "posix" else
+            ["this platform does not enforce owner-only file modes; private data is protected by "
+             "the user profile directory's inherited permissions, which bruriah does not verify"]
+        ),
     }
     try:
         registry = load_registry(effective_today)
@@ -220,8 +235,7 @@ def run_init(paths: PlatformPaths) -> Path:
     config_file = paths.config_dir / "config.json"
     if not config_file.exists():
         default = json.dumps({"network_enabled": False}, sort_keys=True) + "\n"
-        config_file.write_text(default, encoding="utf-8", newline="
-")
+        config_file.write_text(default, encoding="utf-8", newline="\n")
     return config_file
 
 
@@ -252,8 +266,7 @@ def run_client_configs(
     written: dict[clients.ClientId, Path] = {}
     for client_id, rendered in clients.render_all(manifest).items():
         target = clients_dir / f"{client_id.value}.json"
-        target.write_text(rendered, encoding="utf-8", newline="
-")
+        target.write_text(rendered, encoding="utf-8", newline="\n")
         written[client_id] = target
     if os.name == "posix":
         os.chmod(clients_dir, 0o700)
