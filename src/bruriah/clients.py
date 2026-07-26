@@ -13,6 +13,7 @@
 from __future__ import annotations
 
 import json
+import os
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import PurePath
@@ -62,7 +63,18 @@ class ClientError(ValueError):
 # installs for no injection-safety benefit, so this set stays scoped to characters that are
 # genuinely dangerous if a config is ever mishandled by a shell, not every character a shell
 # grammar happens to treat specially.
-_SHELL_METACHARACTERS = frozenset(";&|$`()<>{}[]\n\r\t\\\"'*?~!#")
+#
+# `\` gets the same treatment as the space, for the same reason and only where the reason applies.
+# On POSIX it is an escape character and never a path separator, so it stays rejected. On Windows
+# it is the ONLY path separator: every absolute command (`C:\...\python.exe`) and every directory
+# argument (`--data-dir C:\Users\...`) contains one, so keeping it in the set does not harden
+# anything -- it rejects every valid Windows install, which is exactly what `bruriah init` did
+# there: it could not emit a single client config. Dropping it costs no injection safety, because
+# `cmd.exe` does not treat `\` specially and PowerShell escapes with a backtick, which stays in
+# the set on every platform.
+_SHELL_METACHARACTERS = frozenset(";&|$`()<>{}[]\n\r\t\\\"'*?~!#") - (
+    frozenset("\\") if os.name == "nt" else frozenset()
+)
 
 
 def _reject_shell_metacharacters(value: str, *, code: str) -> None:

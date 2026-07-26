@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import json
-from pathlib import Path
+import os
+from pathlib import Path, PurePath
 
 import pytest
 import bruriah
 from bruriah.clients import (
+    _SHELL_METACHARACTERS,
     CLIENT_CAPABILITIES,
     ClientCapability,
     ClientError,
@@ -22,9 +24,22 @@ from bruriah.clients import (
     render_opencode,
 )
 
-_COMMAND = "/usr/local/bin/bruriah"
-_MANIFEST = LaunchManifest(command=_COMMAND, args=("serve", "--config-dir", "/home/u/.config/cerebro"))
-_SPACED_COMMAND = "/Users/x/Library/Application Support/cerebro/bruriah"
+# "Absolute" is spelled differently per platform and the manifest requires it: `PurePath` is
+# `PureWindowsPath` on Windows, where a driveless "/usr/local/bin/bruriah" is ROOTED but not
+# ABSOLUTE. Hardcoding POSIX paths made this whole module fail to even import on Windows, so the
+# contract went unasserted there rather than being asserted and found wanting. Building the
+# fixtures for the running platform means the same contract is checked everywhere.
+_WINDOWS = os.name == "nt"
+_PREFIX = "C:\\opt\\bruriah\\" if _WINDOWS else "/usr/local/bin/"
+_COMMAND = f"{_PREFIX}bruriah"
+_CONFIG_DIR = "C:\\Users\\u\\AppData\\Roaming\\cerebro" if _WINDOWS else "/home/u/.config/cerebro"
+_MANIFEST = LaunchManifest(command=_COMMAND, args=("serve", "--config-dir", _CONFIG_DIR))
+# A space in an absolute command path is legitimate and common on both platforms, and is deliberately
+# NOT a rejected character -- see `_SHELL_METACHARACTERS`.
+_SPACED_COMMAND = (
+    "C:\\Program Files\\cerebro\\bruriah" if _WINDOWS
+    else "/Users/x/Library/Application Support/cerebro/bruriah"
+)
 
 _MCP_SERVERS_RENDERERS = {
     ClientId.CLAUDE_CODE: render_claude_code,
@@ -43,7 +58,11 @@ def test_manifest_rejects_relative_command() -> None:
     assert excinfo.value.code == "command_not_absolute"
 
 
-@pytest.mark.parametrize("bad_command", ["/usr/bin/bruriah; rm -rf /", "/usr/bin/$(whoami)", "/usr/bin/`id`"])
+@pytest.mark.parametrize("bad_command", [
+    # Built on the platform prefix so the ABSOLUTE check passes and the metacharacter check
+    # is what actually rejects these -- otherwise Windows would fail them for the wrong reason.
+    f"{_PREFIX}bruriah; rm -rf /", f"{_PREFIX}$(whoami)", f"{_PREFIX}`id`",
+])
 def test_manifest_rejects_shell_metacharacters_in_command(bad_command: str) -> None:
     with pytest.raises(ClientError) as excinfo:
         LaunchManifest(command=bad_command)
@@ -200,7 +219,8 @@ def test_render_invokes_exact_canonical_command_and_args(client_id: ClientId) ->
     argv = _extract_argv(client_id, parsed)
     assert argv == list(_MANIFEST.full_argv)
     assert argv[0] == _COMMAND
-    assert argv[0].startswith("/")
+    # Absoluteness is the property; a leading "/" was only ever how POSIX spells it.
+    assert PurePath(argv[0]).is_absolute()
 
 
 def test_render_is_deterministic_byte_identical_across_calls() -> None:
@@ -233,8 +253,13 @@ def test_render_never_launches_arbitrary_command(client_id: ClientId) -> None:
     argv = _extract_argv(client_id, parsed)
     assert argv[0] == _MANIFEST.command
     assert argv[1:] == list(_MANIFEST.args)
+    # Asserted against the module's OWN set rather than a copy of it. The copy that used to live
+    # here had drifted: it still contained "\\", which is a shell escape on POSIX but the path
+    # separator on Windows, so this negative control rejected every legitimate Windows command.
+    # Importing the real set means the guarantee under test can never disagree with the guarantee
+    # being enforced.
     for token in argv:
-        assert not any(character in ";&|$`(){}<>\n\r\\\"'" for character in token)
+        assert not any(character in _SHELL_METACHARACTERS for character in token)
 
 
 # --- Cross-client core equivalence: same manifest -> identical launched server --------------
