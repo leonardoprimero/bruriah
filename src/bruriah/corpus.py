@@ -140,7 +140,17 @@ def parse_document(path: Path, root: Path, policy: CorpusPolicy) -> Document:
         raise CorpusPolicyError(reason)
     resolved = path.resolve(strict=True)
     raw = resolved.read_bytes()
-    text = raw.decode("utf-8")
+    # `source_hash` below stays over `raw`, deliberately: the digest is the provenance anchor and
+    # must identify the exact bytes on disk, not an interpretation of them.
+    #
+    # The PARSED text is normalized, because it is a different thing with a different job. It gets
+    # tokenized for BM25, embedded, stored in the passage table and handed back verbatim as
+    # evidence content -- none of which should depend on how the file happened to be checked out.
+    # A CRLF working tree (every default Windows clone) otherwise indexes `\r` into every token
+    # boundary and quotes it back to the caller, so the same document retrieves differently on two
+    # machines. On an LF file this replacement is a no-op, which is why POSIX behaviour is
+    # unchanged. Line COUNT is preserved either way, so the heading line-map below still lines up.
+    text = raw.decode("utf-8").replace("\r\n", "\n").replace("\r", "\n")
     lines = text.splitlines(keepends=True)
     frontmatter, body_start = _frontmatter(lines)
     relative = resolved.relative_to(root.resolve(strict=True)).as_posix()

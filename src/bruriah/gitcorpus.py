@@ -72,8 +72,12 @@ def build(repo: Path, out: Path, limit: int | None = None) -> int:
             "## Files this decision touched\n"
             + "".join(f"- `{item}`\n" for item in sorted(set(files))[:12])
         )
+        # LF explicitly: these documents are hashed byte-for-byte by `parse_document`
+        # (`source_hash`), so letting text mode rewrite the separators would make an index built
+        # from a Windows-generated corpus disagree with one built from the same commits anywhere
+        # else -- same history, different digests, for no reason a reader could ever see.
         (out / f"{when[:10]}-{sha[:8]}-{_slug(subject)}.md").write_text(
-            document, encoding="utf-8"
+            document, encoding="utf-8", newline="\n"
         )
         written += 1
     return written
