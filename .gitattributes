@@ -1,0 +1,10 @@
+# Bruriah verifies bundled skill packs by digest. A checkout that rewrites line endings changes
+# those bytes and the registry fails closed with `registry_load_failed:digest_mismatch` -- which
+# reads as a corrupt install, not as a misconfigured Git. Windows clones default to
+# `core.autocrlf=true`, so without this file the packaged product is broken on checkout, before
+# any code runs.
+* text=auto eol=lf
+
+# Digest-verified payloads and their manifests are bytes, not text. Never let any platform,
+# attribute inheritance, or user config touch them.
+src/bruriah/data/** -text
