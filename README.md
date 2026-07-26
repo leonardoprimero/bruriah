@@ -192,7 +192,7 @@ comparison against **the common shape**: retrieve passages, put them in the prom
 | when the text arrives | immediately, in the prompt | only if the agent asks for it, bounded |
 | what picks the sources | a model, over the content | boolean set membership over a signed registry |
 | can a document influence what gets picked | yes, that is how ranking works | **no** — selection never reads corpus prose |
-| how confident it sounds | the same, always | `supported` / `stale` / `expired` / `unknown`, stated |
+| how confident it sounds | the same, always | `supported` / `stale` / `expired` / `unknown`, stated — and `unknown` when nothing declared it |
 | when it knows nothing | returns the nearest passage | **abstains**, and says which domain it lacks |
 | trust in a retrieved document | implied by returning it | explicitly `not_assessed_by_retrieval` |
 
@@ -204,7 +204,11 @@ The row that matters is the fourth. Everything else follows from it.
 
 **Everything is read-only.** The MCP surface is exactly two tools and neither writes anything. All mutation — indexing, approval, activation — lives in a CLI a human runs.
 
-**Claims carry state.** Each one is explicitly supported, stale, expired, or of unknown provenance. *"I found something"* and *"I found something current and authoritative"* are different answers, and Bruriah tells you which one you got.
+**State is carried, never inferred.** *"I found something"* and *"I found something current and authoritative"* are different answers, and Bruriah tells you which one you got — `supported`, `stale`, `expired`, `unknown`.
+
+Which one you get depends on whether anything **declared** it, and that is worth knowing before you look at a response. A signed pack declares a source's authority, review date and freshness window, so evidence covered by one carries real state. Your own git history is covered by no such pack, so its evidence comes back `unknown` with `not_assessed_by_retrieval` — not a placeholder for something unfinished, but the honest answer, since the alternative is retrieval deciding a document is authoritative because it retrieved it.
+
+For the same reason `claims` is empty for a local corpus. Forming a claim requires a *structured* statement of what a passage asserts, and deriving one from a decision written in prose is a semantic reading — exactly what nothing in this package is permitted to do to corpus text. Claims are assembled over research evidence, under a source policy that declares what a source may be cited for, and live research ships inert. An empty `claims` list on your own repository is the design holding, not a feature that has not landed.
 
 
 ## What Bruriah does instead
