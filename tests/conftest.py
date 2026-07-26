@@ -23,6 +23,8 @@ VAULT_ROOT = REPOSITORY_ROOT / "Cerebro-IA"
 LEGACY_DATABASE = RETRIEVAL_ROOT / "cerebro.db"
 CORPUS_POLICY = RETRIEVAL_ROOT / "corpus-policy.yaml"
 BASELINE_SCRIPT = RETRIEVAL_ROOT / "scripts" / "verify_legacy_baseline.py"
+BASELINE_RECORD = RETRIEVAL_ROOT / "recovery" / "legacy-baseline-v1.json"
+LEGACY_ENGINE = RETRIEVAL_ROOT / "cerebro.py"
 
 requires_vault = pytest.mark.skipif(
     not VAULT_ROOT.is_dir() or not CORPUS_POLICY.is_file(),
@@ -32,7 +34,12 @@ requires_legacy_database = pytest.mark.skipif(
     not LEGACY_DATABASE.is_file(),
     reason="the legacy cerebro.db is not part of this checkout",
 )
+# The script alone is not enough to run: it imports the legacy engine, opens the legacy database
+# and compares against a recorded baseline, and only the script is distributed. Guarding on the
+# script's presence made a fresh clone FAIL rather than skip -- the guard has to name every
+# resource the work actually touches, not the one that happens to be easiest to test for.
 requires_baseline_script = pytest.mark.skipif(
-    not BASELINE_SCRIPT.is_file(),
+    not (BASELINE_SCRIPT.is_file() and BASELINE_RECORD.is_file()
+         and LEGACY_ENGINE.is_file() and LEGACY_DATABASE.is_file()),
     reason="the legacy recovery baseline is not part of this checkout",
 )
