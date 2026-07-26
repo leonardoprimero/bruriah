@@ -18,6 +18,7 @@ from .index import ActiveSnapshot, BuildConfig, IndexLifecycleError, snapshot_ac
 from .packs import PackError, load_pack
 from .registries import Registry
 from .service import ServiceDeps
+from .skills import SkillSet, load_skill_pack
 
 APP_NAME = "cerebro-router"
 ENV_PREFIX = "CEREBRO_ROUTER_"
@@ -171,6 +172,27 @@ def load_trust_roots() -> dict[str, str]:
         raise PlatformError("trust_roots_unreadable") from error
 
 
+def load_bundled_skills(today: date | None = None) -> SkillSet:
+    """Load the first-party skill pack that ships with the wheel.
+
+    Bundled first-party skills are active on install, exactly as the bundled domain packs are, and
+    for the same reason: they were reviewed and signed by the maintainer before release, so asking
+    the user to approve them again would be asking them to re-do a review they cannot improve on.
+    The human approval gate exists to protect a user from content THEY did not vet; it is not a
+    ceremony for content that shipped signed.
+
+    A user's own activated skill set is separate and lives under `data_dir`; `load_deps` merges the
+    two, and an id collision fails loudly rather than one silently shadowing the other."""
+    try:
+        pack = load_skill_pack(
+            _BUNDLED_DATA / "practices-pack.json", _BUNDLED_DATA / "practices-pack.manifest.json",
+            load_trust_roots(), today=today,
+        )
+    except PackError as error:
+        raise PlatformError(f"skills_load_failed:{error.code}") from error
+    return SkillSet.from_packs([pack])
+
+
 def load_registry(today: date | None = None) -> Registry:
     """Load every bundled domain pack into a `Registry`. `today` is injectable (default: real date)
     so the fail-closed freshness/expiry check is deterministic in tests instead of a wall-clock time
@@ -221,10 +243,11 @@ def load_deps(
     `build_serve_deps`'s job to build and inject for `serve`."""
     return ServiceDeps(
         registry=load_registry(today), snapshot=open_snapshot(paths), embed_query=embed_query,
+        skill_set=load_bundled_skills(today),
     )
 
 
 __all__ = [
     "PlatformError", "PlatformPaths", "ensure_private_dirs", "load_build_descriptor",
-    "load_deps", "load_registry", "load_trust_roots", "open_snapshot", "resolve_paths", "write_build_descriptor",
+    "load_bundled_skills", "load_deps", "load_registry", "load_trust_roots", "open_snapshot", "resolve_paths", "write_build_descriptor",
 ]

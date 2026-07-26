@@ -187,8 +187,10 @@ def test_a_pack_without_an_identity_cannot_be_signed(tmp_path: Path) -> None:
 def test_signing_never_writes_into_the_installed_package(tmp_path: Path) -> None:
     # The tool addresses the private key by path and must leave the bundled data directory exactly as
     # it found it -- no key material, no stray manifest.
-    before = {item.name: item.read_bytes() for item in sorted(DATA.iterdir())}
+    # Files only: `data/` now also holds the `skills/` body directory, and the point of this
+    # snapshot is that no key material appears, not that the tree is flat.
+    before = {item.name: item.read_bytes() for item in sorted(DATA.iterdir()) if item.is_file()}
     _signed_copy(tmp_path)
     generate_key(tmp_path / "another.pem")
-    after = {item.name: item.read_bytes() for item in sorted(DATA.iterdir())}
+    after = {item.name: item.read_bytes() for item in sorted(DATA.iterdir()) if item.is_file()}
     assert after == before

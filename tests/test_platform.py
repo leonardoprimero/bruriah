@@ -264,18 +264,24 @@ def test_the_retired_test_signer_is_no_longer_trusted() -> None:
         forged_path.unlink()
 
 
-def test_both_bundled_packs_ship_with_a_verifiable_manifest() -> None:
+def test_every_bundled_pack_ships_with_a_verifiable_manifest() -> None:
     """Packaging assertion: every pack in the data directory has a manifest beside it that verifies
-    through the unmodified load path. A pack that ships without one is dead weight the loader will
-    refuse at startup."""
+    through the unmodified load path for ITS OWN kind. A pack that ships without one is dead weight
+    the loader refuses at startup."""
     from cerebro_router.packs import load_pack
+    from cerebro_router.skills import load_skill_pack
 
     data = Path(__file__).parents[1] / "src/cerebro_router/data"
     roots = json.loads((data / "trust-roots.json").read_text())
-    packs = sorted(item for item in data.glob("*.json") if not item.name.endswith(".manifest.json")
-                   and item.name != "trust-roots.json")
-    assert [item.stem for item in packs] == ["programming-policy", "research-policy"]
+    packs = sorted(item for item in data.glob("*.json")
+                   if not item.name.endswith(".manifest.json") and item.name != "trust-roots.json")
+    # Three bundled packs now: two domain policies and the first-party skill pack. Asserted as an
+    # exact list so a pack added without a manifest fails here rather than at a user's first startup.
+    assert [item.stem for item in packs] == ["practices-pack", "programming-policy", "research-policy"]
     for pack in packs:
         manifest = pack.with_suffix(".manifest.json")
         assert manifest.is_file(), pack.name
-        assert load_pack(pack, manifest, roots, today=_TODAY).version == "1.0.0"
+        # A skill pack is not a domain pack; loading each through the other's path would either fail
+        # or, worse, appear to succeed against the wrong schema.
+        loader = load_skill_pack if pack.stem == "practices-pack" else load_pack
+        assert loader(pack, manifest, roots, today=_TODAY).version == "1.0.0"
