@@ -275,7 +275,11 @@ def test_research_fetches_via_real_pipeline_and_caches_and_audits(tmp_path: Path
 
         cache_path = deps.cache_dir / f"{cache_key(_url(server))}.json"
         assert cache_path.is_file()
-        assert stat.S_IMODE(os.stat(cache_path).st_mode) == 0o600
+        # Narrowed rather than skipped: everything else this test asserts about the real pipeline
+        # holds on every platform, and only the mode is a POSIX-specific guarantee. See
+        # `conftest.requires_posix_permissions` for why it is not emulated on Windows.
+        if os.name == "posix":
+            assert stat.S_IMODE(os.stat(cache_path).st_mode) == 0o600
 
         records = read_audit_records(deps.audit_path)
         assert len(records) == 1

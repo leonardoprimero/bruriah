@@ -7,6 +7,8 @@ import stat
 from datetime import datetime, timezone
 from pathlib import Path
 
+from conftest import requires_posix_permissions
+
 from bruriah.audit import AuditRecord, append_audit, read_audit_records
 
 _TIMESTAMP = datetime(2026, 7, 24, 12, 0, 0, tzinfo=timezone.utc)
@@ -39,6 +41,7 @@ def test_append_is_append_only_never_truncates(tmp_path: Path) -> None:
     assert [record.request_id[-1] for record in records] == ["1", "2", "3"]
 
 
+@requires_posix_permissions
 def test_audit_file_and_dir_are_0600_0700_on_posix(tmp_path: Path) -> None:
     path = tmp_path / "audit" / "research.jsonl"
     append_audit(path, _record())

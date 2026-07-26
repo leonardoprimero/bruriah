@@ -10,6 +10,8 @@ import stat
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
+from conftest import requires_posix_permissions
+
 from bruriah.cache import (
     CacheEntry, CacheStats, PruneSummary, build_cache_entry, cache_key, cache_stats, prune_expired,
     read_cache, write_cache_atomic,
@@ -61,6 +63,7 @@ def test_write_then_read_round_trips_evidence_and_excerpt(tmp_path: Path) -> Non
     assert lookup.entry.policy_version == "1.0.0"
 
 
+@requires_posix_permissions
 def test_cache_file_written_with_0600_permissions(tmp_path: Path) -> None:
     cache_dir = tmp_path / "cache"
     write_cache_atomic(cache_dir, "https://example.test:443/page", _entry())

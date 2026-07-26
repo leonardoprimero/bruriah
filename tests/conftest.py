@@ -12,9 +12,22 @@ rather than silent.
 """
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 import pytest
+
+# Owner-only file modes are a POSIX guarantee that Windows does not express: `os.chmod` there only
+# toggles a read-only attribute, so every site that narrows permissions is already guarded by
+# `os.name == "posix"` and correctly does nothing. These tests assert the guarantee itself, so on
+# Windows there is nothing to assert -- but passing them silently would claim a protection that was
+# never applied. Skipping says so, `pytest -rs` lists it, and `bruriah doctor` reports the same fact
+# to users at runtime. What actually protects the data there is the user profile directory's
+# inherited ACL, which is real but is not something this process verifies.
+requires_posix_permissions = pytest.mark.skipif(
+    os.name != "posix",
+    reason="owner-only file modes are a POSIX guarantee; see `doctor`'s owner_only_file_modes",
+)
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
 RETRIEVAL_ROOT = Path(__file__).resolve().parents[1]

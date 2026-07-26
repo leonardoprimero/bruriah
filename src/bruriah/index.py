@@ -15,6 +15,7 @@ from .corpus import CorpusPolicy, parse_document
 from .pointer import (
     activation_lock,
     controlled_file,
+    flush_validated,
     identity_matches,
     read_pointer,
     serialized,
@@ -370,10 +371,33 @@ def _entry(path: Path, metadata: dict[str, str]) -> dict[str, str]:
     return {"database": path.name, "build_id": metadata["build_id"]}
 
 
-def _open_descriptor(file_descriptor: int) -> sqlite3.Connection:
-    database = sqlite3.connect(
-        f"file:/dev/fd/{file_descriptor}?mode=ro&immutable=1", uri=True
-    )
+_WINDOWS = os.name == "nt"
+
+
+def _open_descriptor(path: Path, file_descriptor: int) -> sqlite3.Connection:
+    """Open the ALREADY-VALIDATED file behind `file_descriptor`, never a fresh interpretation of a
+    name. Both platforms deliver that; they cannot deliver it the same way.
+
+    POSIX cannot pin a name -- any process may rename over it at any moment -- so the only way to be
+    sure SQLite opens what `_controlled_file` checked is to hand it the descriptor itself, through
+    `/dev/fd`. The path is untrustworthy by construction, so it goes unused.
+
+    Windows has no `/dev/fd` and no way to give SQLite an open handle, but it does not need one: the
+    descriptor from `winfs.open_pinned` was opened WITHOUT share-delete, which makes this name
+    un-renameable and un-deletable for as long as it is held. Measured: `os.replace`, `os.rename`
+    and `os.unlink` against a pinned path all fail. So here the path is the trustworthy thing, and
+    `file_descriptor` is what goes unused -- it is still required as an argument because it is the
+    live pin, and passing it keeps the caller from closing it while this connection is open.
+
+    Same guarantee, obtained from opposite ends: POSIX distrusts the name and passes the file;
+    Windows holds the name and can therefore trust it."""
+    if _WINDOWS:  # pragma: no cover -- Windows-only
+        # `?` and `#` would terminate the path component of a SQLite URI. Nothing else needs
+        # escaping: a drive letter and spaces are already accepted verbatim (measured).
+        location = path.as_posix().replace("?", "%3f").replace("#", "%23")
+    else:
+        location = f"/dev/fd/{file_descriptor}"
+    database = sqlite3.connect(f"file:{location}?mode=ro&immutable=1", uri=True)
     database.execute("PRAGMA query_only = ON")
     return database
 
@@ -390,7 +414,7 @@ def _validated_entry(
 ) -> tuple[Path, dict[str, str]]:
     path, descriptor, identity = _controlled_file(pointer, entry["database"])
     try:
-        with _open_descriptor(descriptor) as database:
+        with _open_descriptor(path, descriptor) as database:
             metadata = (
                 _validate_stored(database, config)
                 if canonical else _activation_metadata(database, config)
@@ -411,7 +435,7 @@ def _open_entry(pointer: Path, entry: dict[str, str], config: BuildConfig) -> Ac
     database: sqlite3.Connection | None = None
     try:
         path, descriptor, identity = _controlled_file(pointer, entry["database"])
-        database = _open_descriptor(descriptor)
+        database = _open_descriptor(path, descriptor)
         metadata = _validate_stored(database, config)
         if metadata["build_id"] != entry["build_id"]:
             raise IndexLifecycleError("invalid_active_target")
@@ -447,11 +471,11 @@ def promote_candidate(
     path, descriptor, identity = _controlled_file(pointer, candidate.name)
     database: sqlite3.Connection | None = None
     try:
-        database = _open_descriptor(descriptor)
+        database = _open_descriptor(path, descriptor)
         metadata = validate_candidate(database, config, policy)
         if not _identity_matches(path, identity):
             raise IndexLifecycleError("candidate_changed_during_validation")
-        os.fsync(descriptor)
+        flushed = flush_validated(path, descriptor)
         retained: list[dict[str, str]] = []
         if pointer.exists():
             current = _read_pointer(pointer)
@@ -459,7 +483,7 @@ def promote_candidate(
                 pointer, current["active"]["database"]
             )
             try:
-                with _open_descriptor(current_descriptor) as current_database:
+                with _open_descriptor(current_path, current_descriptor) as current_database:
                     current_metadata = _activation_metadata(current_database, config)
                 if not _identity_matches(current_path, current_identity):
                     raise IndexLifecycleError("invalid_active_target")
@@ -468,7 +492,9 @@ def promote_candidate(
             retained = [_entry(current_path, current_metadata), *current["retained"]]
         active = _entry(path, metadata)
         retained = [item for item in retained if item != active][:retain]
-        durable = _write_pointer(pointer, active, retained)
+        # `_write_pointer` first, deliberately: the pointer write must happen whatever the flush
+        # reported, and only then does reduced durability fold into the same flag.
+        durable = _write_pointer(pointer, active, retained) and flushed
         return ActivationResult(path, metadata["build_id"], durable)
     finally:
         if database is not None:

@@ -1,12 +1,43 @@
 from __future__ import annotations
 
-import fcntl
 import json
 import os
 import threading
 from pathlib import Path
 
 import pytest
+
+
+def lock_is_free(lock_path: Path) -> bool:
+    """Is the activation lock takeable RIGHT NOW? Deterministic rather than sleep-based.
+
+    Both platforms express the probe the same way -- a NON-BLOCKING exclusive acquisition that fails
+    while another open file description holds the same byte range -- so the tests below assert the
+    mutual-exclusion property itself rather than which API delivered it. `msvcrt.locking` is used
+    only here, as a probe: production takes the lock with `LockFileEx` because that one BLOCKS,
+    which is what `serialized` needs and what `msvcrt.locking` cannot do. Both act on the same
+    mandatory byte range, so they contend with each other."""
+    descriptor = os.open(lock_path, os.O_CREAT | os.O_RDWR, 0o600)
+    try:
+        if os.name == "nt":
+            import msvcrt
+
+            try:
+                msvcrt.locking(descriptor, msvcrt.LK_NBLCK, 1)
+                msvcrt.locking(descriptor, msvcrt.LK_UNLCK, 1)
+                return True
+            except OSError:
+                return False
+        import fcntl
+
+        try:
+            fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            fcntl.flock(descriptor, fcntl.LOCK_UN)
+            return True
+        except BlockingIOError:
+            return False
+    finally:
+        os.close(descriptor)
 
 from bruriah import pointer as pointer_module
 from bruriah.pointer import (
@@ -164,6 +195,17 @@ def test_write_pointer_reports_reduced_durability_without_losing_the_write(
 ) -> None:
     # The documented contract: a failed parent-directory fsync returns False rather than raising,
     # because the pointer IS written -- only its durability is uncertain.
+    #
+    # There is no parent-directory fsync to fail on Windows: `os.open` on a directory is refused
+    # there, and NTFS journals the rename instead, so `write_pointer` deliberately does not attempt
+    # one. The half of the contract that still applies -- the pointer is written and readable -- is
+    # asserted on both; only the injected failure is POSIX-specific.
+    if os.name != "posix":
+        assert write_pointer(tmp_path / "active.json", {"database": "s.sqlite3", "build_id": "b1"}, [])
+        assert json.loads(
+            (tmp_path / "active.json").read_text(encoding="utf-8")
+        )["active"]["build_id"] == "b1"
+        return
     target = tmp_path / "active.json"
     calls: list[int] = []
     real_fsync = os.fsync
@@ -257,15 +299,7 @@ def test_activation_lock_is_mutually_exclusive(tmp_path: Path) -> None:
     lock_path = tmp_path / ".active.json.lock"
 
     def try_acquire() -> bool:
-        descriptor = os.open(lock_path, os.O_CREAT | os.O_RDWR, 0o600)
-        try:
-            fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
-            fcntl.flock(descriptor, fcntl.LOCK_UN)
-            return True
-        except BlockingIOError:
-            return False
-        finally:
-            os.close(descriptor)
+        return lock_is_free(lock_path)
 
     with activation_lock(target):
         assert try_acquire() is False
@@ -291,15 +325,9 @@ def test_serialized_locks_the_pointer_at_the_declared_position(tmp_path: Path) -
         held = threading.Event()
 
         def probe() -> None:
-            descriptor = os.open(pointer.parent / f".{pointer.name}.lock", os.O_CREAT | os.O_RDWR, 0o600)
             try:
-                fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
-                fcntl.flock(descriptor, fcntl.LOCK_UN)
-                observed.append(True)
-            except BlockingIOError:
-                observed.append(False)
+                observed.append(lock_is_free(pointer.parent / f".{pointer.name}.lock"))
             finally:
-                os.close(descriptor)
                 held.set()
 
         worker = threading.Thread(target=probe)

@@ -15,7 +15,9 @@ from typing import Annotated, Literal
 from pydantic import Field, ValidationError
 
 from .packs import MAX_PACK_BYTES, ClosedModel, PackError, encode_pack, parse_pack_bytes
-from .pointer import controlled_file, identity_matches, read_pointer, serialized, write_pointer
+from .pointer import (
+    controlled_file, flush_validated, identity_matches, read_pointer, serialized, write_pointer,
+)
 from .skills import SkillPack, SkillSet, load_skill_pack_bytes
 
 # Compiled skill-set generations: the immutable on-disk artifact dispatch will read from.
@@ -337,7 +339,15 @@ def _read_descriptor(descriptor: int) -> bytes:
     re-opening the path -- re-opening would reintroduce exactly the swap window that opening under
     `O_NOFOLLOW` closed. `pread` leaves the descriptor's offset untouched, so the later `fsync` and
     identity re-check still see the file the caller opened. The read is bounded so an oversized file
-    is detected rather than loaded."""
+    is detected rather than loaded.
+
+    Windows has no `os.pread`; `winfs.pread` restores the offset instead of never moving it, which
+    is sufficient here for the reason stated there -- this descriptor is not shared, and what
+    follows is a flush and a PATH-based identity check, neither of which reads the offset."""
+    if os.name == "nt":  # pragma: no cover -- Windows-only
+        from . import winfs
+
+        return winfs.pread(descriptor, MAX_SKILLSET_BYTES + 1, 0)
     return os.pread(descriptor, MAX_SKILLSET_BYTES + 1, 0)
 
 
@@ -377,13 +387,15 @@ def promote_skillset(
         )
         if not identity_matches(path, file_identity):
             raise SkillSetError("candidate_changed_during_validation")
-        os.fsync(descriptor)
+        flushed = flush_validated(path, descriptor)
         retained: list[dict[str, str]] = []
         if pointer.exists():
             retained = _demote_current(pointer)
         active = _pointer_entry(path, result.build_id)
         retained = [item for item in retained if item != active][:retain]
-        durable = write_pointer(pointer, active, retained)
+        # `write_pointer` first, deliberately: the pointer write must happen whatever the flush
+        # reported, and only then does reduced durability fold into the same flag.
+        durable = write_pointer(pointer, active, retained) and flushed
         return SkillSetActivation(path, result.build_id, durable, result.skill_set)
     finally:
         os.close(descriptor)

@@ -7,6 +7,8 @@ from typing import Any
 
 import pytest
 
+from conftest import requires_posix_permissions
+
 from bruriah.candidates import (
     AnalysisReport,
     CandidateError,
@@ -182,6 +184,7 @@ def test_ingest_does_not_take_its_filename_from_the_source(tmp_path: Path) -> No
     assert ".." not in record.path.name
 
 
+@requires_posix_permissions
 def test_an_ingested_candidate_is_owner_readable_only(tmp_path: Path) -> None:
     record = ingest_candidate(_write(tmp_path, _pack()), tmp_path / "data")
     assert record.path.stat().st_mode & 0o777 == 0o600
