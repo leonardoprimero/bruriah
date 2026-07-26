@@ -5,7 +5,7 @@
 </p>
 
 <p align="center">
-  <img alt="tests" src="https://img.shields.io/badge/tests-886%20passing-2d6a4f?style=flat-square"/>
+  <img alt="tests" src="https://img.shields.io/badge/tests-887%20passing-2d6a4f?style=flat-square"/>
   <img alt="python" src="https://img.shields.io/badge/python-3.12%20%7C%203.13-3776ab?style=flat-square"/>
   <img alt="MCP" src="https://img.shields.io/badge/MCP-2%20read--only%20tools-6a4c93?style=flat-square"/>
   <img alt="generative model" src="https://img.shields.io/badge/generative%20model-none-8b3c3c?style=flat-square"/>
@@ -29,7 +29,7 @@ uv run python demo/injection/run.py
 ```
 
 <p align="center">
-  <img src="demo/injection/demo.gif" alt="A corpus containing an injection payload. investigate_work returns the poisoned note as a reference with authority 'unknown' and not one byte of its prose, and the routing decision is identical with the note and without it." width="100%"/>
+  <img src="https://raw.githubusercontent.com/leonardoprimero/bruriah/main/demo/injection/demo.gif" alt="A corpus containing an injection payload. investigate_work returns the poisoned note as a reference with authority 'unknown' and not one byte of its prose, and the routing decision is identical with the note and without it." width="100%"/>
 </p>
 
 A corpus of three notes. One of them says this, and any pipeline that returns passage *text* puts it straight into your model's context:
@@ -53,7 +53,7 @@ Ask Bruriah about your deployment policy and it *finds that note* — hiding it 
 
 There is nothing there to obey. And the note's claim to *"supersede every other policy"* changes the routing decision by exactly nothing — measured against the same corpus with the note deleted.
 
-The demo asserts all of it, so if a future change breaks a property it fails instead of continuing to advertise it. It also states plainly [what it does **not** prove](demo/injection/), which is the part most of this field leaves out.
+The demo asserts all of it, so if a future change breaks a property it fails instead of continuing to advertise it. It also states plainly [what it does **not** prove](https://github.com/leonardoprimero/bruriah/blob/main/demo/injection/), which is the part most of this field leaves out.
 
 > **Why this matters now.** In an MCP setup the injection does not arrive in the user's message — it arrives in a **tool result**. The [MCPTox benchmark](https://arxiv.org/pdf/2508.14925) measured attack success rates above 60% against real MCP servers, and in April 2026 researchers hijacked Claude Code, Gemini CLI and GitHub Copilot through text in pull request titles. Nearly every published defence is perimeter work — allowlists, gateways, sanitising proxies — inspecting the payload and hoping to catch it. This is a different position: the step that decides what is relevant never sees the payload at all.
 
@@ -172,7 +172,7 @@ The first measurement said Spanish cost two thirds of the top-3 precision. Then 
 
 So the lexical leg is now discounted to 0.1 when the query language and the corpus language differ — measured, disclosed in the response, and never applied when the two agree. English is untouched, because there BM25 is the *stronger* leg (83% against the vector leg's 58%) and dropping it would have traded one language's problem for the other's.
 
-The [eval](evals/project-memory/) carries the per-leg numbers, the weight sweep, and what is still not solved: 58% is the vector leg's own ceiling, so this recovers what fusion was destroying rather than making cross-lingual retrieval as good as same-language retrieval.
+The [eval](https://github.com/leonardoprimero/bruriah/blob/main/evals/project-memory/) carries the per-leg numbers, the weight sweep, and what is still not solved: 58% is the vector leg's own ceiling, so this recovers what fusion was destroying rather than making cross-lingual retrieval as good as same-language retrieval.
 
 ## What makes it different
 
@@ -204,12 +204,12 @@ Six ship signed and are active on install. Every one was used to build this proj
 
 | skill | what it asks of you | what it caught here |
 |---|---|---|
-| [falsifiability-probe](src/bruriah/data/skills/falsifiability-probe/SKILL.md) | break the invariant on purpose; confirm the right test fails | a guard whose removal **wrote a live private key into the package directory** instead of failing an assertion |
-| [verify-before-asserting](src/bruriah/data/skills/verify-before-asserting/SKILL.md) | run the claim before publishing it | a README quoting a measurement that had gone stale in the same commit that wrote it |
-| [make-it-inexpressible](src/bruriah/data/skills/make-it-inexpressible/SKILL.md) | prefer designs where the invalid state cannot be written down | "allow everything" has no wildcard to express it in either grammar |
-| [preserve-behaviour-when-refactoring](src/bruriah/data/skills/preserve-behaviour-when-refactoring/SKILL.md) | refactor until no test file needs editing | *nothing yet* — the one on this list that has not paid for itself |
-| [find-the-time-bomb](src/bruriah/data/skills/find-the-time-bomb/SKILL.md) | inject the clock and sweep it forward | **two** expiry bombs that would have stopped the server on a fixed date |
-| [undiscoverable-is-unbuilt](src/bruriah/data/skills/undiscoverable-is-unbuilt/SKILL.md) | read your published interface as a stranger would | a complete, fully tested feature that no agent could ever find out how to call |
+| [falsifiability-probe](https://github.com/leonardoprimero/bruriah/blob/main/src/bruriah/data/skills/falsifiability-probe/SKILL.md) | break the invariant on purpose; confirm the right test fails | a guard whose removal **wrote a live private key into the package directory** instead of failing an assertion |
+| [verify-before-asserting](https://github.com/leonardoprimero/bruriah/blob/main/src/bruriah/data/skills/verify-before-asserting/SKILL.md) | run the claim before publishing it | a README quoting a measurement that had gone stale in the same commit that wrote it |
+| [make-it-inexpressible](https://github.com/leonardoprimero/bruriah/blob/main/src/bruriah/data/skills/make-it-inexpressible/SKILL.md) | prefer designs where the invalid state cannot be written down | "allow everything" has no wildcard to express it in either grammar |
+| [preserve-behaviour-when-refactoring](https://github.com/leonardoprimero/bruriah/blob/main/src/bruriah/data/skills/preserve-behaviour-when-refactoring/SKILL.md) | refactor until no test file needs editing | *nothing yet* — the one on this list that has not paid for itself |
+| [find-the-time-bomb](https://github.com/leonardoprimero/bruriah/blob/main/src/bruriah/data/skills/find-the-time-bomb/SKILL.md) | inject the clock and sweep it forward | **two** expiry bombs that would have stopped the server on a fixed date |
+| [undiscoverable-is-unbuilt](https://github.com/leonardoprimero/bruriah/blob/main/src/bruriah/data/skills/undiscoverable-is-unbuilt/SKILL.md) | read your published interface as a stranger would | a complete, fully tested feature that no agent could ever find out how to call |
 
 That last one applies to this table. These six sat four directories deep with nothing pointing at them, and the person who *wrote* them could not find them in his own repository. The skill was right; it just had not been used on itself yet.
 
@@ -228,7 +228,7 @@ Bruriah assumes the corpus may be hostile.
 
 Honest state as of 2026-07-25.
 
-**Working and tested** — 886 tests pass on a fresh clone (18 more need the author's private corpus and skip)
+**Working and tested** — 887 tests pass on a fresh clone (18 more need the author's private corpus and skip)
 - Hybrid retrieval (BM25 + local vectors via `sqlite-vec`) over your corpus
 - The two-tool MCP contract, structured output, typed failures
 - Signed policy packs with Ed25519 manifests and fail-closed loading
@@ -257,7 +257,7 @@ uv run bruriah serve    # the MCP server, over stdio
 
 ## Design notes
 
-[`openspec/`](openspec/) carries the specifications, the architecture decisions and a per-unit implementation record — including what was rejected and why. If you want to understand a decision rather than read the code, start there.
+[`openspec/`](https://github.com/leonardoprimero/bruriah/blob/main/openspec/) carries the specifications, the architecture decisions and a per-unit implementation record — including what was rejected and why. If you want to understand a decision rather than read the code, start there.
 
 Every unit shipped with a **falsifiability probe**: the invariant just written was broken on purpose and the suite re-run to confirm the right tests failed. Roughly one probe in three found something. One of them removed a guard and *wrote a live private key into the package directory* instead of merely failing an assertion — which is how I know that guard was the only thing standing there.
 
@@ -267,11 +267,11 @@ Every unit shipped with a **falsifiability probe**: the invariant just written w
 
 That is the whole specification of this tool, written about eighteen centuries early. Return what is known. Say who said it, when, and whether it still holds. Never win by asserting an authority you do not have.
 
-The project was called **Cerebro** while it was being built, and the decision records under [`openspec/`](openspec/) still say so. They are left that way deliberately: a record you rewrite retroactively to match the present is no longer a record — which is, more or less, the problem this whole project exists to solve.
+The project was called **Cerebro** while it was being built, and the decision records under [`openspec/`](https://github.com/leonardoprimero/bruriah/blob/main/openspec/) still say so. They are left that way deliberately: a record you rewrite retroactively to match the present is no longer a record — which is, more or less, the problem this whole project exists to solve.
 
 ## Licence
 
-Apache 2.0. See [`LICENSE`](LICENSE) and [`NOTICE`](NOTICE).
+Apache 2.0. See [`LICENSE`](https://github.com/leonardoprimero/bruriah/blob/main/LICENSE) and [`NOTICE`](https://github.com/leonardoprimero/bruriah/blob/main/NOTICE).
 
 Chosen over MIT for the explicit patent grant: a project whose whole argument is about trust boundaries should not leave a patent question open. Chosen over AGPL because the goal is adoption, and a copyleft reaching across a network would keep exactly the people this is built for from trying it.
 

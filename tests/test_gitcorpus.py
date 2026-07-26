@@ -8,6 +8,7 @@ afterthought, because the failure was invisible to a suite that ran from a clone
 from __future__ import annotations
 
 import shutil
+import sys
 import subprocess
 import zipfile
 from pathlib import Path
@@ -104,3 +105,27 @@ def test_the_built_wheel_actually_contains_it(tmp_path: Path) -> None:
     # The signed packs and skill bodies have to travel too, or an installed copy has no policy.
     assert any(name.endswith("trust-roots.json") for name in names)
     assert sum(name.endswith("SKILL.md") for name in names) == 6
+
+
+def test_windows_is_refused_with_an_answer_rather_than_a_traceback() -> None:
+    """The wheel is py3-none-any, so pip installs it on Windows and the first command exploded.
+
+    A bare `ModuleNotFoundError: No module named 'fcntl'` from several frames deep reads as a
+    broken package, not an unsupported platform. Verified by importing the module fresh with
+    `fcntl` made invisible -- the way Windows presents it -- rather than by reading the source."""
+    import importlib
+
+    real_find = importlib.util.find_spec
+    module = "bruriah"
+    saved = {name: sys.modules.pop(name) for name in list(sys.modules) if name.startswith(module)}
+    try:
+        importlib.util.find_spec = lambda name, *a, **k: (
+            None if name == "fcntl" else real_find(name, *a, **k))
+        with pytest.raises(ImportError) as raised:
+            importlib.import_module(module)
+    finally:
+        importlib.util.find_spec = real_find
+        sys.modules.update(saved)
+    message = str(raised.value)
+    assert "macOS or Linux" in message and "WSL" in message
+    assert "open an issue" in message, "a refusal should say what would change it"
