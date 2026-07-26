@@ -1,0 +1,35 @@
+name: It retrieved the wrong thing
+description: Retrieval ran, but the answer was not the document that answers the question.
+labels: [retrieval]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        This is the most valuable kind of report I can get, and the hardest for me to produce
+        myself: I only have my own corpus and my own questions, in two languages.
+  - type: input
+    id: question
+    attributes:
+      label: The question you asked
+    validations: {required: true}
+  - type: input
+    id: expected
+    attributes:
+      label: The document that should have answered it
+      description: A filename is enough.
+    validations: {required: true}
+  - type: textarea
+    id: got
+    attributes:
+      label: What came back instead
+      description: |
+        The `evidence` array is ideal. `lexical_rank` and `vector_rank` on each match say which
+        retrieval leg found it, which usually identifies the cause on its own.
+      render: json
+    validations: {required: false}
+  - type: input
+    id: languages
+    attributes:
+      label: Language of the question, and of the corpus
+      placeholder: "question in Spanish, corpus mostly English"
+    validations: {required: false}

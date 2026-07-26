@@ -1,0 +1,41 @@
+name: It broke
+description: Something failed, or returned something wrong.
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        The most useful report tells me what your corpus looked like. Most failures here are
+        shaped by the data, not by the code path.
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: The command you ran and what came back. Paste the real output, not a summary of it.
+      render: shell
+    validations: {required: true}
+  - type: textarea
+    id: expected
+    attributes:
+      label: What you expected instead
+    validations: {required: true}
+  - type: textarea
+    id: doctor
+    attributes:
+      label: Output of `bruriah doctor`
+      description: Read-only and safe to run at any time. Redact paths if they are sensitive.
+      render: json
+    validations: {required: false}
+  - type: input
+    id: corpus
+    attributes:
+      label: Corpus shape
+      description: Roughly how many documents, and what they are (git history, notes, ADRs, a mix).
+      placeholder: "~1200 documents, mostly git commit bodies plus an ADR directory"
+    validations: {required: false}
+  - type: input
+    id: environment
+    attributes:
+      label: OS and Python
+      placeholder: "macOS 15.2, Python 3.13, installed with uv tool install"
+    validations: {required: true}

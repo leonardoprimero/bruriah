@@ -18,6 +18,12 @@
 </p>
 
 <p align="center">
+  You install it so your coding agent can answer <b><i>"why is it like this?"</i></b> with the commit that decided it —<br/>
+  and so no document it finds along the way can quietly become an instruction.<br/>
+  Local, read-only, no model, no telemetry, two tools.
+</p>
+
+<p align="center">
   <i>Named after <a href="#the-name">Bruriah</a>, the one woman in the Talmud whose rulings are cited by name.</i>
 </p>
 
@@ -128,9 +134,30 @@ Now ask your agent *"why did we choose X?"* and it gets the commit, the date and
 
 ## See it answer a real question
 
-This is not a mock-up. It is the actual output of running the three commands above against **this repository's own history**, 81 decisions and 162 passages.
+This is not a mock-up. It is the actual output of running the three commands above against **this repository's own history** — 86 decisions and 172 passages when this was run; it grows with every commit that explains itself.
 
-The agent asks *"why is the MCP surface limited to two read-only tools"*. First it gets a **reference**, not prose:
+Here is the whole exchange, so the two-call shape is visible rather than described:
+
+```
+you    →  why did this project avoid FastMCP?
+
+agent  →  investigate_work(task="why did this project avoid FastMCP")
+bruriah←  20 evidence refs. No prose. Each one: locator, digest,
+          authority "unknown", authority_rationale "not_assessed_by_retrieval"
+
+          ── the agent now decides which reference is worth reading ──
+
+agent  →  read_evidence(refs=["chunk:v1:6d43293..."])
+bruriah←  exact lines 1-28 of that document, unmodified
+
+agent  →  "Because FastMCP derives its argument model without extra="forbid",
+           so an unknown field is silently dropped before any handler runs.
+           Decided 2026-07-23, commit e8f3003bda26."
+```
+
+The step that chose *which* document to surface never saw a word of any document. That is the entire design, and it is why a poisoned note further down your corpus cannot influence it.
+
+Now the same exchange in detail. First the **reference**, not prose:
 
 ```jsonc
 {
@@ -179,6 +206,39 @@ The first measurement said Spanish cost two thirds of the top-3 precision. Then 
 So the lexical leg is now discounted to 0.1 when the query language and the corpus language differ — measured, disclosed in the response, and never applied when the two agree. English is untouched, because there BM25 is the *stronger* leg (83% against the vector leg's 58%) and dropping it would have traded one language's problem for the other's.
 
 The [eval](https://github.com/leonardoprimero/bruriah/blob/main/evals/project-memory/) carries the per-leg numbers, the weight sweep, and what is still not solved: 58% is the vector leg's own ceiling, so this recovers what fusion was destroying rather than making cross-lingual retrieval as good as same-language retrieval.
+
+## What never leaves your machine
+
+Worth stating in one place rather than leaving you to assemble it from five.
+
+| | |
+|---|---|
+| **Your corpus** | read from disk, indexed to a local SQLite file. Never uploaded. |
+| **Embeddings** | computed locally by `fastembed` (ONNX, CPU). The model downloads once from Hugging Face on first index; after that, nothing. |
+| **The MCP server** | stdio only. No listening socket, no HTTP, no port. |
+| **Network** | off by default. Live research exists but is inert without an operator-defined allowlist that does not ship. |
+| **API keys** | none. There is no account, no service and nothing to authenticate to. |
+| **Telemetry** | none. No analytics, no crash reporting, no version ping — the code contains no outbound call for it. |
+| **A generative model** | none anywhere in the package. Bruriah retrieves, classifies and discloses. It does not write prose. |
+
+Everything it creates lives under your platform's standard directories, which `bruriah doctor` prints (`data_dir`, `config_dir`, `cache_dir`, `log_dir`). To remove it completely: `pip uninstall bruriah` and delete those four. Nothing else is touched — the tool never writes to the repository it reads.
+
+## How far it scales
+
+The lexical leg is a bounded pure-Python BM25 scan, not FTS5, and every query loads every passage. That is linear by construction, and linear is fine right up until it is not — so here is where the line sits, measured on an M4 Pro:
+
+| documents | passages | index | query p50 | query p95 |
+|---|---|---|---|---|
+| 100 | 200 | 1.7s | 11ms | 13ms |
+| 500 | 1,000 | 6.5s | 45ms | 48ms |
+| 2,000 | 4,000 | 26.4s | 183ms | 194ms |
+| 8,000 | 16,000 | 122.3s | 734ms | 749ms |
+
+Quadruple the passages, quadruple the latency, every time: **≈46µs per passage**, with no deviation across two orders of magnitude. So you can predict your own number rather than trust mine — a 40,000-passage corpus lands near 1.8s, which is where this stops being pleasant.
+
+For a repository's decision record that ceiling is far away: this project's own history is 168 passages. For a large document vault it is close, and FTS5 is the obvious answer if someone hits it. Indexing is a one-off and runs at roughly 130 passages/second, dominated by embedding.
+
+Reproduce it on your own corpus — the script is [`evals/scale.py`](https://github.com/leonardoprimero/bruriah/blob/main/evals/scale.py).
 
 ## What makes it different
 

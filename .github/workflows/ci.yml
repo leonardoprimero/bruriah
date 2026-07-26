@@ -1,0 +1,70 @@
+# The suite ran green on my laptop, which is a claim about my laptop. This runs it on machines I
+# do not control, on both supported Python versions, and then installs the built wheel into a clean
+# environment and uses it -- because the two defects that made this package unpublishable were both
+# invisible to a suite running from a clone.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: tests · ${{ matrix.os }} · py${{ matrix.python }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+        python: ["3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0   # the eval guard rebuilds the corpus from this repository's own history
+      - uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+      - run: uv sync --locked --python ${{ matrix.python }}
+      - name: pytest
+        run: uv run --no-sync python -m pytest tests -q -p no:randomly -rs
+
+  package:
+    name: wheel installs and runs
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: astral-sh/setup-uv@v7
+      - run: uv build
+      - name: metadata is valid for PyPI
+        run: uv tool run --from twine twine check dist/*
+      - name: install the artifact into a clean environment
+        run: |
+          uv venv --python 3.13 /tmp/clean
+          VIRTUAL_ENV=/tmp/clean uv pip install dist/*.whl
+      - name: run the documented workflow with nothing cloned
+        # Deliberately NOT `uv run`: this has to exercise the installed console script, which is
+        # what a reader gets, rather than the source tree the previous job already covered.
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/demo && cd /tmp/demo && git init -q .
+          git config user.email ci@example.invalid && git config user.name CI
+          echo x > note.md && git add -A
+          git commit -q -m "feat: choose sqlite
+
+          Because the whole point is that it runs on a laptop with nothing to operate."
+          printf "version: 1\ninclude: ['**']\nexclude: []\n" > policy.yaml
+          export BRURIAH_DATA_DIR=/tmp/demo/data BRURIAH_CONFIG_DIR=/tmp/demo/cfg
+          /tmp/clean/bin/bruriah corpus --repo . --out ./corpus
+          /tmp/clean/bin/bruriah index --corpus-root ./corpus --policy policy.yaml
+          /tmp/clean/bin/bruriah init
+          /tmp/clean/bin/bruriah doctor | tee doctor.json
+          grep -q '"healthy": true' doctor.json
