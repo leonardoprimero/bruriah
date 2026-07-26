@@ -21,8 +21,11 @@ import subprocess
 import sys
 from pathlib import Path
 
-_SEPARATOR = "\x00"
-_RECORD = "\x01"
+# git's own escapes, NOT literal control bytes: a process argument cannot contain a NUL, so
+# building the format string with real \x00 raises ValueError before git is ever invoked. git
+# expands these itself, and the output is then split on the real bytes.
+_SEPARATOR_FMT, _RECORD_FMT = "%x00", "%x01"
+_SEPARATOR, _RECORD = "\x00", "\x01"
 _MAX_BODY = 16_000
 
 
@@ -44,7 +47,7 @@ def _slug(text: str) -> str:
 
 def build(repo: Path, out: Path, limit: int | None = None) -> int:
     """Write one document per commit that carries reasoning. Returns how many were written."""
-    fmt = _SEPARATOR.join(["%H", "%aI", "%an", "%s", "%b"]) + _RECORD
+    fmt = _SEPARATOR_FMT.join(["%H", "%aI", "%an", "%s", "%b"]) + _RECORD_FMT
     args = ["log", "--no-merges", f"--format={fmt}"]
     if limit:
         args.append(f"-{limit}")
