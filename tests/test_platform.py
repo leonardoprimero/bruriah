@@ -17,6 +17,7 @@ from conftest import requires_legacy_database
 from bruriah.corpus import CorpusPolicy
 from bruriah.index import BuildConfig, build_candidate, promote_candidate
 from bruriah.mcp_server import build_server
+from bruriah.dispatch import DEFAULT_SKILL_CEILING
 from bruriah.platform import (
     PlatformError, ensure_private_dirs, load_build_descriptor, load_deps, load_registry,
     open_snapshot, resolve_paths, write_build_descriptor,
@@ -94,6 +95,53 @@ def test_network_defaults_off_unless_explicitly_enabled(tmp_path: Path) -> None:
     assert resolve_paths(cli_network_enabled=True, env={}).network_enabled is True
 
 
+def test_skill_ceiling_follows_the_same_precedence_as_every_other_setting(tmp_path: Path) -> None:
+    """Six first-party skills ship and the default admits five, so the operator needs a way to
+    raise it. It resolves like everything else -- CLI over env over config file over default --
+    rather than growing its own private mechanism."""
+    config_dir = tmp_path / "config"
+    config_dir.mkdir()
+    (config_dir / "config.json").write_text(json.dumps({"skill_ceiling": 6}), encoding="utf-8")
+
+    assert resolve_paths(env={}).skill_ceiling == DEFAULT_SKILL_CEILING
+    assert resolve_paths(cli_config_dir=config_dir, env={}).skill_ceiling == 6
+    assert resolve_paths(
+        cli_config_dir=config_dir, env={"BRURIAH_SKILL_CEILING": "7"}
+    ).skill_ceiling == 7
+    assert resolve_paths(
+        cli_config_dir=config_dir, cli_skill_ceiling=9, env={"BRURIAH_SKILL_CEILING": "7"}
+    ).skill_ceiling == 9
+    # Zero is legal and means something: dispatch nothing, and report everything dropped as a gap.
+    assert resolve_paths(cli_skill_ceiling=0, env={}).skill_ceiling == 0
+
+
+@pytest.mark.parametrize("bad", [-1, True, 1.5, "6", None])
+def test_an_invalid_skill_ceiling_is_refused_identically_wherever_it_came_from(
+    tmp_path: Path, bad: object
+) -> None:
+    """`True` is the one worth naming: `isinstance(True, int)` holds in Python, so a config saying
+    `{"skill_ceiling": true}` would sail through a plain int check and silently mean 1. A setting
+    that quietly becomes a different number is worse than one that refuses."""
+    config_dir = tmp_path / "config"
+    config_dir.mkdir()
+    (config_dir / "config.json").write_text(json.dumps({"skill_ceiling": bad}), encoding="utf-8")
+    with pytest.raises(PlatformError) as from_file:
+        resolve_paths(cli_config_dir=config_dir, env={})
+    assert from_file.value.code == "invalid_config"
+
+    if isinstance(bad, int):  # `True` included: the CLI can hand a bool straight through
+        with pytest.raises(PlatformError) as from_cli:
+            resolve_paths(cli_skill_ceiling=bad, env={})
+        assert from_cli.value.code == "invalid_config"
+
+    if isinstance(bad, int) and not isinstance(bad, bool):
+        # The environment carries strings, and `str(True)` is not a number at all -- only a real
+        # integer round-trips through it, so only that case belongs here.
+        with pytest.raises(PlatformError) as from_env:
+            resolve_paths(env={"BRURIAH_SKILL_CEILING": str(bad)})
+        assert from_env.value.code == "invalid_config"
+
+
 def test_ensure_private_dirs_creates_only_the_resolved_base(tmp_path: Path) -> None:
     base = tmp_path / "private"
     paths = resolve_paths(
@@ -164,6 +212,18 @@ def test_real_index_then_load_deps_produces_a_working_service_deps(tmp_path: Pat
     try:
         assert deps.registry.pack_ids
         assert deps.snapshot.build_id
+        # The operator's ceiling has to REACH the thing that applies it. Parsing it correctly and
+        # then dropping it on the floor would leave the setting looking configurable and behaving
+        # like a constant, which is worse than not offering it.
+        assert deps.skill_ceiling == paths.skill_ceiling == DEFAULT_SKILL_CEILING
+    finally:
+        deps.snapshot.database.close()
+
+    raised = resolve_paths(cli_data_dir=data_dir, cli_config_dir=tmp_path / "config",
+                           cli_skill_ceiling=6, env={})
+    deps = load_deps(raised, today=_TODAY)
+    try:
+        assert deps.skill_ceiling == 6
     finally:
         deps.snapshot.database.close()
 

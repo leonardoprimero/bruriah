@@ -529,6 +529,30 @@ def test_opting_in_emits_a_skill_ref_with_provenance_and_envelope(deps) -> None:
     assert record.envelope is not None and record.envelope.network_hosts == []
 
 
+def test_the_dispatch_ceiling_comes_from_the_operator_and_not_from_the_caller(deps) -> None:
+    """Making the ceiling configurable must not make it *callable*.
+
+    `dispatch` orders and truncates before it ever consults the host inventory, so a host cannot
+    change which skills are selected. A ceiling declared in the request would have handed that back
+    through the front door -- which is why it lives on `ServiceDeps`, resolved by the operator, and
+    is asserted here through the real `investigate` path rather than only at `dispatch`'s own door.
+
+    Zero is used because it is unambiguous: nothing survives it, and what was dropped is still
+    reported rather than silently vanishing."""
+    silenced = dataclasses.replace(_skill_deps(deps), skill_ceiling=0)
+    for host_skills in ([], _installed(), _installed("sha256:" + "e" * 64)):
+        result = investigate(
+            InvestigationRequest(task=_SKILL_TASK, host_skills=host_skills), silenced)
+        assert _skill_records(result) == []
+        assert "skill_ceiling_exceeded:1" in result.gaps
+
+    # Same request, same caller, only the operator's setting differs -- and now it dispatches.
+    allowed = investigate(
+        InvestigationRequest(task=_SKILL_TASK, host_skills=_installed()), _skill_deps(deps))
+    assert len(_skill_records(allowed)) == 1
+    assert not any(gap.startswith("skill_ceiling_exceeded") for gap in allowed.gaps)
+
+
 def test_an_uninstalled_skill_yields_a_gap_and_an_install_action(deps) -> None:
     result = investigate(
         InvestigationRequest(task=_SKILL_TASK, host_skills=[]), _skill_deps(deps))

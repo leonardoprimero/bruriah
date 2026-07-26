@@ -3,6 +3,33 @@
 Notable changes, newest first. This project follows [semantic versioning](https://semver.org/),
 and the entries here name what changed for *you* rather than which files moved.
 
+## [Unreleased]
+
+### The skill-dispatch ceiling is operator-configurable
+
+Six first-party skills ship and the ceiling admitted five, so every install reported
+`skill_ceiling_exceeded:1` and had no way to do anything about it — or even to learn what the
+number was. It now resolves like every other setting: `--skill-ceiling`, then
+`BRURIAH_SKILL_CEILING`, then `skill_ceiling` in `config.json`, then the unchanged default of five.
+`bruriah doctor` prints it.
+
+It is deliberately **not** a `Budgets` field, and that is the whole design of the change. Budgets
+are declared by the calling host and echoed back in every response; putting the ceiling there would
+both alter the response every pre-skills client receives and hand the number to the least trusted
+party in the exchange. `dispatch` orders and truncates *before* it consults the host inventory
+precisely so a host cannot influence which skills are selected — a host-declared ceiling would have
+returned through the front door what that ordering exists to keep out. The operator can set it,
+because the operator runs the CLI and owns the config file.
+
+Zero is legal and means something: dispatch nothing, and still report everything dropped as a gap.
+`true` is not, even though `isinstance(True, int)` holds in Python and would otherwise have made
+`{"skill_ceiling": true}` silently mean 1.
+
+The default is unchanged at five. It was not raised to fit the pack: a constant nobody measured
+should not quietly become a bigger constant nobody measured. The alphabetical cut is also
+unchanged, and remains unrelated to relevance — raising the ceiling avoids the cut rather than
+improving it.
+
 ## [0.2.0] — 2026-07-26
 
 The release that makes the published package match its own front page. `0.1.0` shipped without
@@ -67,7 +94,7 @@ ships 3.14 and carries no older interpreter. The suite result is now identical o
 
 Nothing forces a rebuild: `parser_version`, `service_version` and the snapshot schema are
 unchanged, so an existing index keeps validating. One exception worth knowing — if you built one
-from a working tree checked out with CRLF line endings, its passages contain `` and its
+from a working tree checked out with CRLF line endings, its passages contain a literal `backslash-r` and its
 retrieval is subtly worse. Re-run `bruriah index` and it will be correct; there is no way for the
 tool to detect that from the outside, which is why it is written here.
 
@@ -130,6 +157,7 @@ First release. Published as [`bruriah`](https://pypi.org/project/bruriah/) on Py
 - Six bundled skills is a starting point, not a library.
 - Live web research ships inert: it needs an operator-defined allowlist that is not distributed.
 
+[Unreleased]: https://github.com/leonardoprimero/bruriah/compare/v0.2.0...main
 [0.2.0]: https://github.com/leonardoprimero/bruriah/releases/tag/v0.2.0
 <!-- 0.1.0 was published to PyPI without a git tag, so it links to the artifact that actually
      exists rather than to a release page that never did. -->

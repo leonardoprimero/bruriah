@@ -14,6 +14,7 @@ from pathlib import Path
 
 import platformdirs
 
+from .dispatch import DEFAULT_SKILL_CEILING
 from .index import ActiveSnapshot, BuildConfig, IndexLifecycleError, snapshot_active
 from .packs import PackError, load_pack
 from .registries import Registry
@@ -28,7 +29,7 @@ _BUNDLED_DATA = Path(__file__).resolve().parent / "data"
 # Fixed order, so the reported `registry_load_failed` code is deterministic when more than one pack
 # is unverifiable. `Registry.from_packs` sorts by pack id, so this order does not affect the result.
 _BUNDLED_PACKS = ("programming-policy", "project-memory-policy", "research-policy")
-_CONFIG_KEYS = {"config_dir", "data_dir", "cache_dir", "log_dir", "network_enabled"}
+_CONFIG_KEYS = {"config_dir", "data_dir", "cache_dir", "log_dir", "network_enabled", "skill_ceiling"}
 
 
 class PlatformError(ValueError):
@@ -44,6 +45,18 @@ class PlatformPaths:
     cache_dir: Path
     log_dir: Path
     network_enabled: bool = False
+    # How many applicable skills may be dispatched at once. It belongs HERE, with the other
+    # operator settings, and deliberately not in `Budgets`: `Budgets` is declared by the calling
+    # host and echoed back in every `InvestigationResult`, so a field there would both change the
+    # response every pre-skills client receives and hand the ceiling to the least trusted party in
+    # the exchange. `dispatch` applies the ceiling BEFORE it consults the host inventory precisely
+    # so a host cannot influence which skills are selected; letting that host declare the number
+    # would give back through the front door what that ordering was built to keep out.
+    #
+    # The operator can, because the operator is who runs the CLI and owns the config file. Six
+    # first-party skills ship and the default admits five, so one is always reported as a gap --
+    # an alphabetical cut, deterministic and non-injectable by design, but unrelated to relevance.
+    skill_ceiling: int = DEFAULT_SKILL_CEILING
 
 
 def _private_defaults() -> PlatformPaths:
@@ -63,6 +76,30 @@ def _env_path(environment: dict[str, str], suffix: str) -> Path | None:
 def _env_bool(environment: dict[str, str], suffix: str) -> bool | None:
     value = environment.get(ENV_PREFIX + suffix)
     return None if value is None else value.strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _env_int(environment: dict[str, str], suffix: str) -> int | None:
+    value = environment.get(ENV_PREFIX + suffix)
+    if value is None:
+        return None
+    try:
+        return _valid_ceiling(int(value.strip()))
+    except ValueError as error:
+        raise PlatformError("invalid_config") from error
+
+
+def _valid_ceiling(value: object) -> int:
+    """A ceiling is a non-negative integer, and `bool` is not one of them.
+
+    `isinstance(True, int)` is True in Python, so `{"skill_ceiling": true}` in a JSON config would
+    sail through a plain int check and silently mean 1. Zero IS meaningful and stays legal: it
+    turns skill dispatch off while still reporting everything that was dropped as a gap, which is
+    a different and more honest state than pretending no skills applied. There is no upper bound
+    on purpose -- the operator is trusted here, and the response is bounded a second time
+    downstream by the `max_evidence` budget the host declares."""
+    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+        raise PlatformError("invalid_config")
+    return value
 
 
 def _read_json(path: Path, missing_code: str, invalid_code: str) -> object:
@@ -89,11 +126,13 @@ def resolve_paths(
     cli_cache_dir: Path | None = None,
     cli_log_dir: Path | None = None,
     cli_network_enabled: bool | None = None,
+    cli_skill_ceiling: int | None = None,
     env: dict[str, str] | None = None,
     config_path: Path | None = None,
 ) -> PlatformPaths:
-    """Resolve private dirs and network policy. Precedence: CLI arg > env var > config file >
-    private `platformdirs` default; network defaults off unless explicitly enabled at any level."""
+    """Resolve private dirs, network policy and the skill-dispatch ceiling. Precedence: CLI arg >
+    env var > config file > private `platformdirs` default; network defaults off unless explicitly
+    enabled at any level."""
     environment = os.environ if env is None else env
     defaults = _private_defaults()
     config_dir = cli_config_dir or _env_path(environment, "CONFIG_DIR") or defaults.config_dir
@@ -123,7 +162,20 @@ def resolve_paths(
     else:
         network_enabled = bool(file_values.get("network_enabled", False))
 
-    return PlatformPaths(config_dir, data_dir, cache_dir, log_dir, network_enabled)
+    # Same precedence as everything above it, validated at every level rather than only in the
+    # config file: a bad `--skill-ceiling` and a bad `BRURIAH_SKILL_CEILING` are the same mistake
+    # and deserve the same typed refusal, not a traceback from one and silence from the other.
+    env_ceiling = _env_int(environment, "SKILL_CEILING")
+    if cli_skill_ceiling is not None:
+        skill_ceiling = _valid_ceiling(cli_skill_ceiling)
+    elif env_ceiling is not None:
+        skill_ceiling = env_ceiling
+    elif "skill_ceiling" in file_values:
+        skill_ceiling = _valid_ceiling(file_values["skill_ceiling"])
+    else:
+        skill_ceiling = DEFAULT_SKILL_CEILING
+
+    return PlatformPaths(config_dir, data_dir, cache_dir, log_dir, network_enabled, skill_ceiling)
 
 
 def ensure_private_dirs(paths: PlatformPaths) -> None:
@@ -277,7 +329,7 @@ def load_deps(
     `build_serve_deps`'s job to build and inject for `serve`."""
     return ServiceDeps(
         registry=load_registry(today), snapshot=open_snapshot(paths), embed_query=embed_query,
-        skill_set=load_active_skills(paths, today),
+        skill_set=load_active_skills(paths, today), skill_ceiling=paths.skill_ceiling,
     )
 
 

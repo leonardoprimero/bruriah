@@ -188,6 +188,10 @@ def run_doctor(
             "cache": paths.cache_dir.is_dir(), "log": paths.log_dir.is_dir(),
         },
         "network_enabled": paths.network_enabled,
+        # Surfaced because six first-party skills ship and the default admits five: without this,
+        # the operator sees `skill_ceiling_exceeded:1` in a response and has no way to learn what
+        # the number is, let alone that it is theirs to change.
+        "skill_ceiling": paths.skill_ceiling,
         # Every site that narrows permissions is already guarded by `os.name == "posix"`, so on
         # Windows those calls correctly do nothing rather than pretending -- `os.chmod` there only
         # toggles a read-only attribute and would be theatre. What was missing is that the user had
@@ -546,6 +550,7 @@ def _resolve_paths(args: argparse.Namespace) -> PlatformPaths:
             cli_config_dir=args.config_dir, cli_data_dir=args.data_dir,
             cli_cache_dir=args.cache_dir, cli_log_dir=args.log_dir,
             cli_network_enabled=args.network_enabled,
+            cli_skill_ceiling=getattr(args, "skill_ceiling", None),
         )
     except PlatformError as error:
         raise CliError(error.code) from error
@@ -705,6 +710,11 @@ def _add_platform_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--cache-dir", type=Path, default=None)
     parser.add_argument("--log-dir", type=Path, default=None)
     parser.add_argument("--network-enabled", action=argparse.BooleanOptionalAction, default=None)
+    # Left untyped as `int` on purpose: `type=int` would let argparse reject a bad value with its
+    # own usage message and exit code, bypassing this module's typed-error discipline. Validation
+    # happens once, in `resolve_paths`, so `--skill-ceiling -1` and a config file saying the same
+    # thing fail identically.
+    parser.add_argument("--skill-ceiling", type=int, default=None)
 
 
 def _build_cli_parser() -> argparse.ArgumentParser:

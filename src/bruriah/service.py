@@ -46,7 +46,7 @@ from .contracts import (
     EvidenceRecord, HostAction, InvestigationRequest, InvestigationResult, PermissionDisclosure,
     ReadItem, ReadRequest, ReadResult,
 )
-from .dispatch import SkillDispatch, dispatch
+from .dispatch import DEFAULT_SKILL_CEILING, SkillDispatch, dispatch
 from .index import ActiveSnapshot
 from .lookup import SkillMatch, discover, resolve_capability
 from .packs import CapabilityPolicy
@@ -84,6 +84,11 @@ class ServiceDeps:
     # Dormant unless supplied. A deps built without it behaves exactly as it did before the
     # skills layer existed, which is the same discipline `research` follows above.
     skill_set: SkillSet | None = None
+    # Resolved by the OPERATOR (`platform.resolve_paths`), never by the calling host -- see the
+    # note on `PlatformPaths.skill_ceiling` for why this is not a `Budgets` field. Defaulting to
+    # the same constant `dispatch` already defaulted to keeps every existing construction, and
+    # every test that builds deps directly, byte-identical to before this was configurable.
+    skill_ceiling: int = DEFAULT_SKILL_CEILING
 
 
 def _canonical_json(payload: object) -> str:
@@ -382,7 +387,10 @@ def investigate(request: InvestigationRequest, deps: ServiceDeps) -> Investigati
         # Skill refs lead the evidence list for the same reason capabilities do: they are the
         # smallest, most specific answer to "what procedure applies here". `dispatch` is only
         # reached under the opt-in gate, so `skill_evidence` is [] for every pre-skills client.
-        skill_dispatch = dispatch(lookup, request.host_skills or []) if opted_in else None
+        skill_dispatch = (
+            dispatch(lookup, request.host_skills or [], ceiling=deps.skill_ceiling)
+            if opted_in else None
+        )
         skill_evidence = [_skill_evidence_record(item) for item in skill_dispatch.skills] if skill_dispatch else []
         outcome = search(
             deps.snapshot, request.task, request.budgets,
