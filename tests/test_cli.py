@@ -101,7 +101,8 @@ def test_end_to_end_init_index_serve_doctor(tmp_path: Path, capsys: pytest.Captu
     report = cli.run_doctor(paths, today=_TODAY)
     assert report["healthy"] is True
     assert report["snapshot"]["build_id"] == result.build_id
-    assert report["registry"]["pack_ids"] == ["programming.minimal", "research.minimal"]
+    assert report["registry"]["pack_ids"] == [
+        "programming.minimal", "project.memory", "research.minimal"]
 
     capsys.readouterr()  # discard init/index stdout before the serve-wiring stdout-clean check
     deps = cli.build_serve_deps(paths, embedder_factory=_fake_embedder_factory)

@@ -1,0 +1,76 @@
+{
+  "schema_version": "1",
+  "pack_id": "project.memory",
+  "version": "1.0.0",
+  "maintainer": "Cerebro release maintainers",
+  "min_router_version": "0.1.0",
+  "max_router_version": "0.9.9",
+  "reviewed_at": "2026-07-25",
+  "expires_at": "2027-07-25",
+  "freshness_days": 365,
+  "domains": ["general", "programming"],
+  "regulated_domain": false,
+  "claim_types": ["decision-record", "documentation"],
+  "jurisdictions": ["GLOBAL"],
+  "languages": ["en", "es"],
+  "update_cadence": "Review annually; the policy describes how to read a project's own record, not the record itself",
+  "license": "CC0-1.0 policy metadata; the project's own content remains under its own terms",
+  "provenance": "Bundled Cerebro policy for a project's own decision record. Declares the classifier domains 'general' and 'programming' so that questions about a project's own history resolve instead of abstaining. Abstention exists to stop Cerebro answering about an external body of knowledge it has no policy for; a project's own history is not external, and refusing to read it protects nobody.",
+  "sources": [
+    {
+      "source_id": "project-decision-record",
+      "publisher": "The project's own version control history",
+      "authority": "primary",
+      "rationale": "A commit is the primary record of what was decided and when, because it was written by the person making the decision at the moment of making it. Nothing else in a project has that property: documentation is written afterwards and code shows the result without the reasoning.",
+      "claim_types": ["decision-record"],
+      "jurisdictions": ["GLOBAL"],
+      "temporal_rules": "Cite the commit hash and its date, always. A decision recorded two years ago may have been reversed since, and the commit will never say so -- commit messages are immutable and are never updated when superseded. Treat an old record as evidence of what was believed then, not of what holds now.",
+      "citation_rules": "Quote the commit's own words and attribute them to its hash. Never paraphrase a decision into a recommendation: the record says what was chosen, and turning that into what SHOULD be chosen is the reader's judgment, not the record's.",
+      "reuse_rules": "The project's own terms govern. This policy describes how to read the record; it grants no rights over its content.",
+      "freshness_days": 180,
+      "limitations": [
+        "PRIMARY ABOUT THE PROJECT, NEVER ABOUT THE WORLD. This records what a team decided, not whether the decision was correct, safe, legal, or still advisable.",
+        "A commit message can be wrong about its own effect. An author describing what they intended is not evidence that the code does it -- this very project shipped a docstring claiming a merge that was never implemented.",
+        "Absence of a record is not absence of a decision. Plenty of choices are made in conversation and never written down, and the history cannot distinguish 'nobody decided this' from 'nobody wrote it down'.",
+        "Coverage is proportional to discipline. A history of 'fix bug' and 'wip' messages contains no reasoning to retrieve, and no amount of retrieval quality compensates for that."
+      ],
+      "biases": [
+        "Records what the author thought was worth explaining. Decisions that felt obvious at the time -- often the most consequential ones -- go unrecorded precisely because nobody thought they needed defending.",
+        "Written by the person who made the choice, so it argues for it. A commit rarely records the strongest case against what it did."
+      ],
+      "conflicts": [
+        "The record and the current code can disagree, and when they do the code is what runs while the record is what was intended. That gap is a finding worth surfacing, not an error in either one."
+      ],
+      "exclusions": [
+        "Commits with no explanatory body, which carry no reasoning to retrieve.",
+        "Merge commits, which record the mechanics of integration rather than a decision."
+      ]
+    },
+    {
+      "source_id": "project-internal-documentation",
+      "publisher": "The project's own maintainers",
+      "authority": "official",
+      "rationale": "Architecture records, specifications and design notes are the maintainers' own statement of how the project is meant to work, which no external source can supply.",
+      "claim_types": ["documentation"],
+      "jurisdictions": ["GLOBAL"],
+      "temporal_rules": "Prefer the most recently revised document, and check it against the decision record: documentation is mutable and can drift from what was actually decided without any signal that it has.",
+      "citation_rules": "Cite the document and the section. Where documentation and the commit history disagree, cite both and say they disagree rather than choosing one silently.",
+      "reuse_rules": "The project's own terms govern.",
+      "freshness_days": 365,
+      "limitations": [
+        "Describes intent, which is not the same as behaviour. Documentation drifts, and the drift is invisible from inside the document.",
+        "Says nothing about whether the design described is a good one; it records what the maintainers chose to write down."
+      ],
+      "biases": [
+        "Presents the project as its maintainers wish it were understood. Known weaknesses, abandoned approaches and unresolved trade-offs are systematically underrepresented."
+      ],
+      "conflicts": [
+        "Can contradict the decision record when a document was updated and the reasoning behind the change was never committed, or the reverse."
+      ],
+      "exclusions": [
+        "Third-party documentation vendored into the repository, which is not the maintainers' own statement and carries its own authority and terms."
+      ]
+    }
+  ],
+  "capabilities": []
+}

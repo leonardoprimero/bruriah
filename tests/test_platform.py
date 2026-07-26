@@ -135,7 +135,8 @@ def test_open_snapshot_without_a_built_index_is_typed_and_read_only(tmp_path: Pa
 
 def test_load_registry_freshness_is_date_injectable_not_wall_clock() -> None:
     # Injected date so freshness is deterministic, not a wall-clock time bomb after the window.
-    assert load_registry(today=date(2026, 7, 25)).pack_ids == ("programming.minimal", "research.minimal")
+    assert load_registry(today=date(2026, 7, 25)).pack_ids == (
+        "programming.minimal", "project.memory", "research.minimal")
     # Loading is all-or-nothing: the earliest-expiring bundled pack takes the whole registry down
     # rather than leaving a silently truncated one, which a caller could not distinguish from a
     # deliberately small registry.
@@ -216,11 +217,17 @@ def test_real_pipeline_build_server_answers_investigate_and_read_over_mcp(tmp_pa
         deps.snapshot.database.close()
 
 
-def test_the_bundled_registry_reconciles_exactly_one_classifier_domain() -> None:
-    """The point of the second bundled pack: `programming` resolves, everything else abstains.
+def test_the_bundled_registry_resolves_only_the_domains_it_should() -> None:
+    """`programming` and `general` resolve; every professional domain still abstains.
 
-    Asserted as an exact set rather than "programming is True", so quietly widening a pack's
-    `domains` shows up here as a failure instead of as silently broader routing."""
+    Asserted as an exact set rather than a spot check, so quietly widening a pack's `domains` shows
+    up here as a failure instead of as silently broader routing.
+
+    The split is deliberate. Abstention exists to stop Cerebro answering about an EXTERNAL body of
+    knowledge it holds no policy for, which is why law, accounting, cybersecurity and ux_design must
+    keep abstaining -- that is where a confident wrong answer does real damage. `general` is the
+    classifier's "no professional speciality applies" bucket; refusing to read a project's own
+    decision record there protects nobody and merely hides the user's own corpus from them."""
     import typing
 
     from cerebro_router.classify import Domain, RequestClassification
@@ -236,7 +243,9 @@ def test_the_bundled_registry_reconciles_exactly_one_classifier_domain() -> None
             registry,
         ).domain_supported
     }
-    assert supported == {"programming"}
+    assert supported == {"programming", "general"}
+    # The property that must never quietly change: the professional domains still refuse.
+    assert supported & {"law", "accounting", "cybersecurity", "ux_design", "unsupported"} == set()
 
 
 def test_the_retired_test_signer_is_no_longer_trusted() -> None:
@@ -277,7 +286,8 @@ def test_every_bundled_pack_ships_with_a_verifiable_manifest() -> None:
                    if not item.name.endswith(".manifest.json") and item.name != "trust-roots.json")
     # Three bundled packs now: two domain policies and the first-party skill pack. Asserted as an
     # exact list so a pack added without a manifest fails here rather than at a user's first startup.
-    assert [item.stem for item in packs] == ["practices-pack", "programming-policy", "research-policy"]
+    assert [item.stem for item in packs] == [
+        "practices-pack", "programming-policy", "project-memory-policy", "research-policy"]
     for pack in packs:
         manifest = pack.with_suffix(".manifest.json")
         assert manifest.is_file(), pack.name

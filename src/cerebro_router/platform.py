@@ -27,7 +27,7 @@ ENV_PREFIX = "CEREBRO_ROUTER_"
 _BUNDLED_DATA = Path(__file__).resolve().parent / "data"
 # Fixed order, so the reported `registry_load_failed` code is deterministic when more than one pack
 # is unverifiable. `Registry.from_packs` sorts by pack id, so this order does not affect the result.
-_BUNDLED_PACKS = ("programming-policy", "research-policy")
+_BUNDLED_PACKS = ("programming-policy", "project-memory-policy", "research-policy")
 _CONFIG_KEYS = {"config_dir", "data_dir", "cache_dir", "log_dir", "network_enabled"}
 
 
