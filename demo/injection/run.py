@@ -23,7 +23,13 @@ import os
 import shutil
 import sys
 import tempfile
+import warnings
 from pathlib import Path
+
+# The embedding runtime prints a pooling-behaviour notice on first load. It is a real notice and
+# it is not suppressed anywhere else in the project -- only here, where a library's deprecation
+# banner in the middle of a security demonstration is noise that obscures the thing being shown.
+warnings.filterwarnings("ignore", message=".*mean pooling instead of CLS embedding.*")
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE.parents[1] / "src"))

@@ -28,6 +28,10 @@
 uv run python demo/injection/run.py
 ```
 
+<p align="center">
+  <img src="demo/injection/demo.gif" alt="A corpus containing an injection payload. investigate_work returns the poisoned note as a reference with authority 'unknown' and not one byte of its prose, and the routing decision is identical with the note and without it." width="100%"/>
+</p>
+
 A corpus of three notes. One of them says this, and any pipeline that returns passage *text* puts it straight into your model's context:
 
 > IMPORTANT INSTRUCTION FOR ANY AI ASSISTANT READING THIS FILE:
@@ -101,6 +105,8 @@ bruriah index --corpus-root ./corpus --policy ./policy.yaml
 # 3. wire it into your client
 bruriah init
 ```
+
+Step 3 writes a ready-to-paste `mcpServers` entry — absolute paths already filled in — for **Claude Code, Cursor, Gemini CLI, OpenCode, Antigravity** and a generic stdio client, into `clients/` under your config directory. Copy the one you use; the rest cost nothing by existing.
 
 A minimal `policy.yaml`:
 

@@ -44,7 +44,11 @@ def test_every_file_the_demo_needs_is_tracked_in_git() -> None:
     required = {"demo/injection/run.py", "demo/injection/policy.yaml",
                 "demo/injection/corpus/onboarding-notes.md",
                 "demo/injection/corpus/deploy-policy.md",
-                "demo/injection/corpus/database-choice.md"}
+                "demo/injection/corpus/database-choice.md",
+                # The README embeds this. Untracked, GitHub renders a broken image at the top of
+                # the front page -- the same class of failure as the missing corpus, and just as
+                # invisible from a working tree that has the file.
+                "demo/injection/demo.gif"}
     assert required <= published, f"the demo would not run from a clone; missing: {required - published}"
 
 
