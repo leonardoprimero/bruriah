@@ -13,14 +13,15 @@
 <p align="center">
   <a href="https://pypi.org/project/bruriah/"><img alt="PyPI" src="https://img.shields.io/pypi/v/bruriah?style=flat-square&color=2d6a4f"/></a>
   <a href="https://github.com/leonardoprimero/bruriah/actions/workflows/ci.yml"><img alt="CI" src="https://img.shields.io/github/actions/workflow/status/leonardoprimero/bruriah/ci.yml?branch=main&style=flat-square&label=tests"/></a>
-  <img alt="python" src="https://img.shields.io/badge/python-3.12%20%7C%203.13-3776ab?style=flat-square"/>
+  <img alt="python" src="https://img.shields.io/badge/python-3.12%20%7C%203.13%20%7C%203.14-3776ab?style=flat-square"/>
+  <img alt="platforms" src="https://img.shields.io/badge/Linux%20%7C%20macOS%20%7C%20Windows-supported-2d6a4f?style=flat-square"/>
   <img alt="MCP" src="https://img.shields.io/badge/MCP-2%20read--only%20tools-6a4c93?style=flat-square"/>
   <img alt="generative model" src="https://img.shields.io/badge/generative%20model-none-8b3c3c?style=flat-square"/>
   <img alt="licence" src="https://img.shields.io/badge/licence-Apache%202.0-555?style=flat-square"/>
 </p>
 
 ```bash
-pip install bruriah          # macOS or Linux; on Windows use WSL
+pip install bruriah          # Linux, macOS or Windows
 
 bruriah corpus --repo . --out ./corpus              # your git history, as documents
 bruriah index --corpus-root ./corpus --policy ./policy.yaml
@@ -119,7 +120,6 @@ That is a real answer to *why*, written by the person deciding at the moment of 
   is the single biggest determinant and it is not something the tool can fix.
 - you want it to search your **code**. It indexes Markdown, not source.
 - your knowledge lives in PDFs, Slack, Notion or a database. Only Markdown is ever considered.
-- you are on native Windows without WSL, or Python 3.14.
 - you want prose answers. There is no generative model here; it returns evidence and your agent
   writes the answer.
 - you need instant search over millions of passages. See [Measured](#measured) —
@@ -237,7 +237,7 @@ unflattering ones are in the same table as the rest.
 | **Query latency** | **≈46µs per passage**, linear — 1k passages 45ms, 16k 734ms | [scale.py](https://github.com/leonardoprimero/bruriah/blob/main/evals/scale.py) |
 | **Index build** | ≈130 passages/second, embedding-dominated, one-off | |
 | **Index size** | ≈5 KB per passage — a 16k-passage corpus is ~79 MB | |
-| **Tests** | 894 passing on a fresh clone, on Linux and macOS, 3.12 and 3.13 | [CI](https://github.com/leonardoprimero/bruriah/actions/workflows/ci.yml) |
+| **Tests** | **898** passing on a fresh clone on Linux, identical on 3.12, 3.13 and 3.14 · **885** on native Windows | [CI](https://github.com/leonardoprimero/bruriah/actions/workflows/ci.yml) |
 | **Install size** | 178 KB wheel; the embedding model downloads once, separately | |
 | **Sample size** | **12 questions, one corpus, two languages** | the honest caveat: treat the direction as established, the figures as indicative |
 
@@ -335,9 +335,9 @@ Bruriah assumes the corpus may be hostile.
 
 ## Status — read this before installing
 
-Honest state as of 2026-07-25.
+Honest state as of 2026-07-26.
 
-**Working and tested** — 887 tests pass on a fresh clone (18 more need the author's private corpus and skip)
+**Working and tested** — 898 tests pass on a fresh clone on Linux, byte-identical on 3.12, 3.13 and 3.14; 885 on native Windows
 - Hybrid retrieval (BM25 + local vectors via `sqlite-vec`) over your corpus
 - The two-tool MCP contract, structured output, typed failures
 - Signed policy packs with Ed25519 manifests and fail-closed loading
@@ -350,7 +350,13 @@ Honest state as of 2026-07-25.
 - Six bundled skills is a starting point, not a library. The mechanism is finished; the content is deliberately small.
 - The dispatch ceiling is five refs and six skills ship, so one is reported as a gap. The ceiling was *not* raised to fit the pack — six refs measured 6.6 KB, a third of the default output budget. The cut is alphabetical: deterministic and non-injectable by design, but unrelated to relevance. Making it operator-configurable is the obvious next step.
 - Skill dispatch requires the client to send `host_skills`. Omitting it returns a byte-identical pre-skills response — intentional, but the layer stays invisible until a client opts in.
-- Only macOS/POSIX is validated. `index.py` uses POSIX-only primitives and will not import on Windows.
+- Owner-only file modes are the one guarantee that does not survive the Windows port. `os.chmod`
+  there only toggles a read-only attribute, so five tests that assert `0o600` skip rather than
+  passing and claiming a protection nobody applied. What actually protects the data is the user
+  profile directory's inherited ACL, which is real but is not something this process verifies —
+  `bruriah doctor` reports `owner_only_file_modes` so you learn it from the tool rather than from
+  this paragraph. Writing an explicit DACL was considered and rejected: one that looks restrictive
+  while inheriting something permissive is the silently-weaker outcome refused everywhere else here.
 - Live web research exists but is **deliberately inert**: it needs an operator-defined allowlist that does not ship by default. The absence is a posture, not an oversight.
 - There is no generative model anywhere in this project. Bruriah retrieves, classifies and discloses. It does not write prose.
 
@@ -363,9 +369,17 @@ bruriah doctor             # read-only health check, safe at any time
 bruriah serve              # the MCP server, over stdio
 ```
 
-Requires **Python 3.12 or 3.13**, on **macOS or Linux**. The suite runs green on both versions. 3.14 is excluded until the embedding runtime is validated against it — the pin states what was tested, not what is possible.
+Requires **Python 3.12, 3.13 or 3.14**, on **Linux, macOS or Windows**. The suite result is identical on all three versions, which is a stronger statement than three green runs.
 
-**Windows is not supported, and the package says so rather than crashing.** Activation swaps a pointer under `flock` with `O_NOFOLLOW` and re-confirms the file's identity afterwards; that is what makes promoting a snapshot atomic and unspoofable. Windows has different primitives with different semantics, and half-porting that guarantee would be worse than not having it, because it would fail silently instead of loudly. Run it under **WSL** — that is a real Linux and needs no changes. If you want native Windows, open an issue saying so: knowing someone is waiting is what would make it worth doing carefully.
+**Windows is supported natively, and getting there meant relocating a guarantee rather than porting a call.** The activation that makes promoting a snapshot atomic and unspoofable is built from three things: an exclusive lock, an open that cannot be swapped underneath it, and a rename that detaches a name while readers hold it. Windows provides all three — but not by the same route, and two of the substitutions are not the obvious ones.
+
+The interesting one is SQLite. POSIX cannot pin a name, so the only way to be sure SQLite opens the file that was just validated is to hand it the descriptor through `/dev/fd`. Windows has no `/dev/fd` and no way to give SQLite an open handle — and does not need one: a handle opened without `FILE_SHARE_DELETE` makes the name un-renameable and un-deletable while it is held, so the path itself becomes trustworthy. POSIX distrusts the name and passes the file; Windows holds the name and can therefore trust it. Same guarantee, obtained from opposite ends.
+
+The one that cannot be substituted at all is `os.replace`. A Windows file with a pending delete **keeps its name** until its last handle closes, so `MoveFileExW` cannot put a new file at a name someone is still reading, under any share mode — and publishing a generation while readers are mid-read is precisely what the pointer swap is for. Publication therefore uses `SetFileInformationByHandle` with `FILE_RENAME_FLAG_POSIX_SEMANTICS`, which asks NTFS for exactly the detachment POSIX `rename` performs. There is deliberately **no fallback**: on a volume that cannot provide it, promotion refuses rather than quietly becoming non-atomic.
+
+Every substitution was measured on Windows 11 / NTFS before it was written, and the reasoning lives in [`src/bruriah/winfs.py`](https://github.com/leonardoprimero/bruriah/blob/main/src/bruriah/winfs.py) next to each call. Two earlier attempts were wrong in ways the documentation did not reveal and only a test could.
+
+WSL still works and needs no changes, if that is where you already are.
 
 `bruriah init` writes a ready-to-paste `mcpServers` entry — absolute paths already filled in — for
 **Claude Code, Cursor, Gemini CLI, OpenCode, Antigravity** and a generic stdio client, into

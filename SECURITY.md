@@ -55,6 +55,21 @@ Only the latest release. This is 0.1.0 and there is no backport branch.
 
 ## Platform
 
-macOS and Linux. Windows is unsupported and refuses to import rather than running with a weaker
-guarantee: activation swaps a pointer under `flock` with `O_NOFOLLOW` and re-confirms the file's
-identity afterwards, and a half-ported version of that would fail silently instead of loudly.
+Linux, macOS and Windows. The import still refuses rather than running with a weaker guarantee — it
+just asks a better question now: not whether this is POSIX, but whether the platform can provide the
+three things activation needs. An exclusive lock, an open that cannot be swapped underneath it, and
+a rename that detaches a name while readers hold it.
+
+Both families provide all three, by different routes recorded in `src/bruriah/winfs.py`. One
+substitution is worth knowing about here: the Windows pointer swap uses
+`FILE_RENAME_FLAG_POSIX_SEMANTICS` and has **no fallback**, because `os.replace` cannot publish
+under a reader at all there. On a volume that cannot provide those semantics, promotion refuses.
+Atomicity is not something this degrades quietly.
+
+**One guarantee does not survive the port.** Owner-only file modes (`0o600`) are POSIX; `os.chmod`
+on Windows only toggles a read-only attribute. Nothing pretends otherwise: the calls are guarded,
+the five tests that assert it skip with a stated reason, and `bruriah doctor` reports
+`owner_only_file_modes` with a warning. In practice the data sits under the per-user profile
+directory, whose inherited ACL denies other standard users — real protection, but not the one the
+code asked for, and not one this process verifies. An explicit DACL was considered and rejected: one
+that looks restrictive while inheriting something permissive is worse than a gap you can see.

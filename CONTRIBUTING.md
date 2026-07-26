@@ -11,11 +11,16 @@ uv sync
 uv run python -m pytest tests -q -p no:randomly
 ```
 
-Python 3.12 or 3.13, macOS or Linux. On Windows use WSL — the package refuses to import natively
-and [says why](SECURITY.md#platform).
+Python 3.12, 3.13 or 3.14, on Linux, macOS or Windows. All nine combinations run in CI.
 
 Some tests skip unless you have my private corpus. That is expected; `-rs` lists them. A fresh
 clone runs the whole product suite green.
+
+On Windows, five more skip: they assert owner-only file modes, which is a POSIX guarantee Windows
+does not express. They skip rather than passing, because passing would claim a protection nobody
+applied. If you touch `pointer.py`, `index.py` or `winfs.py`, run the suite on both families before
+opening a PR — the activation primitives are the one place where a platform difference is a
+correctness difference, and `winfs.py` records what was measured for each substitution.
 
 ## What a change needs
 
