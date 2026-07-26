@@ -20,6 +20,43 @@ Without that the scorer reports 0% and looks like a retrieval collapse rather th
 `tests/test_project_memory_eval.py` asserts every ground-truth document is still produced by this
 repository's own history, so the numbers below stay reproducible from the published repository.
 
+## The model matters more than the weighting, measured 2026-07-26
+
+`--model` has always been a flag on `bruriah index`, and nothing said what it was worth. It is
+worth a great deal — more than the fusion fix that preceded it — and the shipped default is not
+the best choice for every corpus. 218 passages from this repository's history, twelve questions
+per language, same corpus build for every row.
+
+| model | size | dim | en recall@3 | en MRR@10 | es recall@3 | es MRR@10 |
+|---|---|---|---|---|---|---|
+| `paraphrase-multilingual-MiniLM-L12-v2` *(default)* | 0.22 GB | 384 | 0.833 | 0.705 | 0.583 | 0.463 |
+| `jina-embeddings-v2-base-es` | 0.64 GB | 768 | **0.917** | **0.861** | **0.750** | **0.667** |
+| `paraphrase-multilingual-mpnet-base-v2` | 1.0 GB | 768 | 0.500 | 0.480 | 0.250 | 0.219 |
+
+Spanish recall@3 goes 58% → 75%, which the main README had called the vector leg's own ceiling.
+It was not a ceiling; it was this model's ceiling.
+
+**Read the per-question results before believing the averages.** Twelve questions means one
+question is eight points, so an average can move on luck. In Spanish, `jina` wins w01, w04 and w07
+and *loses* w03 — three independent gains and one real regression, not one lucky question. The
+firmer signal is MRR@10 (0.463 → 0.667): it measures where the right document ranks rather than
+whether it crossed a threshold, so it moves less on noise, and it improved even where both models
+already hit.
+
+**Do not read this as "change the default."** `jina-embeddings-v2-base-es` is a Spanish-English
+*bilingual* model, and this corpus is 95% English queried in Spanish — precisely what it was built
+for. A German or Japanese corpus would likely do worse on it than on the multilingual default,
+which is why the default stays multilingual and this stays a documented choice instead of a silent
+one. Pick with `bruriah index --model`, and re-index: the embedding identity is pinned in the
+snapshot, so a mismatched query embedder fails closed rather than quietly searching the wrong space.
+
+`intfloat/multilingual-e5-large` is deliberately **absent** from that table. It expects
+`query:`/`passage:` prefixes and this pipeline embeds both identically, so running it here would
+measure the pipeline's omission and report it as the model's quality. Giving the pipeline a
+per-model contract would make that comparison possible — but note that the gain above needed no
+such contract, so the contract is a prerequisite for *more* candidates, not for the improvement
+itself.
+
 ## The obvious next model is worse, measured 2026-07-26
 
 The README says closing the cross-lingual gap "needs a better multilingual signal, not better
