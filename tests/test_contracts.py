@@ -246,3 +246,35 @@ def test_the_disclosure_covers_every_dimension_the_signed_envelope_can_express()
     assert envelope == {"filesystem", "network", "subprocess", "secrets"}
     assert disclosed == {"filesystem_read", "filesystem_write", "network_hosts",
                          "network_schemes", "programs", "secrets"}
+
+
+# --- the layer has to be discoverable, or it does not exist ---------------------------------------
+
+
+def test_an_agent_is_told_how_to_opt_into_skills() -> None:
+    """Without this the entire skills layer is invisible in practice.
+
+    `host_skills` is a field this server invented; no MCP client sends it spontaneously. If the
+    schema does not explain what to put there and what omitting it costs, no agent ever opts in and
+    every skill, envelope and provenance chain built behind that gate is dead code in production.
+    This test exists because that was the actual state until it was found by inspection."""
+    schema = InvestigationRequest.model_json_schema()
+    description = schema["properties"]["host_skills"].get("description", "")
+    assert description, "no description: no agent will ever send the field"
+    assert "empty list" in description, "an agent must learn that [] still opts in"
+    assert "OMITTING" in description or "Omitting" in description, "and what omitting it costs"
+
+
+def test_the_task_field_says_it_is_not_an_instruction() -> None:
+    # The separation of evidence from instruction is a normative requirement; the contract should
+    # say so where an agent actually reads it, not only in a spec file.
+    description = InvestigationRequest.model_json_schema()["properties"]["task"].get("description", "")
+    assert "never treated as an instruction" in description
+
+
+def test_descriptions_do_not_change_the_response_shape() -> None:
+    # Schema metadata is not response data: the byte-identity guarantee for pre-skills clients must
+    # survive documenting the contract.
+    dumped = EvidenceRecord(**_EVIDENCE_FIELDS).model_dump(mode="json")
+    assert "envelope" not in dumped
+    assert InvestigationRequest(task="t").host_skills is None

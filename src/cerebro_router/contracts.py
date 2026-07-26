@@ -45,11 +45,11 @@ class PermissionDisclosure(ClosedModel):
     programs: Annotated[list[ShortText], Field(max_length=32)] = []
     secrets: Annotated[list[ShortText], Field(max_length=32)] = []
 class InvestigationRequest(ClosedModel):
-    task: ShortText
-    outcome: ShortText | None = None
+    task: Annotated[ShortText, Field(description="The work task to investigate, in the requester's own words. This is matched against local knowledge; it is never executed and never treated as an instruction to obey.")]
+    outcome: Annotated[ShortText | None, Field(description="What a good result would look like, if known. Used to scope the investigation, not to steer which sources are selected.")] = None
     jurisdiction: Annotated[str, Field(min_length=2, max_length=32)] | None = None
     as_of: date | None = None
-    risk_class: Literal["low", "medium", "high", "regulated"] = "low"
+    risk_class: Annotated[Literal["low", "medium", "high", "regulated"], Field(description="How costly a wrong answer would be. `regulated` tightens the outcome: more is withheld and more is disclosed as uncertain.")] = "low"
     network_policy: Literal["off", "public_https"] = "off"
     host_capabilities: Annotated[list[ShortText], Field(max_length=32)] = []
     candidate_material: Annotated[list[CandidateMaterial], Field(max_length=20)] = []
@@ -66,7 +66,17 @@ class InvestigationRequest(ClosedModel):
             ),
         ),
     ] | None = None
-    host_skills: Annotated[list[HostSkill], Field(max_length=64)] | None = None
+    host_skills: list[HostSkill] | None = Field(
+        default=None,
+        max_length=64,
+        description=(
+            "Skills the CALLING AGENT currently has installed, so this server can tell you which "
+            "vetted skills apply to this task and whether your copy matches the approved one. "
+            "Send an empty list if you have none or do not know what you have: an empty list "
+            "still opts in, and you will be told which skills apply and asked to install them. "
+            "OMITTING this field opts out entirely and you receive no skill guidance at all."
+        ),
+    )
     budgets: Budgets = Budgets()
 class EvidenceRecord(ClosedModel):
     ref: Ref
