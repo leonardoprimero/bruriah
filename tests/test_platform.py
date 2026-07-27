@@ -115,7 +115,7 @@ def test_skill_ceiling_follows_the_same_precedence_as_every_other_setting(tmp_pa
     assert resolve_paths(cli_skill_ceiling=0, env={}).skill_ceiling == 0
 
 
-@pytest.mark.parametrize("bad", [-1, True, 1.5, "6", None])
+@pytest.mark.parametrize("bad", [-1, True, 1.5, None])
 def test_an_invalid_skill_ceiling_is_refused_identically_wherever_it_came_from(
     tmp_path: Path, bad: object
 ) -> None:
@@ -129,17 +129,51 @@ def test_an_invalid_skill_ceiling_is_refused_identically_wherever_it_came_from(
         resolve_paths(cli_config_dir=config_dir, env={})
     assert from_file.value.code == "invalid_config"
 
-    if isinstance(bad, int):  # `True` included: the CLI can hand a bool straight through
-        with pytest.raises(PlatformError) as from_cli:
-            resolve_paths(cli_skill_ceiling=bad, env={})
-        assert from_cli.value.code == "invalid_config"
+    # The CLI and the environment carry text, so every one of these reaches them as a string --
+    # including the ones that are not numbers at all.
+    for source in ({"cli_skill_ceiling": str(bad)}, {"env": {"BRURIAH_SKILL_CEILING": str(bad)}}):
+        with pytest.raises(PlatformError) as raised:
+            resolve_paths(**{"env": {}, **source})
+        assert raised.value.code == "invalid_config"
 
-    if isinstance(bad, int) and not isinstance(bad, bool):
-        # The environment carries strings, and `str(True)` is not a number at all -- only a real
-        # integer round-trips through it, so only that case belongs here.
-        with pytest.raises(PlatformError) as from_env:
-            resolve_paths(env={"BRURIAH_SKILL_CEILING": str(bad)})
-        assert from_env.value.code == "invalid_config"
+
+def test_the_config_file_wants_a_number_where_the_flag_accepts_text(tmp_path: Path) -> None:
+    """`"6"` is a legitimate `--skill-ceiling` and an illegitimate `config.json`, and the asymmetry
+    is deliberate rather than an oversight: a command line can only carry text, so text is parsed
+    there; JSON has real integers, so a quoted number means the file was written by something that
+    did not know that, and accepting it would hide the mistake instead of naming it."""
+    assert resolve_paths(cli_skill_ceiling="6", env={}).skill_ceiling == 6
+    assert resolve_paths(env={"BRURIAH_SKILL_CEILING": "6"}).skill_ceiling == 6
+
+    config_dir = tmp_path / "config"
+    config_dir.mkdir()
+    (config_dir / "config.json").write_text(json.dumps({"skill_ceiling": "6"}), encoding="utf-8")
+    with pytest.raises(PlatformError) as raised:
+        resolve_paths(cli_config_dir=config_dir, env={})
+    assert raised.value.code == "invalid_config"
+
+
+def test_a_bad_ceiling_fails_the_same_way_whichever_door_it_came_through(tmp_path: Path) -> None:
+    """The flag used to carry `type=int`, so `--skill-ceiling abc` exited 2 with argparse's own
+    usage message while `--skill-ceiling -1` exited 1 with this module's typed code. Two formats
+    and two exit codes for one class of mistake teaches an operator that the difference means
+    something. It does not."""
+    config_dir = tmp_path / "config"
+    config_dir.mkdir()
+    (config_dir / "config.json").write_text(json.dumps({"skill_ceiling": -1}), encoding="utf-8")
+
+    codes = set()
+    for source in (
+        {"cli_skill_ceiling": "abc"},
+        {"cli_skill_ceiling": "-1"},
+        {"env": {"BRURIAH_SKILL_CEILING": "abc"}},
+        {"env": {"BRURIAH_SKILL_CEILING": "-1"}},
+        {"cli_config_dir": config_dir},
+    ):
+        with pytest.raises(PlatformError) as raised:
+            resolve_paths(**{"env": {}, **source})
+        codes.add(raised.value.code)
+    assert codes == {"invalid_config"}
 
 
 def test_ensure_private_dirs_creates_only_the_resolved_base(tmp_path: Path) -> None:

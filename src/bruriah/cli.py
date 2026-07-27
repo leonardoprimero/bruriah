@@ -714,7 +714,7 @@ def _add_platform_arguments(parser: argparse.ArgumentParser) -> None:
     # own usage message and exit code, bypassing this module's typed-error discipline. Validation
     # happens once, in `resolve_paths`, so `--skill-ceiling -1` and a config file saying the same
     # thing fail identically.
-    parser.add_argument("--skill-ceiling", type=int, default=None)
+    parser.add_argument("--skill-ceiling", default=None)
 
 
 def _build_cli_parser() -> argparse.ArgumentParser:

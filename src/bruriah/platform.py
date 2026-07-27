@@ -78,14 +78,23 @@ def _env_bool(environment: dict[str, str], suffix: str) -> bool | None:
     return None if value is None else value.strip().lower() in {"1", "true", "yes", "on"}
 
 
-def _env_int(environment: dict[str, str], suffix: str) -> int | None:
-    value = environment.get(ENV_PREFIX + suffix)
-    if value is None:
-        return None
+def _parse_ceiling(text: str) -> int:
+    """Parse a ceiling that arrived as TEXT, then validate it exactly as a structured one.
+
+    The CLI and the environment can only carry strings; the config file carries JSON, which has
+    real integers. So text is parsed here and JSON is validated directly -- and both land in
+    `_valid_ceiling`, so every source refuses a bad ceiling with the same `invalid_config` and the
+    same exit code. A flag that fails differently from the config file describing the same mistake
+    teaches the operator that the difference means something."""
     try:
-        return _valid_ceiling(int(value.strip()))
-    except ValueError as error:
-        raise PlatformError("invalid_config") from error
+        return _valid_ceiling(int(text.strip()))
+    except ValueError:
+        raise PlatformError("invalid_config") from None
+
+
+def _env_ceiling(environment: dict[str, str], suffix: str) -> int | None:
+    value = environment.get(ENV_PREFIX + suffix)
+    return None if value is None else _parse_ceiling(value)
 
 
 def _valid_ceiling(value: object) -> int:
@@ -126,7 +135,7 @@ def resolve_paths(
     cli_cache_dir: Path | None = None,
     cli_log_dir: Path | None = None,
     cli_network_enabled: bool | None = None,
-    cli_skill_ceiling: int | None = None,
+    cli_skill_ceiling: str | None = None,
     env: dict[str, str] | None = None,
     config_path: Path | None = None,
 ) -> PlatformPaths:
@@ -165,9 +174,9 @@ def resolve_paths(
     # Same precedence as everything above it, validated at every level rather than only in the
     # config file: a bad `--skill-ceiling` and a bad `BRURIAH_SKILL_CEILING` are the same mistake
     # and deserve the same typed refusal, not a traceback from one and silence from the other.
-    env_ceiling = _env_int(environment, "SKILL_CEILING")
+    env_ceiling = _env_ceiling(environment, "SKILL_CEILING")
     if cli_skill_ceiling is not None:
-        skill_ceiling = _valid_ceiling(cli_skill_ceiling)
+        skill_ceiling = _parse_ceiling(str(cli_skill_ceiling))
     elif env_ceiling is not None:
         skill_ceiling = env_ceiling
     elif "skill_ceiling" in file_values:
