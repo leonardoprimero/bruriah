@@ -1,0 +1,3 @@
+{"excluded_by": ["too_short"], "id": "eg686", "query": "Modal dialogs"}
+{"excluded_by": ["release_note_only"], "id": "eg4418", "query": "Not detecting mouse release after alt-tab on windows"}
+{"excluded_by": ["too_short"], "id": "eg4489", "query": "Gif Support"}
