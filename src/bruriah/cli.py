@@ -18,7 +18,7 @@ import mcp.server.stdio
 import yaml
 from fastembed import TextEmbedding
 
-from . import cache, clients, gitcorpus
+from . import __version__, cache, clients, gitcorpus
 from .corpus import CorpusPolicy, CorpusPolicyError
 from .index import (
     BuildConfig, BuildResult, Embedder, IndexLifecycleError, build_candidate, promote_candidate,
@@ -175,6 +175,12 @@ def run_index(
     policy = CorpusPolicy.load(policy_path)
     embed, fingerprint, dimensions = embedder_factory(model_name)
     revision = json.loads(fingerprint)["snapshot"]
+    # `service_version` is NOT `bruriah.__version__` and must not be wired to it. It belongs to the
+    # same family as `parser_version="corpus-v1"` and `ranking_config="rrf-v1"`: a symbolic marker of
+    # the snapshot contract, carried into the `expected` metadata that `promote_candidate` validates
+    # (`index.py`). Binding it to the package version would put every release into the index
+    # identity, so a patch bump would refuse the user's existing snapshot and force a full re-embed
+    # of their corpus. It moves when the snapshot contract moves, and it has not moved.
     config = BuildConfig(
         root=root, policy_path=policy_path, schema_version=1, parser_version="corpus-v1",
         service_version="0.1.0", mcp_range=">=1.28.1,<2", embedding_model=model_name,
@@ -800,6 +806,14 @@ def _add_platform_arguments(parser: argparse.ArgumentParser) -> None:
 
 def _build_cli_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="bruriah")
+    # `docs/client-guidance.md` told readers to run this to find out which router version a config
+    # targets, and through 0.3.0 there was nothing to run: the flag it named did not exist. A tool
+    # whose subject is provenance has to be able to state its own version when asked.
+    #
+    # `action="version"` prints and exits while the flag is being parsed, so it answers before
+    # `required=True` on the subcommand can reject the call for naming no command. Pinned by
+    # test_it_reports_its_own_version_without_a_subcommand.
+    parser.add_argument("--version", action="version", version=f"bruriah {__version__}")
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     def add(name: str, help_text: str, handler: Callable) -> argparse.ArgumentParser:
