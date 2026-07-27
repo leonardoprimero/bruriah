@@ -71,18 +71,37 @@ jobs:
       - name: run the documented workflow with nothing cloned
         # Deliberately NOT `uv run`: this has to exercise the installed console script, which is
         # what a reader gets, rather than the source tree the previous job already covered.
+        #
+        # And the commands are EXTRACTED from the README rather than copied into this file, because
+        # a copy drifts and this one did: the job is named for running the documented workflow, and
+        # for a while it ran a different one -- its own older version, with the data directory set
+        # through environment variables the README never mentions. A quickstart that is only
+        # asserted is a quickstart nobody runs. This makes the front page the thing under test, so
+        # if it stops working, stops being the first bash block, or starts naming a flag that does
+        # not exist, this job is what says so.
         run: |
           set -euo pipefail
+          python3 - <<'EXTRACT' > /tmp/quickstart.sh
+          import pathlib, re
+          block = re.search(
+              r"```bash\n(.*?)```", pathlib.Path("README.md").read_text(encoding="utf-8"), re.S
+          ).group(1)
+          # `pip install` alone is dropped: the wheel under test is already installed, from dist/
+          # rather than from PyPI, which is the entire point of this job.
+          print("".join(l for l in block.splitlines(keepends=True) if not l.startswith("pip install")))
+          EXTRACT
+          echo "--- the quickstart, as the README states it ---"; cat /tmp/quickstart.sh
           mkdir -p /tmp/demo && cd /tmp/demo && git init -q .
           git config user.email ci@example.invalid && git config user.name CI
           echo x > note.md && git add -A
           git commit -q -m "feat: choose sqlite
 
           Because the whole point is that it runs on a laptop with nothing to operate."
-          printf "version: 1\ninclude: ['**']\nexclude: []\n" > policy.yaml
-          export BRURIAH_DATA_DIR=/tmp/demo/data BRURIAH_CONFIG_DIR=/tmp/demo/cfg
-          /tmp/clean/bin/bruriah corpus --repo . --out ./corpus
-          /tmp/clean/bin/bruriah index --corpus-root ./corpus --policy policy.yaml
-          /tmp/clean/bin/bruriah init
-          /tmp/clean/bin/bruriah doctor | tee doctor.json
-          grep -q '"healthy": true' doctor.json
+          export PATH=/tmp/clean/bin:$PATH
+          source /tmp/quickstart.sh
+          # Written OUTSIDE the repository: the next assertion is that the quickstart leaves the
+          # repository it reads untouched, and a check that dirties the tree it is checking passes
+          # or fails for its own reasons.
+          bruriah doctor --data-dir "$B/data" | tee /tmp/doctor.json
+          grep -q '"healthy": true' /tmp/doctor.json
+          test -z "$(git status --porcelain)"  # the quickstart must not write into the repo it reads
