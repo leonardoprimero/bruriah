@@ -1,0 +1,92 @@
+# Publishing, with the three things that went wrong before made impossible rather than remembered.
+#
+# 0.1.0 through 0.3.0 were published by hand, with `twine` and an API token living in a file on a
+# laptop. That token is a long-lived credential with upload rights to this project, kept on the one
+# machine most likely to be lost, and nothing about it expires. Trusted Publishing removes it: PyPI
+# accepts a short-lived OIDC token minted by GitHub for this repository, this workflow file and
+# this environment, and there is no secret to store, rotate, or leak.
+#
+# ONE-TIME SETUP ON PyPI, which no workflow can do for you. On the project's page, under
+# Publishing -> Add a new pending/trusted publisher, GitHub:
+#
+#     Owner:                leonardoprimero
+#     Repository:           bruriah
+#     Workflow name:        release.yml
+#     Environment name:     pypi
+#
+# The environment is not decoration: it is a second place the identity is pinned, so a workflow
+# added to this repository under a different name cannot publish even though it runs in it.
+#
+# WHAT THIS REFUSES TO PUBLISH, each one a mistake already made here once:
+#
+#   1. A version bumped without `uv lock` in the same commit. It does not show locally, because
+#      `uv run --python X` re-resolves in silence; only `--locked` reads the lockfile as written.
+#      Measured before this file was added: bumping the version and running `uv lock --check`
+#      exits 1, and exits 0 after `uv lock`.
+#   2. A tag that does not name the version pyproject declares. Tagging v0.4.0 over a pyproject
+#      still saying 0.3.0 produces an artifact whose name and contents disagree.
+#   3. A red suite. This calls ci.yml rather than restating its matrix, so the gate is the CI that
+#      already exists -- nine cells across Linux, macOS and Windows, plus the wheel-installs-and-
+#      runs job -- and cannot drift into a weaker copy. 0.2.0 went out with main red.
+#
+# Tag, push the tag, and this does the rest. Nothing here publishes on a branch push.
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+jobs:
+  suite:
+    name: the whole of CI, as the gate
+    uses: ./.github/workflows/ci.yml
+
+  gate:
+    name: the tag, the lockfile, the artifact
+    needs: suite
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+
+      - name: the tag names the version pyproject declares
+        run: |
+          set -euo pipefail
+          declared=$(python3 -c "import tomllib,pathlib;print(tomllib.loads(pathlib.Path('pyproject.toml').read_text())['project']['version'])")
+          tagged="${GITHUB_REF_NAME#v}"
+          echo "tag ${GITHUB_REF_NAME} -> ${tagged} · pyproject -> ${declared}"
+          test "$tagged" = "$declared"
+
+      - name: the lockfile was updated in the same commit as the version
+        run: uv lock --check
+
+      - run: uv build
+      - name: metadata is valid for PyPI
+        run: uv tool run --from twine twine check dist/*
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+  publish:
+    name: upload to PyPI without a token
+    needs: gate
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      # The whole point. Short-lived, minted for this repository and workflow, verified by PyPI
+      # against the trusted publisher configured there. `contents` stays read: publishing needs
+      # nothing from the repository it has not already been given.
+      id-token: write
+      contents: read
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+      - uses: pypa/gh-action-pypi-publish@release/v1
