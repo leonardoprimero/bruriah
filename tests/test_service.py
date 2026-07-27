@@ -689,3 +689,69 @@ def test_a_client_that_did_not_opt_in_gets_no_drafting_action(deps) -> None:
                          dataclasses.replace(deps, skill_set=_aged_skills(1)))
     assert result.host_actions == [] or all(
         item.kind not in {"draft_skill_candidate", "install_skill"} for item in result.host_actions)
+
+
+# --- The declared output budget binds the `proceed` path too ------------------------------------
+# `max_output_chars` was enforced only where `context.assemble_context` returned the result, i.e.
+# on `route_only`/`abstained`. The `proceed` branch built its result inline and returned it
+# unchecked -- so the ONE path that carries retrieved evidence, the largest response this tool
+# produces, was the only one that never looked at the budget. Measured before the fix: a request
+# declaring 256 characters received 2581, labelled `complete`.
+
+
+def _padded_deps_notes() -> dict[str, str]:
+    return {
+        "en.md": f"# Apple\nAn apple pie baking recipe passage with real corpus text.\n{_FILLER}\n",
+        "more.md": f"# More\nAnother apple pie baking recipe and python schema validation note.\n{_FILLER}\n",
+    }
+
+
+def test_proceed_path_honours_the_declared_output_budget(tmp_path: Path) -> None:
+    with _snapshot_for(tmp_path, _padded_deps_notes()) as active:
+        deps = ServiceDeps(registry=_real_registry(), snapshot=active)
+        unbounded = investigate(InvestigationRequest(task=_TASK), deps)
+        assert unbounded.evidence  # the real pipeline really did return evidence to compact
+
+        budget = len(unbounded.model_dump_json()) // 2
+        bounded = investigate(
+            InvestigationRequest(task=_TASK, budgets=Budgets(max_output_chars=budget)), deps,
+        )
+        assert len(bounded.model_dump_json()) <= budget
+        assert "output_budget_compacted" in bounded.degradation
+        assert bounded.status == "partial"  # a compacted result is never reported as complete
+
+
+def test_a_budget_no_response_can_meet_is_reported_not_silently_exceeded(tmp_path: Path) -> None:
+    # `Budgets` declares `max_output_chars >= 256`, but an entirely empty result already
+    # serializes to 470 characters: `request_id` is a 71-character digest and `budgets` echoes all
+    # ten fields. Every request in the 256..469 band therefore asks for something no valid
+    # response can satisfy. The contract is not to lie about it.
+    with _snapshot_for(tmp_path, _padded_deps_notes()) as active:
+        deps = ServiceDeps(registry=_real_registry(), snapshot=active)
+        result = investigate(
+            InvestigationRequest(task=_TASK, budgets=Budgets(max_output_chars=256)), deps,
+        )
+        assert len(result.model_dump_json()) > 256  # the floor is structural, not a bug to hide
+        assert "output_budget_unmet" in result.degradation
+        assert result.status != "complete"
+
+
+def test_output_budget_compaction_is_deterministic(tmp_path: Path) -> None:
+    with _snapshot_for(tmp_path, _padded_deps_notes()) as active:
+        deps = ServiceDeps(registry=_real_registry(), snapshot=active)
+        request = InvestigationRequest(task=_TASK, budgets=Budgets(max_output_chars=1200))
+        assert investigate(request, deps) == investigate(request, deps)
+
+
+def test_max_evidence_does_not_subsume_the_output_budget(tmp_path: Path) -> None:
+    # Two different ceilings: `max_evidence` bounds the NUMBER of records and says nothing about
+    # their size. A request whose evidence count is comfortably under the item ceiling can still
+    # blow the character budget, which is exactly the case the missing call let through.
+    with _snapshot_for(tmp_path, _padded_deps_notes()) as active:
+        deps = ServiceDeps(registry=_real_registry(), snapshot=active)
+        result = investigate(
+            InvestigationRequest(task=_TASK, budgets=Budgets(max_evidence=100, max_output_chars=900)),
+            deps,
+        )
+        assert len(result.evidence) < 100  # the item ceiling was never the binding constraint
+        assert len(result.model_dump_json()) <= 900
