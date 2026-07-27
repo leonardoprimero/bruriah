@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import re
 import subprocess
+from dataclasses import dataclass
 from pathlib import Path
 
 # git's own escapes, NOT literal control bytes: a process argument cannot contain a NUL, so
@@ -47,20 +48,35 @@ def _slug(text: str) -> str:
     return re.sub(r"[^a-z0-9]+", "-", text.lower())[:60].strip("-") or "untitled"
 
 
-def build(repo: Path, out: Path, limit: int | None = None) -> int:
-    """Write one document per commit that carries reasoning. Returns how many were written."""
+@dataclass(frozen=True)
+class CorpusResult:
+    written: int
+    # Non-merge commits read. Merges are excluded by `--no-merges` before anything is counted, so
+    # they are not in the denominator: they are skipped for being merges, not for lacking
+    # reasoning, and counting them would understate a history that is actually well written.
+    examined: int
+
+
+def build(repo: Path, out: Path, limit: int | None = None) -> CorpusResult:
+    """Write one document per commit that carries reasoning.
+
+    Returns what was written AND what was read, because the gap between them is the single thing
+    that decides whether any of this is worth installing -- and until it was returned, the caller
+    could only see the numerator. A history that yields three documents from three commits and one
+    that yields three from three hundred are the same number on the way out."""
     fmt = _SEPARATOR_FMT.join(["%H", "%aI", "%an", "%s", "%b"]) + _RECORD_FMT
     args = ["log", "--no-merges", f"--format={fmt}"]
     if limit:
         args.append(f"-{limit}")
     out.mkdir(parents=True, exist_ok=True)
 
-    written = 0
+    written = examined = 0
     for entry in _git(repo, *args).split(_RECORD):
         parts = entry.strip("\n").split(_SEPARATOR)
         if len(parts) < 5:
             continue
         sha, when, author, subject, body = (part.strip() for part in parts[:5])
+        examined += 1
         if not body:
             continue  # a subject records what changed, never why
         files = _git(repo, "show", "--stat", "--format=", "--name-only", sha).split()
@@ -80,4 +96,4 @@ def build(repo: Path, out: Path, limit: int | None = None) -> int:
             document, encoding="utf-8", newline="\n"
         )
         written += 1
-    return written
+    return CorpusResult(written, examined)

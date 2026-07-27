@@ -36,8 +36,9 @@ def test_a_real_repository_yields_one_document_per_reasoned_commit(tmp_path: Pat
         ("fix typo", ""),
         ("remove the thing", "It turned out the constraint was wrong."),
     ])
-    written = build(repo, tmp_path / "out")
-    assert written == 2, "commits without a body carry no reasoning and are skipped"
+    result = build(repo, tmp_path / "out")
+    assert result.written == 2, "commits without a body carry no reasoning and are skipped"
+    assert result.examined == 3, "and the denominator is what says how much was left behind"
     documents = sorted(p.name for p in (tmp_path / "out").glob("*.md"))
     assert len(documents) == 2
     from datetime import date

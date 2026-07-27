@@ -7,6 +7,7 @@ afterthought, because the failure was invisible to a suite that ran from a clone
 """
 from __future__ import annotations
 
+import json
 import shutil
 import sys
 import subprocess
@@ -37,8 +38,11 @@ def _repo(tmp_path: Path) -> Path:
 
 
 def test_only_commits_that_explain_themselves_become_documents(tmp_path: Path) -> None:
-    written = gitcorpus.build(_repo(tmp_path), tmp_path / "out")
-    assert written == 1
+    result = gitcorpus.build(_repo(tmp_path), tmp_path / "out")
+    # Both halves: one document written, and the two commits it had to read to get there. The
+    # denominator is what tells a reader whether a small corpus means a small repository or a
+    # history that does not explain itself.
+    assert (result.written, result.examined) == (1, 2)
     documents = list((tmp_path / "out").glob("*.md"))
     assert len(documents) == 1
     body = documents[0].read_text(encoding="utf-8")
@@ -78,6 +82,39 @@ def test_the_subcommand_produces_what_the_module_produces(tmp_path: Path) -> Non
     viacli = {path.name: path.read_text() for path in (tmp_path / "viacli").glob("*.md")}
     direct = {path.name: path.read_text() for path in (tmp_path / "direct").glob("*.md")}
     assert viacli == direct and viacli
+
+
+def test_it_says_how_much_of_the_history_it_had_to_skip(tmp_path: Path, capsys) -> None:
+    """The README calls commit discipline "the single biggest determinant" and says this command
+    will tell you to your face. It only ever did at zero: a repository that yielded three
+    documents from three hundred commits printed `{"documents": 3}` and said nothing, which reads
+    as a small project rather than a history that does not explain itself."""
+    repo = _repo(tmp_path)  # two non-merge commits, one of them with no body
+    assert cli.bruriah_main(["corpus", "--repo", str(repo), "--out", str(tmp_path / "out"),
+                             "--data-dir", str(tmp_path / "d"),
+                             "--config-dir", str(tmp_path / "c")]) == 0
+    captured = capsys.readouterr()
+
+    assert json.loads(captured.out)["commits_examined"] == 2
+    assert json.loads(captured.out)["documents"] == 1
+    assert "1 of 2" in captured.err
+    assert "were skipped" in captured.err
+
+
+def test_a_history_that_explains_itself_is_not_nagged(tmp_path: Path, capsys) -> None:
+    repo = tmp_path / "clean"
+    repo.mkdir()
+    run = lambda *args: subprocess.run(["git", *args], cwd=repo, check=True, capture_output=True)
+    run("init", "-q")
+    run("config", "user.email", "test@example.invalid")
+    run("config", "user.name", "Test")
+    (repo / "a.txt").write_text("one")
+    run("add", "-A")
+    run("commit", "-q", "-m", "feat: add the thing\n\nBecause the other way needed two trips.")
+    assert cli.bruriah_main(["corpus", "--repo", str(repo), "--out", str(tmp_path / "out"),
+                             "--data-dir", str(tmp_path / "d"),
+                             "--config-dir", str(tmp_path / "c")]) == 0
+    assert capsys.readouterr().err == "", "nothing was skipped, so there is nothing to report"
 
 
 def test_the_corpus_builder_is_importable_from_the_installed_package() -> None:

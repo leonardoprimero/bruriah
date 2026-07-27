@@ -32,9 +32,12 @@ def main(argv: list[str] | None = None) -> int:
     if not (args.repo / ".git").exists():
         print(f"error: {args.repo} is not a git repository", file=sys.stderr)
         return 1
-    written = build(args.repo, args.out, args.limit)
-    print(f"{written} decisions written to {args.out}")
-    if written == 0:
+    # `build` returns what it read as well as what it wrote. This wrapper reports only the
+    # numerator it always reported: it exists to keep an old command working, and the coverage
+    # line belongs with the command people are being sent to.
+    result = build(args.repo, args.out, args.limit)
+    print(f"{result.written} decisions written to {args.out}")
+    if result.written == 0:
         print(
             "No commit carried an explanatory body. This history records what changed but not why, "
             "so there is no reasoning to retrieve -- retrieval quality cannot compensate for that.",
