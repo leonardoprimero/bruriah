@@ -23,10 +23,18 @@
 ```bash
 pip install bruriah          # Linux, macOS or Windows
 
-bruriah corpus --repo . --out ./corpus              # your git history, as documents
-bruriah index --corpus-root ./corpus --policy ./policy.yaml
-bruriah init                                        # writes your MCP client config
+B=~/.bruriah/myproject                              # one directory per project, outside the repo
+mkdir -p "$B" && printf "version: 1\ninclude: ['**']\nexclude: ['private/**']\n" > "$B/policy.yaml"
+
+bruriah corpus --repo . --out "$B/corpus"           # your git history, as documents
+bruriah index --data-dir "$B/data" --corpus-root "$B/corpus" --policy "$B/policy.yaml"
+bruriah init  --data-dir "$B/data"                  # writes your MCP client config
 ```
+
+**One directory per project.** Bruriah keeps one active index, and `--data-dir` is what tells each
+command which one — `index`, `ask`, `serve` and `doctor` all take it, and `bruriah init` bakes the
+path into the MCP snippet so the client you paste it into is already pointed at the right project.
+Omit it and everything lands in one shared directory, which is fine until the second project.
 
 Then ask it something, from the terminal, before wiring up any client:
 
@@ -35,8 +43,8 @@ Then ask it something, from the terminal, before wiring up any client:
 </p>
 
 ```bash
-bruriah ask "why did this project avoid FastMCP"     # references, provenance, no prose
-bruriah ask "why did this project avoid FastMCP" --read 2   # the exact lines, on request
+bruriah ask --data-dir "$B/data" "why did this project avoid FastMCP"   # references, no prose
+bruriah ask --data-dir "$B/data" "why did this project avoid FastMCP" --read 2   # the exact lines
 ```
 
 An MCP server that lets an agent consult your project's decisions **without letting those documents
@@ -350,6 +358,13 @@ Honest state as of 2026-07-26.
 - The full skill lifecycle from the terminal
 
 **Limits, stated rather than buried**
+- A data directory holds one project. Promoting a new index into a directory whose current index
+  was built from a *different* `policy.yaml` fails with `index_failed:incompatible_candidate` —
+  including the case where you edited your own policy and re-indexed the same repository. The new
+  candidate is sound; what refuses is the check that the outgoing index still matches the incoming
+  policy, which after a policy change it never can. The error names the candidate, and the
+  candidate is not the incompatible one. Per-project `--data-dir`, as the quickstart shows, avoids
+  it; if you have already hit it, delete the `data_dir` that `bruriah doctor` prints and re-index.
 - Cross-lingual retrieval trails same-language on the **default** model: 58% against 83% at recall@3, after the fusion fix above recovered it from 33%. That 58% was described here as the vector leg's own ceiling, and [measuring it](https://github.com/leonardoprimero/bruriah/blob/main/evals/project-memory/) showed it was this model's ceiling instead — `bruriah index --model jinaai/jina-embeddings-v2-base-es` takes Spanish to **75%** and English to **92%**, improving both. The default stays multilingual on purpose: that model is Spanish-English bilingual, which is exactly this corpus, and would likely be the wrong pick for a German or Japanese one. Bigger is *not* the axis — the larger sibling of the default scored worse in both languages for five times the download. The choice is documented rather than made for you, and the numbers are per-question so you can see how thin twelve questions are.
 - Models are not interchangeable in the pipeline: queries and passages are embedded identically, with no prefix and no per-model normalisation, so a model whose contract expects otherwise (`multilingual-e5-large` wants `query:`/`passage:`) cannot be evaluated fairly here at all. That is real open work — but it is a prerequisite for testing *more* candidates, not for the improvement above, which needed none of it.
 - The language detector is a function-word counter that abstains often in general — though not once on the 24 eval questions, where it was measured, so the cross-lingual discount was applied every time.
@@ -371,9 +386,12 @@ Honest state as of 2026-07-26.
 ```bash
 pip install bruriah        # or: uv tool install bruriah
 
-bruriah doctor             # read-only health check, safe at any time
-bruriah serve              # the MCP server, over stdio
+bruriah doctor --data-dir "$B/data"    # read-only health check, safe at any time
+bruriah serve  --data-dir "$B/data"    # the MCP server, over stdio
 ```
+
+On a fresh install, before any index exists, `doctor` reports `healthy: false` with
+`snapshot: index_not_built`. That is the absence of an index, not a broken one.
 
 Requires **Python 3.12, 3.13 or 3.14**, on **Linux, macOS or Windows**. The suite result is identical on all three versions, which is a stronger statement than three green runs.
 
@@ -387,11 +405,14 @@ Every substitution was measured on Windows 11 / NTFS before it was written, and 
 
 WSL still works and needs no changes, if that is where you already are.
 
-`bruriah init` writes a ready-to-paste `mcpServers` entry — absolute paths already filled in — for
-**Claude Code, Cursor, Gemini CLI, OpenCode, Antigravity** and a generic stdio client, into
-`clients/` under your config directory. Copy the one you use; the rest cost nothing by existing.
+`bruriah init` writes a ready-to-paste `mcpServers` entry — absolute paths already filled in,
+including the `--data-dir` you gave it — for **Claude Code, Cursor, Gemini CLI, OpenCode,
+Antigravity** and a generic stdio client, into `clients/` under your config directory. Copy the one
+you use; the rest cost nothing by existing. The snippet carries whichever `--data-dir` you passed,
+so run it per project and paste each one into that project's own client config — the files under
+`clients/` are a template to consume, not a per-project registry, and the next run rewrites them.
 
-A minimal `policy.yaml`:
+The minimal `policy.yaml` the quickstart writes for you:
 
 ```yaml
 version: 1
