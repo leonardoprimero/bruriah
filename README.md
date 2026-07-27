@@ -285,7 +285,7 @@ The lexical leg is a bounded pure-Python BM25 scan, not FTS5, and every query lo
 
 Quadruple the passages, quadruple the latency, every time: **≈46µs per passage**, with no deviation across two orders of magnitude. So you can predict your own number rather than trust mine — a 40,000-passage corpus lands near 1.8s, which is where this stops being pleasant.
 
-For a repository's decision record that ceiling is far away: this project's own history is 168 passages. For a large document vault it is close, and FTS5 is the obvious answer if someone hits it. Indexing is a one-off and runs at roughly 130 passages/second, dominated by embedding.
+For a repository's decision record that ceiling is far away: this project's own history was 248 passages when this sentence was last checked, from 124 commits of which every one carried an explanatory body. For a large document vault it is close, and FTS5 is the obvious answer if someone hits it. Indexing is a one-off and runs at roughly 130 passages/second, dominated by embedding.
 
 Reproduce it on your own corpus — the script is [`evals/scale.py`](https://github.com/leonardoprimero/bruriah/blob/main/evals/scale.py).
 
