@@ -3,6 +3,98 @@
 Notable changes, newest first. This project follows [semantic versioning](https://semver.org/),
 and the entries here name what changed for *you* rather than which files moved.
 
+## [0.5.0] — 2026-07-27
+
+The live research path, which 0.4.1 deliberately left alone. Four defects, all confirmed by
+running code against a loopback TLS server, none of them reachable through `bruriah serve` today —
+`ServiceDeps.research` is still `None` everywhere the installed package builds it. They are fixed
+now rather than when the path is wired, because "we will remember when we turn it on" is not a
+control.
+
+### A cache hit no longer outlives the policy that allowed it
+
+`research()` read the cache before checking the allowlist and the access policy, on the reasoning
+that a hit costs no network. True, and beside the point: those lists do not exist to save
+bandwidth, they declare which destinations this installation may surface at all. Revoking a host
+stopped nothing — the entry kept being served, in full, for the rest of its 24-hour TTL. Same for
+a path the access policy denies. Both checks are local, so they now run first at no cost.
+
+`policy_version` was recorded on every cache write from the beginning and never read back. So a
+cached answer also outlived the *pack* that authorised it: re-signing a research policy with
+different source rules changed nothing about what was already on disk. An entry written under a
+different policy version is now a miss and is refetched under the current rules. Neither case
+deletes anything — TTL and `prune_expired` still own removal, and a policy change is not grounds
+for destroying an audit-relevant artifact.
+
+### `read_evidence` can read the refs `investigate_work` hands out
+
+`fetch.py` mints `live:sha256:<32 hex>` for captured live evidence and `investigate_work` returns
+it. `read_evidence` had no branch for that prefix, so those refs fell through to the local passage
+table, found nothing, and came back `missing_ref` — the two tools disagreeing about refs one of
+them had just issued.
+
+They resolve from the cache now, by scanning for the entry whose evidence carries the ref. The
+content served is the stored excerpt, never a refetch: `read_evidence` is documented read-only and
+resolving *immutable* refs, and a ref that reaches the network on read is not immutable. The
+excerpt is also already the permitted minimum computed under the reuse rules — capped at 280
+characters whenever reuse is anything but `permitted` — so serving anything larger would route
+around that cap through a different door.
+
+One consequence worth naming: `expired_ref` becomes reachable. It was declared in the contract and
+documented as structurally impossible from a single active snapshot, which has no history to age
+out. Cached live evidence does. An aged-out ref returns `expired_ref` with no content, because
+"had it, it aged out" is a different answer from "never had it" and neither justifies presenting
+stale material as current.
+
+### Refusal is the cheap path again
+
+A redirect, a non-2xx and a rejected Content-Type each discarded their body with `response.read()`
+and no argument — reading to EOF into memory with no ceiling at all. So `max_bytes` bounded the
+one response shape that was accepted and none of the three that were refused: an allowlisted host
+could spend this process's memory precisely by being refused. Measured: 3,000,000 bytes read on
+each of the three paths against a declared `max_bytes` of 1,000,000. They now read at most one
+chunk, which is politeness rather than necessity — the connection is closed immediately after, and
+`Connection: close` is already in the outbound headers.
+
+While measuring that: the accepted path overran too. The byte ceiling was checked *after* each
+64 KB chunk landed, so `max_bytes` really meant "max_bytes plus up to one chunk" — a declared
+1,000,000 read 1,062,144. Reads are now sized to at most one byte past the ceiling, which is all
+the evidence an overrun needs.
+
+### The network budget belongs to the investigation, not to each URL
+
+`Budgets` is declared once per request, and `fetch.py` enforced it faithfully — for the single
+hop-chain of a single call. Nothing pooled it. Each candidate URL received the same
+`request.budgets` again, so a request declaring `max_bytes=1_000_000` and
+`max_network_requests=5` made five connections and pulled 2,500,000 bytes, with every individual
+fetch honestly inside its budget the whole time. `max_elapsed_ms` multiplied the same way. What
+the host declared as the cost of an investigation was really the cost of one URL inside it.
+
+A `NetworkLedger` now pools requests, bytes and wall-clock across every research call of one
+investigation, and is charged for what each call actually spent — including calls refused
+mid-flight, since billing only successes would make failure the cheap way to drain a budget. A
+cache hit costs nothing, having made no request and read no socket. Candidates the pool cannot
+fund come back as `research_unavailable:network_budget_exhausted` rather than being silently
+dropped.
+
+`fetch()` reports `requests_made`/`bytes_read` on every return path to make this possible,
+including its error paths — a call refused after three hops used to report the same nothing as one
+rejected on its scheme.
+
+### The README stopped overstating one thing
+
+"The step that chose *which* document to surface never saw a word of any document" was true of
+routing and false of ranking, which is BM25 and a vector leg reading your corpus text, because
+ordering passages by relevance cannot be done without reading them. The comparison table said
+"selection never reads corpus prose" without saying which selection. Both now name the step. The
+protection being described is unchanged and is stated more precisely: corpus content decides which
+passages rank highest, it does not decide which sources are admissible, and it never reaches the
+agent as prose.
+
+Two other audit findings were checked and not acted on, for reasons recorded in the pull request:
+`README:223` already explains why `claims` is empty for a local corpus, and
+`docs/client-guidance.md` already declines to claim any client/platform pair has passed evaluation.
+
 ## [0.4.1] — 2026-07-27
 
 ### The date format the tool advertises is now a date format the tool accepts
