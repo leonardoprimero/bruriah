@@ -363,7 +363,9 @@ Honest state as of 2026-07-26.
   your own edited `exclude` — drops that generation instead of keeping it, and says so on stderr.
   It has to: `policy_hash` is part of what a retained entry is validated against, so after a policy
   change the old generation can never be activated again, and recording it would promise a return
-  path that `rollback` would refuse. The index file stays on disk, unreferenced. Until 0.3.0 this
+  path that `rollback` would refuse. The index file stays on disk, unreferenced, because nothing
+  here removes a file it did not create; `bruriah index-prune` is what removes them, and it can
+  only ever name generations of its own making. Until 0.3.0 this
   case aborted the promotion outright with `index_failed:incompatible_candidate`, which made a data
   directory permanently unindexable once you edited your own policy; per-project `--data-dir`, as
   the quickstart shows, keeps the generations separate and the rollback intact.

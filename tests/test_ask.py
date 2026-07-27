@@ -117,6 +117,31 @@ def test_the_read_banner_reports_a_character_span_and_names_the_unit(indexed, ca
     assert re.search(r"\.md#\d+-\d+", banner), banner
 
 
+def test_index_prune_clears_what_reindexing_stranded(indexed, capsys) -> None:
+    """End to end, through the parser a person actually types at. Re-indexing under a changed
+    policy promotes and drops the old generation, which leaves it on disk referenced by nothing."""
+    parser, argv = indexed
+    data_dir = Path(argv[argv.index("--data-dir") + 1])
+    corpus = next(path for path in data_dir.parent.iterdir() if path.name == "corpus")
+    edited = data_dir.parent / "edited.yaml"
+    edited.write_text("version: 1\ninclude: ['**']\nexclude: ['nothing/**']\n")
+    assert cli._cmd_index(
+        parser.parse_args(["index", "--corpus-root", str(corpus), "--policy", str(edited),
+                           "--model", "test/minilm", *argv]),
+        embedder_factory=_fake_embedder_factory,
+    ) == 0
+    stranded = sorted(data_dir.glob("candidate-*.sqlite3"))
+    assert len(stranded) == 2, "the superseded generation should still be on disk"
+    capsys.readouterr()
+
+    assert cli.bruriah_main(["index-prune", *argv]) == 0
+
+    captured = capsys.readouterr()
+    assert len(json.loads(captured.out)["removed"]) == 1
+    assert "Removed 1 unreferenced generation(s)." in captured.err
+    assert len(sorted(data_dir.glob("candidate-*.sqlite3"))) == 1
+
+
 def test_a_reference_that_does_not_exist_fails_typed(indexed) -> None:
     with pytest.raises(cli.CliError):
         _ask(indexed, "apple", "--read", "99")

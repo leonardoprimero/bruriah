@@ -20,7 +20,10 @@ from fastembed import TextEmbedding
 
 from . import cache, clients, gitcorpus
 from .corpus import CorpusPolicy, CorpusPolicyError
-from .index import BuildConfig, BuildResult, Embedder, IndexLifecycleError, build_candidate, promote_candidate
+from .index import (
+    BuildConfig, BuildResult, Embedder, IndexLifecycleError, build_candidate, promote_candidate,
+    prune_generations,
+)
 from .mcp_server import build_server
 from . import approvals, candidates, platform as platform_module, signing, skillset
 from .platform import (
@@ -538,6 +541,17 @@ def _cmd_skill_prune(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_index_prune(args: argparse.Namespace) -> int:
+    paths = _resolve_paths(args)
+    try:
+        removed = prune_generations(paths.data_dir / "active.json")
+    except (IndexLifecycleError, OSError) as error:
+        raise CliError(f"index_prune_failed:{getattr(error, 'code', type(error).__name__)}") from error
+    print(json.dumps({"removed": sorted(path.name for path in removed)}, indent=2, sort_keys=True))
+    print(f"Removed {len(removed)} unreferenced generation(s).", file=sys.stderr)
+    return 0
+
+
 def _cmd_skill_ingest(args: argparse.Namespace) -> int:
     result = run_skill_ingest(_resolve_paths(args), args.pack)
     print(json.dumps(result, indent=2, sort_keys=True))
@@ -824,7 +838,8 @@ def _build_cli_parser() -> argparse.ArgumentParser:
                           help="Permit unsigned local (T3) packs. Local-tier skills only.")
     add("skill-rollback", "Restore the previously retained skill set.", _cmd_skill_rollback)
     add("skill-status", "Show the active set and generations on disk.", _cmd_skill_status)
-    add("skill-prune", "Delete unreferenced generations.", _cmd_skill_prune)
+    add("index-prune", "Delete unreferenced index generations.", _cmd_index_prune)
+    add("skill-prune", "Delete unreferenced skill-set generations.", _cmd_skill_prune)
     add("serve", "Run the two-tool MCP server over stdio.", _cmd_serve)
     add("doctor", "Read-only health check.", _cmd_doctor)
     return parser
