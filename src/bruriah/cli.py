@@ -704,71 +704,78 @@ def _cmd_ask(
     """
     paths = _resolve_paths(args)
     deps = build_serve_deps(paths, embedder_factory=embedder_factory)
-    result = investigate(InvestigationRequest(task=args.question, host_skills=[]), deps)
-    payload = result.model_dump(mode="json")
-    if args.json:
-        print(json.dumps(payload, indent=2, sort_keys=True))
-        return 0
+    # The snapshot holds an open SQLite connection. `_cmd_serve` closes it in a finally and
+    # `run_doctor` closes it before returning; this one never did, across five exits. On POSIX
+    # that is a ResourceWarning nobody reads, and on Windows an unclosed connection is what
+    # makes a generation undeletable -- the same shape that failed `index-prune` in CI.
+    try:
+        result = investigate(InvestigationRequest(task=args.question, host_skills=[]), deps)
+        payload = result.model_dump(mode="json")
+        if args.json:
+            print(json.dumps(payload, indent=2, sort_keys=True))
+            return 0
 
-    local = [item for item in payload["evidence"] if item["kind"] == "local"]
-    print(f"\n  status: {payload['status']} · {len(local)} references")
-    for note in payload["degradation"]:
-        print(f"  disclosed: {note}")
-    for gap in payload["gaps"]:
-        print(f"  gap: {gap}")
-    if payload["status"] == "abstained":
-        print("\n  No approved policy covers this domain, so nothing is returned rather than the\n"
-              "  nearest-looking passage. That is the designed answer, not a failure.\n")
-        return 0
+        local = [item for item in payload["evidence"] if item["kind"] == "local"]
+        print(f"\n  status: {payload['status']} · {len(local)} references")
+        for note in payload["degradation"]:
+            print(f"  disclosed: {note}")
+        for gap in payload["gaps"]:
+            print(f"  gap: {gap}")
+        if payload["status"] == "abstained":
+            print("\n  No approved policy covers this domain, so nothing is returned rather than the\n"
+                  "  nearest-looking passage. That is the designed answer, not a failure.\n")
+            return 0
 
-    # When a reference was named, list only it: relisting eight results above the text you
-    # asked for buries the thing you asked for.
-    shown = [(n, item) for n, item in enumerate(local, start=1)
-             if not args.read or n in args.read][: args.limit if not args.read else None]
-    for position, item in shown:
-        print(f"\n  [{position}] {item['citation_locator']}")
-        print(f"      authority: {item['authority']} ({item['authority_rationale']})")
-        print(f"      {item['digest']}")
-    if not local:
-        print("\n  Nothing in this corpus bears on that question.\n")
-        return 0
+        # When a reference was named, list only it: relisting eight results above the text you
+        # asked for buries the thing you asked for.
+        shown = [(n, item) for n, item in enumerate(local, start=1)
+                 if not args.read or n in args.read][: args.limit if not args.read else None]
+        for position, item in shown:
+            print(f"\n  [{position}] {item['citation_locator']}")
+            print(f"      authority: {item['authority']} ({item['authority_rationale']})")
+            print(f"      {item['digest']}")
+        if not local:
+            print("\n  Nothing in this corpus bears on that question.\n")
+            return 0
 
-    if args.read:
-        chosen = [local[index - 1]["ref"] for index in args.read if 1 <= index <= len(local)]
-        if not chosen:
-            raise CliError("no_such_reference")
-        print()
-        for item in read(ReadRequest(refs=chosen), deps).model_dump(mode="json")["items"]:
-            # `start`/`end` are character offsets into the passage, not line numbers -- they are
-            # what the output budget is spent in and what `next_cursor` resumes from. Labelling
-            # them "lines" printed 1-567 for a fifteen-line document. The line span is the
-            # locator's, and it is the one a person wants next to the text.
-            where = item["citation_locator"] or f"{item['ref'][:24]}…"
-            print(f"  ── {where} · chars {item['start']}-{item['end']} " + "─" * 16)
-            for line in item["content"].splitlines():
-                print(f"  {line}")
+        if args.read:
+            chosen = [local[index - 1]["ref"] for index in args.read if 1 <= index <= len(local)]
+            if not chosen:
+                raise CliError("no_such_reference")
             print()
-        return 0
+            for item in read(ReadRequest(refs=chosen), deps).model_dump(mode="json")["items"]:
+                # `start`/`end` are character offsets into the passage, not line numbers -- they are
+                # what the output budget is spent in and what `next_cursor` resumes from. Labelling
+                # them "lines" printed 1-567 for a fifteen-line document. The line span is the
+                # locator's, and it is the one a person wants next to the text.
+                where = item["citation_locator"] or f"{item['ref'][:24]}…"
+                print(f"  ── {where} · chars {item['start']}-{item['end']} " + "─" * 16)
+                for line in item["content"].splitlines():
+                    print(f"  {line}")
+                print()
+            return 0
 
-    # This line is the bridge to the second call, so the whole two-call shape is behind it and a
-    # suggestion that does not survive a paste is the design going undiscoverable one step from
-    # the end. It used to truncate the question to 34 characters and append an ellipsis, and it
-    # never carried the directory flags, so pasting it asked either a different question or the
-    # right one of the wrong index. Double quotes rather than shlex: they are the form that runs
-    # on every shell this project supports, including cmd.exe.
-    # The values are quoted, not interpolated bare. The default data directory on macOS is
-    # `~/Library/Application Support/bruriah`, so an unquoted path splits at the space and the
-    # paste fails on the platform's own default -- and on Windows the same quoting is what keeps
-    # a backslash path from being read as escapes. Double quotes hold both, in every shell here.
-    directories = " ".join(
-        f'--{name.replace("_", "-")} "{getattr(args, name)}"'
-        for name in ("data_dir", "config_dir")
-        if getattr(args, name, None) is not None
-    )
-    command = f'bruriah ask "{args.question}" --read 1' + (f" {directories}" if directories else "")
-    print("\n  Nothing above is the document's text -- only references to it. That is the whole\n"
-          f"  design: read one explicitly with\n\n    {command}\n")
-    return 0
+        # This line is the bridge to the second call, so the whole two-call shape is behind it and a
+        # suggestion that does not survive a paste is the design going undiscoverable one step from
+        # the end. It used to truncate the question to 34 characters and append an ellipsis, and it
+        # never carried the directory flags, so pasting it asked either a different question or the
+        # right one of the wrong index. Double quotes rather than shlex: they are the form that runs
+        # on every shell this project supports, including cmd.exe.
+        # The values are quoted, not interpolated bare. The default data directory on macOS is
+        # `~/Library/Application Support/bruriah`, so an unquoted path splits at the space and the
+        # paste fails on the platform's own default -- and on Windows the same quoting is what keeps
+        # a backslash path from being read as escapes. Double quotes hold both, in every shell here.
+        directories = " ".join(
+            f'--{name.replace("_", "-")} "{getattr(args, name)}"'
+            for name in ("data_dir", "config_dir")
+            if getattr(args, name, None) is not None
+        )
+        command = f'bruriah ask "{args.question}" --read 1' + (f" {directories}" if directories else "")
+        print("\n  Nothing above is the document's text -- only references to it. That is the whole\n"
+              f"  design: read one explicitly with\n\n    {command}\n")
+        return 0
+    finally:
+        deps.snapshot.database.close()
 
 
 def _cmd_doctor(args: argparse.Namespace) -> int:

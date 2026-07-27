@@ -7,6 +7,7 @@ import sqlite3
 import stat
 import threading
 import warnings
+from contextlib import closing
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
 from pathlib import Path
@@ -87,7 +88,7 @@ def test_candidate_declares_schema_metadata_manifest_and_model_identity(tmp_path
     assert result.documents == 2
     assert result.passages == 2
     assert result.reused_documents == 0
-    with open_candidate(candidate) as database:
+    with closing(open_candidate(candidate)) as database:
         metadata = dict(database.execute("SELECT key, value FROM index_meta"))
         manifest = database.execute(
             "SELECT relative_path, source_hash FROM manifest ORDER BY relative_path"
@@ -126,7 +127,7 @@ def test_incremental_build_reuses_only_compatible_unchanged_documents(tmp_path: 
     )
 
     assert result.reused_documents == 1
-    with open_candidate(second) as database:
+    with closing(open_candidate(second)) as database:
         rows = database.execute(
             "SELECT relative_path, text, vector FROM passages ORDER BY relative_path"
         ).fetchall()
@@ -185,7 +186,7 @@ def test_deleted_documents_and_incompatible_embeddings_are_not_reused(tmp_path: 
         changed = replace(config(root, policy_path), **changes)
         embedder = lambda texts, size=changed.embedding_dimensions: [b"x" * (size * 4) for _ in texts]
         assert build_candidate(changed, candidate, policy, embedder, previous=first).reused_documents == 0
-        with open_candidate(candidate) as database:
+        with closing(open_candidate(candidate)) as database:
             assert database.execute("SELECT relative_path FROM documents").fetchall() == [
                 ("public/one.md",)
             ]
@@ -206,14 +207,14 @@ def test_semantically_invalid_reused_rows_are_rebuilt(tmp_path: Path, corruption
     first = tmp_path / "first.sqlite3"
     second = tmp_path / "second.sqlite3"
     build_candidate(config(root, policy_path), first, policy, fake_embeddings)
-    with sqlite3.connect(first) as database:
+    with closing(sqlite3.connect(first)) as database, database:
         database.execute(corruption)
         assert database.execute("PRAGMA integrity_check").fetchone() == ("ok",)
 
     result = build_candidate(config(root, policy_path), second, policy, fake_embeddings, previous=first)
 
     assert result.reused_documents == 1
-    with open_candidate(second) as database:
+    with closing(open_candidate(second)) as database:
         assert database.execute(
             "SELECT count(*) FROM passages WHERE length(vector) != 12"
         ).fetchone() == (0,)
@@ -328,7 +329,7 @@ def test_invalid_or_incompatible_promotion_keeps_last_known_good(tmp_path: Path)
     original_pointer = pointer.read_bytes()
     old_snapshot = snapshot_active(pointer, config(root, policy_path))
     build_candidate(config(root, policy_path), invalid, policy, fake_embeddings)
-    with sqlite3.connect(invalid) as database:
+    with closing(sqlite3.connect(invalid)) as database, database:
         database.execute(
             "UPDATE passages SET vector = X'00' WHERE ref = (SELECT ref FROM passages LIMIT 1)"
         )
@@ -461,7 +462,7 @@ def test_rollback_and_recovery_restore_retained_index_without_rebuild(tmp_path: 
         assert snapshot.build_id == first_result.build_id
     (root / "public/two.md").write_text("# Two\nChanged.\n", encoding="utf-8")
     promote_candidate(second, pointer, config(root, policy_path), policy)
-    with sqlite3.connect(second) as database:
+    with closing(sqlite3.connect(second)) as database, database:
         database.execute(
             "UPDATE passages SET source_hash = 'corrupt' "
             "WHERE ref = (SELECT ref FROM passages LIMIT 1)"
@@ -647,7 +648,7 @@ def test_snapshot_rejects_noncanonical_passage_semantics(
     pointer = tmp_path / "active.json"
     build_candidate(config(root, policy_path), candidate, policy, fake_embeddings)
     promote_candidate(candidate, pointer, config(root, policy_path), policy)
-    with sqlite3.connect(candidate) as database:
+    with closing(sqlite3.connect(candidate)) as database, database:
         database.execute(corruption)
     with pytest.raises(IndexLifecycleError, match="invalid_active_target"):
         snapshot_active(pointer, config(root, policy_path))
@@ -724,3 +725,5 @@ def test_concurrent_readers_and_promoters_keep_complete_history(tmp_path: Path) 
     value = json.loads(pointer.read_text())
     observed = {value["active"]["build_id"], *(item["build_id"] for item in value["retained"])}
     assert observed == {result.build_id for result in results}
+
+
