@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import json
 import re
+import shlex
 from pathlib import Path
 
 import pytest
@@ -68,6 +69,28 @@ def test_reading_a_reference_is_a_separate_explicit_step(indexed, capsys) -> Non
     read = capsys.readouterr().out
     assert "Why we chose the apple recipe" not in listing
     assert "Why we chose the apple recipe" in read
+
+
+def test_the_suggested_read_command_survives_being_pasted(indexed, capsys) -> None:
+    """The listing ends by telling you how to read one, and that line is the bridge to the second
+    call -- the entire two-call shape is behind it. It truncated the question to 34 characters
+    with an ellipsis and omitted the directory flags, so pasting it asked a different question, or
+    the right question of whichever index the default directory happened to hold."""
+    question = "why did we choose the apple recipe over every other candidate recipe we tried"
+    _ask(indexed, question)
+    suggestion = next(
+        line.strip() for line in capsys.readouterr().out.splitlines()
+        if line.strip().startswith("bruriah ask")
+    )
+
+    parser, argv = indexed
+    # The real check: hand what we printed back to the parser that has to accept it.
+    parsed = parser.parse_args(shlex.split(suggestion)[1:])
+    assert parsed.question == question, "the suggestion asks a different question than the user did"
+    assert parsed.read == [1]
+    assert str(parsed.data_dir) == argv[argv.index("--data-dir") + 1], (
+        "the suggestion would read from a different index than the listing came from"
+    )
 
 
 def test_the_read_banner_reports_a_character_span_and_names_the_unit(indexed, capsys) -> None:
