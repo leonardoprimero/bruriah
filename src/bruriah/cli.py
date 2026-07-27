@@ -590,12 +590,26 @@ def _cmd_corpus(args: argparse.Namespace) -> int:
     a reader to run a file that `pip install bruriah` had never put on their disk."""
     if not (args.repo / ".git").exists():
         raise CliError("not_a_git_repository")
-    written = gitcorpus.build(args.repo, args.out, args.limit)
-    print(json.dumps({"documents": written, "out": str(args.out)}, indent=2, sort_keys=True))
-    if written == 0:
+    result = gitcorpus.build(args.repo, args.out, args.limit)
+    print(json.dumps(
+        {"documents": result.written, "commits_examined": result.examined, "out": str(args.out)},
+        indent=2, sort_keys=True,
+    ))
+    if result.written == 0:
         print(
             "No commit carried an explanatory body. This history records what changed but not why, "
             "so there is no reasoning to retrieve -- retrieval quality cannot compensate for that.",
+            file=sys.stderr,
+        )
+    elif result.written < result.examined:
+        # Stated whenever anything was dropped, at no particular threshold. Coverage is THE
+        # determinant of whether this is worth installing, and picking a percentage below which
+        # to speak would be a constant nobody measured deciding when the user gets to know. The
+        # ratio is cheap to print and the reader can judge their own history.
+        print(
+            f"{result.written} of {result.examined} non-merge commits carried an explanatory body; "
+            f"the other {result.examined - result.written} record what changed but not why and "
+            "were skipped. That share is the ceiling on what any of this can retrieve.",
             file=sys.stderr,
         )
     return 0
