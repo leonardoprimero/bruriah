@@ -52,36 +52,40 @@ name = "bruriah"
 version = "0.3.0"
 source = { editable = "." }
 dependencies = [
+    { name = "anyio" },
+    { name = "cryptography" },
     { name = "fastembed" },
     { name = "markdown-it-py" },
     { name = "mcp" },
     { name = "platformdirs" },
     { name = "pydantic" },
     { name = "pyyaml" },
-    { name = "sqlite-vec" },
 ]
 
 [package.dev-dependencies]
 dev = [
     { name = "pip-audit" },
     { name = "pytest" },
+    { name = "sqlite-vec" },
 ]
 
 [package.metadata]
 requires-dist = [
+    { name = "anyio", specifier = ">=4.11,<5" },
+    { name = "cryptography", specifier = ">=46,<50" },
     { name = "fastembed", specifier = "==0.8.0" },
     { name = "markdown-it-py", specifier = ">=4.0.0,<5" },
     { name = "mcp", specifier = ">=1.28.1,<2" },
     { name = "platformdirs", specifier = ">=4.11,<5" },
     { name = "pydantic", specifier = ">=2.13.4,<3" },
     { name = "pyyaml", specifier = ">=6.0.3,<7" },
-    { name = "sqlite-vec", specifier = "==0.1.9" },
 ]
 
 [package.metadata.requires-dev]
 dev = [
     { name = "pip-audit", specifier = ">=2.10.0,<3" },
     { name = "pytest", specifier = ">=9.0.2,<10" },
+    { name = "sqlite-vec", specifier = "==0.1.9" },
 ]
 
 [[package]]
