@@ -3,7 +3,7 @@
 Notable changes, newest first. This project follows [semantic versioning](https://semver.org/),
 and the entries here name what changed for *you* rather than which files moved.
 
-## [Unreleased]
+## [0.3.0] — 2026-07-26
 
 ### The skill-dispatch ceiling is operator-configurable
 
@@ -29,6 +29,31 @@ The default is unchanged at five. It was not raised to fit the pack: a constant 
 should not quietly become a bigger constant nobody measured. The alphabetical cut is also
 unchanged, and remains unrelated to relevance — raising the ceiling avoids the cut rather than
 improving it.
+
+A bad ceiling also fails the same way now wherever it came from. The flag carried `type=int`, so
+`--skill-ceiling abc` exited 2 with argparse's usage message while `--skill-ceiling -1` exited 1
+with a typed `invalid_config` — two formats and two exit codes for one class of mistake.
+
+### Which embedding model to pick, measured
+
+`bruriah index --model` has always existed and nothing said what choosing differently was worth.
+It is worth more than the fusion fix that preceded it: `jinaai/jina-embeddings-v2-base-es` takes
+Spanish recall@3 from 58% to **75%** and English from 83% to **92%**, improving both at once. The
+README had called 58% the vector leg's own ceiling; it was that model's ceiling.
+
+The default does **not** change, and the [eval note](https://github.com/leonardoprimero/bruriah/blob/main/evals/project-memory/)
+says why: that model is Spanish-English bilingual and this corpus is 95% English queried in
+Spanish, exactly what it was built for. A German or Japanese corpus would likely be worse off.
+Bigger is not the axis either — the larger sibling of the default scored worse in both languages
+for five times the download. Per-question results are published alongside the averages, because
+twelve questions means one question is eight points.
+
+### Documentation
+
+- The README now says **when** state is declared rather than that it exists, so `"claims": []` and
+  `authority: "unknown"` on your own git history read as the design holding rather than as work
+  left undone. A signed pack declares authority; your commits are covered by none, and retrieval
+  deciding otherwise is exactly what the project exists to prevent.
 
 ## [0.2.0] — 2026-07-26
 
@@ -157,7 +182,7 @@ First release. Published as [`bruriah`](https://pypi.org/project/bruriah/) on Py
 - Six bundled skills is a starting point, not a library.
 - Live web research ships inert: it needs an operator-defined allowlist that is not distributed.
 
-[Unreleased]: https://github.com/leonardoprimero/bruriah/compare/v0.2.0...main
+[0.3.0]: https://github.com/leonardoprimero/bruriah/releases/tag/v0.3.0
 [0.2.0]: https://github.com/leonardoprimero/bruriah/releases/tag/v0.2.0
 <!-- 0.1.0 was published to PyPI without a git tag, so it links to the artifact that actually
      exists rather than to a release page that never did. -->
