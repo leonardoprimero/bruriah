@@ -7,6 +7,7 @@ import json
 import os
 import sys
 import uuid
+import warnings
 from array import array
 from collections.abc import Callable
 from datetime import date, datetime, timedelta, timezone
@@ -136,7 +137,23 @@ def main() -> None:
 
 def _default_embedder_factory(model_name: str) -> tuple[Embedder, str, int]:
     """Real fastembed model; tests inject a fake factory so the suite never loads real ONNX."""
-    model = TextEmbedding(model_name=model_name)
+    with warnings.catch_warnings():
+        # fastembed announces on every construction that this model now pools by mean rather than
+        # CLS, which lands in the middle of `index` and `ask --read` and reads, to someone running
+        # the quickstart, like something went wrong. The change it reports is real and is already
+        # handled harder than a printed line can manage: `_embedding_fingerprint` reads the
+        # pooling off the backend class, REFUSES a runtime it cannot name, and writes the answer
+        # into `embedding_fingerprint` -- which is part of what an index is validated against, so
+        # a pooling change invalidates the index rather than scrolling past. That is pinned by
+        # test_fastembed_fingerprint_binds_pooling_source_snapshot_and_artifact and by the pooling
+        # case in the activation-metadata table.
+        #
+        # Matched by message, never by category: any OTHER warning fastembed raises has no such
+        # backstop and must still reach the user.
+        warnings.filterwarnings(
+            "ignore", message=".*mean pooling instead of CLS.*", category=UserWarning
+        )
+        model = TextEmbedding(model_name=model_name)
     fingerprint = _embedding_fingerprint(model)
 
     def embed(texts: list[str]) -> list[bytes]:
