@@ -106,6 +106,10 @@ class ActivationResult:
     path: Path
     build_id: str
     durable: bool = True
+    # True when the outgoing index could not be kept as a rollback target. Reported rather than
+    # silent, for the same reason a truncated read is: the caller loses a capability it had, and
+    # finding that out at rollback time is finding out too late.
+    retention_discarded: bool = False
 
 
 class IndexLifecycleError(ValueError):
@@ -477,6 +481,7 @@ def promote_candidate(
             raise IndexLifecycleError("candidate_changed_during_validation")
         flushed = flush_validated(path, descriptor)
         retained: list[dict[str, str]] = []
+        retention_discarded = False
         if pointer.exists():
             current = _read_pointer(pointer)
             current_path, current_descriptor, current_identity = _controlled_file(
@@ -484,18 +489,38 @@ def promote_candidate(
             )
             try:
                 with _open_descriptor(current_path, current_descriptor) as current_database:
-                    current_metadata = _activation_metadata(current_database, config)
+                    try:
+                        current_metadata = _activation_metadata(current_database, config)
+                    except IndexLifecycleError:
+                        # The outgoing index was built under a different config; an edited
+                        # `policy.yaml`, or a second project sharing this directory, is the
+                        # ordinary way to arrive here, and `policy_hash` can then never match by
+                        # construction. It is opened for one purpose -- to become a rollback
+                        # entry -- and `rollback_active` re-validates that entry against whatever
+                        # config is in force when it runs. An entry that cannot be validated now
+                        # is therefore a return path that would refuse to activate later, so
+                        # retaining it would record a rollback that does not exist. Refusing the
+                        # promotion instead lets a superseded generation veto a candidate that
+                        # already validated on line 475, which leaves no way to index at all and
+                        # no documented way out. Drop it, keep the invariant that every retained
+                        # entry is activatable, and disclose the loss.
+                        current_metadata = None
                 if not _identity_matches(current_path, current_identity):
                     raise IndexLifecycleError("invalid_active_target")
             finally:
                 os.close(current_descriptor)
-            retained = [_entry(current_path, current_metadata), *current["retained"]]
+            if current_metadata is None:
+                # Anything older was built under a config at least as distant, so it cannot be
+                # activatable either; keeping it would rebuild the same false promise one deep.
+                retention_discarded = True
+            else:
+                retained = [_entry(current_path, current_metadata), *current["retained"]]
         active = _entry(path, metadata)
         retained = [item for item in retained if item != active][:retain]
         # `_write_pointer` first, deliberately: the pointer write must happen whatever the flush
         # reported, and only then does reduced durability fold into the same flag.
         durable = _write_pointer(pointer, active, retained) and flushed
-        return ActivationResult(path, metadata["build_id"], durable)
+        return ActivationResult(path, metadata["build_id"], durable, retention_discarded)
     finally:
         if database is not None:
             database.close()

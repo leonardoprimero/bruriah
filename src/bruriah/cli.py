@@ -163,7 +163,15 @@ def run_index(
     )
     candidate_path = paths.data_dir / f"candidate-{uuid.uuid4().hex}.sqlite3"
     result = build_candidate(config, candidate_path, policy, embed)
-    promote_candidate(candidate_path, paths.data_dir / "active.json", config, policy)
+    activation = promote_candidate(candidate_path, paths.data_dir / "active.json", config, policy)
+    if activation.retention_discarded:
+        print(
+            "Note: the previous index in this data directory was built under a different "
+            "configuration -- an edited policy, or another project -- so it was not kept as a "
+            "rollback target. The new index is active. Give each project its own --data-dir to "
+            "keep their generations separate.",
+            file=sys.stderr,
+        )
     write_build_descriptor(paths, config)
     return result
 
