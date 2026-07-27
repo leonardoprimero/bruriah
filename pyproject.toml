@@ -1,6 +1,6 @@
 [project]
 name = "bruriah"
-version = "0.4.1"
+version = "0.5.0"
 description = "Work-intelligence MCP server: evidence-backed answers from your own history"
 requires-python = ">=3.12,<3.15"
 license = "Apache-2.0"
