@@ -81,7 +81,7 @@ agent  →  "Because FastMCP derives its argument model without extra="forbid",
            Decided 2026-07-23, commit e8f3003bda26."
 ```
 
-The step that chose *which* document to surface never saw a word of any document. That is the entire design, and it is why a poisoned note further down your corpus cannot influence it.
+The step that chose *which policy applies* never saw a word of any document. Ranking did read them — that is what ranking is, and BM25 and the vector leg both score on the text. What ranking cannot do is decide whether a source is admissible at all: it only orders passages that a routing decision already admitted, and what comes back is a reference rather than prose. So a poisoned note can compete for a place in the list. What it cannot do is change what the router decided, or get its own words into the agent's context.
 
 Now the same exchange in detail. First the **reference**, not prose:
 
@@ -203,14 +203,16 @@ comparison against **the common shape**: retrieve passages, put them in the prom
 | what a search returns | passage **text** | a **reference**: locator, digest, provenance |
 | when the text arrives | immediately, in the prompt | only if the agent asks for it, bounded |
 | what picks the sources | a model, over the content | boolean set membership over a signed registry |
-| can a document influence what gets picked | yes, that is how ranking works | **no** — selection never reads corpus prose |
+| can a document influence **which sources are admissible** | yes — ranking is the only gate there is | **no** — routing never reads corpus prose. Ranking does, and only orders what routing already admitted |
 | how confident it sounds | the same, always | `supported` / `stale` / `expired` / `unknown`, stated — and `unknown` when nothing declared it |
 | when it knows nothing | returns the nearest passage | **abstains**, and says which domain it lacks |
 | trust in a retrieved document | implied by returning it | explicitly `not_assessed_by_retrieval` |
 
 The row that matters is the fourth. Everything else follows from it.
 
-**Selection is deterministic, not modelled.** Which sources apply is boolean set membership over a signed registry — no scoring, no embedding, no model in the decision path. Corpus content cannot influence *what gets selected*, only what comes back as evidence. That property is structural, not a policy someone remembers to enforce.
+**Routing is deterministic, not modelled.** Which sources apply is boolean set membership over a signed registry — no scoring, no embedding, no model in the decision path. That property is structural, not a policy someone remembers to enforce.
+
+Retrieval is the other half, and it is the ordinary kind: BM25 and a vector leg, both reading your corpus text, because ranking passages by relevance is not something that can be done without reading them. The distinction the table draws is between the two steps. Corpus content decides *which passages are ranked highest*; it does not decide *which sources are admissible*, and it never reaches the agent as prose. An earlier version of that table row said "selection never reads corpus prose" without saying which selection, which read as a claim about ranking and was not true of it.
 
 **Evidence is never instruction.** The separation is a normative requirement, not a convention. Retrieved text is disclosed as untrusted evidence with its provenance attached.
 
