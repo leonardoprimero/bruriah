@@ -12,6 +12,18 @@ import yaml
 from cryptography.exceptions import InvalidSignature
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
+
+# The version a pack's `min_router_version`/`max_router_version` window is checked against, which
+# has to be the version this code actually IS. It was a hardcoded "0.1.0" through 0.3.0, which made
+# `check_router_compatibility` compare against a version the package had not been since its first
+# release: a pack declaring `min_router_version: "0.4.0"` was rejected by a 0.4.0 router. The gate
+# was not dormant, it was answering the wrong question.
+#
+# NOT to be confused with `BuildConfig.service_version`, which looks like a package version and is
+# not one -- see the note at its assignment in `cli.py` before touching it.
+from . import __version__ as _ROUTER_VERSION
+
+
 class ClosedModel(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
 Text = Annotated[str, Field(min_length=1, max_length=2048)]
@@ -220,7 +232,7 @@ def load_pack(
     trust_roots: dict[str, str],
     *,
     today: date | None = None,
-    router_version: str = "0.1.0",
+    router_version: str = _ROUTER_VERSION,
     minimum_versions: dict[str, str] | None = None,
     domain: str | None = None,
     jurisdiction: str | None = None,
