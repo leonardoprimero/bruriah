@@ -8,6 +8,7 @@ import sqlite3
 import tempfile
 import uuid
 from collections.abc import Callable
+from contextlib import closing
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -419,7 +420,14 @@ def _validated_entry(
 ) -> tuple[Path, dict[str, str]]:
     path, descriptor, identity = _controlled_file(pointer, entry["database"])
     try:
-        with _open_descriptor(path, descriptor) as database:
+        # `closing`, not the connection's own `with`: sqlite3.Connection.__exit__ commits or rolls
+        # back and leaves the handle OPEN. On POSIX that is an invisible descriptor leak, because
+        # unlink succeeds against an open file anyway. On Windows it is not invisible at all --
+        # SQLite opens without share-delete, so a connection nobody closed makes the file
+        # undeletable, and `index-prune` fails with WinError 32 against a generation this same
+        # process finished reading. Every use here is read-only, so there is no transaction to
+        # keep; closing is the whole intent.
+        with closing(_open_descriptor(path, descriptor)) as database:
             metadata = (
                 _validate_stored(database, config)
                 if canonical else _activation_metadata(database, config)
@@ -489,7 +497,10 @@ def promote_candidate(
                 pointer, current["active"]["database"]
             )
             try:
-                with _open_descriptor(current_path, current_descriptor) as current_database:
+                # `closing` for the reason recorded at `_validated_entry`: the connection's own
+                # `with` does not close it, and the outgoing generation is exactly the file
+                # `index-prune` will be asked to remove next.
+                with closing(_open_descriptor(current_path, current_descriptor)) as current_database:
                     try:
                         current_metadata = _activation_metadata(current_database, config)
                     except IndexLifecycleError:
