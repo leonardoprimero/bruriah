@@ -742,8 +742,12 @@ def _cmd_ask(
     # never carried the directory flags, so pasting it asked either a different question or the
     # right one of the wrong index. Double quotes rather than shlex: they are the form that runs
     # on every shell this project supports, including cmd.exe.
+    # The values are quoted, not interpolated bare. The default data directory on macOS is
+    # `~/Library/Application Support/bruriah`, so an unquoted path splits at the space and the
+    # paste fails on the platform's own default -- and on Windows the same quoting is what keeps
+    # a backslash path from being read as escapes. Double quotes hold both, in every shell here.
     directories = " ".join(
-        f"--{name.replace('_', '-')} {getattr(args, name)}"
+        f'--{name.replace("_", "-")} "{getattr(args, name)}"'
         for name in ("data_dir", "config_dir")
         if getattr(args, name, None) is not None
     )
