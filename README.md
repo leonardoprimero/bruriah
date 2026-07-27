@@ -358,13 +358,15 @@ Honest state as of 2026-07-26.
 - The full skill lifecycle from the terminal
 
 **Limits, stated rather than buried**
-- A data directory holds one project. Promoting a new index into a directory whose current index
-  was built from a *different* `policy.yaml` fails with `index_failed:incompatible_candidate` —
-  including the case where you edited your own policy and re-indexed the same repository. The new
-  candidate is sound; what refuses is the check that the outgoing index still matches the incoming
-  policy, which after a policy change it never can. The error names the candidate, and the
-  candidate is not the incompatible one. Per-project `--data-dir`, as the quickstart shows, avoids
-  it; if you have already hit it, delete the `data_dir` that `bruriah doctor` prints and re-index.
+- A data directory holds one project, and rollback does not survive a policy change. Promoting into
+  a directory whose current index was built from a *different* `policy.yaml` — a second project, or
+  your own edited `exclude` — drops that generation instead of keeping it, and says so on stderr.
+  It has to: `policy_hash` is part of what a retained entry is validated against, so after a policy
+  change the old generation can never be activated again, and recording it would promise a return
+  path that `rollback` would refuse. The index file stays on disk, unreferenced. Until 0.3.0 this
+  case aborted the promotion outright with `index_failed:incompatible_candidate`, which made a data
+  directory permanently unindexable once you edited your own policy; per-project `--data-dir`, as
+  the quickstart shows, keeps the generations separate and the rollback intact.
 - Cross-lingual retrieval trails same-language on the **default** model: 58% against 83% at recall@3, after the fusion fix above recovered it from 33%. That 58% was described here as the vector leg's own ceiling, and [measuring it](https://github.com/leonardoprimero/bruriah/blob/main/evals/project-memory/) showed it was this model's ceiling instead — `bruriah index --model jinaai/jina-embeddings-v2-base-es` takes Spanish to **75%** and English to **92%**, improving both. The default stays multilingual on purpose: that model is Spanish-English bilingual, which is exactly this corpus, and would likely be the wrong pick for a German or Japanese one. Bigger is *not* the axis — the larger sibling of the default scored worse in both languages for five times the download. The choice is documented rather than made for you, and the numbers are per-question so you can see how thin twelve questions are.
 - Models are not interchangeable in the pipeline: queries and passages are embedded identically, with no prefix and no per-model normalisation, so a model whose contract expects otherwise (`multilingual-e5-large` wants `query:`/`passage:`) cannot be evaluated fairly here at all. That is real open work — but it is a prerequisite for testing *more* candidates, not for the improvement above, which needed none of it.
 - The language detector is a function-word counter that abstains often in general — though not once on the 24 eval questions, where it was measured, so the cross-lingual discount was applied every time.
