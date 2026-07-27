@@ -24,7 +24,7 @@
 from __future__ import annotations
 
 import json
-from typing import Any
+from typing import Any, TypeVar
 
 from mcp.server.lowlevel import Server
 from mcp.types import CallToolResult, TextContent
@@ -56,6 +56,8 @@ _INVESTIGATE_SCHEMA_OUT = InvestigationResult.model_json_schema()
 _READ_SCHEMA_IN = ReadRequest.model_json_schema()
 _READ_SCHEMA_OUT = ReadResult.model_json_schema()
 
+_RequestModel = TypeVar("_RequestModel", InvestigationRequest, ReadRequest)
+
 
 def _canonical_json(payload: dict[str, Any]) -> str:
     # RFC-8785-style canonical JSON fallback: sorted keys, compact separators. A protocol-only
@@ -83,10 +85,34 @@ def _success_result(result_model: InvestigationResult | ReadResult) -> CallToolR
     )
 
 
+def _validate_as_json(model: type[_RequestModel], arguments: dict[str, Any]) -> _RequestModel:
+    """Validate `arguments` in pydantic's JSON mode, which is the mode the wire actually used.
+
+    `ClosedModel` sets `strict=True`, and under strict PYTHON-object validation a `date` field
+    accepts only a `datetime.date` instance -- never a string. But JSON has no date type, so a
+    conforming client has no way to send one: the `inputSchema` this server publishes describes
+    `as_of` as `{"format": "date", "type": "string"}`, and `model_validate(arguments)` then
+    rejected exactly the value that schema asks for. The tool advertised a contract it refused.
+
+    The arguments dict reached us by JSON-RPC parsing a JSON document, so re-serializing it and
+    validating with `model_validate_json` does not loosen anything -- it restores the mode the
+    payload was written in. Measured, python vs JSON mode differ on exactly one behavior: the ISO
+    date string. `extra="forbid"`, strict scalar types (a bool is still not an int, a `"5"` is
+    still not a `5`), range bounds, `Literal` members, unparseable dates, and every cross-field
+    validator (`ReadRequest.valid_refs`, `ReadRange.ordered`) reject identically in both.
+
+    `cache.py:_decode` already uses this pattern for the same reason; the tool boundary is where
+    it matters most, and it is the one place that never adopted it."""
+    return model.model_validate_json(json.dumps(arguments))
+
+
 def _handle_investigate(arguments: dict[str, Any], deps: ServiceDeps) -> CallToolResult:
     try:
-        request = InvestigationRequest.model_validate(arguments)
-    except ValidationError as error:
+        request = _validate_as_json(InvestigationRequest, arguments)
+    except (ValidationError, TypeError, ValueError) as error:
+        # TypeError/ValueError cover an `arguments` dict that will not re-serialize (a non-string
+        # key, a value no encoder handles). Only reachable from a transport that hands us
+        # something JSON-RPC could not have produced, but a typed refusal beats a traceback.
         return _error_result("invalid_request", str(error))
     try:
         result = investigate(request, deps)
@@ -96,9 +122,13 @@ def _handle_investigate(arguments: dict[str, Any], deps: ServiceDeps) -> CallToo
 
 
 def _handle_read(arguments: dict[str, Any], deps: ServiceDeps) -> CallToolResult:
+    # `ReadRequest` carries no date field today, so this is behaviour-identical for every payload
+    # it can currently receive. It is done anyway because the rule belongs to the BOUNDARY, not to
+    # a field list: the next temporal field added to either request model inherits the fix instead
+    # of reintroducing the defect.
     try:
-        request = ReadRequest.model_validate(arguments)
-    except ValidationError as error:
+        request = _validate_as_json(ReadRequest, arguments)
+    except (ValidationError, TypeError, ValueError) as error:
         return _error_result("invalid_request", str(error))
     try:
         result = read(request, deps)

@@ -240,3 +240,68 @@ def test_no_diagnostic_output_reaches_stdout(tmp_path, capsys) -> None:
     # print/log there. The in-memory transport does not use stdout itself, so any output
     # captured here would have to come from a stray print/log call in our own code.
     assert capsys.readouterr().out == ""
+
+
+# --- The published schema must describe input this server actually accepts ----------------------
+# `investigate_work`'s `inputSchema` declares `as_of` as `{"format": "date", "type": "string"}`,
+# which is the only way a JSON-RPC client CAN send a date. Under `ClosedModel(strict=True)` the
+# handler validated the already-parsed arguments dict in pydantic's Python-object mode, where a
+# `date` field accepts only a `datetime.date` instance -- so the server rejected exactly the value
+# its own advertised schema asks for. These tests drive the real protocol session, and the first
+# one reads the expected shape OUT of the published schema rather than restating it, so the
+# assertion cannot drift away from what clients are actually told.
+
+
+def test_the_date_format_the_published_schema_advertises_is_accepted(tmp_path) -> None:
+    async def body(session) -> None:
+        listed = await session.list_tools()
+        investigate = next(tool for tool in listed.tools if tool.name == INVESTIGATE_TOOL)
+        as_of_schema = investigate.inputSchema["properties"]["as_of"]
+        string_form = next(o for o in as_of_schema["anyOf"] if o.get("type") == "string")
+        assert string_form["format"] == "date"  # this is the promise being kept below
+
+        result = await session.call_tool(INVESTIGATE_TOOL, {"task": _TASK, "as_of": "2026-07-27"})
+        assert result.isError is False, result.content[0].text
+        assert result.structuredContent is not None
+
+    with _deps_for(tmp_path, _default_notes()) as deps:
+        anyio.run(_drive, deps, body)
+
+
+def test_accepting_iso_dates_did_not_loosen_any_other_validation(tmp_path) -> None:
+    # Validating in JSON mode restores the mode the payload was written in; it must not become a
+    # coercion escape hatch. Each of these is rejected in BOTH modes and must stay rejected.
+    async def body(session) -> None:
+        for label, arguments in (
+            ("a date-shaped string that is not a date", {"task": _TASK, "as_of": "not-a-date"}),
+            ("a numeric string where an int is declared", {"task": _TASK, "budgets": {"max_evidence": "5"}}),
+            ("a bool where an int is declared", {"task": _TASK, "budgets": {"max_evidence": True}}),
+            ("an int where a string is declared", {"task": 5}),
+            ("a value outside the declared range", {"task": _TASK, "budgets": {"max_evidence": 999}}),
+            ("a Literal member that does not exist", {"task": _TASK, "risk_class": "catastrophic"}),
+        ):
+            result = await session.call_tool(INVESTIGATE_TOOL, arguments)
+            assert result.isError is True, f"{label} was accepted"
+            assert json.loads(result.content[0].text)["error"]["code"] == "invalid_request"
+
+    with _deps_for(tmp_path, _default_notes()) as deps:
+        anyio.run(_drive, deps, body)
+
+
+def test_cross_field_validators_still_run_on_the_json_path(tmp_path) -> None:
+    # `ReadRequest.valid_refs` and `ReadRange.ordered` are the rules no JSON Schema can express,
+    # and they are the whole reason this boundary validates by constructing the frozen model
+    # instead of trusting a declarative pre-check. Changing the validation MODE must not lose them.
+    async def body(session) -> None:
+        for label, arguments in (
+            ("duplicate refs", {"refs": ["a", "a"]}),
+            ("a range naming a ref that was not requested",
+             {"refs": ["a"], "ranges": [{"ref": "b", "start": 1, "end": 2}]}),
+            ("a reversed range", {"refs": ["a"], "ranges": [{"ref": "a", "start": 9, "end": 2}]}),
+        ):
+            result = await session.call_tool(READ_TOOL, arguments)
+            assert result.isError is True, f"{label} was accepted"
+            assert json.loads(result.content[0].text)["error"]["code"] == "invalid_request"
+
+    with _deps_for(tmp_path, _default_notes()) as deps:
+        anyio.run(_drive, deps, body)
