@@ -13,6 +13,9 @@ on:
     branches: [main]
   pull_request:
   workflow_dispatch:
+  # `release.yml` calls this rather than restating the matrix, so the gate a publish passes is
+  # this file and cannot quietly become a weaker copy of it.
+  workflow_call:
 
 permissions:
   contents: read
