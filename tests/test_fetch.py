@@ -583,3 +583,103 @@ def test_production_defaults_are_wired_and_typed_without_real_network(monkeypatc
         raise AssertionError("expected FetchError for a refused connection")
     except FetchError as error:
         assert error.code == "connect_failed"
+
+
+# --- Refusal is the cheap path ------------------------------------------------------------------
+# A redirect, a non-2xx and a rejected Content-Type each called `response.read()` with no argument,
+# reading to EOF into memory with no ceiling. `max_bytes` therefore bounded only the one response
+# shape that was ACCEPTED, and the three that were refused were unbounded: an allowlisted host
+# could spend this process's memory precisely by being refused. Measured before the fix: 3,000,000
+# bytes read on each of the three, against a declared `max_bytes` of 1,000,000.
+
+
+def _spy_unbounded_reads(monkeypatch) -> dict[str, int]:
+    """Record the size of every `read()` made with NO length argument -- i.e. every unbounded one."""
+    import http.client
+
+    seen = {"largest": 0}
+    original = http.client.HTTPResponse.read
+
+    def _spy(self, amt=None):
+        data = original(self, amt)
+        if amt is None:
+            seen["largest"] = max(seen["largest"], len(data))
+        return data
+
+    monkeypatch.setattr(http.client.HTTPResponse, "read", _spy)
+    return seen
+
+
+def _fetch_from(server: "_LocalTlsServer", **budget_overrides: object):
+    return fetch(
+        _url(server), "GET", Budgets(**budget_overrides), network_enabled=True,
+        allowlist=_allowlist(server), resolver=_fake_public_resolver,
+        connect=_redirect_connect(server), ssl_context=_trusting_ssl_context(),
+    )
+
+
+def test_an_error_body_is_not_read_without_a_limit(monkeypatch) -> None:
+    seen = _spy_unbounded_reads(monkeypatch)
+    server = _LocalTlsServer(lambda _r: (500, {"Content-Type": "text/plain"}, b"x" * 3_000_000))
+    try:
+        result = _fetch_from(server, max_bytes=1_000_000)
+        assert result.status == "error" and result.code == "http_status_500"
+        assert seen["largest"] == 0, "an error body must never be read to EOF"
+        assert result.bytes_read <= 1_000_000
+    finally:
+        server.close()
+
+
+def test_a_rejected_content_type_body_is_not_read_without_a_limit(monkeypatch) -> None:
+    seen = _spy_unbounded_reads(monkeypatch)
+    server = _LocalTlsServer(lambda _r: (200, {"Content-Type": "image/png"}, b"x" * 3_000_000))
+    try:
+        result = _fetch_from(server, max_bytes=1_000_000)
+        assert result.status == "blocked" and result.code == "content_type_not_allowed"
+        assert seen["largest"] == 0
+        assert result.bytes_read <= 1_000_000
+    finally:
+        server.close()
+
+
+def test_a_redirect_body_is_not_read_without_a_limit(monkeypatch) -> None:
+    seen = _spy_unbounded_reads(monkeypatch)
+    server = _LocalTlsServer(
+        lambda _r: (302, {"Location": "/next", "Content-Type": "text/plain"}, b"x" * 3_000_000)
+    )
+    try:
+        result = _fetch_from(server, max_bytes=1_000_000, max_redirects=1, max_network_requests=2)
+        assert result.status == "blocked"  # the chain is refused, one way or another
+        assert seen["largest"] == 0
+        assert result.bytes_read <= 1_000_000
+    finally:
+        server.close()
+
+
+# --- Usage is reported on every path, not only on success ---------------------------------------
+
+
+def test_a_successful_fetch_reports_what_it_spent() -> None:
+    server = _LocalTlsServer(lambda _r: (200, {"Content-Type": "text/plain"}, b"y" * 5_000))
+    try:
+        result = _fetch_from(server)
+        assert result.status == "ok"
+        assert result.requests_made == 1
+        assert result.bytes_read == 5_000
+    finally:
+        server.close()
+
+
+def test_a_failed_fetch_still_reports_the_connections_it_made() -> None:
+    # The reason `_Usage` is a mutable argument rather than a return value: a `FetchError` unwinds
+    # past every local, so without it a call refused after several hops reported the same nothing
+    # as one rejected on its scheme. A caller pooling a budget has to charge for failed work.
+    server = _LocalTlsServer(
+        lambda _r: (302, {"Location": "/loop", "Content-Type": "text/plain"}, b"")
+    )
+    try:
+        result = _fetch_from(server, max_redirects=3, max_network_requests=3)
+        assert result.status == "blocked"
+        assert result.requests_made == 3, "three connections were opened and must be reported"
+    finally:
+        server.close()
