@@ -11,10 +11,12 @@ TWO files: the surviving candidates, and every rejection with its reason. Publis
 keepers would be asking the reader to trust what was dropped, which is the habit this whole
 measurement exists to replace.
 
-What comes out is CANDIDATES, not an eval set. Three of the four conditions are mechanical and are
-applied here; the fourth -- whether the issue title works as a question at all -- is a human pass,
-because `ToastEventListener leak` is usable and `Bugs when running application` is not, and any
-rule separating them would be a judgement about question quality smuggled into the mechanical part.
+What comes out is CANDIDATES. All four conditions are mechanical, including the fourth -- shape
+rules over titles alone that exclude raw stack traces, release notes, titles under 18 characters,
+and complaints naming no subject. That last one was first drafted as a human pass and it was wrong:
+the ground truth is valid whether or not the title reads nicely (the commit closed that issue), and
+curating further would mean choosing which questions are fair AFTER seeing what retrieval can do.
+See `pairs.py` for the full argument.
 
 API responses are cached to `--cache` so a second run costs nothing and so the exact inputs behind
 a published number stay on disk, reviewable, instead of living only in whatever GitHub returned
@@ -169,8 +171,8 @@ def main(argv: list[str] | None = None) -> int:
     print(f"rejected {len(rejections)} -> {rejected_path}", file=sys.stderr)
     for reason, count in sorted(tally.items(), key=lambda item: -item[1]):
         print(f"  {count:5}  {reason}", file=sys.stderr)
-    print("\nThese are CANDIDATES. Condition 4 -- does the issue title work as a question -- is a "
-          "human pass, deliberately not automated.", file=sys.stderr)
+    print("\nThese are CANDIDATES: conditions 1-3. Condition 4 is a shape filter applied at "
+          "scoring time, and what it excludes is published alongside what it keeps.", file=sys.stderr)
     return 0
 
 
