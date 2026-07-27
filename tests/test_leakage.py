@@ -9,6 +9,7 @@
 # rather than described.
 from __future__ import annotations
 
+import json
 import math
 import sys
 from pathlib import Path
@@ -154,3 +155,116 @@ def test_stratify_excludes_unmeasurable_questions_from_both_bands() -> None:
     high, low = stratify(rows, threshold=0.5)
     assert high.questions == 1
     assert low.questions == 0
+
+
+# === report_leakage.py: the runner ===============================================================
+# The pure module above is well covered and the runner was not, which is backwards: the runner holds
+# the two things that actually break. The sha-stripping rule is the trap this repository has already
+# documented twice -- ground truth carries no sha because a sha does not survive a history rewrite,
+# so a corpus filename must be stripped before it can match, and forgetting it reports every
+# question as unmatched and looks like a corpus problem rather than a naming one. And the gate's
+# exit code is the part a CI job would depend on, which is worth nothing if it cannot fail.
+
+from report_leakage import canonical, main as report_main  # noqa: E402
+
+
+def test_canonical_strips_the_generators_sha() -> None:
+    assert canonical("2026-07-25-0af3d9c2-fix-make-skills-reach-the-server.md") == (
+        "2026-07-25-fix-make-skills-reach-the-server.md"
+    )
+
+
+def test_canonical_leaves_an_already_stripped_name_alone() -> None:
+    # Idempotent, because ground truth is recorded in the stripped form and both sides of the
+    # comparison run through this.
+    stripped = "2026-07-25-fix-make-skills-reach-the-server.md"
+    assert canonical(stripped) == stripped
+
+
+def test_canonical_does_not_mistake_a_slug_for_a_sha() -> None:
+    # `deadbeef` is eight hex characters AND a plausible slug start. The rule only applies directly
+    # after the date, which is where the generator puts it.
+    assert canonical("2026-07-25-deadbeef-cafe-slug.md") == "2026-07-25-cafe-slug.md"
+    assert canonical("not-dated-deadbeef-slug.md") == "not-dated-deadbeef-slug.md"
+
+
+def _write_fixture(root: Path, *, leaky: bool) -> tuple[Path, Path]:
+    """A two-document corpus and a one-question set, with the question either restating its answer
+    or asking from a consequence. Written with a sha in the filename and referenced without one, so
+    the stripping rule is exercised rather than bypassed."""
+    corpus = root / "corpus"
+    corpus.mkdir()
+    (corpus / "2026-07-25-0af3d9c2-extract-the-pointer-primitives.md").write_text(
+        "the pointer primitives moved so a second artifact kind reuses the guarantees",
+        encoding="utf-8",
+    )
+    (corpus / "2026-07-26-1b2c3d4e-discount-the-lexical-leg.md").write_text(
+        "the lexical leg is discounted when the query language differs from the corpus",
+        encoding="utf-8",
+    )
+    question = (
+        "why were the pointer primitives moved" if leaky
+        else "how do two kinds of thing share one promise"
+    )
+    questions = root / "questions.jsonl"
+    questions.write_text(
+        json.dumps({
+            "id": "q01", "query": question, "language": "en", "type": "factual",
+            "ground_truth": {
+                "must_include": ["2026-07-25-extract-the-pointer-primitives.md"],
+                "acceptable": [],
+            },
+        }) + "\n",
+        encoding="utf-8",
+    )
+    return corpus, questions
+
+
+def test_the_runner_matches_ground_truth_across_the_sha(tmp_path: Path, capsys) -> None:
+    corpus, questions = _write_fixture(tmp_path, leaky=True)
+    assert report_main(["--corpus", str(corpus), "--questions", str(questions), "--json"]) == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["summary"]["unmatched_ground_truth"] == []
+    assert payload["summary"]["questions"] == 1
+    assert payload["questions"][0]["peak"] > 0.0
+
+
+def test_the_gate_fails_and_names_the_offending_questions(tmp_path: Path, capsys) -> None:
+    corpus, questions = _write_fixture(tmp_path, leaky=True)
+    assert report_main(["--corpus", str(corpus), "--questions", str(questions), "--gate", "0.1"]) == 1
+    assert "q01" in capsys.readouterr().err
+
+
+def test_the_gate_passes_a_question_that_does_not_reach_the_threshold(tmp_path: Path, capsys) -> None:
+    # A gate that only ever fails is not a gate. Same corpus, same target, a question asked from
+    # the consequence instead of restated.
+    corpus, questions = _write_fixture(tmp_path, leaky=False)
+    assert report_main(["--corpus", str(corpus), "--questions", str(questions), "--gate", "0.6"]) == 0
+    assert "OK" in capsys.readouterr().out
+
+
+def test_an_empty_corpus_is_a_typed_refusal_not_a_clean_report(tmp_path: Path, capsys) -> None:
+    # Reporting "0 questions leak" over a corpus that failed to load would be the worst possible
+    # answer: a green gate that measured nothing.
+    empty = tmp_path / "empty"
+    empty.mkdir()
+    _, questions = _write_fixture(tmp_path, leaky=True)
+    assert report_main(["--corpus", str(empty), "--questions", str(questions)]) == 2
+    assert "no .md documents" in capsys.readouterr().err
+
+
+def test_ground_truth_absent_from_the_corpus_is_reported_not_scored(tmp_path: Path, capsys) -> None:
+    corpus, _ = _write_fixture(tmp_path, leaky=True)
+    orphan = tmp_path / "orphan.jsonl"
+    orphan.write_text(
+        json.dumps({
+            "id": "q99", "query": "why anything", "language": "en", "type": "factual",
+            "ground_truth": {"must_include": ["2020-01-01-a-document-that-never-existed.md"],
+                             "acceptable": []},
+        }) + "\n",
+        encoding="utf-8",
+    )
+    assert report_main(["--corpus", str(corpus), "--questions", str(orphan), "--json"]) == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["summary"]["unmatched_ground_truth"] == ["q99"]
+    assert payload["summary"]["mean_peak"] is None  # nothing scoreable, not zero
