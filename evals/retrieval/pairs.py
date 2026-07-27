@@ -24,10 +24,18 @@ THE FOUR CONDITIONS, three of them mechanical:
      then files the issue, under a commit that carries a co-author's handle. Cheap insurance, not
      a major filter, and worth saying so rather than letting a reader assume both clauses pull
      equal weight.
-  4. The issue title works as a question. NOT mechanical, and deliberately left to a human:
-     `ToastEventListener leak` is usable and `Bugs when running application` is not, and no rule
-     written here would separate them without also deciding what a good question is, which is the
-     judgement this whole module exists to keep out of the mechanical part.
+  4. The issue title is not obviously unusable -- too short, a raw stack trace, a release note, or
+     a complaint naming no subject. Shape rules, applied to titles alone, published with what they
+     excluded.
+
+     Condition 4 was first drafted as a human pass, and that was wrong. The validity of the ground
+     truth does not depend on the question being well phrased: the commit closed that issue, and
+     it stays the right answer whether or not the title reads nicely. Curating further would mean
+     someone deciding which questions are fair, which is precisely the selection bias every other
+     condition here exists to remove -- and it would flatter the result, because the questions a
+     curator finds unsatisfying are the vague ones retrieval does worst on. `Crash when exploring
+     an HeapDump` is how a person actually asked. Dropping it because it reads badly would be
+     grading the engine on questions chosen after seeing what it can do.
 
 Conditions 1-3 are decided here and every rejection is recorded with its reason, so the set that
 survives can be audited against the set that did not. A pipeline that reports only its keepers is
