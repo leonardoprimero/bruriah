@@ -272,6 +272,19 @@ def test_the_task_field_says_it_is_not_an_instruction() -> None:
     assert "never treated as an instruction" in description
 
 
+def test_the_read_range_states_which_unit_its_offsets_are_in() -> None:
+    # `ReadRequest.model_json_schema()` is handed to the host verbatim as `read_evidence`'s
+    # `inputSchema`, so this is the only place a caller can learn the unit. Getting it wrong is
+    # silent by construction: every line number is also a valid character offset, so a client that
+    # assumes lines receives a much shorter window and no error saying why.
+    properties = ReadRequest.model_json_schema()["$defs"]["ReadRange"]["properties"]
+    for field in ("start", "end"):
+        assert "character offset" in properties[field].get("description", ""), field
+    returned = ReadItem.model_json_schema()["properties"]
+    for field in ("start", "end"):
+        assert "character offset" in returned[field].get("description", ""), field
+
+
 def test_descriptions_do_not_change_the_response_shape() -> None:
     # Schema metadata is not response data: the byte-identity guarantee for pre-skills clients must
     # survive documenting the contract.
