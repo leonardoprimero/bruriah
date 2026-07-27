@@ -249,7 +249,7 @@ unflattering ones are in the same table as the rest.
 | **Query latency** | **≈46µs per passage**, linear — 1k passages 45ms, 16k 734ms | [scale.py](https://github.com/leonardoprimero/bruriah/blob/main/evals/scale.py) |
 | **Index build** | ≈130 passages/second, embedding-dominated, one-off | |
 | **Index size** | ≈5 KB per passage — a 16k-passage corpus is ~79 MB | |
-| **Tests** | **911** passing on a fresh clone on Linux, identical on 3.12, 3.13 and 3.14 · **906** on native Windows, the difference being the five owner-only-mode tests that skip there | [CI](https://github.com/leonardoprimero/bruriah/actions/workflows/ci.yml) |
+| **Tests** | **915** passing on a fresh clone on Linux, identical on 3.12, 3.13 and 3.14 · **910** on native Windows, the difference being the five owner-only-mode tests that skip there | [CI](https://github.com/leonardoprimero/bruriah/actions/workflows/ci.yml) |
 | **Install size** | 178 KB wheel; the embedding model downloads once, separately | |
 | **Sample size** | **12 questions, one corpus, two languages** | the honest caveat: treat the direction as established, the figures as indicative |
 
@@ -349,7 +349,7 @@ Bruriah assumes the corpus may be hostile.
 
 Honest state as of 2026-07-26.
 
-**Working and tested** — 911 tests pass on a fresh clone on Linux, byte-identical on 3.12, 3.13 and 3.14; 906 on native Windows, which is those 911 less the five that skip rather than assert a file mode nobody applied
+**Working and tested** — 915 tests pass on a fresh clone on Linux, byte-identical on 3.12, 3.13 and 3.14; 910 on native Windows, which is those 915 less the five that skip rather than assert a file mode nobody applied
 - Hybrid retrieval (BM25 + local vectors via `sqlite-vec`) over your corpus
 - The two-tool MCP contract, structured output, typed failures
 - Signed policy packs with Ed25519 manifests and fail-closed loading
