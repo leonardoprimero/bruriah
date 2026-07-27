@@ -13,6 +13,8 @@ rather than silent.
 from __future__ import annotations
 
 import os
+import sqlite3
+import traceback
 from pathlib import Path
 
 import pytest
@@ -56,3 +58,51 @@ requires_baseline_script = pytest.mark.skipif(
          and LEGACY_ENGINE.is_file() and LEGACY_DATABASE.is_file()),
     reason="the legacy recovery baseline is not part of this checkout",
 )
+
+
+# An unclosed SQLite connection is not cosmetic in this package. On POSIX it is a descriptor nobody
+# notices, because unlink succeeds against an open file. On Windows the same connection makes the
+# file undeletable, so a leak in `promote_candidate` surfaced as `index-prune` failing WinError 32
+# on three CI jobs and as nothing at all on two platforms and every local run. Thirteen more were
+# in the tests themselves, and the noise they made is what a real one hid in.
+#
+# `filterwarnings` cannot catch this and was tried: the ResourceWarning is raised by the garbage
+# collector, outside the context those filters apply in, so neither `error::ResourceWarning` nor
+# `error::pytest.PytestUnraisableExceptionWarning` fails a test that deliberately leaks one.
+#
+# So the connection is tracked instead of the warning. Closure is recorded from `close()` itself,
+# which means a connection the collector happened to reclaim still counts as leaked -- that is the
+# intent, not an approximation. Relying on collection IS the defect: it is what makes the failure
+# depend on when the collector runs, which is why this one reached CI as a Windows-only mystery.
+@pytest.fixture(autouse=True)
+def no_connection_outlives_its_test(monkeypatch):
+    real_connect = sqlite3.connect
+    opened: list[sqlite3.Connection] = []
+    closed: set[int] = set()
+    origins: dict[int, str] = {}
+
+    def tracking_connect(*args, **kwargs):
+        base = kwargs.pop("factory", sqlite3.Connection)
+        # Subclassed per call so a caller's own factory is honoured rather than replaced.
+        tracked = type("TrackedConnection", (base,), {
+            "close": lambda self: (closed.add(id(self)), super(tracked, self).close())[1]
+        })
+        connection = real_connect(*args, factory=tracked, **kwargs)
+        opened.append(connection)
+        # [-1] is this wrapper and [-2] is whoever called `sqlite3.connect`. Taking the oldest of
+        # three frames instead named `_pytest/python.py`, which is true and useless.
+        caller = traceback.extract_stack(limit=2)[0]
+        origins[id(connection)] = f"{caller.filename}:{caller.lineno}"
+        return connection
+
+    monkeypatch.setattr(sqlite3, "connect", tracking_connect)
+    yield
+    leaked = [connection for connection in opened if id(connection) not in closed]
+    where = "\n".join(f"  opened at {origins[id(item)]}" for item in leaked)
+    for connection in leaked:
+        connection.close()   # do not leave the next test to inherit this one's handles
+    assert not leaked, (
+        f"{len(leaked)} SQLite connection(s) were never closed:\n{where}\n"
+        "Use `contextlib.closing`; a bare `with connection:` commits or rolls back and leaves the "
+        "handle open, which is undetectable on POSIX and fatal to unlink on Windows."
+    )
