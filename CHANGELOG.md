@@ -3,6 +3,57 @@
 Notable changes, newest first. This project follows [semantic versioning](https://semver.org/),
 and the entries here name what changed for *you* rather than which files moved.
 
+## [0.4.1] — 2026-07-27
+
+### The date format the tool advertises is now a date format the tool accepts
+
+`investigate_work` publishes its `inputSchema` straight from the frozen request model, and that
+schema describes `as_of` as `{"format": "date", "type": "string"}` — which is the only way a
+JSON-RPC client *can* send a date, since JSON has no date type. The server then rejected exactly
+that. The request models set `strict=True`, and the tool boundary validated the already-parsed
+arguments in pydantic's Python-object mode, where a `date` field accepts only a `datetime.date`
+instance. A client that read the published schema and did what it said got `invalid_request`.
+
+Validation now runs in JSON mode, which is the mode the payload was written in. Nothing was
+loosened: `extra="forbid"`, strict scalars (a bool is still not an int, `"5"` is still not `5`),
+range bounds, `Literal` members, unparseable dates and every cross-field validator reject exactly
+as before — there is a test that walks each of those. `cache.py` already used this pattern for the
+same reason; the boundary where it mattered most was the one place that never adopted it.
+
+### `max_output_chars` binds the path that actually returns evidence
+
+The declared output budget was enforced only where `context.assemble_context` produced the result,
+which is the routed-or-abstained path. The proceeding path — the one that carries retrieved
+evidence, and therefore the largest response this tool produces — built its result inline and
+returned it unchecked. A request declaring 256 characters received 2581, labelled `complete`.
+`max_evidence` did not cover for it: that ceiling bounds how many records come back, not how big
+they are.
+
+Compaction also has to tell the truth when it cannot win. Two ways it did not. It measured the
+evidence copy and then returned something ~110 characters larger, because the
+`output_budget_compacted` marker and the `ctx-compacted:<digest>:<n>` cursor are appended *after*
+the stop decision — so a response could stop at "now it fits" and cross back over on the way out.
+And when nothing was droppable it returned silently, still over budget, still `complete`. It now
+measures the payload it actually returns, and a budget it cannot meet is reported as
+`output_budget_unmet` with the status downgraded.
+
+Worth knowing if you set this field: `Budgets` allows `max_output_chars` as low as 256, but an
+entirely empty result already serializes to 470 characters — `request_id` is a 71-character digest
+and `budgets` echoes all ten of its fields. Anything you declare below ~470 is unreachable by
+construction. You will be told rather than quietly overrun.
+
+### Every GitHub Action is pinned to a commit SHA
+
+`@v4` and `@release/v1` are mutable pointers, not versions: they can be moved between one run and
+the next. The sharpest instance was `pypa/gh-action-pypi-publish@release/v1` — a *branch* ref on
+the only job holding `id-token: write`. Removing the stored API token in 0.4.0 bought less than it
+looked like while the code minting the short-lived one was still mutable. Every third-party action
+now names a 40-character SHA with its version in a trailing comment, and a new CI job fails the
+build if a step is ever added without one, so this does not decay the next time someone adds a
+step.
+
+None of this changes any behaviour you would see at the CLI, and no index or snapshot is affected.
+
 ## [0.4.0] — 2026-07-27
 
 ### It can state its own version, and the compatibility gate now asks about the real one
