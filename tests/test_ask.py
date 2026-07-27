@@ -37,7 +37,9 @@ def indexed(tmp_path: Path):
     (corpus / "rocket.md").write_text(f"# Rocket\nThe rocket launch decision.\n{_PAD}\n")
     policy = tmp_path / "policy.yaml"
     policy.write_text("version: 1\ninclude: ['**']\nexclude: []\n")
-    argv = ["--data-dir", str(tmp_path / "d"), "--config-dir", str(tmp_path / "c")]
+    # Spaces on purpose: the default data directory on macOS is `~/Library/Application Support/
+    # bruriah`, so a path without one is not the path most of this project's users actually have.
+    argv = ["--data-dir", str(tmp_path / "data dir"), "--config-dir", str(tmp_path / "config dir")]
     parser = cli._build_cli_parser()
     # The model NAME is recorded in the build descriptor and re-checked when deps are loaded, so
     # it has to match what the fake factory claims or activation fails `embedding_model_mismatch`.
