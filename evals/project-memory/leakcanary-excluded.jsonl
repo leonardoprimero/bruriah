@@ -1,0 +1,24 @@
+{"excluded_by": ["stack_trace"], "id": "lc3", "query": "java.lang.StackOverflowError on HeapAnalyzerService"}
+{"excluded_by": ["stack_trace"], "id": "lc46", "query": "java.lang.ExceptionInInitializerError Caused by: java.lang.NullPointerException: in == null   at java.util.Properties.load(Properties.java:246)"}
+{"excluded_by": ["stack_trace"], "id": "lc223", "query": "OutOfMemoryError: lower memory usage for M heap dumps"}
+{"excluded_by": ["stack_trace"], "id": "lc417", "query": "java.lang.NullPointerException alyunOS"}
+{"excluded_by": ["stack_trace"], "id": "lc449", "query": "NullPointerException in LeakCanaryInternals.isInServiceProcess()"}
+{"excluded_by": ["stack_trace"], "id": "lc874", "query": "NullPointerException: Attempt to invoke virtual method 'java.util.List com.squareup.haha.perflib.ClassInstance.getValues()' on a null object reference"}
+{"excluded_by": ["stack_trace"], "id": "lc1037", "query": "IndexOutOfBoundsException on 1.6-SNAPSHOT"}
+{"excluded_by": ["stack_trace"], "id": "lc1075", "query": "IndexOutOfBoundsException with 1.6.1 leakcanary"}
+{"excluded_by": ["stack_trace"], "id": "lc1135", "query": "IndexOutOfBoundsException"}
+{"excluded_by": ["stack_trace"], "id": "lc1366", "query": "KotlinNullPointerException"}
+{"excluded_by": ["generic_no_subject"], "id": "lc1529", "query": "Crash on app process restart"}
+{"excluded_by": ["too_short"], "id": "lc1530", "query": "configuration"}
+{"excluded_by": ["stack_trace"], "id": "lc1624", "query": "ava.lang.NoSuchMethodError: No interface method getBuffer()Lokio/Buffer"}
+{"excluded_by": ["stack_trace"], "id": "lc1713", "query": "IndexOutOfBoundsException  leak_canary_list"}
+{"excluded_by": ["stack_trace"], "id": "lc1735", "query": "java.lang.NoSuchMethodError on obfuscated instrumentation tests"}
+{"excluded_by": ["stack_trace"], "id": "lc1768", "query": "java.lang.ArrayIndexOutOfBoundsException"}
+{"excluded_by": ["too_short"], "id": "lc2054", "query": "Prevent Monkey"}
+{"excluded_by": ["too_short"], "id": "lc2078", "query": "A typo"}
+{"excluded_by": ["stack_trace"], "id": "lc2140", "query": "ServiceNotFoundException for input_method"}
+{"excluded_by": ["stack_trace"], "id": "lc2315", "query": "NoSuchFieldError:No file Companion of type Lokio/ByteString$Companion"}
+{"excluded_by": ["stack_trace"], "id": "lc2342", "query": "kotlin.KotlinNullPointerException in Instrumentation test "}
+{"excluded_by": ["generic_no_subject"], "id": "lc2371", "query": "Crash when exploring an HeapDump"}
+{"excluded_by": ["release_note_only"], "id": "lc2644", "query": "\"Getting started\" page accidentally pointing folks to alpha release"}
+{"excluded_by": ["generic_no_subject"], "id": "lc2674", "query": "Bugs when running application"}
