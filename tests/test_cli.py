@@ -16,7 +16,8 @@ import platformdirs
 import pytest
 
 from conftest import requires_vault
-from bruriah import cache, cli, clients
+from bruriah import __version__ as bruriah_version
+from bruriah import cache, cli, clients, packs
 from bruriah.contracts import EvidenceRecord
 from bruriah.platform import load_deps, open_snapshot, resolve_paths
 from bruriah.retrieval import search as router_search
@@ -692,3 +693,17 @@ def test_every_activation_subcommand_is_registered(tmp_path: Path, argv, capsys)
     assert code == (0 if argv[0] == "skill-status" else 1)
     if code == 1:
         assert "bruriah: error:" in capsys.readouterr().err
+
+
+def test_pack_compatibility_is_checked_against_the_version_this_actually_is(tmp_path: Path) -> None:
+    """The router-version default is the installed version, not the `0.1.0` it was hardcoded to.
+
+    `check_router_compatibility` gates a pack on `min_router_version <= router <= max_router`. With
+    the default frozen at `0.1.0`, a pack requiring the CURRENT version was rejected by a router
+    that IS the current version -- the gate was not dormant, it was answering about a release the
+    package had not been since its first. Asserting the default equals `__version__` would restate
+    the assignment; this asserts the BEHAVIOUR the assignment exists for.
+    """
+    packs.check_router_compatibility(bruriah_version, bruriah_version, bruriah_version)
+    with pytest.raises(packs.PackError):
+        packs.check_router_compatibility("0.0.1", "0.0.2", bruriah_version)

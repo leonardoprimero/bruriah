@@ -8,6 +8,7 @@ from typing import Annotated, Literal
 
 from pydantic import Field, ValidationError, model_validator
 
+from . import __version__ as _ROUTER_VERSION
 from .packs import (
     ClosedModel,
     Identifier,
@@ -199,7 +200,7 @@ def load_skill_pack_bytes(
     trust_roots: dict[str, str],
     *,
     today: date | None = None,
-    router_version: str = "0.1.0",
+    router_version: str = _ROUTER_VERSION,
     minimum_versions: dict[str, str] | None = None,
     allow_unsigned_local: bool = False,
     enforce_currency: bool = True,
@@ -258,7 +259,7 @@ def load_skill_pack(
     trust_roots: dict[str, str],
     *,
     today: date | None = None,
-    router_version: str = "0.1.0",
+    router_version: str = _ROUTER_VERSION,
     minimum_versions: dict[str, str] | None = None,
     allow_unsigned_local: bool = False,
     enforce_currency: bool = True,

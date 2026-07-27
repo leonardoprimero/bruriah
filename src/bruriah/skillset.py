@@ -14,6 +14,7 @@ from typing import Annotated, Literal
 
 from pydantic import Field, ValidationError
 
+from . import __version__ as _ROUTER_VERSION
 from .packs import MAX_PACK_BYTES, ClosedModel, PackError, encode_pack, parse_pack_bytes
 from .pointer import (
     controlled_file, flush_validated, identity_matches, read_pointer, serialized, write_pointer,
@@ -155,7 +156,7 @@ def compile_skillset(
     approvals: Mapping[str, str],
     *,
     today: date | None = None,
-    router_version: str = "0.1.0",
+    router_version: str = _ROUTER_VERSION,
     minimum_versions: dict[str, str] | None = None,
 ) -> ValidatedSkillSet:
     """Compile approved skill packs into one immutable generation at `destination`.
@@ -179,7 +180,7 @@ def validate_skillset_bytes(
     approvals: Mapping[str, str],
     *,
     today: date | None = None,
-    router_version: str = "0.1.0",
+    router_version: str = _ROUTER_VERSION,
     minimum_versions: dict[str, str] | None = None,
 ) -> ValidatedSkillSet:
     """Re-verify a generation from its bytes alone, then derive the skill set it compiles to.
@@ -223,7 +224,7 @@ def validate_skillset(
     approvals: Mapping[str, str],
     *,
     today: date | None = None,
-    router_version: str = "0.1.0",
+    router_version: str = _ROUTER_VERSION,
     minimum_versions: dict[str, str] | None = None,
 ) -> ValidatedSkillSet:
     try:
@@ -359,7 +360,7 @@ def promote_skillset(
     approvals: Mapping[str, str],
     *,
     today: date | None = None,
-    router_version: str = "0.1.0",
+    router_version: str = _ROUTER_VERSION,
     minimum_versions: dict[str, str] | None = None,
     retain: int = 2,
 ) -> SkillSetActivation:
@@ -437,7 +438,7 @@ def rollback_skillset(
     approvals: Mapping[str, str],
     *,
     today: date | None = None,
-    router_version: str = "0.1.0",
+    router_version: str = _ROUTER_VERSION,
     minimum_versions: dict[str, str] | None = None,
 ) -> SkillSetActivation:
     """Restore the most recently retained generation, demoting the current active into `retained`.
@@ -469,7 +470,7 @@ def recover_skillset(
     approvals: Mapping[str, str],
     *,
     today: date | None = None,
-    router_version: str = "0.1.0",
+    router_version: str = _ROUTER_VERSION,
     minimum_versions: dict[str, str] | None = None,
 ) -> SkillSetActivation:
     """Republish the first generation in `[active, *retained]` that still validates.
@@ -532,7 +533,7 @@ def open_skillset(
     approvals: Mapping[str, str],
     *,
     today: date | None = None,
-    router_version: str = "0.1.0",
+    router_version: str = _ROUTER_VERSION,
     minimum_versions: dict[str, str] | None = None,
 ) -> SkillSetStatus:
     """Open the active skill set for serving. NEVER raises.
