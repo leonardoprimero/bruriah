@@ -231,6 +231,156 @@ from different corpora, which is what makes it safe to work against without fitt
 One finding is positive: jina improves on both foreign corpora. The claim below that the model
 matters more than the weighting was, until this, one repository's opinion of itself.
 
+## Reranking, measured 2026-07-27 — and how much of the loss is really ranking
+
+The paragraph above says the ranking gap is the distance between recall@3 and recall@10. That
+understates it by half, and the correction came from measuring the ceiling instead of inferring it.
+
+Ask how often the correct document is **anywhere** in the pool `search` returns, rather than in its
+top ten. Reproduce with no reranker and no new model — the pool is just `Budgets(max_candidates=200)`:
+
+| | recall@3 | in the top 10 | in the top 40 documents | **anywhere in the pool** |
+|---|---|---|---|---|
+| leakcanary (604 docs) | 0.340 | 0.451 | 0.588 | **0.758** |
+| egui (2119 docs) | 0.530 | 0.723 | 0.855 | **0.916** |
+
+**Retrieval finds the right document three times in four, and nine times in ten. The ordering then
+throws it away.** Everything on this page about a "ranking problem" was true and too modest.
+
+### What a cross-encoder recovers
+
+`search` takes an optional `rerank` callable, off unless an operator names one with `--reranker`.
+It scores the top 40 **documents** and reorders them; the tail keeps retrieval's own order, so a
+reranker can only reorder what was already found and never invent a result.
+
+| | recall@3 | recall@10 | MRR@10 | ceiling at this depth |
+|---|---|---|---|---|
+| leakcanary, shipped ranking | 0.340 | 0.451 | 0.290 | — |
+| leakcanary, `jina-reranker-v2` | **0.431** | **0.516** | **0.392** | 0.588 |
+| egui, shipped ranking | **0.530** | **0.723** | 0.443 | — |
+| egui, `jina-reranker-v2` | 0.494 | 0.675 | 0.445 | 0.855 |
+
+**It is worth fourteen questions on leakcanary and costs three on egui**, and the second number is
+the one to read first. On egui the reranker lowers recall@3 *and* recall@10 while leaving MRR flat:
+it is not noise around zero, it is a small consistent loss, on the corpus where the shipped ranking
+was already strongest.
+
+### Depth amplifies the direction, it does not improve it
+
+The obvious hypothesis is that egui was simply not reranked deeply enough. It was measured:
+
+| | top 20 | top 40 *(shipped)* | no reranker |
+|---|---|---|---|
+| leakcanary | 0.412 | **0.431** | 0.340 |
+| this repository, English | 0.917 | **1.000** | 0.833 |
+| egui | 0.518 | **0.494** | 0.530 |
+
+**Deeper is better where the reranker helps and worse where it hurts.** That is the opposite of a
+depth problem — more candidates do not give a struggling reranker more to work with, they give it
+more opportunities to move the right document down. An earlier draft of this page said depth helped
+everywhere it was tried, on two corpora out of three. The third one is why that sentence is gone.
+
+So the rule this eval supports is narrower than "reranking helps", and narrower than the tidy story
+that it helps where retrieval is weak — the internal English set began at 0.833, the strongest
+baseline measured, and still went to 1.000. Four question sets: three gained, one lost, and no
+explanation available from four sets is worth stating as a mechanism. **Measure it on your own
+corpus before turning it on**, which is a real instruction here because the flag makes that a
+one-command experiment and no re-index.
+
+### The unit matters more than the size of the model
+
+The first attempt reranked **passages** and was nearly worthless. A passage here is roughly 250
+characters of a commit body whose median length is 445 and 497 in these two corpora, so a
+cross-encoder was being handed half a commit and asked whether it answered a bug report:
+
+| what the cross-encoder was given | model | size | leakcanary recall@3 |
+|---|---|---|---|
+| passages | `ms-marco-MiniLM-L-6` | 0.08 GB | 0.359 *(recall@10 falls to 0.425)* |
+| passages | `jina-reranker-v2` | 1.11 GB | 0.373 |
+| **whole documents** | `ms-marco-MiniLM-L-6` | 0.08 GB | 0.373 |
+| **whole documents** | `jina-reranker-v2` | 1.11 GB | **0.412** *(at top 20)* |
+
+The 0.08 GB model reading whole documents matches the 1.11 GB model reading passages. Fourteen
+times the download bought what changing the input unit bought for free. This is the same shape as
+"the model matters more than the weighting" below, one level further in: the model matters more
+than the weighting, and what you feed the model matters more than the model.
+
+### An English-only reranker is not neutral on Spanish — it is destructive
+
+The cheap model is English-only, and the tempting reading of the table above is that it is nearly
+as good for a fraction of the size. On the twelve Spanish questions, against a 159-document corpus
+of this repository's own history:
+
+| | recall@3 | recall@10 | MRR@10 |
+|---|---|---|---|
+| shipped ranking | 0.500 | 0.917 | 0.454 |
+| `ms-marco-MiniLM-L-6` (English-only, top 20) | 0.583 | **0.667** | 0.507 |
+| `jina-reranker-v2` (multilingual) | **0.917** | 0.917 | **0.819** |
+
+**A model that cannot read the query still returns confident scores, and reordering by them
+destroyed a quarter of the recall@10 the engine already had.** That is the reason the flag takes a
+model name and ships with no default: there is no safe default across languages, and a silent one
+would have made this failure invisible.
+
+The same stage takes the twelve **English** questions from 0.833 to **1.000** — all twelve — with
+MRR@10 going 0.637 to 0.847. So Spanish does not reach parity: it lands one question short of an
+English set that the reranker also improved. What closed is most of the gap, not the gap.
+
+Two paragraphs further down this page say 58% is "the vector leg's own ceiling" and that the fusion
+fix "does not make cross-lingual retrieval as good as same-language retrieval." Both were true of
+the pipeline that existed when they were written. Neither survives this, and it is the second time
+a number on this page called a ceiling turned out to be a property of one replaceable component.
+
+Twelve questions, and one of them is eight points: read that 1.000 as "nothing left to find in a
+twelve-question set", which is a statement about the set.
+
+### How these numbers were produced, which is not uniform and should not be hidden
+
+Two harnesses produced this section, and saying which did what is the difference between a
+measurement and a number.
+
+The **internal twelve-question rows** come from calling the shipped `search(..., rerank=...)`
+directly, through the deps `bruriah serve` builds, with the shipped depth. Nothing was reordered
+outside the product.
+
+The **exploratory rows** — every reranker and depth that was tried and discarded, including the
+passage-level table above — come from an offline harness that dumps the ranked pool once and
+reorders it, because rerunning retrieval for every candidate would have taken hours. That harness
+earns its place by reproducing every previously published figure on this page **exactly**:
+leakcanary 0.340 / 0.451 / 0.662 (n=68) / 0.082 (n=85), egui 0.530 / 0.723 / 0.649 (n=57) /
+0.269 (n=26), and 0.833 on the internal English set.
+
+**Every reranked row in the result table above was then re-derived through the shipped `search()`**,
+at the shipped depth, and the leakcanary figures agree with the offline harness digit for digit
+(0.431 / 0.516 / 0.392, bands 0.824 and 0.118). Two independent paths, same numbers, so neither is
+a private convention of one script.
+
+That re-derivation is also what produced the egui loss. The offline exploration had egui at depth 20
+reading 0.518, close enough to the 0.530 baseline to write off as one question; running the shipped
+configuration turned it into 0.494 and three questions. The number that went into this page is the
+one from the code that ships, and it is worse than the one exploration suggested.
+
+### What this costs, and the caveats that do not go away
+
+A cross-encoder pass per candidate document is by far the most expensive thing in a request, and
+depth is the whole cost: 40 documents is 40 forward passes before a single result is returned.
+`search` drops the stage entirely once `max_elapsed_ms` has passed rather than overrunning it, and
+degrades to the shipped ranking — a measured 0.340, not nothing — on every failure a supplied model
+can produce, disclosing which one in `degradation`.
+
+**Twelve questions is still twelve questions.** The Spanish result is five questions moving, and
+the English one is a single question plus an MRR gain. The foreign-corpus figures rest on 153 and
+83 questions written by people who did not know the answer, which is why they lead. The internal
+Spanish baseline reads 0.500 here rather than the 0.583 published further down because this corpus
+has grown to 159 documents from 147 — one question out of twelve, which is exactly what the sample
+size warning on this page has always meant.
+
+**Not measured:** any language other than English and Spanish, and any reranker outside the two
+named. The ceiling table says 0.758 is available on leakcanary and reranking the whole
+200-candidate pool would be the way to chase it — but the depth table above is a reason to expect
+less from that than the ceiling suggests, since on egui more depth made things worse rather than
+better. Nobody has run it, and the latency is why it is not the default in any case.
+
 ## The model matters more than the weighting, measured 2026-07-26
 
 `--model` has always been a flag on `bruriah index`, and nothing said what it was worth. It is
