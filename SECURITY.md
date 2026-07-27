@@ -51,7 +51,10 @@ Stated plainly, because a security claim that quietly overreaches is worse than 
 
 ## Supported versions
 
-Only the latest release. This is 0.1.0 and there is no backport branch.
+Only the latest release, and there is no backport branch. `bruriah --version` reports the one you
+have; the releases themselves are listed in `CHANGELOG.md`. This paragraph names no number on
+purpose — it named 0.1.0 for three releases, because a version written into prose is a fact that
+goes stale silently while reading as though someone maintained it.
 
 ## Platform
 

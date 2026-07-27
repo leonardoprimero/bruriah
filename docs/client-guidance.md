@@ -29,8 +29,10 @@ ever lands on stdout, which is the JSON-RPC transport channel itself.
 ## Version visibility
 
 Every launch manifest carries a `router_version` field, defaulting to the
-installed `bruriah.__version__` (currently `0.1.0`) at the moment the
-manifest is constructed. This gives version visibility (spec
+installed `bruriah.__version__` at the moment the manifest is constructed.
+Run `bruriah --version` to see what that is on your machine; this sentence
+deliberately does not repeat the number, having claimed `0.1.0` for three
+releases after it stopped being true. This gives version visibility (spec
 `K-Canonical Client Launch Manifest and Adapters`: "Adapters MUST use
 absolute executable semantics, explicit arguments/environment, version
 visibility, stderr diagnostics, and no shell-specific quoting

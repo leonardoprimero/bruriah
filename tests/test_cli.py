@@ -695,6 +695,21 @@ def test_every_activation_subcommand_is_registered(tmp_path: Path, argv, capsys)
         assert "bruriah: error:" in capsys.readouterr().err
 
 
+def test_it_reports_its_own_version_without_a_subcommand(capsys) -> None:
+    """`--version` has to answer before `required=True` on the subcommand can reject the call.
+
+    `docs/client-guidance.md` named this flag as the way to find out which router version a config
+    targets while the flag did not exist, and the doc asserted `0.1.0` for three releases. Both the
+    flag and the single source it reads from are pinned here: the number comes from
+    `bruriah.__version__` rather than being restated, so a bump cannot make this test agree with a
+    stale string.
+    """
+    with pytest.raises(SystemExit) as exit_info:
+        cli.bruriah_main(["--version"])
+    assert exit_info.value.code == 0
+    assert capsys.readouterr().out.strip() == f"bruriah {bruriah_version}"
+
+
 def test_pack_compatibility_is_checked_against_the_version_this_actually_is(tmp_path: Path) -> None:
     """The router-version default is the installed version, not the `0.1.0` it was hardcoded to.
 
