@@ -13,8 +13,8 @@ from pathlib import Path
 from conftest import requires_posix_permissions
 
 from bruriah.cache import (
-    CacheEntry, CacheStats, PruneSummary, build_cache_entry, cache_key, cache_stats, prune_expired,
-    read_cache, write_cache_atomic,
+    CacheEntry, CacheStats, PruneSummary, build_cache_entry, cache_key, cache_stats, find_by_ref,
+    prune_expired, read_cache, write_cache_atomic,
 )
 from bruriah.contracts import EvidenceRecord
 
@@ -316,3 +316,58 @@ def test_cache_stats_reports_entries_and_expired_without_mutating(tmp_path: Path
     assert stale.entries == 1  # still on disk -- cache_stats only reports, never prunes
     assert stale.expired == 1
     assert _path(cache_dir, "https://example.test:443/live").exists()
+
+
+# --- Finding an entry by the ref its evidence carries -------------------------------------------
+# Entries are keyed by a hash of the canonical URL, which answers `research()`'s question ("do I
+# already have this url") and not `read_evidence`'s ("give me the bytes behind this ref"). The key
+# cannot be reversed: the ref digests the BODY and the key digests the URL, deliberately, so the
+# same page fetched twice is one cache entry and two pieces of evidence.
+
+
+def test_find_by_ref_returns_the_entry_whose_evidence_carries_that_ref(tmp_path: Path) -> None:
+    now = datetime(2026, 7, 24, 12, 0, 0, tzinfo=timezone.utc)
+    wanted = _entry(evidence=_evidence(ref="live:sha256:" + "a" * 32), retrieved_at=now)
+    other = _entry(evidence=_evidence(ref="live:sha256:" + "b" * 32), retrieved_at=now)
+    write_cache_atomic(tmp_path, "https://one.example:443/a", wanted)
+    write_cache_atomic(tmp_path, "https://two.example:443/b", other)
+
+    found = find_by_ref(tmp_path, "live:sha256:" + "a" * 32, now=now)
+    assert found.hit and found.entry is not None
+    assert found.entry.evidence.ref == "live:sha256:" + "a" * 32
+
+
+def test_find_by_ref_reports_an_expired_entry_as_expired_and_withholds_it(tmp_path: Path) -> None:
+    # "Had it, it aged out" is a different answer from "never had it", and neither is grounds for
+    # handing back stale content -- the same split `read_cache` already makes.
+    now = datetime(2026, 7, 24, 12, 0, 0, tzinfo=timezone.utc)
+    write_cache_atomic(tmp_path, "https://one.example:443/a",
+                       _entry(evidence=_evidence(ref="live:sha256:" + "c" * 32), retrieved_at=now))
+
+    found = find_by_ref(tmp_path, "live:sha256:" + "c" * 32, now=now + timedelta(days=3))
+    assert found.hit is False
+    assert found.expired is True
+    assert found.entry is None
+
+
+def test_find_by_ref_misses_cleanly_on_an_unknown_ref_and_an_absent_directory(tmp_path: Path) -> None:
+    now = datetime(2026, 7, 24, 12, 0, 0, tzinfo=timezone.utc)
+    assert find_by_ref(tmp_path / "never-created", "live:sha256:" + "d" * 32, now=now).hit is False
+
+    write_cache_atomic(tmp_path, "https://one.example:443/a",
+                       _entry(evidence=_evidence(ref="live:sha256:" + "e" * 32), retrieved_at=now))
+    miss = find_by_ref(tmp_path, "live:sha256:" + "f" * 32, now=now)
+    assert miss.hit is False and miss.expired is False and miss.entry is None
+
+
+def test_find_by_ref_skips_a_corrupt_entry_instead_of_raising(tmp_path: Path) -> None:
+    # A corrupt file cannot answer for any ref, and a scan that dies on one bad file would make a
+    # single unreadable entry break every live read. `prune_expired` is what removes it.
+    now = datetime(2026, 7, 24, 12, 0, 0, tzinfo=timezone.utc)
+    (tmp_path).mkdir(parents=True, exist_ok=True)
+    (tmp_path / "0000corrupt.json").write_text("{not json", encoding="utf-8")
+    write_cache_atomic(tmp_path, "https://one.example:443/a",
+                       _entry(evidence=_evidence(ref="live:sha256:" + "9" * 32), retrieved_at=now))
+
+    found = find_by_ref(tmp_path, "live:sha256:" + "9" * 32, now=now)
+    assert found.hit and found.entry is not None

@@ -286,6 +286,40 @@ def read_cache(cache_dir: Path, canonical_url: str, *, now: datetime) -> CacheLo
     return CacheLookup(hit=True, expired=False, entry=entry)
 
 
+def find_by_ref(cache_dir: Path, ref: str, *, now: datetime) -> CacheLookup:
+    """Find the cached entry whose evidence carries `ref`, for `read_evidence`.
+
+    Entries are keyed by a hash of the canonical URL, which is right for `research()` -- it asks
+    "do I already have THIS url" -- and useless for the other direction. `investigate_work` hands
+    the client a `live:sha256:<32 hex>` ref and the client hands it back to `read_evidence`, which
+    has the ref and not the URL. Reversing the key is not possible: the ref digests the BODY and
+    the key digests the URL, deliberately, so that the same page fetched twice at different times
+    is one cache entry and two distinct pieces of evidence.
+
+    So this scans. The cache is a small per-user directory with a TTL and a prune sweep, and the
+    alternative -- a second index, on disk, kept consistent with the first -- is a durability
+    problem in exchange for microseconds. Scanning in sorted order also keeps the answer
+    deterministic if two entries ever carry one ref (identical bytes fetched from two URLs).
+
+    An expired entry is reported as `hit=False, expired=True` with the entry withheld, exactly as
+    `read_cache` does: the caller needs to distinguish "never had it" from "had it, it aged out",
+    and neither is grounds for serving stale content as current.
+    """
+    if not cache_dir.is_dir():
+        return CacheLookup(hit=False, expired=False, entry=None)
+    for path in sorted(cache_dir.glob("*.json")):
+        try:
+            entry = _decode(path.read_text(encoding="utf-8"))
+        except (CacheError, OSError):
+            continue  # a corrupt entry cannot answer for any ref; `prune_expired` removes it
+        if entry.evidence.ref != ref:
+            continue
+        if now > entry.expires_at:
+            return CacheLookup(hit=False, expired=True, entry=None)
+        return CacheLookup(hit=True, expired=False, entry=entry)
+    return CacheLookup(hit=False, expired=False, entry=None)
+
+
 def build_cache_entry(
     evidence: EvidenceRecord,
     *,
@@ -315,6 +349,6 @@ def build_cache_entry(
 
 __all__ = [
     "CacheEntry", "CacheError", "CacheLookup", "CacheStats", "PruneSummary", "ReuseState",
-    "build_cache_entry", "cache_key", "cache_stats", "prune_expired", "read_cache",
+    "build_cache_entry", "cache_key", "cache_stats", "find_by_ref", "prune_expired", "read_cache",
     "write_cache_atomic",
 ]
