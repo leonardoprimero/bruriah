@@ -41,7 +41,7 @@ from dataclasses import dataclass
 from urllib.parse import urlsplit
 
 from .classify import classify
-from .context import assemble_context
+from .context import assemble_context, compact_to_budget
 from .contracts import (
     EvidenceRecord, HostAction, InvestigationRequest, InvestigationResult, PermissionDisclosure,
     ReadItem, ReadRequest, ReadResult,
@@ -435,11 +435,28 @@ def investigate(request: InvestigationRequest, deps: ServiceDeps) -> Investigati
                 extra_gaps.append(f"no_skill_for_domain:{classification.domain}")
                 host_actions = host_actions + [drafting]
 
-    return InvestigationResult(
+    result = InvestigationResult(
         schema_version="1", status=status, request_id=request_id, evidence=evidence,
         claims=[], conflicts=[], gaps=list(decision.gaps) + extra_gaps, host_actions=host_actions,
         warnings=warnings, degradation=degradation, budgets=request.budgets, next_cursor=None,
     )
+    # `max_output_chars` is enforced HERE and nowhere else on this path. Both non-`proceed`
+    # outcomes return through `assemble_context`, which compacts before returning; the `proceed`
+    # branch built and returned its result inline, so the ONE path that actually carries retrieved
+    # evidence -- the largest response this tool produces -- was the only one that never checked
+    # the declared budget. Measured on a real snapshot before this line existed: a request
+    # declaring 256 characters received 2581 and was labelled `complete`.
+    #
+    # `max_evidence` above is a different ceiling and does not subsume this one: it bounds the
+    # NUMBER of records, which says nothing about their size. Twenty short passages and twenty
+    # long ones both satisfy it.
+    #
+    # Compaction drops only evidence no claim cites. `claims` is `[]` on this path, so nothing is
+    # protected and every record is droppable -- correct rather than harsh: a caller who declares
+    # a budget too small to hold evidence gets the shortfall named in `degradation`
+    # (`output_budget_compacted`, plus `output_budget_unmet` when even an empty result overruns)
+    # instead of a quietly oversized response.
+    return compact_to_budget(result, request.budgets.max_output_chars)
 
 
 def _read_one(

@@ -234,9 +234,47 @@ def compact_to_budget(result: InvestigationResult, max_output_chars: int) -> Inv
     fixed order (reverse-sorted `ref`, so repeated calls on identical input always drop the same
     items in the same order). `conflicts`, `warnings`, `gaps`, `host_actions`, and every
     claim-cited evidence ref are NEVER removed -- if the budget still cannot be met once every
-    droppable item is gone, the result is returned as-is rather than sacrificing protected data."""
+    droppable item is gone, protected data is kept and the SHORTFALL IS REPORTED rather than
+    silently tolerated: `degradation` gains `output_budget_unmet` and the status can no longer be
+    `complete`.
+
+    Reporting the shortfall is not defensive decoration. The declared floor is
+    `max_output_chars >= 256`, and an entirely empty result -- no evidence, no claims, no gaps --
+    already serializes to 470 characters, because `request_id` is a 71-character digest and
+    `budgets` echoes all ten declared fields. So every request in the 256..469 band asks for
+    something no valid response can satisfy, and the old code answered them over budget while
+    still claiming `complete`. The budget is a target this function shrinks TOWARD; whether it was
+    reached is now a fact the caller is told, not one they must measure themselves."""
     if len(result.model_dump_json()) <= max_output_chars:
         return result
+
+    # Reached only when the result was already over budget, so `complete` is never truthful from
+    # here on -- either something was dropped to fit, or the budget was not met at all.
+    demoted: ContextStatus = "partial" if result.status == "complete" else result.status
+
+    def _render(kept: list[EvidenceRecord], dropped: int, unmet: bool) -> InvestigationResult:
+        """Build the result EXACTLY as it will be returned, markers and cursor included.
+
+        The loop below has to measure this and not the bare evidence copy. Compaction appends
+        `output_budget_compacted` and a `ctx-compacted:<71-char digest>:<n>` cursor AFTER the
+        decision to stop -- together roughly 110 characters that the old measurement never saw,
+        so a result could stop dropping at "now it fits", then grow back over the ceiling on its
+        way out the door. Measuring the real payload is the only way the returned object and the
+        checked object are the same object."""
+        return result.model_copy(update={
+            "evidence": kept,
+            "status": demoted,
+            "degradation": [
+                *result.degradation,
+                *(["output_budget_compacted"] if dropped else []),
+                *(["output_budget_unmet"] if unmet else []),
+            ],
+            # Only a real drop leaves anything to resume past; `:0` would advertise a position
+            # that does not exist.
+            "next_cursor": (
+                f"ctx-compacted:{result.request_id}:{dropped}" if dropped else result.next_cursor
+            ),
+        })
 
     protected = _protected_refs(result)
     kept = list(result.evidence)
@@ -245,19 +283,15 @@ def compact_to_budget(result: InvestigationResult, max_output_chars: int) -> Inv
     for ref in droppable_refs:
         kept = [item for item in kept if item.ref != ref]
         dropped += 1
-        if len(result.model_copy(update={"evidence": kept}).model_dump_json()) <= max_output_chars:
-            break
+        candidate = _render(kept, dropped, unmet=False)
+        if len(candidate.model_dump_json()) <= max_output_chars:
+            return candidate
 
-    if dropped == 0:
-        return result
-
-    compacted_status: ContextStatus = "partial" if result.status == "complete" else result.status
-    return result.model_copy(update={
-        "evidence": kept,
-        "status": compacted_status,
-        "degradation": [*result.degradation, "output_budget_compacted"],
-        "next_cursor": f"ctx-compacted:{result.request_id}:{dropped}",
-    })
+    # Every droppable record is gone (or there were none) and the payload is still too large.
+    # Protected data is kept and the shortfall is named -- adding `output_budget_unmet` here can
+    # only make the result larger, which is exactly why it is the terminal case and not a
+    # condition the loop above has to reason about.
+    return _render(kept, dropped, unmet=True)
 
 
 def _fallback_result(request: object, code: str) -> InvestigationResult:

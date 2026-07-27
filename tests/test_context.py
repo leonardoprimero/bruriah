@@ -482,7 +482,18 @@ def test_compact_to_budget_never_drops_protected_evidence_even_if_still_over_bud
     compacted = compact_to_budget(result, max_output_chars=1)  # impossibly small budget
     assert compacted.evidence == [protected]  # never sacrificed
     assert compacted.warnings == ["a safety warning"]
-    assert compacted == result  # nothing droppable -> unchanged, no fake compaction claimed
+
+    # Nothing was droppable, so no compaction is CLAIMED and no resume position is invented --
+    # `ctx-compacted:<id>:0` would advertise a cursor that points nowhere.
+    assert "output_budget_compacted" not in compacted.degradation
+    assert compacted.next_cursor is None
+
+    # But the budget was still missed by three orders of magnitude, and that IS reported. Saying
+    # nothing is what let an over-budget response go out labelled `complete`; keeping protected
+    # data is the right call, presenting the result as if it honoured the declared ceiling is not.
+    assert compacted.degradation == ["output_budget_unmet"]
+    assert compacted.status == "partial"
+    assert len(compacted.model_dump_json()) > 1  # the shortfall the marker is reporting is real
 
 
 def test_assemble_context_end_to_end_forces_compaction_under_a_real_output_budget() -> None:
@@ -708,3 +719,29 @@ def test_module_never_calls_an_un_injected_wall_clock() -> None:
     source = _CONTEXT_MODULE.read_text()
     assert "date.today(" not in source
     assert "datetime.now(" not in source
+
+
+def test_compaction_measures_the_payload_it_actually_returns() -> None:
+    # The loop used to measure `result.model_copy(update={"evidence": kept})` and then return
+    # something bigger: compaction appends `output_budget_compacted` and a
+    # `ctx-compacted:<71-char digest>:<n>` cursor after the stop decision, together roughly 110
+    # characters the measurement never saw. A result could therefore stop at "now it fits" and
+    # cross back over the ceiling on the way out. The checked object and the returned object have
+    # to be the same object.
+    records = [
+        _evidence_record(f"drop:{i}", digest_content=f"padding record {i} " + ("x" * 200))
+        for i in range(6)
+    ]
+    result = InvestigationResult(
+        schema_version="1", status="complete", request_id=f"sha256:{'d' * 64}", evidence=records,
+        claims=[], conflicts=[], gaps=[], host_actions=[], warnings=[], degradation=[],
+        budgets=Budgets(), next_cursor=None,
+    )
+    full = len(result.model_dump_json())
+    # Sweep a band of budgets so the assertion does not depend on one lucky stopping point.
+    for budget in range(600, full, 137):
+        compacted = compact_to_budget(result, max_output_chars=budget)
+        size = len(compacted.model_dump_json())
+        if "output_budget_unmet" in compacted.degradation:
+            continue  # honestly reported as unreachable -- the other test covers that case
+        assert size <= budget, f"budget {budget}: returned {size} while claiming it fit"
