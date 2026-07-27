@@ -35,6 +35,10 @@ bruriah init  --data-dir "$B/data"                  # writes your MCP client con
 command which one — `index`, `ask`, `serve` and `doctor` all take it, and `bruriah init` bakes the
 path into the MCP snippet so the client you paste it into is already pointed at the right project.
 Omit it and everything lands in one shared directory, which is fine until the second project.
+`BRURIAH_DATA_DIR` sets the same thing from the environment, as do `BRURIAH_CONFIG_DIR`,
+`BRURIAH_CACHE_DIR` and `BRURIAH_LOG_DIR`. Each directory resolves in one order: the flag, then the
+variable, then a `data_dir` / `cache_dir` / `log_dir` key in `config.json`, then your platform's
+default. `bruriah init` writes whichever won into the snippet, so either route reaches your client.
 
 Then ask it something, from the terminal, before wiring up any client:
 
