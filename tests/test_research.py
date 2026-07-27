@@ -12,6 +12,7 @@ import ssl
 import stat
 import threading
 from collections.abc import Callable
+from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -19,7 +20,8 @@ from bruriah.audit import read_audit_records
 from bruriah.cache import cache_key, read_cache
 from bruriah.contracts import Budgets, InvestigationRequest
 from bruriah.research import (
-    AccessPolicy, ConcurrencyLimiter, ResearchDeps, ResearchOutcome, build_proxy_connect, research,
+    AccessPolicy, ConcurrencyLimiter, NetworkLedger, ResearchDeps, ResearchOutcome,
+    _canonicalize, build_proxy_connect, research,
 )
 
 _FIXTURES = Path(__file__).parent / "fixtures" / "fetch"
@@ -515,5 +517,166 @@ def test_build_proxy_connect_dials_the_configured_proxy_not_the_validated_ip() -
         accepted, _addr = server.accept()
         accepted.close()
         sock.close()
+    finally:
+        server.close()
+
+
+# --- Admission outranks the cache ---------------------------------------------------------------
+# The cache read used to run BEFORE the allowlist and the access policy, on the reasoning that a
+# hit costs no network. True, and beside the point: those lists say which destinations this
+# installation may surface, not how much bandwidth to spend. A host or path the operator revoked
+# went on being served, in full, for the rest of its TTL.
+
+
+def test_revoking_a_host_from_the_allowlist_stops_serving_it_from_cache(tmp_path: Path) -> None:
+    server = _LocalTlsServer(_ok_responder())
+    try:
+        clock = _Clock(datetime(2026, 7, 24, 12, 0, 0, tzinfo=timezone.utc))
+        deps = _deps(tmp_path, server, clock, default_ttl=timedelta(hours=24))
+
+        first = research(_request(), _url(server), deps)
+        assert first.status == "fetched"  # it really is in the cache now
+
+        revoked = replace(deps, allowlist=frozenset())
+        after = research(_request(), _url(server), revoked)
+        assert after.status == "refused"
+        assert after.code == "host_not_allowlisted"
+        assert after.evidence is None and after.excerpt is None  # not one byte of it
+        assert after.cache_hit is False
+
+        # The entry is still on disk: revocation refuses to SERVE it, it does not delete it. TTL
+        # and `prune_expired` own removal, and a policy change is not a reason to destroy an
+        # audit-relevant artifact.
+        canonical, *_ = _canonicalize(_url(server))
+        assert read_cache(deps.cache_dir, canonical, now=clock.now()).hit
+    finally:
+        server.close()
+
+
+def test_denying_a_path_stops_serving_it_from_cache(tmp_path: Path) -> None:
+    server = _LocalTlsServer(_ok_responder())
+    try:
+        clock = _Clock(datetime(2026, 7, 24, 12, 0, 0, tzinfo=timezone.utc))
+        deps = _deps(tmp_path, server, clock, default_ttl=timedelta(hours=24))
+        assert research(_request(), _url(server), deps).status == "fetched"
+
+        denied = replace(deps, access_policy=AccessPolicy(disallowed_path_prefixes={_HOST: ("/page",)}))
+        after = research(_request(), _url(server), denied)
+        assert after.status == "refused"
+        assert after.code == "access_restricted"
+        assert after.evidence is None and after.excerpt is None
+    finally:
+        server.close()
+
+
+def test_a_cache_entry_written_under_another_policy_version_is_refetched(tmp_path: Path) -> None:
+    # `policy_version` was recorded on every write from the beginning and never consulted on read,
+    # so a cached answer outlived the pack that authorised it. Re-signing a research policy with
+    # different source rules changed nothing about what was already stored.
+    connects = {"n": 0}
+    server = _LocalTlsServer(_ok_responder())
+
+    def _counting_connect(ip: str, port: int, timeout: float) -> socket.socket:
+        connects["n"] += 1
+        return socket.create_connection(("127.0.0.1", server.port), timeout=timeout)
+
+    try:
+        clock = _Clock(datetime(2026, 7, 24, 12, 0, 0, tzinfo=timezone.utc))
+        deps = _deps(tmp_path, server, clock, connect=_counting_connect,
+                     policy_version="pack-v1", default_ttl=timedelta(hours=24))
+        assert research(_request(), _url(server), deps).status == "fetched"
+        assert connects["n"] == 1
+
+        # Same URL, same TTL, still well inside it -- only the policy version moved.
+        rotated = replace(deps, policy_version="pack-v2")
+        after = research(_request(), _url(server), rotated)
+        assert after.status == "fetched"  # refetched under the current rules, not served stale
+        assert after.cache_hit is False
+        assert connects["n"] == 2
+
+        # And an unchanged policy version still hits cache, so this did not simply disable caching.
+        again = research(_request(), _url(server), rotated)
+        assert again.status == "cached" and again.cache_hit and connects["n"] == 2
+    finally:
+        server.close()
+
+
+# --- One budget for the whole investigation, not one per URL ------------------------------------
+
+
+def test_the_ledger_pools_requests_and_bytes_across_calls(tmp_path: Path) -> None:
+    server = _LocalTlsServer(_ok_responder(b"z" * 400_000))
+    try:
+        clock = _Clock(datetime(2026, 7, 24, 12, 0, 0, tzinfo=timezone.utc))
+        deps = _deps(tmp_path, server, clock)
+        budgets = Budgets(max_bytes=1_000_000, max_network_requests=5)
+        ledger = NetworkLedger.for_request(budgets, clock.monotonic)
+
+        outcomes = [
+            research(_request(budgets=budgets), _url(server, f"/p{i}"), deps, ledger)
+            for i in range(5)
+        ]
+        fetched = [o for o in outcomes if o.status == "fetched"]
+        exhausted = [o for o in outcomes if o.code == "network_budget_exhausted"]
+
+        # Two 400 KB bodies fit under 1 MB; the third would not, and the pool says so instead of
+        # granting the full budget again.
+        assert len(fetched) == 2
+        assert exhausted, "the pool must refuse once it cannot fund another call"
+        assert ledger.bytes_remaining < 1_000_000 - 400_000
+    finally:
+        server.close()
+
+
+def test_a_refused_fetch_still_costs_the_pool(tmp_path: Path) -> None:
+    # Billing only successes would make failure the cheap way to drain a budget: an allowlisted
+    # host that always errors could be asked forever at no charge.
+    def _big_error(_request: bytes) -> tuple[int, dict[str, str], bytes]:
+        return 500, {"Content-Type": "text/plain"}, b"e" * 40_000
+
+    server = _LocalTlsServer(_big_error)
+    try:
+        clock = _Clock(datetime(2026, 7, 24, 12, 0, 0, tzinfo=timezone.utc))
+        deps = _deps(tmp_path, server, clock)
+        budgets = Budgets(max_bytes=1_000_000, max_network_requests=3)
+        ledger = NetworkLedger.for_request(budgets, clock.monotonic)
+
+        outcome = research(_request(budgets=budgets), _url(server), deps, ledger)
+        assert outcome.status == "error" and outcome.code == "http_status_500"
+        assert ledger.requests_remaining == 2  # the connection was made, so it was charged
+        assert ledger.bytes_remaining < 1_000_000  # and the bytes it pulled were charged too
+    finally:
+        server.close()
+
+
+def test_a_cache_hit_costs_the_pool_nothing(tmp_path: Path) -> None:
+    # A hit makes no request and reads no socket. Charging for it would let a repeated question
+    # exhaust an investigation's network budget without any network.
+    server = _LocalTlsServer(_ok_responder())
+    try:
+        clock = _Clock(datetime(2026, 7, 24, 12, 0, 0, tzinfo=timezone.utc))
+        deps = _deps(tmp_path, server, clock, default_ttl=timedelta(hours=24))
+        budgets = Budgets(max_bytes=1_000_000, max_network_requests=4)
+        ledger = NetworkLedger.for_request(budgets, clock.monotonic)
+
+        assert research(_request(budgets=budgets), _url(server), deps, ledger).status == "fetched"
+        after_fetch = ledger.requests_remaining
+
+        assert research(_request(budgets=budgets), _url(server), deps, ledger).status == "cached"
+        assert ledger.requests_remaining == after_fetch
+    finally:
+        server.close()
+
+
+def test_omitting_the_ledger_preserves_the_previous_per_call_behaviour(tmp_path: Path) -> None:
+    # `ledger=None` is the default, so every existing caller and every single-URL investigation
+    # behaves exactly as before this pooling existed.
+    server = _LocalTlsServer(_ok_responder(b"w" * 400_000))
+    try:
+        clock = _Clock(datetime(2026, 7, 24, 12, 0, 0, tzinfo=timezone.utc))
+        deps = _deps(tmp_path, server, clock)
+        budgets = Budgets(max_bytes=1_000_000, max_network_requests=5)
+        outcomes = [research(_request(budgets=budgets), _url(server, f"/q{i}"), deps) for i in range(4)]
+        assert all(o.status == "fetched" for o in outcomes)  # each call got the full budget
     finally:
         server.close()

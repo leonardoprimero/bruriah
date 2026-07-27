@@ -12,22 +12,41 @@
 #      `platform.resolve_paths`) agree, AND a candidate `url` was actually supplied. Any other
 #      case returns vendor-neutral `HostAction`s (never fetches) -- "Read-Only Informational
 #      Boundary and Host Actions": needed work is expressed as host actions, never performed.
-#   2. A cache hit is served WITHOUT any network attempt or concurrency-slot use; an expired
-#      entry is always a genuine miss, never served as current (`cache.py`).
-#   3. Destination admission is evaluated by THIS module before any fetch attempt: the same
-#      host[:port] allowlist `fetch.py` itself enforces (checked here too so refusal never wastes
-#      a concurrency slot or a network attempt), plus an `AccessPolicy` host+path-prefix deny
-#      list -- the documented, scoped-down substitute for live robots.txt fetch-and-parse (see
-#      `AccessPolicy`'s own docstring for why fetching robots.txt itself is out of scope). A
-#      request the policy disallows is refused, never fetched anyway.
+#   2. Destination admission is evaluated by THIS module BEFORE the cache is consulted and before
+#      any fetch attempt: the same host[:port] allowlist `fetch.py` itself enforces (checked here
+#      too so refusal never wastes a concurrency slot or a network attempt), plus an
+#      `AccessPolicy` host+path-prefix deny list -- the documented, scoped-down substitute for
+#      live robots.txt fetch-and-parse (see `AccessPolicy`'s own docstring for why fetching
+#      robots.txt itself is out of scope). A request the policy disallows is refused, never
+#      fetched and never answered from cache.
+#
+#      The cache used to be read first, because a hit costs no network. That is true and it is
+#      beside the point: these lists do not exist to save bandwidth, they declare which
+#      destinations this installation may surface at all. Consulting the cache first meant a host
+#      or path the operator REVOKED kept being served, in full, until its TTL ran out. Both
+#      checks are local, so running them first costs nothing.
+#   3. A cache hit is served WITHOUT any network attempt or concurrency-slot use, provided the
+#      entry was written under the policy version in force now. An expired entry is always a
+#      genuine miss, never served as current (`cache.py`), and so is an entry whose
+#      `policy_version` no longer matches: that field was recorded on every write from the start
+#      and never consulted, so a cached answer outlived the pack that authorised it. Neither case
+#      deletes anything here -- TTL and `prune_expired` own removal.
 #   4. Cross-call concurrency throttling (`ConcurrencyLimiter`): a bounded counter shared across
 #      possibly-simultaneous `research()` calls. A call that finds the limit already reached
 #      degrades typed (`status="degraded"`) instead of blocking or launching an unbounded fetch.
 #      Only an actual live `fetch.py` invocation acquires/releases it -- cache hits and refusals
 #      never touch it.
-#   5. `request.budgets` (`max_network_requests`, `max_bytes`, `max_elapsed_ms`, ...) is forwarded
-#      UNCHANGED to `fetch.py`, which is the authoritative enforcer of all of them for the single
-#      hop-chain this call makes; this module adds no second, competing budget system.
+#   5. `fetch.py` remains the authoritative enforcer of `request.budgets` for the single hop-chain
+#      one call makes. What this module adds is not a competing budget but a POOL: an optional
+#      `NetworkLedger`, owned by whoever owns the investigation, that narrows the declared budget
+#      to what the investigation as a whole has left and is charged for what each call actually
+#      spent -- including calls that were refused mid-flight.
+#
+#      Without it every ceiling reset per candidate URL, because `service._run_research` handed
+#      each URL the same `request.budgets`. A request declaring `max_bytes=1_000_000` and
+#      `max_network_requests=5` made five connections and pulled 2,500,000 bytes, with every
+#      individual fetch inside its budget the whole time. `ledger=None` keeps exactly that
+#      per-call behaviour, so a single-URL caller is unaffected.
 #   6. A successful fetch is cached (`cache.py`: atomic write, permitted-minimum excerpt unless
 #      `deps.resolve_reuse` marks it `permitted`) and appended to the content-free audit
 #      (`audit.py`: host + closed classification only, never path/query/body/secret).
@@ -157,6 +176,67 @@ class ResearchDeps:
     now: Callable[[], datetime] = field(default_factory=lambda: _utcnow)
 
 
+@dataclass
+class NetworkLedger:
+    """Requests, bytes and wall-clock POOLED ACROSS every `research()` call of one investigation.
+
+    `Budgets` is declared once per `InvestigationRequest`, and `fetch.py` enforces it faithfully --
+    for the single hop-chain of a single call. Nothing pooled it. `service._run_research` iterates
+    the candidate URLs and hands each one the SAME `request.budgets`, so every ceiling reset per
+    URL: a request declaring `max_bytes=1_000_000` and `max_network_requests=5` made five
+    connections and pulled 2,500,000 bytes, and each individual fetch was within budget the whole
+    time. `max_elapsed_ms` multiplied the same way. What the host declared as the cost of an
+    investigation was really the cost of one URL inside it.
+
+    Deliberately NOT a field on `ResearchDeps`. Deps are constructed once and live as long as the
+    server; a ledger is per-investigation state and would leak spend between unrelated requests --
+    and, being mutable and shared, would need a lock it has no business needing. It is created by
+    the caller that owns the investigation and passed down.
+
+    `deadline` is on the injected monotonic clock, the same one `fetch.py` measures against, so it
+    stays testable and never reads wall-clock.
+    """
+
+    requests_remaining: int
+    bytes_remaining: int
+    deadline: float
+
+    @classmethod
+    def for_request(cls, budgets: Budgets, clock: Callable[[], float]) -> "NetworkLedger":
+        return cls(
+            requests_remaining=budgets.max_network_requests,
+            bytes_remaining=budgets.max_bytes,
+            deadline=clock() + (budgets.max_elapsed_ms / 1000),
+        )
+
+    def allowance(self, budgets: Budgets, clock: Callable[[], float]) -> Budgets | None:
+        """The budget for the NEXT call: the declared one, narrowed to what the pool has left.
+
+        `None` means the pool cannot fund another call. That is a separate answer from "narrowed
+        to a small number", because `Budgets` has floors -- `max_bytes >= 1024`,
+        `max_elapsed_ms >= 1` -- and a remainder under a floor cannot be expressed as a valid
+        `Budgets` at all. Constructing one anyway (via `model_copy`, which skips validation) would
+        smuggle an out-of-contract value into the frozen model rather than admit the pool is dry.
+        """
+        milliseconds_left = int((self.deadline - clock()) * 1000)
+        if self.requests_remaining < 1 or self.bytes_remaining < 1024 or milliseconds_left < 1:
+            return None
+        return budgets.model_validate({
+            **budgets.model_dump(),
+            "max_network_requests": min(budgets.max_network_requests, self.requests_remaining),
+            "max_bytes": min(budgets.max_bytes, self.bytes_remaining),
+            "max_elapsed_ms": min(budgets.max_elapsed_ms, milliseconds_left),
+        })
+
+    def charge(self, requests: int, bytes_read: int) -> None:
+        """Deduct what a call actually spent, whether it succeeded or was refused mid-flight.
+
+        Charging only for success would make refusals free, and a hostile-but-allowlisted host
+        would then be able to burn the pool indefinitely by always failing."""
+        self.requests_remaining = max(self.requests_remaining - max(requests, 0), 0)
+        self.bytes_remaining = max(self.bytes_remaining - max(bytes_read, 0), 0)
+
+
 def _canonicalize(url: str) -> tuple[str, str, int, str]:
     """Parse `url` into (canonical_url, host, port, path_and_query) the same way `fetch.py`
     canonicalizes (scheme + host:port + path/query; userinfo dropped). Needed here -- BEFORE any
@@ -218,7 +298,10 @@ def _record(
     )
 
 
-def _research_inner(request: InvestigationRequest, url: str | None, deps: ResearchDeps) -> ResearchOutcome:
+def _research_inner(
+    request: InvestigationRequest, url: str | None, deps: ResearchDeps,
+    ledger: NetworkLedger | None = None,
+) -> ResearchOutcome:
     if not isinstance(request, InvestigationRequest):
         raise ResearchError("invalid_request_type")
     if not isinstance(deps, ResearchDeps):
@@ -245,15 +328,16 @@ def _research_inner(request: InvestigationRequest, url: str | None, deps: Resear
 
     canonical, host, port, path = _canonicalize(url)
 
-    lookup = read_cache(deps.cache_dir, canonical, now=deps.now())
-    if lookup.hit and lookup.entry is not None:
-        entry = lookup.entry
-        return _record(
-            deps=deps, request_id=request_id, host=host, decision="cached", code="ok",
-            bytes_transferred=len(entry.excerpt), started=started, evidence=entry.evidence,
-            excerpt=entry.excerpt, excerpt_only=entry.excerpt_only, cache_hit=True,
-        )
-
+    # ADMISSION IS DECIDED BEFORE THE CACHE IS CONSULTED. The cache read used to come first, on
+    # the reasoning that a hit costs no network -- true, and beside the point. The allowlist and
+    # the access policy are not there to save bandwidth, they say WHICH DESTINATIONS THIS
+    # INSTALLATION IS PERMITTED TO SURFACE. Answering from cache before asking meant a host or a
+    # path removed from the policy kept being served, in full, for the whole TTL after the
+    # operator revoked it. Measured: fetch once, empty the allowlist, ask again -- `status=cached`
+    # with content. Same for a path the access policy denies.
+    #
+    # Both checks are local, so moving them ahead of the cache costs no network attempt and no
+    # concurrency slot; the guarantee that a cache hit never touches either is unchanged.
     if host not in deps.allowlist and f"{host}:{port}" not in deps.allowlist:
         return _record(
             deps=deps, request_id=request_id, host=host, decision="refused", code="host_not_allowlisted",
@@ -265,6 +349,56 @@ def _research_inner(request: InvestigationRequest, url: str | None, deps: Resear
             bytes_transferred=0, started=started, host_actions=(_host_action_for("access_restricted", url),),
         )
 
+    lookup = read_cache(deps.cache_dir, canonical, now=deps.now())
+    if lookup.hit and lookup.entry is not None:
+        entry = lookup.entry
+        # The entry also has to have been written under the policy in force NOW. `policy_version`
+        # was recorded on every write from the beginning and never consulted on read, so a cached
+        # answer outlived the pack that authorised it: re-signing a research policy with different
+        # source rules changed nothing about what was already stored. A stale-policy entry is
+        # treated as a miss and refetched under the current rules, not served and not silently
+        # deleted -- the TTL and `prune_expired` still own removal.
+        if entry.policy_version == deps.policy_version:
+            return _record(
+                deps=deps, request_id=request_id, host=host, decision="cached", code="ok",
+                bytes_transferred=len(entry.excerpt), started=started, evidence=entry.evidence,
+                excerpt=entry.excerpt, excerpt_only=entry.excerpt_only, cache_hit=True,
+            )
+        return _fetch_under_current_policy(
+            request, deps, request_id, started, canonical, host, url, ledger,
+        )
+
+    return _fetch_under_current_policy(
+        request, deps, request_id, started, canonical, host, url, ledger,
+    )
+
+
+def _fetch_under_current_policy(
+    request: InvestigationRequest, deps: ResearchDeps, request_id: str, started: float,
+    canonical: str, host: str, url: str, ledger: NetworkLedger | None,
+) -> ResearchOutcome:
+    """The live leg: acquire a concurrency slot, fetch, cache, audit. Split out of
+    `_research_inner` so the cache-miss path and the stale-policy path reach it by the same
+    route -- a policy-stale entry must be refetched under the CURRENT rules, which is exactly a
+    miss, not a second code path that could drift away from this one.
+
+    A cache hit never gets here, which is why the ledger is charged only on this path: serving
+    what is already on disk makes no request and reads no socket, so charging for it would let a
+    repeated question exhaust an investigation's network budget without any network."""
+    # Narrow the declared budget to what the investigation-wide pool has left, BEFORE taking a
+    # concurrency slot -- a call the pool cannot fund should not occupy a slot another one could
+    # have used.
+    budgets = request.budgets
+    if ledger is not None:
+        allowance = ledger.allowance(budgets, deps.clock)
+        if allowance is None:
+            return _record(
+                deps=deps, request_id=request_id, host=host, decision="not_warranted",
+                code="network_budget_exhausted", bytes_transferred=0, started=started,
+                host_actions=(_host_action_for("network_budget_exhausted", url),),
+            )
+        budgets = allowance
+
     if not deps.concurrency.try_acquire():
         return _record(
             deps=deps, request_id=request_id, host=host, decision="degraded",
@@ -273,12 +407,18 @@ def _research_inner(request: InvestigationRequest, url: str | None, deps: Resear
         )
     try:
         result = fetch(
-            canonical, "GET", request.budgets, network_enabled=True, allowlist=deps.allowlist,
+            canonical, "GET", budgets, network_enabled=True, allowlist=deps.allowlist,
             resolver=deps.resolver, connect=deps.connect, ssl_context=deps.ssl_context,
             clock=deps.clock, retrieved_at=deps.now(),
         )
     finally:
         deps.concurrency.release()
+
+    # Charge before branching on the outcome. `fetch()` reports usage on every path, and a refused
+    # or errored call still opened connections and read bytes -- billing only successes would make
+    # failure the cheap way to drain the pool.
+    if ledger is not None:
+        ledger.charge(result.requests_made, result.bytes_read)
 
     if result.status != "ok" or result.evidence is None or result.body is None:
         decision: ResearchStatus = "error" if result.status == "error" else "refused"
@@ -293,7 +433,7 @@ def _research_inner(request: InvestigationRequest, url: str | None, deps: Resear
 
     entry = build_cache_entry(
         evidence, retrieved_at=deps.now(), ttl=deps.default_ttl, body=result.body,
-        max_excerpt_chars=request.budgets.max_extracted_chars, policy_version=deps.policy_version,
+        max_excerpt_chars=budgets.max_extracted_chars, policy_version=deps.policy_version,
     )
     write_cache_atomic(deps.cache_dir, canonical, entry)
 
@@ -304,15 +444,24 @@ def _research_inner(request: InvestigationRequest, url: str | None, deps: Resear
     )
 
 
-def research(request: InvestigationRequest, url: str | None, deps: ResearchDeps) -> ResearchOutcome:
+def research(
+    request: InvestigationRequest, url: str | None, deps: ResearchDeps,
+    ledger: NetworkLedger | None = None,
+) -> ResearchOutcome:
     """Decide whether live research for `url` is warranted under `request`/`deps`'s resolved
     network policy, serving a valid cache hit or driving `fetch.py` when warranted, and otherwise
     returning vendor-neutral `HostAction`s -- NEVER fetching outside those two paths. Never raises
     (module docstring #7): typed `ResearchError`/`CacheError` failures AND any unenumerated
     exception are converted to a typed `ResearchOutcome(status="error", ...)`.
+
+    `ledger` pools `max_network_requests`/`max_bytes`/`max_elapsed_ms` across every call belonging
+    to ONE investigation (see `NetworkLedger`). It defaults to `None`, which restores the previous
+    per-call behaviour exactly -- so a caller investigating a single URL, and every existing test,
+    is unaffected. `service._run_research` builds one per `investigate()` and passes it to all of
+    them, because a budget the host declared once should not be granted once per candidate URL.
     """
     try:
-        return _research_inner(request, url, deps)
+        return _research_inner(request, url, deps, ledger)
     except (ResearchError, CacheError) as error:
         return ResearchOutcome(status="error", code=error.code, host_actions=(_host_action_for(error.code, url),))
     except Exception:  # Backstop (#7): no bare exception may ever escape `research()`.
@@ -320,6 +469,6 @@ def research(request: InvestigationRequest, url: str | None, deps: ResearchDeps)
 
 
 __all__ = [
-    "AccessPolicy", "ConcurrencyLimiter", "ResearchDeps", "ResearchError", "ResearchOutcome",
+    "AccessPolicy", "ConcurrencyLimiter", "NetworkLedger", "ResearchDeps", "ResearchError", "ResearchOutcome",
     "ResearchStatus", "build_proxy_connect", "research",
 ]
