@@ -6,6 +6,7 @@ import os
 import sqlite3
 import stat
 import threading
+import warnings
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
 from pathlib import Path
@@ -17,6 +18,7 @@ from conftest import requires_vault
 
 import bruriah.index as index_module
 from bruriah.corpus import CorpusPolicy
+import bruriah.cli as cli_module
 from bruriah.cli import _embedding_fingerprint
 from bruriah.index import (
     BuildConfig,
@@ -237,6 +239,38 @@ def test_fastembed_fingerprint_binds_pooling_source_snapshot_and_artifact(tmp_pa
         "snapshot": tmp_path.name,
         "source": "qdrant/model",
     }
+
+
+def test_only_the_pooling_notice_is_swallowed_on_model_construction(
+    tmp_path: Path, monkeypatch, recwarn
+) -> None:
+    """fastembed says, every time a model is built, that it now pools by mean instead of CLS. That
+    lands mid-quickstart and reads like a fault, and the change it reports already invalidates an
+    index through `embedding_fingerprint` rather than needing to be read. So it is filtered -- by
+    message. Filtering the CATEGORY would take every future fastembed warning with it, and those
+    have no such backstop."""
+    artifact = tmp_path / "model.onnx"
+    artifact.write_bytes(b"model-weights")
+    backend_type = type("PooledEmbedding", (), {})
+    backend = backend_type()
+    backend._model_dir = tmp_path
+    backend.model_description = SimpleNamespace(
+        model_file="model.onnx", sources=SimpleNamespace(hf="qdrant/model", url=None)
+    )
+
+    def _noisy(model_name: str):
+        warnings.warn(
+            f"The model {model_name} now uses mean pooling instead of CLS embedding.", UserWarning
+        )
+        warnings.warn("a different fastembed problem, with no backstop", UserWarning)
+        return SimpleNamespace(model=backend, embed=lambda texts: [], embedding_size=3)
+
+    monkeypatch.setattr(cli_module, "TextEmbedding", _noisy)
+    cli_module._default_embedder_factory("qdrant/model")
+
+    raised = [str(item.message) for item in recwarn]
+    assert not any("mean pooling" in message for message in raised), "filtered too little"
+    assert any("no backstop" in message for message in raised), "filtered too much"
 
 
 @requires_vault
