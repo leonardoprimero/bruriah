@@ -29,14 +29,26 @@ classifiers = [
   "Typing :: Typed",
 ]
 
+# Every distribution here is imported by name somewhere in `src/bruriah/`, and nothing imported by
+# name is missing. Through 0.3.0 neither half was true: `cryptography` (`signing.py`, `packs.py`)
+# and `anyio` (`cli.py`, `evaluation.py`) were imported but never declared, arriving only as
+# transitive passengers of `mcp` -- an install contract that held by luck and would have broken the
+# moment a dependency dropped them. In the other direction `sqlite-vec` was a RUNTIME dependency with
+# no runtime caller: nothing under `src/` imports it, because the vector leg reads float blobs out
+# of SQLite and scores them in Python (`retrieval.py`). Its one importer is
+# `evals/retrieval/adapters.py`, which opens the legacy `cerebro.db` to measure this router against
+# its predecessor -- a benchmark, not the product. It moved to the dev group below, so installing
+# Bruriah no longer builds a compiled extension nothing it ships will call. If an ANN index ever
+# lands, it comes back with the code that uses it.
 dependencies = [
+  "anyio>=4.11,<5",
+  "cryptography>=46,<50",
   "fastembed==0.8.0",
   "markdown-it-py>=4.0.0,<5",
   "mcp>=1.28.1,<2",
   "platformdirs>=4.11,<5",
   "pydantic>=2.13.4,<3",
   "pyyaml>=6.0.3,<7",
-  "sqlite-vec==0.1.9",
 ]
 
 [project.urls]
@@ -59,6 +71,10 @@ module-name = "bruriah"
 dev = [
   "pip-audit>=2.10.0,<3",
   "pytest>=9.0.2,<10",
+  # Only `evals/retrieval/adapters.py` imports this, to read the legacy `cerebro.db`'s vec0 tables
+  # for the router-vs-predecessor benchmark. It was a runtime dependency through 0.3.0 and no
+  # shipped module has ever called it.
+  "sqlite-vec==0.1.9",
 ]
 
 [tool.pytest.ini_options]
