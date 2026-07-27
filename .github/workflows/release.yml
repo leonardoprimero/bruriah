@@ -17,6 +17,20 @@
 # The environment is not decoration: it is a second place the identity is pinned, so a workflow
 # added to this repository under a different name cannot publish even though it runs in it.
 #
+# EVERY ACTION IS PINNED TO A COMMIT SHA, with its version in a trailing comment. `@v4` and
+# `@release/v1` are not versions -- they are mutable pointers the action's own maintainers, or
+# anyone who compromises them, can move under us between one run and the next. That is a live
+# supply-chain path into this workflow, and `pypa/gh-action-pypi-publish@release/v1` was the worst
+# instance of it: a BRANCH ref on the one job that holds `id-token: write`. Whoever moved that
+# branch could have published as this project, and removing the stored API token above would have
+# bought nothing, because the credential was never the weakest link once the code minting it was
+# mutable. A SHA is the only ref GitHub cannot repoint. `ci.yml` is pinned the same way, since it
+# is this workflow's gate and a compromised test step can pass a red suite as green.
+#
+# The cost is that updates are now explicit: read the action's changelog, resolve the new tag to
+# its SHA, and change both the SHA and the comment in the same edit. `ci.yml`'s `actions are
+# pinned to immutable refs` job fails the build if a step is ever added without one.
+#
 # WHAT THIS REFUSES TO PUBLISH, each one a mistake already made here once:
 #
 #   1. A version bumped without `uv lock` in the same commit. It does not show locally, because
@@ -49,8 +63,8 @@ jobs:
     needs: suite
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
-      - uses: astral-sh/setup-uv@v7
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803  # v6.1.0
+      - uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78  # v7.6.0
         with:
           enable-cache: true
 
@@ -68,7 +82,7 @@ jobs:
       - run: uv build
       - name: metadata is valid for PyPI
         run: uv tool run --from twine twine check dist/*
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4.6.2
         with:
           name: dist
           path: dist/
@@ -85,8 +99,8 @@ jobs:
       id-token: write
       contents: read
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093  # v4.3.0
         with:
           name: dist
           path: dist/
-      - uses: pypa/gh-action-pypi-publish@release/v1
+      - uses: pypa/gh-action-pypi-publish@ba38be9e461d3875417946c167d0b5f3d385a247  # v1.14.1

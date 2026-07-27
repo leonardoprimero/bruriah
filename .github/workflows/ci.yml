@@ -34,10 +34,10 @@ jobs:
         os: [ubuntu-latest, macos-latest, windows-latest]
         python: ["3.12", "3.13", "3.14"]
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803  # v6.1.0
         with:
           fetch-depth: 0   # the eval guard rebuilds the corpus from this repository's own history
-      - uses: astral-sh/setup-uv@v7
+      - uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78  # v7.6.0
         with:
           enable-cache: true
       # Nine jobs downloading the same ~130 MB embedding model at once is what widening this matrix
@@ -48,7 +48,7 @@ jobs:
       # needless download costs a minute; a stale one would silently embed against a different
       # space, which is the failure `index` fails closed on and CI should never manufacture.
       - name: cache the embedding model
-        uses: actions/cache@v4
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830  # v4.3.0
         with:
           path: ${{ runner.temp }}/fastembed_cache
           key: fastembed-${{ runner.os }}-${{ hashFiles('src/bruriah/cli.py') }}
@@ -71,8 +71,8 @@ jobs:
     name: dependencies have no known advisories
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
-      - uses: astral-sh/setup-uv@v7
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803  # v6.1.0
+      - uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78  # v7.6.0
       - run: uv sync --locked
       - name: pip-audit
         run: uv run --no-sync pip-audit --skip-editable
@@ -81,8 +81,8 @@ jobs:
     name: wheel installs and runs
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
-      - uses: astral-sh/setup-uv@v7
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803  # v6.1.0
+      - uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78  # v7.6.0
       - run: uv build
       - name: metadata is valid for PyPI
         run: uv tool run --from twine twine check dist/*
@@ -127,3 +127,45 @@ jobs:
           bruriah doctor --data-dir "$B/data" | tee /tmp/doctor.json
           grep -q '"healthy": true' /tmp/doctor.json
           test -z "$(git status --porcelain)"  # the quickstart must not write into the repo it reads
+
+  # An action referenced by tag or branch (`@v4`, `@release/v1`) is a MUTABLE pointer: the action's
+  # maintainers, or anyone who compromises them, can move it under us between one run and the next.
+  # Pinning every step to a commit SHA closes that path, but pinning decays -- the next step anyone
+  # adds will be written the convenient way unless something objects. This is the something.
+  #
+  # It reads the workflow files as text rather than trusting review, and it runs in the same CI
+  # `release.yml` calls as its gate, so an unpinned step cannot reach a publish. Local actions
+  # (`./.github/...`) are exempt: they are this repository's own files at this repository's own
+  # commit, and there is no third party to pin.
+  pinned:
+    name: actions are pinned to immutable refs
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803  # v6.1.0
+      - name: every `uses:` names a 40-character commit SHA
+        run: |
+          set -euo pipefail
+          python3 - <<'CHECK'
+          import pathlib, re, sys
+
+          offenders = []
+          for path in sorted(pathlib.Path(".github/workflows").glob("*.yml")):
+              for number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
+                  match = re.search(r"^\s*(?:-\s*)?uses:\s*(\S+)", line)
+                  if not match:
+                      continue
+                  ref = match.group(1)
+                  if ref.startswith("./"):
+                      continue  # this repository's own file, at this repository's own commit
+                  _, separator, version = ref.partition("@")
+                  if not separator or not re.fullmatch(r"[0-9a-f]{40}", version):
+                      offenders.append(f"{path}:{number}: {ref}")
+
+          if offenders:
+              print("These steps use a mutable ref. Pin them to a commit SHA:")
+              print("\n".join(f"  {line}" for line in offenders))
+              print("\n  gh api repos/OWNER/REPO/commits/TAG --jq .sha")
+              print("  then write `uses: OWNER/REPO@<sha>  # <tag>`")
+              sys.exit(1)
+          print("every third-party action is pinned to a commit SHA")
+          CHECK
