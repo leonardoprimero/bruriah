@@ -26,7 +26,12 @@
 #      read (canonical URLs are built from host/port only).
 #   8. Hard limits: connect+read+total elapsed (`max_elapsed_ms`), `max_redirects`, total
 #      connection attempts per `fetch()` call (`max_network_requests`), and a byte ceiling
-#      (`max_bytes`) enforced on BOTH the raw/compressed wire stream and the decompressed output --
+#      (`max_bytes`) enforced on BOTH the raw/compressed wire stream and the decompressed output.
+#      A body this module has decided NOT to keep -- a redirect, a non-2xx, a rejected
+#      Content-Type -- is discarded through `_discard_body`, which reads at most one chunk. Those
+#      three sites used an unbounded `response.read()`, so the byte ceiling covered only the one
+#      response shape that was ACCEPTED and the three that were refused could each pull an
+#      arbitrary body into memory. Refusal must be the cheap path, not the expensive one --
 #      the frozen `Budgets` model has one bytes field, so this module deliberately uses it for
 #      both the transfer ceiling and the decompression-bomb ceiling (see `_read_bounded_body`).
 #      Content-Type is checked against a fixed allowlist (`text/*`, `application/pdf`, declared
@@ -88,10 +93,28 @@ class FetchError(ValueError):
         super().__init__(code)
 
 
+@dataclass
+class _Usage:
+    """What one `fetch()` call actually spent, accumulated as it spends it.
+
+    Mutable and threaded through `_fetch_inner` rather than derived from the return value, because
+    the return value cannot express it on the paths that matter: a `FetchError` unwinds past every
+    local, so a call that made three connections and read half a megabyte before being refused
+    reported the same nothing as a call that was rejected on its scheme. A caller pooling a budget
+    across several fetches has to charge for work that failed, or a budget is only spent by
+    success and refusals are free."""
+
+    requests: int = 0
+    bytes_read: int = 0
+
+
 @dataclass(frozen=True)
 class FetchResult:
     """Total, typed outcome of one `fetch()` call. Only `status="ok"` carries a body/evidence;
-    every other status is a safe, empty refusal -- never a partial or prohibited body."""
+    every other status is a safe, empty refusal -- never a partial or prohibited body.
+
+    `requests_made`/`bytes_read` are populated on EVERY path, success or failure, so a caller
+    pooling a budget across calls can charge for what this one consumed."""
 
     status: Literal["disabled", "blocked", "error", "ok"]
     code: str
@@ -99,6 +122,8 @@ class FetchResult:
     body: bytes | None = None
     content_type: str | None = None
     redirect_chain: tuple[str, ...] = ()
+    requests_made: int = 0
+    bytes_read: int = 0
 
 
 def default_resolver(host: str) -> list[str]:
@@ -230,6 +255,7 @@ def _decompressor(encoding: str) -> zlib.decompressobj | None:
 
 def _read_bounded_body(
     response: http.client.HTTPResponse, max_bytes: int, deadline: float, clock: Callable[[], float],
+    usage: _Usage,
 ) -> bytes:
     """Stream the body in fixed chunks, enforcing BOTH the raw/compressed byte ceiling and the
     decompressed byte ceiling at `max_bytes` (see module docstring #8). Each `decompress()` call
@@ -243,12 +269,18 @@ def _read_bounded_body(
         if clock() > deadline:
             raise FetchError("timeout_exceeded")
         try:
-            chunk = response.read(_CHUNK_SIZE)
+            # Never ASK for more than one byte past the ceiling. The overrun check below runs
+            # after a chunk has already landed, so a fixed 64 KB request meant `max_bytes` was
+            # really "max_bytes, plus up to one chunk" -- a declared 1,000,000 could read
+            # 1,062,144 before refusing. One byte past is all the evidence an overrun needs, and
+            # it makes the number the caller declared the number this reads.
+            chunk = response.read(min(_CHUNK_SIZE, max_bytes - raw_total + 1))
         except OSError as error:
             raise FetchError("read_failed") from error
         if not chunk:
             break
         raw_total += len(chunk)
+        usage.bytes_read += len(chunk)  # charged as it arrives, so a refusal mid-body still costs
         if raw_total > max_bytes:
             raise FetchError("raw_bytes_limit_exceeded")
         if decompressor is None:
@@ -261,6 +293,28 @@ def _read_bounded_body(
         # decompress() stopped early because output hit its per-call cap: the bomb shape.
         raise FetchError("decompressed_limit_exceeded")
     return bytes(out)
+
+
+def _discard_body(response: http.client.HTTPResponse, usage: _Usage) -> None:
+    """Discard the body of a response we will NOT turn into evidence, reading at most one chunk.
+
+    A redirect, a non-2xx, and a rejected Content-Type all used to call `response.read()` with no
+    argument, which reads until EOF into memory with no ceiling at all -- so `max_bytes` bounded
+    only the one response shape that was allowed through, and the three that were refused were
+    unbounded. Measured against a loopback server: a 3 MB error body was read whole under a
+    declared `max_bytes` of 1 MB, and the same for a 3 MB rejected-MIME body and a 3 MB redirect
+    body. An allowlisted host could spend this process's memory precisely by being refused.
+
+    Reading one chunk rather than nothing is politeness, not necessity: every caller closes the
+    connection immediately afterwards (`finally: connection.close()`), and `Connection: close` is
+    in the outbound header set, so nothing is being drained for reuse. A short body is consumed
+    cleanly instead of provoking a reset the server logs; a long one is abandoned, which is what
+    should happen to a body we already decided not to read.
+    """
+    try:
+        usage.bytes_read += len(response.read(_CHUNK_SIZE))
+    except OSError:
+        pass  # the body is being thrown away; failing to throw it away changes nothing
 
 
 def _content_type_allowed(content_type: str) -> bool:
@@ -294,7 +348,7 @@ def _status_for(code: str) -> Literal["disabled", "blocked", "error"]:
 def _fetch_inner(
     url: str, method: str, budgets: Budgets, *, network_enabled: bool, allowlist: frozenset[str],
     resolver: Resolver, connect: ConnectionFactory, ssl_context: ssl.SSLContext,
-    clock: Callable[[], float], retrieved_at: datetime,
+    clock: Callable[[], float], retrieved_at: datetime, usage: _Usage,
 ) -> FetchResult:
     if not network_enabled:
         raise FetchError("network_disabled")
@@ -310,6 +364,7 @@ def _fetch_inner(
         if hops_made >= budgets.max_network_requests:
             raise FetchError("network_request_count_exceeded")
         hops_made += 1
+        usage.requests = hops_made
         connection, response, canonical = _fetch_one_hop(
             current_url, method, allowlist, resolver, connect, ssl_context, deadline, clock,
         )
@@ -317,20 +372,23 @@ def _fetch_inner(
             redirect_chain.append(canonical)
             if response.status in _REDIRECT_STATUSES:
                 location = response.getheader("Location")
-                response.read()  # drain and discard -- a redirect body is never evidence
+                _discard_body(response, usage)  # never evidence, and never unbounded
                 if not location:
                     raise FetchError("invalid_redirect_location")
                 current_url = urljoin(canonical, location)  # a fresh URL; re-validated next loop
                 continue
             if not 200 <= response.status < 300:
-                response.read()
+                _discard_body(response, usage)
                 raise FetchError(f"http_status_{response.status}")
 
             content_type = (response.getheader("Content-Type") or "").split(";", 1)[0].strip().lower()
             if not _content_type_allowed(content_type):
-                response.read()
+                _discard_body(response, usage)
                 raise FetchError("content_type_not_allowed")
-            body = b"" if method == "HEAD" else _read_bounded_body(response, budgets.max_bytes, deadline, clock)
+            body = (
+                b"" if method == "HEAD"
+                else _read_bounded_body(response, budgets.max_bytes, deadline, clock, usage)
+            )
         finally:
             connection.close()
 
@@ -347,6 +405,7 @@ def _fetch_inner(
         return FetchResult(
             status="ok", code="ok", evidence=evidence, body=body,
             content_type=content_type or None, redirect_chain=tuple(redirect_chain),
+            requests_made=usage.requests, bytes_read=usage.bytes_read,
         )
 
     raise FetchError("redirect_count_exceeded")
@@ -372,17 +431,27 @@ def fetch(
     `ssl.create_default_context()` (hostname + chain verification ON); tests inject one that
     trusts a local loopback test certificate. `retrieved_at` defaults to the real current time.
     """
+    usage = _Usage()
     try:
         return _fetch_inner(
             url, method, budgets, network_enabled=network_enabled, allowlist=allowlist,
             resolver=resolver, connect=connect,
             ssl_context=ssl_context or ssl.create_default_context(),
-            clock=clock, retrieved_at=retrieved_at or datetime.now(timezone.utc),
+            clock=clock, retrieved_at=retrieved_at or datetime.now(timezone.utc), usage=usage,
         )
     except FetchError as error:
-        return FetchResult(status=_status_for(error.code), code=error.code)
+        # `usage` survives the unwind, which is the whole reason it is a mutable argument rather
+        # than a return value: a call refused after three hops and half a megabyte has to report
+        # that it spent them.
+        return FetchResult(
+            status=_status_for(error.code), code=error.code,
+            requests_made=usage.requests, bytes_read=usage.bytes_read,
+        )
     except Exception:  # Backstop (#10): no bare exception may ever escape `fetch()`.
-        return FetchResult(status="error", code="internal_error")
+        return FetchResult(
+            status="error", code="internal_error",
+            requests_made=usage.requests, bytes_read=usage.bytes_read,
+        )
 
 
 __all__ = ["ConnectionFactory", "FetchError", "FetchResult", "Resolver", "default_connect", "default_resolver", "fetch"]
