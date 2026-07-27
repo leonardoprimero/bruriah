@@ -722,3 +722,77 @@ def test_pack_compatibility_is_checked_against_the_version_this_actually_is(tmp_
     packs.check_router_compatibility(bruriah_version, bruriah_version, bruriah_version)
     with pytest.raises(packs.PackError):
         packs.check_router_compatibility("0.0.1", "0.0.2", bruriah_version)
+
+
+# --- `--reranker`: opt-in, never loaded unless named ------------------------------------------
+
+
+def test_build_serve_deps_leaves_the_reranker_dormant_unless_an_operator_names_one(
+    tmp_path: Path,
+) -> None:
+    """The stage is off by default and that default must be structural, not documentation.
+
+    A reranker is a second ~1 GB model download and a cross-encoder pass per candidate document.
+    Every caller that never passed `--reranker` -- `doctor`, the MCP server, the eval adapters --
+    must get deps that neither construct nor consult one."""
+    paths = _index_with_fake_embedder(tmp_path)
+
+    def never(model_name: str):
+        raise AssertionError(f"a reranker was constructed without being asked for: {model_name}")
+
+    deps = cli.build_serve_deps(
+        paths, embedder_factory=_fake_embedder_factory, reranker_factory=never,
+    )
+    try:
+        assert deps.rerank is None
+    finally:
+        deps.snapshot.database.close()
+
+
+def test_build_serve_deps_threads_a_named_reranker_through_to_the_search_stage(
+    tmp_path: Path,
+) -> None:
+    paths = _index_with_fake_embedder(tmp_path)
+    built: list[str] = []
+
+    def factory(model_name: str):
+        built.append(model_name)
+        return lambda query, documents: [0.0] * len(documents)
+
+    deps = cli.build_serve_deps(
+        paths, embedder_factory=_fake_embedder_factory,
+        reranker_model="example/reranker", reranker_factory=factory,
+    )
+    try:
+        assert built == ["example/reranker"]
+        assert deps.rerank is not None
+        outcome = router_search(
+            deps.snapshot, _TASK, embed_query=deps.embed_query, rerank=deps.rerank,
+        )
+        assert any(note.startswith("reranked:") for note in outcome.degradation)
+    finally:
+        deps.snapshot.database.close()
+
+
+def test_build_serve_deps_default_reranker_factory_is_the_real_fastembed_one() -> None:
+    """Same guard the embedder factory carries: the production path must never silently hold a
+    fake, or `--reranker` would be accepted and quietly do nothing."""
+    import inspect
+
+    default = inspect.signature(cli.build_serve_deps).parameters["reranker_factory"].default
+    assert default is cli._default_reranker_factory
+
+
+def test_the_reranker_is_not_read_from_the_build_descriptor_like_the_embedder_is() -> None:
+    """The asymmetry is deliberate and worth pinning, because it looks like an omission.
+
+    Passage vectors are baked into the snapshot, so a query embedder that does not match what
+    built them searches the wrong space -- hence the fail-closed fingerprint check. A reranker
+    reads text and writes nothing, so no snapshot can be wrong about it and none records it."""
+    import dataclasses
+
+    from bruriah.index import BuildConfig
+
+    assert not any("rerank" in field.name for field in dataclasses.fields(BuildConfig)), (
+        "a reranker was recorded in the build descriptor; then swapping one would need a re-index"
+    )

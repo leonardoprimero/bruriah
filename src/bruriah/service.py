@@ -54,7 +54,7 @@ from .packs import CapabilityPolicy
 from .skills import PermissionEnvelope, SkillSet
 from .registries import Registry
 from .research import NetworkLedger, ResearchDeps, ResearchOutcome, research
-from .retrieval import EmbedQuery, search, to_evidence_records
+from .retrieval import EmbedQuery, Rerank, search, to_evidence_records
 from .route import route
 
 _CAPABILITY_REF_PREFIX = "capability:"
@@ -94,6 +94,12 @@ class ServiceDeps:
     # the same constant `dispatch` already defaulted to keeps every existing construction, and
     # every test that builds deps directly, byte-identical to before this was configurable.
     skill_ceiling: int = DEFAULT_SKILL_CEILING
+    # Dormant unless supplied, the same discipline `research` and `skill_set` follow: a deps built
+    # without it ranks exactly as it did before the reranking stage existed. Off by default is a
+    # measured position and not caution -- the stage is worth 0.340 -> 0.431 recall@3 on one
+    # foreign corpus and one question out of eighty-three on the other, while costing a 1.11 GB
+    # download and a cross-encoder pass per candidate document. That is an operator's call.
+    rerank: Rerank | None = None
 
 
 def _canonical_json(payload: object) -> str:
@@ -410,7 +416,7 @@ def investigate(request: InvestigationRequest, deps: ServiceDeps) -> Investigati
         skill_evidence = [_skill_evidence_record(item) for item in skill_dispatch.skills] if skill_dispatch else []
         outcome = search(
             deps.snapshot, request.task, request.budgets,
-            embed_query=deps.embed_query, clock=deps.clock,
+            embed_query=deps.embed_query, rerank=deps.rerank, clock=deps.clock,
         )
         local_evidence = to_evidence_records(outcome)
         warnings = list(outcome.warnings)

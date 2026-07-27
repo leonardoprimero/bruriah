@@ -328,6 +328,7 @@ def load_deps(
     paths: PlatformPaths,
     today: date | None = None,
     embed_query: Callable[[str], bytes] | None = None,
+    rerank: Callable[[str, list[str]], list[float]] | None = None,
 ) -> ServiceDeps:
     """Assemble the real `ServiceDeps` `serve`/`doctor` need: the bundled registry and the
     active read-only snapshot under the resolved private data directory. `today` forwards to
@@ -335,10 +336,13 @@ def load_deps(
     `None`) threads straight into `ServiceDeps` -- this module never constructs one itself (no
     model load here), so `doctor` and every existing caller that omits it keep the exact same
     embedder-less, light-weight behavior as before. The real query embedder is `cli.py`'s
-    `build_serve_deps`'s job to build and inject for `serve`."""
+    `build_serve_deps`'s job to build and inject for `serve`. `rerank` follows the identical
+    rule for the identical reason: another model this module refuses to load, threaded through
+    to `ServiceDeps` and left `None` unless an operator asked for it."""
     return ServiceDeps(
         registry=load_registry(today), snapshot=open_snapshot(paths), embed_query=embed_query,
         skill_set=load_active_skills(paths, today), skill_ceiling=paths.skill_ceiling,
+        rerank=rerank,
     )
 
 
