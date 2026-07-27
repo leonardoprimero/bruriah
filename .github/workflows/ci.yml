@@ -58,6 +58,25 @@ jobs:
           FASTEMBED_CACHE_PATH: ${{ runner.temp }}/fastembed_cache
         run: uv run --no-sync python -m pytest tests -q -p no:randomly -rs
 
+  # `pip-audit` sat in `[dependency-groups] dev` from the beginning and no job ever ran it, which is
+  # the worst of both: the cost of declaring a security tool and none of the signal. A vulnerability
+  # in a transitive dependency of a package whose pitch is trust boundaries should not first be
+  # heard about from a user.
+  #
+  # It audits the LOCKED resolution, not a fresh one, because the lock is what CI tests and what a
+  # `uv sync --locked` reproduces -- auditing anything else would report on a dependency set nobody
+  # runs. Its own job: an advisory published overnight turns this one cell red without also
+  # withholding the test results for the change under review.
+  audit:
+    name: dependencies have no known advisories
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: astral-sh/setup-uv@v7
+      - run: uv sync --locked
+      - name: pip-audit
+        run: uv run --no-sync pip-audit --skip-editable
+
   package:
     name: wheel installs and runs
     runs-on: ubuntu-latest
