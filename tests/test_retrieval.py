@@ -233,3 +233,148 @@ def test_unreadable_snapshot_raises_typed_error_not_bare_sqlite_error(snapshot) 
     with pytest.raises(RetrievalError) as caught:
         search(snapshot, "apple", Budgets())
     assert caught.value.code == "snapshot_unreadable"# MARKER_TEST_12345
+
+
+# --- Optional cross-encoder reranking (opt-in stage) ------------------------------------------
+#
+# What these pin is not "the reranker improves recall" -- that is measured over real corpora in
+# `evals/project-memory/README.md` and cannot be asserted from three fixture notes. What they pin
+# is the CONTRACT the measurement is only meaningful under: that reranking reorders evidence
+# without inventing or dropping any, that every way a caller-supplied model can misbehave lands
+# back on the shipped ranking with a disclosure, and that the model is handed whole documents,
+# which is the input the published figure was produced with.
+
+@pytest.fixture
+def multi_passage_snapshot(tmp_path: Path):
+    with _snapshot_for(tmp_path, {
+        "alpha.md": "# Alpha\napple one.\n\n## Alpha Two\napple two body.\n",
+        "beta.md": "# Beta\napple three.\n\n## Beta Two\napple four body.\n",
+        "gamma.md": "# Gamma\napple five.\n\n## Gamma Two\napple six body.\n",
+    }) as active:
+        yield active
+
+
+def _documents_of(outcome) -> list[str]:
+    return list(dict.fromkeys(match.relative_path for match in outcome.matches))
+
+
+def test_no_reranker_leaves_ranking_and_disclosure_exactly_as_before(multi_passage_snapshot) -> None:
+    # Absence is deliberately silent, unlike `vector_leg_unavailable`: an opt-in stage that is off
+    # must not add a line to every response of every caller who never asked for it.
+    outcome = search(multi_passage_snapshot, "apple", Budgets())
+    assert not any(note.startswith("rerank") for note in outcome.degradation)
+
+
+def test_reranker_reorders_documents_and_discloses_that_it_did(multi_passage_snapshot) -> None:
+    baseline = _documents_of(search(multi_passage_snapshot, "apple", Budgets()))
+
+    def rerank(query: str, documents: list[str]) -> list[float]:
+        # Score the LAST document highest, so a reorder is unmistakable rather than coincidental.
+        return [float(index) for index in range(len(documents))]
+
+    outcome = search(multi_passage_snapshot, "apple", Budgets(), rerank=rerank)
+    assert _documents_of(outcome) == list(reversed(baseline))
+    assert f"reranked:{len(baseline)}_documents" in outcome.degradation
+
+
+def test_reranking_reorders_evidence_and_never_changes_which_evidence_exists(
+    multi_passage_snapshot,
+) -> None:
+    # The invariant the cross-lingual discount already follows. If reranking could add or drop a
+    # ref, `lexical_rank`/`vector_rank` would describe a list that no longer exists.
+    plain = search(multi_passage_snapshot, "apple", Budgets())
+    reranked = search(multi_passage_snapshot, "apple", Budgets(),
+                      rerank=lambda query, documents: [1.0] * len(documents))
+    assert {match.ref for match in plain.matches} == {match.ref for match in reranked.matches}
+    ranks = {match.ref: (match.lexical_rank, match.vector_rank) for match in plain.matches}
+    assert {m.ref: (m.lexical_rank, m.vector_rank) for m in reranked.matches} == ranks
+
+
+def test_every_passage_of_a_document_travels_with_it(multi_passage_snapshot) -> None:
+    outcome = search(multi_passage_snapshot, "apple", Budgets(),
+                     rerank=lambda query, documents: [float(i) for i in range(len(documents))])
+    seen: list[str] = []
+    for match in outcome.matches:
+        if not seen or seen[-1] != match.relative_path:
+            seen.append(match.relative_path)
+    # A document appearing twice would mean its passages were split across the new ordering.
+    assert len(seen) == len(set(seen))
+
+
+def test_the_reranker_is_handed_whole_documents_in_file_order_not_passages(
+    multi_passage_snapshot,
+) -> None:
+    # The measured finding this stage rests on: passages are ~250 characters of a body whose
+    # median is 445, and scoring them directly is worth a fraction of scoring documents. A future
+    # change that quietly passed passages here would keep every other test green.
+    captured: dict[str, list[str]] = {}
+
+    def rerank(query: str, documents: list[str]) -> list[float]:
+        captured["documents"] = documents
+        return [0.0] * len(documents)
+
+    search(multi_passage_snapshot, "apple", Budgets(), rerank=rerank)
+    alpha = next(text for text in captured["documents"] if "apple one" in text)
+    assert "apple two body" in alpha, "a document reached the reranker missing one of its passages"
+    assert alpha.index("apple one") < alpha.index("apple two body"), "passages arrived out of order"
+
+
+@pytest.mark.parametrize("returned, expected", [
+    (lambda n: [1.0] * (n - 1), "rerank_failed:score_count_mismatch"),
+    (lambda n: ["high"] * n, "rerank_failed:non_numeric_score"),
+    (lambda n: [float("nan")] * n, "rerank_failed:non_numeric_score"),
+])
+def test_a_reranker_that_answers_wrongly_degrades_to_the_shipped_ranking(
+    returned, expected, multi_passage_snapshot,
+) -> None:
+    baseline = _documents_of(search(multi_passage_snapshot, "apple", Budgets()))
+    outcome = search(multi_passage_snapshot, "apple", Budgets(),
+                     rerank=lambda query, documents: returned(len(documents)))
+    assert expected in outcome.degradation
+    assert _documents_of(outcome) == baseline, "a bad reranker must cost its stage, not the answer"
+
+
+def test_a_reranker_that_raises_degrades_to_the_shipped_ranking_without_crashing(
+    multi_passage_snapshot,
+) -> None:
+    baseline = _documents_of(search(multi_passage_snapshot, "apple", Budgets()))
+
+    def rerank(query: str, documents: list[str]) -> list[float]:
+        raise RuntimeError("model went away")
+
+    outcome = search(multi_passage_snapshot, "apple", Budgets(), rerank=rerank)
+    assert "rerank_failed:RuntimeError" in outcome.degradation
+    assert _documents_of(outcome) == baseline
+
+
+def test_reranking_is_skipped_once_the_deadline_has_passed(multi_passage_snapshot) -> None:
+    # A cross-encoder pass per document is the most expensive thing in a request. It must be the
+    # first thing dropped when the budget is gone, not the thing that overruns it.
+    calls: list[int] = []
+
+    def rerank(query: str, documents: list[str]) -> list[float]:
+        calls.append(len(documents))
+        return [0.0] * len(documents)
+
+    # The clock must expire AFTER retrieval and BEFORE reranking, or this passes for the wrong
+    # reason: a deadline that fires during the scan empties the pool, and a reranker that is never
+    # reached because there is nothing to rerank proves nothing about the deadline check. The
+    # non-empty assertion below is what keeps that honest if the number of clock reads ever moves.
+    reads = {"count": 0}
+
+    def clock() -> float:
+        reads["count"] += 1
+        return 0.0 if reads["count"] <= 4 else 1000.0
+
+    outcome = search(multi_passage_snapshot, "apple", Budgets(max_elapsed_ms=1),
+                     rerank=rerank, clock=clock)
+    assert outcome.matches, "retrieval itself was cut short; this no longer tests the rerank gate"
+    assert not calls, "the reranker ran after the deadline expired"
+    assert "max_elapsed_ms_exceeded" in outcome.degradation
+
+
+def test_equal_scores_cannot_reorder_so_two_identical_requests_agree(multi_passage_snapshot) -> None:
+    baseline = _documents_of(search(multi_passage_snapshot, "apple", Budgets()))
+    outcome = search(multi_passage_snapshot, "apple", Budgets(),
+                     rerank=lambda query, documents: [7.0] * len(documents))
+    assert _documents_of(outcome) == baseline

@@ -24,6 +24,10 @@ from .contracts import Budgets, EvidenceRecord
 from .index import ActiveSnapshot
 
 EmbedQuery = Callable[[str], bytes]
+# A reranker scores whole documents against the query and returns one number each, higher first.
+# Supplied by the caller exactly as `embed_query` is, for the same reason: the model, its download
+# and its licence are the operator's choice, and retrieval must stay importable without either.
+Rerank = Callable[[str, list[str]], list[float]]
 _TOKEN_PATTERN = re.compile(r"\w+", re.UNICODE)
 _BM25_K1 = 1.5
 _BM25_B = 0.75
@@ -46,6 +50,28 @@ _CROSS_LINGUAL_LEXICAL_WEIGHT = 0.1
 # so the same snapshot yields the same verdict without scanning every byte on every query.
 _LANGUAGE_SAMPLE_PASSAGES = 64
 _LANGUAGE_SAMPLE_CHARS = 400
+
+# How many DOCUMENTS a supplied reranker is asked to score, and how much of each it reads.
+#
+# Measured on the two foreign corpora, not guessed. On `square/leakcanary` the correct document is
+# somewhere in the returned pool 75.8% of the time while recall@3 is 0.340 -- almost everything
+# that is lost is lost ORDERING, not retrieving, and recall@10 understates that headroom by half.
+# Reranking the top 40 documents reads 0.431 recall@3 and 0.516 recall@10; the top 20 reads 0.412
+# and 0.464. Depth is the whole cost of the stage: one cross-encoder pass per extra document.
+#
+# 40 is NOT the depth that maximises every corpus, and this constant should not be read as tuned.
+# On `emilk/egui` reranking loses to the shipped ranking (0.494 against 0.530) and losing DEEPER
+# loses MORE -- top 20 reads 0.518 there. Depth amplifies whichever direction the reranker has on
+# a given corpus rather than improving it, so a larger number here would not be safer. The value
+# is set where the corpora that gain, gain most, and the whole stage is opt-in precisely because
+# whether a corpus gains at all is not predictable from anything measured.
+#
+# DOCUMENTS, not passages, and that is the larger of the two findings. A passage here is ~250
+# characters of a commit body whose median length is 445, and scoring passages directly reaches
+# only 0.373 with a 1.11 GB model -- the same figure an 0.08 GB model reaches when it is handed
+# whole documents. The unit fed to the cross-encoder matters more than the size of the model.
+_RERANK_DEPTH = 40
+_RERANK_MAX_CHARS = 4000
 _SNIPPET_CHARS = 500
 _MAX_QUERY_CHARS = 4096
 _CLOCK_EVERY = 64
@@ -275,6 +301,89 @@ def _fuse(
     return [(ref, lexical_rank, vector_rank) for _, ref, lexical_rank, vector_rank in fused]
 
 
+def _document_text(passages: list[_Passage]) -> str:
+    """One document rebuilt from the passages already scanned, in file order.
+
+    The snapshot's `documents` table carries metadata and no text, so this is the only document
+    text `search` can offer a reranker without a second read of the corpus -- which it cannot do
+    anyway, being snapshot-bound. It was VALIDATED as the input rather than assumed: scoring text
+    rebuilt this way reproduces the figure measured against the corpus files themselves, so the
+    number in `_RERANK_DEPTH`'s note belongs to the pipeline that actually ships.
+    """
+    return "\n\n".join(passage.text for passage in sorted(passages, key=lambda item: item.start_line))
+
+
+def _rerank_fused(
+    fused: list[tuple[str, int | None, int | None]],
+    passages: list[_Passage],
+    by_ref: dict[str, _Passage],
+    query: str,
+    rerank: Rerank,
+    deadline: float,
+    clock: Callable[[], float],
+    degradation: list[str],
+) -> list[tuple[str, int | None, int | None]]:
+    """Reorder the head of the fused list by a cross-encoder's reading of whole documents.
+
+    Reranking changes the ORDER of the evidence and never its membership: every ref returned here
+    was returned by `_fuse`, and every passage of a document travels with it. That is the rule the
+    cross-lingual discount already follows, for the same reason -- a ranking rule may reweigh
+    evidence, but inventing or dropping it would leave `lexical_rank`/`vector_rank` describing a
+    list that no longer exists.
+
+    Every failure path returns the fused order untouched and says so. A reranker is a caller-
+    supplied model that can be slow, absent or wrong, and the shipped ranking without it is a
+    measured 0.340 rather than nothing: degrading to it is a real answer, not an error.
+    """
+    if not fused:
+        return fused
+    if clock() >= deadline:
+        degradation.append("max_elapsed_ms_exceeded")
+        return fused
+
+    within: dict[str, list[tuple[str, int | None, int | None]]] = {}
+    for entry in fused:
+        within.setdefault(by_ref[entry[0]].document_ref, []).append(entry)
+    order = list(within)  # Insertion order is fused order: dicts preserve it, first passage wins.
+    head, tail = order[:_RERANK_DEPTH], order[_RERANK_DEPTH:]
+
+    grouped: dict[str, list[_Passage]] = {}
+    for passage in passages:
+        grouped.setdefault(passage.document_ref, []).append(passage)
+
+    try:
+        returned = list(rerank(
+            query,
+            [_document_text(grouped.get(document_ref, []))[:_RERANK_MAX_CHARS] for document_ref in head],
+        ))
+    except Exception as error:  # noqa: BLE001 -- caller-supplied untrusted callable, as embed_query
+        degradation.append(f"rerank_failed:{type(error).__name__}")
+        return fused
+    if len(returned) != len(head):
+        degradation.append("rerank_failed:score_count_mismatch")
+        return fused
+    try:
+        scores = [float(score) for score in returned]
+    except (TypeError, ValueError):
+        degradation.append("rerank_failed:non_numeric_score")
+        return fused
+    if any(score != score for score in scores):  # NaN sorts unpredictably and would be silent.
+        degradation.append("rerank_failed:non_numeric_score")
+        return fused
+
+    # Ties break on the position the document already held, so a reranker that scores two documents
+    # identically cannot reorder them and two identical requests cannot disagree.
+    ranked = [
+        document_ref for _score, _position, document_ref in sorted(
+            ((score, position, document_ref)
+             for position, (score, document_ref) in enumerate(zip(scores, head, strict=True))),
+            key=lambda item: (-item[0], item[1]),
+        )
+    ]
+    degradation.append(f"reranked:{len(head)}_documents")
+    return [entry for document_ref in ranked + tail for entry in within[document_ref]]
+
+
 def _leg_state(ranks: dict[str, int] | None, leg: str, degradation: list[str]) -> None:
     # `None` means the leg could not run; an empty mapping means it ran and matched nothing.
     # Both must be reported: embedding-dimension drift produces the second and used to be silent.
@@ -290,6 +399,7 @@ def search(
     budgets: Budgets = Budgets(),
     *,
     embed_query: EmbedQuery | None = None,
+    rerank: Rerank | None = None,
     clock: Callable[[], float] = time.monotonic,
 ) -> RetrievalOutcome:
     """Search the given open, read-only snapshot. Never writes, never raises on a budget ceiling."""
@@ -338,10 +448,20 @@ def search(
         degradation.append(f"lexical_leg_discounted:{query_language}_query_{corpus_language}_corpus")
 
     by_ref = {passage.ref: passage for passage in passages}
+    ordered = _fuse(lexical_ranks, vector_ranks, lexical_weight)
+    # Absence of a reranker is deliberately NOT reported the way `vector_leg_unavailable` is. The
+    # vector leg is part of the shipped ranking and its absence is a shortfall; a reranker is an
+    # opt-in stage that is off by default, so announcing it on every request would add a line to
+    # every existing response to say that nothing happened.
+    if rerank is not None:
+        ordered = _rerank_fused(
+            ordered, passages, by_ref, query, rerank, deadline, clock, degradation
+        )
+
     matches: list[RetrievalMatch] = []
     truncated = False
     extracted = 0
-    for rank, (ref, lexical_rank, vector_rank) in enumerate(_fuse(lexical_ranks, vector_ranks, lexical_weight), start=1):
+    for rank, (ref, lexical_rank, vector_rank) in enumerate(ordered, start=1):
         if len(matches) >= budgets.max_candidates:
             truncated = True
             degradation.append("max_candidates_exceeded")
