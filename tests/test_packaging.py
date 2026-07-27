@@ -174,3 +174,30 @@ def test_a_non_programming_request_gets_no_bundled_skills() -> None:
         load_registry(today=today), load_bundled_skills(today=today),
     )
     assert lookup.skills == ()
+
+
+def test_the_version_the_package_reports_is_the_version_it_is_built_as() -> None:
+    """`__version__` and `pyproject.toml`'s `version` are two declarations of one fact.
+
+    0.4.0 was a release about version drift: prose that claimed `0.1.0` through three releases, and
+    a `router_version` default that made a router reject a pack requiring the version it was. It
+    left these two unlinked, and the gap is not theoretical -- bumping `pyproject.toml` for 0.4.1
+    while `__init__.py` still said `0.4.0` produced a tree whose `bruriah --version` disagreed with
+    its own wheel, and nothing objected.
+
+    `release.yml` checks the git tag against `pyproject.toml` only, so that combination would have
+    published: correct artifact name, correct metadata, and a CLI reporting a version it is not.
+    Anyone comparing an installed copy against a release note would have been reading a wrong
+    number that looked maintained. This is the assertion that makes the drift impossible rather
+    than remembered.
+    """
+    import tomllib
+
+    from bruriah import __version__
+
+    root = Path(__file__).resolve().parents[1]
+    declared = tomllib.loads((root / "pyproject.toml").read_text(encoding="utf-8"))["project"]["version"]
+    assert __version__ == declared, (
+        f"src/bruriah/__init__.py says {__version__!r} and pyproject.toml says {declared!r}; "
+        "bump both in the same commit"
+    )
