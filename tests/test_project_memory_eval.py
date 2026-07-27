@@ -56,3 +56,57 @@ def test_every_ground_truth_document_exists_in_the_generated_corpus() -> None:
     assert not missing, (
         "the eval names documents this repository's history does not produce, so the published "
         f"numbers cannot be reproduced: {sorted(missing)}")
+
+
+# --- The published leakage figures have to stay true of the published question set ---------------
+# `evals/project-memory/README.md` states that ten of the twelve English questions hand over a term
+# this corpus treats as distinctive, and uses that to bound how the recall numbers on the same page
+# may be read. A figure in prose goes stale in silence while continuing to read as though somebody
+# maintained it -- this repository shipped 0.5.0 with a test count that had been wrong since 0.4.1,
+# and it was caught by noticing rather than by anything asserting it.
+#
+# So the claim is pinned. Not the exact mean, which moves whenever a commit is added to the corpus
+# that changes an IDF, but the COUNT the README leans on, which is the number a reader acts on.
+
+_EVALS_RETRIEVAL = ROOT / "evals" / "retrieval"
+if str(_EVALS_RETRIEVAL) not in sys.path:
+    sys.path.insert(0, str(_EVALS_RETRIEVAL))
+
+_PUBLISHED_ENGLISH_QUESTIONS_LEAKING_A_DISTINCTIVE_TERM = 10
+_LEAKAGE_THRESHOLD = 0.50
+
+
+def test_the_published_leakage_count_is_still_true() -> None:
+    from leakage import TermStatistics, leakage  # noqa: PLC0415 -- path is set above
+
+    toplevel = subprocess.run(["git", "rev-parse", "--show-toplevel"], cwd=ROOT,
+                              capture_output=True, text=True, timeout=60)
+    if toplevel.returncode != 0:
+        pytest.skip("not a git checkout")
+    with tempfile.TemporaryDirectory() as workspace:
+        built = subprocess.run([sys.executable, str(GENERATOR), "--repo", toplevel.stdout.strip(),
+                                "--out", workspace], capture_output=True, text=True, timeout=300)
+        assert built.returncode == 0, built.stdout + built.stderr
+        documents = {_SHA.sub(r"\1-", path.name): path.read_text(encoding="utf-8")
+                     for path in Path(workspace).glob("*.md")}
+
+    statistics = TermStatistics.over(documents.values())
+    leaking = 0
+    measured = 0
+    for line in (EVALS / "decisions-en.jsonl").read_text(encoding="utf-8").splitlines():
+        if not line.strip():
+            continue
+        case = json.loads(line)
+        target = case["ground_truth"]["must_include"][0]
+        assert target in documents, target  # covered by the test above; asserted so this one is honest
+        measured += 1
+        result = leakage(case["query"], documents[target], statistics)
+        if result.peak is not None and result.peak >= _LEAKAGE_THRESHOLD:
+            leaking += 1
+
+    assert measured == 12, f"the English question set is no longer twelve questions but {measured}"
+    assert leaking == _PUBLISHED_ENGLISH_QUESTIONS_LEAKING_A_DISTINCTIVE_TERM, (
+        f"README.md says {_PUBLISHED_ENGLISH_QUESTIONS_LEAKING_A_DISTINCTIVE_TERM} of {measured} "
+        f"English questions reach peak leakage {_LEAKAGE_THRESHOLD}; it is now {leaking}. Update "
+        "the figure and the paragraph that reasons from it, in this commit."
+    )

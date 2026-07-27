@@ -7,10 +7,13 @@ deliberately: this repo is its own test case, the same way `verify_legacy_baseli
 ## Reproduce
 
 ```bash
-python scripts/git_corpus.py --repo . --out /tmp/corpus
+bruriah corpus --repo . --out /tmp/corpus
 bruriah index --corpus-root /tmp/corpus --policy policy.yaml --data-dir /tmp/data
 # then score search() against decisions-{es,en}.jsonl with evals/retrieval/metrics.py
 ```
+
+*(That first line said `python scripts/git_corpus.py` until 0.5.0. The generator moved into the
+package when the front page started telling readers to run a file the wheel does not ship.)*
 
 **One rule the recipe needs and did not state:** the generator writes `date-sha8-slug.md`, and the
 recorded ground truth carries **no sha** — deliberately, because a sha does not survive a history
@@ -19,6 +22,110 @@ Without that the scorer reports 0% and looks like a retrieval collapse rather th
 
 `tests/test_project_memory_eval.py` asserts every ground-truth document is still produced by this
 repository's own history, so the numbers below stay reproducible from the published repository.
+
+## How much these questions give away, measured 2026-07-27
+
+Read this before any table below it. It is the strongest caveat on this page and it is a
+measurement, not a disclaimer.
+
+These questions were written by the person who wrote the commits that answer them. That is the only
+way this eval could exist — the ground truth is known because the reasoning was written down
+deliberately — and it is also the failure mode of every self-authored retrieval eval: if the
+question is phrased in the answer's own vocabulary, retrieval is being credited for matching words
+it was handed. Everyone says they avoided that. Nobody can show it, because "I wrote the questions
+independently" is a claim about a process and a reader cannot check a process.
+
+So it is measured instead. `evals/retrieval/leakage.py` weights each question term by its IDF over
+the derived corpus and reports two numbers: `share`, the weighted fraction of the question that
+also appears in its own answer, and `peak`, the single most distinctive term the question handed
+over, as a fraction of the highest IDF this corpus can produce. There is no stopword list — that
+would be a knob for deciding which words do not count, and picking a different list moves the mean
+by 0.12. IDF does the same work from the corpus itself. Reproduce with no index and no model:
+
+```bash
+bruriah corpus --repo . --out /tmp/corpus
+python evals/retrieval/report_leakage.py --corpus /tmp/corpus \
+    --questions evals/project-memory/decisions-en.jsonl
+```
+
+147 documents, the corpus as of `9591f91`:
+
+| | mean `share` | mean `peak` | questions with `peak` ≥ 0.50 |
+|---|---|---|---|
+| English | 0.577 | 0.589 | **10 of 12** |
+| Spanish | 0.066 | 0.336 | 3 of 12 |
+
+**Ten of the twelve English questions hand over a term this corpus treats as distinctive.** Three
+are close to restatements of the commit's own subject line with `why did` in front:
+
+| question | the commit subject it restates |
+|---|---|
+| *why did user activated skills not reach the server* | `make user-activated skills reach the server` |
+| *why is approval bound to the digest not the version* | `add digest-bound approval records` |
+| *why did we extract the pointer primitives* | `extract atomic pointer primitives to pointer.py` |
+
+The Spanish set leaks far less, but not from better question design — it leaks less because it is in
+another language. Which means the English/Spanish gap reported further down this page has **two**
+explanations, not one: cross-lingual retrieval really is harder, and the English questions really do
+give more away. These figures cannot separate those.
+
+### Does leakage actually change the result? Paired, and yes — 3 questions
+
+Comparing different questions confounds difficulty with leakage. Comparing two phrasings of one
+question against one fixed target does not. The three restatements above, re-asked from the
+consequence someone would actually notice:
+
+| phrasing | `peak` | rank of the correct document |
+|---|---|---|
+| *why did user activated skills not reach the server* | 0.68 | **1** |
+| *the tool confirmed something was enabled and it never took effect* | 0.03 | 6 |
+| *why is approval bound to the digest not the version* | 0.54 | **1** |
+| *what prevents content from being altered after a human signed off* | 0.07 | >10 |
+| *why did we extract the pointer primitives* | 0.68 | **1** |
+| *how can a second artifact kind get the same crash safety without duplicating it* | 0.56 | **1** |
+
+recall@3 goes **3/3 → 1/3**, and the one that survived is the one whose rewrite still leaked. That
+internal consistency is what makes three questions worth reporting at all.
+
+**The honest objection, which is not answered here:** those rewrites are also *vaguer* than the
+originals, and they were written by someone who had read the answers. The drop mixes leakage with
+vagueness and this experiment cannot separate them. That is exactly why
+[issue #4](https://github.com/leonardoprimero/bruriah/issues/4) asks for questions drawn from a
+source independent of the corpus — a linked issue, a PR discussion, a release note. That is not
+methodological decoration; it is the only thing that separates the two.
+
+### Stratifying by leakage proves nothing at twelve questions, and here is the proof
+
+The obvious next step is to split the questions into high- and low-leakage bands and compare recall.
+Done on `peak` at a 0.50 threshold, and on `share` at the same threshold, over the same twelve
+English questions and the same engine:
+
+| split on | high-leakage band | low-leakage band |
+|---|---|---|
+| `peak` | recall@3 0.80 (n=10) | recall@3 **1.00** (n=2) |
+| `share` | recall@3 0.90 (n=10) | recall@3 **0.50** (n=2) |
+
+**Opposite conclusions from the same data.** The low band holds two questions either way, and which
+two depends on which number you sort by, so the sign of the effect is decided by a choice that has
+nothing to do with retrieval. `evals/retrieval/leakage.py` ships `stratify` because the comparison
+is the right one to make; this table is why it is not made *here* yet.
+
+That is what "twelve questions means one question is eight points" costs in practice, and it is the
+reason the sample size caveat on this page is not boilerplate.
+
+### What this does to the numbers below
+
+It does not retract them. Recall@3 of 0.83 on English is a real measurement of a real engine over a
+real corpus, and the relative comparisons on this page — between models, between fusion weights,
+between languages — hold, because leakage is a property of the question set and the question set was
+held fixed across all of them. A confound that is constant cannot explain a difference.
+
+What it does mean is narrower and worth stating exactly: **0.83 cannot be separated from lexical
+overlap with a question set that hands over a distinctive term in ten cases out of twelve.** It is
+not an estimate of what this engine would do on a repository whose history somebody else wrote, and
+it should not be read as one. Getting a number that can be read that way is
+[issue #4](https://github.com/leonardoprimero/bruriah/issues/4), and it needs an external corpus and
+a question set large enough that the table above stops flipping.
 
 ## The model matters more than the weighting, measured 2026-07-26
 
