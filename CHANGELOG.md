@@ -3,6 +3,55 @@
 Notable changes, newest first. This project follows [semantic versioning](https://semver.org/),
 and the entries here name what changed for *you* rather than which files moved.
 
+## [Unreleased]
+
+### Optional cross-encoder reranking — `--reranker`
+
+`bruriah ask` and `bruriah serve` take `--reranker MODEL`. It reorders the top 40 documents a
+search returns, using a cross-encoder that reads the query and each document together instead of
+comparing two vectors that were embedded without knowing about each other. It is **off unless you
+name a model**, and it needs no re-index: unlike `--model`, a reranker touches no stored vector, so
+it can be added, swapped or dropped against an existing snapshot.
+
+What it changes, measured on the two foreign corpora and this repository's own history:
+
+| | recall@3 before | after |
+|---|---|---|
+| `square/leakcanary`, 153 independent-source questions | 0.340 | **0.431** |
+| `emilk/egui`, 83 independent-source questions | **0.530** | 0.494 *(three questions worse)* |
+| this repository, 12 English questions | 0.833 | **1.000** |
+| this repository, 12 Spanish questions | 0.500 | **0.917** |
+
+Three things are worth knowing before you turn it on.
+
+**It is not free and it is not always positive.** Roughly 7 seconds per query, a second ~1 GB
+model download, and on one of the two foreign corpora it made things *worse* — three questions of
+83, lowering recall@3 and recall@10 both, on the corpus where the shipped ranking was already
+strongest. Reranking deeper amplified that loss rather than fixing it. Measure it on your own
+corpus before turning it on; the flag needs no re-index, so that is one command.
+
+**An English-only reranker is dangerous on a non-English query.** `ms-marco-MiniLM-L-6` scores
+confidently in a language it cannot read, and reordering by those scores cut Spanish recall@10 from
+0.917 to 0.667 — worse than not reranking at all. There is no safe default across languages, which
+is why there is no default.
+
+**Every failure degrades to the shipped ranking rather than to an error**, and says which failure
+it was in `degradation`: a model that raises, returns the wrong number of scores, returns something
+that is not a number, or arrives after `max_elapsed_ms` has passed. Reranking also never changes
+*which* evidence is returned — only its order — so `lexical_rank` and `vector_rank` keep describing
+the list you actually received.
+
+### Two claims on the front page were wrong and are corrected
+
+The README said 58% Spanish recall@3 was "the vector leg's own ceiling" and that the cross-lingual
+fix "does not make cross-lingual retrieval as good as same-language retrieval". Both were true of
+the pipeline that existed when they were written; neither survives the measurement above.
+
+The same eval also corrects something larger. The correct document is somewhere in the returned
+pool **76%** of the time on leakcanary and **92%** on egui, against recall@3 of 0.340 and 0.530 —
+so recall@10 was understating the ranking headroom by about half, and everything this project has
+said about "a ranking problem" was right and too modest.
+
 ## [0.5.0] — 2026-07-27
 
 The live research path, which 0.4.1 deliberately left alone. Four defects, all confirmed by
