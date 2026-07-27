@@ -130,11 +130,23 @@ def independence(commit: Commit, issue: Issue) -> str | None:
 
 @dataclass(frozen=True)
 class Pair:
-    """One surviving question/answer pair, ready to become an eval case."""
+    """One surviving question/answer pair, ready to become an eval case.
+
+    `also_answered_by` exists because one issue can be closed by several commits, years apart.
+    `square/leakcanary` #2301, `ToastEventListener leak`, was fixed in 2022 and fixed again in 2026
+    when the same class turned out to also have a race condition. Both commits genuinely answer the
+    report, so neither can be called wrong, and emitting two cases under one question would
+    silently collapse the moment the set is keyed by id -- which is how it was found.
+
+    The EARLIEST commit after the issue is the ground truth: it is the one that answered the report
+    as filed. The rest become `acceptable`, the field `ndcg_at_10` already grades at partial credit.
+    Chronological, so nothing here decides which fix was the better one.
+    """
 
     issue_number: int
     question: str
     ground_truth: str
+    also_answered_by: tuple[str, ...]
     commit_sha: str
     issue_author: str
     commit_author: str
@@ -173,7 +185,9 @@ def build(
     `issues` maps number -> Issue for every reference that could be resolved; a number absent from
     it is rejected as unresolvable rather than assumed innocent.
     """
-    kept: list[Pair] = []
+    # Collected per issue first, because an issue answered by several commits is ONE question with
+    # one best answer and some partial ones -- not several questions that happen to share a title.
+    by_issue: dict[int, list[tuple[Commit, Issue, str]]] = {}
     rejected: list[Rejected] = []
     for commit in commits:
         numbers = parse_closes(commit.body)
@@ -192,14 +206,21 @@ def build(
             if reason is not None:
                 rejected.append(Rejected(commit.sha[:12], number, reason))
                 continue
-            kept.append(Pair(
-                issue_number=number,
-                question=issue.title,
-                ground_truth=document,
-                commit_sha=commit.sha[:12],
-                issue_author=issue.author_login,
-                commit_author=commit.author_login or commit.author_name,
-            ))
+            by_issue.setdefault(number, []).append((commit, issue, document))
+
+    kept: list[Pair] = []
+    for number in sorted(by_issue):
+        answers = sorted(by_issue[number], key=lambda item: (item[0].authored_at, item[0].sha))
+        commit, issue, document = answers[0]
+        kept.append(Pair(
+            issue_number=number,
+            question=issue.title,
+            ground_truth=document,
+            also_answered_by=tuple(later[2] for later in answers[1:]),
+            commit_sha=commit.sha[:12],
+            issue_author=issue.author_login,
+            commit_author=commit.author_login or commit.author_name,
+        ))
     return kept, rejected
 
 

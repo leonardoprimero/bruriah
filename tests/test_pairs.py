@@ -143,6 +143,7 @@ def test_build_keeps_an_independent_pair_with_the_issue_title_as_the_question() 
     assert rejected == []
     assert len(kept) == 1
     pair = kept[0]
+    assert pair.also_answered_by == ()
     # The question is the issue title verbatim -- how somebody actually asked, not a paraphrase of
     # the answer written afterwards.
     assert pair.question == "ToastEventListener leak"
@@ -194,3 +195,36 @@ def test_one_commit_closing_two_issues_yields_two_pairs() -> None:
     )
     assert [pair.issue_number for pair in kept] == [10, 11]
     assert kept[1].question == "a second report"
+
+
+def test_one_issue_closed_by_two_commits_is_one_question_with_a_partial_credit_answer() -> None:
+    """Found by a guard on the generated set, not by review: `square/leakcanary` #2301 was fixed in
+    2022 and fixed again in 2026, and the extractor emitted two cases under one id, which collapse
+    the moment the set is keyed by question.
+
+    Both commits genuinely answer the report. The earliest after the issue is the ground truth --
+    it answered the report as filed -- and the rest are partial credit. Chronological, so nothing
+    here decides which fix was better.
+    """
+    corpus = {"aaaaaaaa": "2022-04-03-fix-the-leak.md", "bbbbbbbb": "2026-02-26-fix-the-race.md"}
+    early = _commit(sha="aaaaaaaa" + "0" * 32, authored_at=_WHEN, body="closes #2301")
+    late = _commit(sha="bbbbbbbb" + "0" * 32, authored_at=_WHEN + timedelta(days=1400),
+                   body="closes #2301")
+    # Fed newest-first, the order `git log` actually produces, so the ordering is real work.
+    kept, rejected = build([late, early], {2301: _issue()}, corpus)
+    assert rejected == []
+    assert len(kept) == 1
+    assert kept[0].ground_truth == "2022-04-03-fix-the-leak.md"
+    assert kept[0].also_answered_by == ("2026-02-26-fix-the-race.md",)
+
+
+def test_pairs_come_out_in_issue_order_regardless_of_commit_order() -> None:
+    # Deterministic output: the same history must produce the same file, byte for byte, or a
+    # regenerated eval set shows up as a diff nobody can review.
+    corpus = {"aaaaaaaa": "2022-01-01-a.md", "bbbbbbbb": "2022-01-02-b.md"}
+    commits = [
+        _commit(sha="bbbbbbbb" + "0" * 32, body="closes #20"),
+        _commit(sha="aaaaaaaa" + "0" * 32, body="closes #10"),
+    ]
+    kept, _ = build(commits, {10: _issue(number=10), 20: _issue(number=20)}, corpus)
+    assert [pair.issue_number for pair in kept] == [10, 20]
