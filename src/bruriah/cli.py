@@ -719,8 +719,20 @@ def _cmd_ask(
             print()
         return 0
 
-    print(f"\n  Nothing above is the document's text -- only references to it. That is the whole\n"
-          f"  design: read one explicitly with  bruriah ask \"{args.question[:34]}…\" --read 1\n")
+    # This line is the bridge to the second call, so the whole two-call shape is behind it and a
+    # suggestion that does not survive a paste is the design going undiscoverable one step from
+    # the end. It used to truncate the question to 34 characters and append an ellipsis, and it
+    # never carried the directory flags, so pasting it asked either a different question or the
+    # right one of the wrong index. Double quotes rather than shlex: they are the form that runs
+    # on every shell this project supports, including cmd.exe.
+    directories = " ".join(
+        f"--{name.replace('_', '-')} {getattr(args, name)}"
+        for name in ("data_dir", "config_dir")
+        if getattr(args, name, None) is not None
+    )
+    command = f'bruriah ask "{args.question}" --read 1' + (f" {directories}" if directories else "")
+    print("\n  Nothing above is the document's text -- only references to it. That is the whole\n"
+          f"  design: read one explicitly with\n\n    {command}\n")
     return 0
 
 
