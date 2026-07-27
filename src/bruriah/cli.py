@@ -694,7 +694,12 @@ def _cmd_ask(
             raise CliError("no_such_reference")
         print()
         for item in read(ReadRequest(refs=chosen), deps).model_dump(mode="json")["items"]:
-            print(f"  ── {item['ref'][:24]}… lines {item['start']}-{item['end']} " + "─" * 24)
+            # `start`/`end` are character offsets into the passage, not line numbers -- they are
+            # what the output budget is spent in and what `next_cursor` resumes from. Labelling
+            # them "lines" printed 1-567 for a fifteen-line document. The line span is the
+            # locator's, and it is the one a person wants next to the text.
+            where = item["citation_locator"] or f"{item['ref'][:24]}…"
+            print(f"  ── {where} · chars {item['start']}-{item['end']} " + "─" * 16)
             for line in item["content"].splitlines():
                 print(f"  {line}")
             print()

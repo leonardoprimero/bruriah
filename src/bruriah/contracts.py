@@ -150,9 +150,14 @@ class InvestigationResult(ClosedModel):
     budgets: Budgets
     next_cursor: str | None = None
 class ReadRange(ClosedModel):
+    # Character offsets, 1-indexed and inclusive -- NOT line numbers. This model is handed to the
+    # host verbatim as `read_evidence`'s `inputSchema`, so the unit has to be stated here or it is
+    # stated nowhere: a caller that assumes lines gets a window an order of magnitude short and no
+    # error, because every value valid as a line number is also valid as an offset. The line span
+    # of a passage is carried separately, by `citation_locator`.
     ref: Ref
-    start: Annotated[int, Field(ge=1)]
-    end: Annotated[int, Field(ge=1)]
+    start: Annotated[int, Field(ge=1, description="1-indexed character offset, inclusive")]
+    end: Annotated[int, Field(ge=1, description="1-indexed character offset, inclusive")]
     @model_validator(mode="after")
     def ordered(self) -> "ReadRange":
         if self.end < self.start:
@@ -174,8 +179,10 @@ class ReadItem(ClosedModel):
     ref: Ref
     status: Literal["ok", "missing_ref", "stale_ref", "expired_ref", "ineligible_ref", "invalid_range"]
     content: str | None = None
-    start: int | None = None
-    end: int | None = None
+    # The window actually returned, in the same character offsets `ReadRange` accepts, so that
+    # `end + 1` is where `next_cursor` resumes. Not line numbers; `citation_locator` has those.
+    start: Annotated[int | None, Field(description="1-indexed character offset, inclusive")] = None
+    end: Annotated[int | None, Field(description="1-indexed character offset, inclusive")] = None
     digest: str | None = None
     truncated: bool = False
     next_cursor: str | None = None

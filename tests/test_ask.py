@@ -10,6 +10,7 @@ the MCP surface or introduced a component that answers questions.
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 
 import pytest
@@ -67,6 +68,28 @@ def test_reading_a_reference_is_a_separate_explicit_step(indexed, capsys) -> Non
     read = capsys.readouterr().out
     assert "Why we chose the apple recipe" not in listing
     assert "Why we chose the apple recipe" in read
+
+
+def test_the_read_banner_reports_a_character_span_and_names_the_unit(indexed, capsys) -> None:
+    """`ReadItem.start`/`end` are character offsets into the passage -- they are what the output
+    budget is spent in and what `next_cursor` resumes from. The banner labelled them "lines",
+    which printed a span in the hundreds above a body of four. Nothing errors when a caller
+    believes it, because every line number is also a valid offset, so the wrong unit just returns
+    a window an order of magnitude short."""
+    _ask(indexed, "why did we choose the apple recipe", "--read", "1")
+    out = capsys.readouterr().out
+    banner = next(line for line in out.splitlines() if line.lstrip().startswith("──"))
+
+    assert "lines" not in banner, "a character offset is being called a line number"
+    span = re.search(r"chars (\d+)-(\d+)", banner)
+    assert span is not None, banner
+    start, end = int(span.group(1)), int(span.group(2))
+    body = [line for line in out.split(banner, 1)[1].splitlines() if line.strip()]
+    assert end - start + 1 > len(body), (
+        "the span is a character count, so it cannot also be the number of lines printed under it"
+    )
+    # The locator keeps carrying the line range, which is the one a person wants next to the text.
+    assert re.search(r"\.md#\d+-\d+", banner), banner
 
 
 def test_a_reference_that_does_not_exist_fails_typed(indexed) -> None:
