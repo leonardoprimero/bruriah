@@ -312,6 +312,41 @@ def test_invalid_or_incompatible_promotion_keeps_last_known_good(tmp_path: Path)
         assert snapshot.build_id == result.build_id
 
 
+def test_edited_policy_promotes_and_discards_the_unretainable_generation(tmp_path: Path) -> None:
+    """An edited `policy.yaml` used to make the directory permanently unindexable: the outgoing
+    index's `policy_hash` is the old policy's by construction, so validating it against the new
+    config could only ever fail, and that failure vetoed a candidate that had already validated.
+    Promotion now proceeds, the un-activatable generation is dropped instead of recorded as a
+    rollback target that `rollback_active` would refuse, and the loss is reported."""
+    root, policy = write_corpus(tmp_path)
+    policy_path = tmp_path / "policy.yaml"
+    pointer = tmp_path / "active.json"
+    first = tmp_path / "first.sqlite3"
+    second = tmp_path / "second.sqlite3"
+    build_candidate(config(root, policy_path), first, policy, fake_embeddings)
+    first_activation = promote_candidate(first, pointer, config(root, policy_path), policy)
+    assert first_activation.retention_discarded is False
+
+    policy_path.write_text(
+        "version: 1\ninclude: ['public/**']\nexclude: ['drafts/**']\n", encoding="utf-8"
+    )
+    edited = CorpusPolicy.load(policy_path)
+    second_result = build_candidate(config(root, policy_path), second, edited, fake_embeddings)
+
+    activation = promote_candidate(second, pointer, config(root, policy_path), edited)
+
+    assert activation.retention_discarded is True
+    assert activation.build_id == second_result.build_id
+    assert json.loads(pointer.read_text(encoding="utf-8"))["retained"] == []
+    with snapshot_active(pointer, config(root, policy_path)) as snapshot:
+        assert snapshot.build_id == second_result.build_id
+    # The dropped generation is unreferenced, not deleted: nothing here removes a file it did not
+    # create, and the bytes stay available to anyone who wants to inspect them.
+    assert first.exists()
+    with pytest.raises(ValueError, match="no_retained_index"):
+        rollback_active(pointer, config(root, policy_path))
+
+
 def test_rollback_and_recovery_restore_retained_index_without_rebuild(tmp_path: Path) -> None:
     root, policy = write_corpus(tmp_path)
     policy_path = tmp_path / "policy.yaml"
