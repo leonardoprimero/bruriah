@@ -3,6 +3,63 @@
 Notable changes, newest first. This project follows [semantic versioning](https://semver.org/),
 and the entries here name what changed for *you* rather than which files moved.
 
+## [0.4.0] — 2026-07-27
+
+### It can state its own version, and the compatibility gate now asks about the real one
+
+`bruriah --version` exists. `docs/client-guidance.md` had been telling readers to run it to find
+out which router version a config targets, while the flag did not exist and the doc asserted
+`0.1.0` — through three releases in which that stopped being true. The doc and `SECURITY.md` now
+name no number at all: a version written into prose goes stale silently while reading as though
+somebody maintained it.
+
+The same hardcoded `0.1.0` was doing damage where nobody could see it. `check_router_compatibility`
+gates a pack on `min_router_version <= router <= max_router`, and every loader defaulted the middle
+term to `0.1.0`. A pack requiring the current version would have been **rejected by a router that
+is that version**. The gate was not dormant, it was answering about a release this package had not
+been since its first. It now defaults to the installed `__version__`, the way `clients.py` already
+did.
+
+One thing that looks like the same bug is not, and is deliberately unchanged: `service_version` in
+`BuildConfig` stays `"0.1.0"`. It belongs with `parser_version="corpus-v1"` and
+`ranking_config="rrf-v1"` — a marker of the snapshot contract, carried into the metadata
+`promote_candidate` validates. Wiring it to the package version would put every release into the
+index identity, so a patch bump would refuse your existing snapshot and re-embed your whole corpus.
+It moves when the snapshot contract moves. There is now a comment at the assignment saying so.
+
+### The install contract says what the code actually imports
+
+`cryptography` and `anyio` are imported by name in `src/bruriah/` and were never declared. They
+arrived as transitive passengers of `mcp`: an install that worked by luck and would have broken the
+day a dependency dropped them. Both are declared now.
+
+`sqlite-vec` went the other way — a runtime dependency with no runtime caller. Nothing under `src/`
+imports it: the vector leg reads float blobs out of SQLite and scores them in Python. Its one
+importer is the eval harness, which opens the legacy `cerebro.db` to measure this router against
+its predecessor — a benchmark, not the product. It is now a dev dependency, so installing Bruriah
+no longer builds a compiled extension nothing it ships will call. If an ANN index ever lands, it
+arrives with the code that uses it.
+
+### CI runs the security tool it already declared
+
+`pip-audit` sat in the dev dependency group from the beginning and no job ever ran it — the cost of
+declaring a security tool with none of the signal. It audits the locked resolution, which is what
+CI tests and what `uv sync --locked` reproduces, in its own job so an advisory published overnight
+does not withhold the test results for the change under review.
+
+### Everything merged since 0.3.0 and never released
+
+0.3.0 is what PyPI has been serving while `main` accumulated eighteen commits of fixes nobody could
+install. They are in this release: `ask` no longer leaks the snapshot it opens, and the suite fails
+on a connection that outlives its test; `index` closes the connections that made a generation
+undeletable and no longer lets a superseded generation veto a valid candidate; `index-prune` lands
+as the counterpart to dropping a generation; the read command the CLI suggests can be pasted, and
+the character offset it printed is no longer called a line number; the fastembed pooling notice is
+silenced, and only that one. `bruriah corpus` now reports **what share of your history carried no
+reasoning** — a repository yielding three documents from three commits and one yielding three from
+three hundred used to print the same number. CI runs the quickstart the README states rather than a
+copy that had already drifted, and publication goes through Trusted Publishing.
+
 ## [0.3.0] — 2026-07-26
 
 ### The skill-dispatch ceiling is operator-configurable
