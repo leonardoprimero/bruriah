@@ -127,6 +127,99 @@ it should not be read as one. Getting a number that can be read that way is
 [issue #4](https://github.com/leonardoprimero/bruriah/issues/4), and it needs an external corpus and
 a question set large enough that the table above stops flipping.
 
+## A repository nobody here wrote, measured 2026-07-27
+
+Everything else on this page is measured against this project's own history, by questions this
+project's author wrote. This section is not, and it is the least flattering thing here.
+
+**The corpus.** `square/leakcanary` — 1736 non-merge commits, **604 carrying an explanatory body**,
+derived by the shipped `bruriah corpus` and indexed by the shipped `bruriah index`. Chosen by a
+query rather than from memory: permissive licence, not archived, not a fork, 2000–30000 stars, a
+real language, at least five releases. The release filter replaced a first rule that sorted on
+stars alone and returned content collections — `public-apis`, `TheAlgorithms` — whose commits are
+"add X to list" and carry no reasoning by construction. Reasoning coverage across the first twelve
+candidates in that rule's own order has a **median of 23%**. This repository is at 100%, which is
+not a normal number and is worth knowing before reading anything below.
+
+**The questions.** 153, and **not one of them written by anybody who knew the answer.** Each comes
+from a GitHub issue that a commit's body says it closes, where the issue was opened by a different
+person, before that commit existed. `evals/retrieval/pairs.py` decides that; the surviving set is
+[`leakcanary-issues.jsonl`](leakcanary-issues.jsonl) and the 24 excluded by shape rules — raw stack
+traces, titles under 18 characters, release notes, complaints naming no subject — are in
+[`leakcanary-excluded.jsonl`](leakcanary-excluded.jsonl) with the rule that excluded each. Of 286
+commits naming an issue they close, 129 were rejected before that: 123 were the maintainer filing
+an issue about their own fix. The 177 survivors become 153 questions and 24 exclusions — one issue
+was closed by two commits four years apart, which is one question with a partial-credit second
+answer rather than two questions sharing a title.
+
+Leakage, on the metric defined above and shipped before these questions existed:
+
+| | mean `share` | mean `peak` | `peak` ≥ 0.50 |
+|---|---|---|---|
+| this repository's own 12 | 0.577 | 0.589 | 83% |
+| leakcanary's 153 | **0.250** | 0.440 | 44% |
+
+### The result
+
+| | recall@3 | recall@10 | MRR@10 |
+|---|---|---|---|
+| default `paraphrase-multilingual-MiniLM-L12-v2` | **0.261** | 0.399 | 0.233 |
+| `jinaai/jina-embeddings-v2-base-es` | **0.340** | 0.451 | 0.290 |
+
+Against 0.83 on this repository. **A foreign history is much harder, and the honest headline is
+that number, not the one above it.**
+
+### What is actually driving it
+
+Four controls, so the figure is a measurement rather than an anecdote with decimals:
+
+| control | effect on recall@3 |
+|---|---|
+| embedding model, default → jina | +0.08 |
+| distractors, 604 → 147 documents | +0.15 *(approximate — see below)* |
+| ground-truth document length, shortest quartile → longest | +0.09 |
+| passages per document | **none**: 2.00 here, 2.02 there |
+
+The distractor figure restricts the existing ranked list to a random 147-document subset containing
+the answer; it does not re-index, so BM25's IDF would shift slightly on a real corpus that size.
+Read it as an upper bound. The length control matters because leakcanary's documents are **3.6×
+shorter** than this repository's — median 445 characters against 1600 — so there is simply less
+reasoning per commit to match against. It explains less than it looks like it should.
+
+**And then the one that does not move.** Splitting the same 153 questions by how much they gave
+away, on bands of 68 and 85 rather than the two-question bands that made this comparison useless
+above:
+
+| | `peak` ≥ 0.50 | `peak` < 0.50 |
+|---|---|---|
+| default | 0.515 | **0.059** |
+| jina | 0.662 | **0.082** |
+
+**When the question shares no distinctive term with its answer, the correct document reaches the
+top three about six times in a hundred.** A better embedding lifts both bands by a similar factor
+and leaves the dependence exactly where it was, which is what rules out "the default model is the
+problem". This comparison is internal — one corpus, one question set, both models — so none of the
+four controls above touches it.
+
+### Two things this is not
+
+**Not a comparison with the 0.83.** The two question sets measure different tasks. This page's
+twelve ask for a decision's rationale (*why is the skill ceiling five*); leakcanary's ask about a
+symptom (*ToastEventListener leak*). Retrieving a commit from a why-question and retrieving it from
+the bug that provoked it are different jobs, and there is a case that the symptom is the more
+faithful one — nobody asks why a ceiling is five out of nowhere; they hit it, and then they ask.
+Either way the numbers sit in separate tables on purpose.
+
+**Not a verdict on the engine.** recall@10 of 0.451 against recall@3 of 0.340 says the right
+document is found considerably more often than it is ranked well. That is a ranking problem, and it
+is the same shape as the fusion defect recorded further down this page — where reciprocal-rank
+fusion was averaging a correct vector answer against a lexical leg that could not read the query's
+language. The external number now exists to measure a fix against, which is the thing this section
+was built to make possible.
+
+One genuinely positive finding: jina improves on a foreign corpus too. The claim below that the
+model matters more than the weighting was, until now, one repository's opinion of itself.
+
 ## The model matters more than the weighting, measured 2026-07-26
 
 `--model` has always been a flag on `bruriah index`, and nothing said what it was worth. It is
