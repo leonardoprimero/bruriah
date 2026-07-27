@@ -31,6 +31,7 @@ from .platform import (
     load_registry, open_snapshot, resolve_paths, write_build_descriptor,
 )
 from .contracts import InvestigationRequest, ReadRequest
+from .retrieval import Rerank
 from .service import ServiceDeps, investigate, read
 
 # Slice 8A-2: `bruriah {init,serve,index,doctor}` over Slice 8A-1's `platform.py` loader.
@@ -48,6 +49,12 @@ from .service import ServiceDeps, investigate, read
 # fail-closed against the descriptor before ever using it, and threads it into `load_deps`.
 # `doctor`/`platform.load_deps` stay untouched: `embed_query` still defaults to `None` there.
 EmbedderFactory = Callable[[str], tuple[Embedder, str, int]]
+# Same shape as `EmbedderFactory`, for the same testing reason: the suite injects a fake so it
+# never downloads or runs a real cross-encoder, and `--reranker` stays a documented operator
+# choice rather than a silent default. Unlike the embedder there is NOTHING to fail closed
+# against here -- a reranker touches no stored vector, so it cannot be mismatched with the
+# snapshot and needs no fingerprint pinned in the build descriptor.
+RerankerFactory = Callable[[str], Rerank]
 
 
 class CliError(ValueError):
@@ -163,6 +170,23 @@ def _default_embedder_factory(model_name: str) -> tuple[Embedder, str, int]:
         return [array("f", vector).tobytes() for vector in model.embed(texts)]
 
     return embed, fingerprint, model.embedding_size
+
+
+def _default_reranker_factory(model_name: str) -> Rerank:
+    """Real fastembed cross-encoder; tests inject a fake so the suite never loads real ONNX.
+
+    Imported inside the function on purpose. `fastembed.rerank` pulls a second ONNX runtime graph
+    into the process, and `doctor`, `index-prune` and every deps construction that never asked for
+    a reranker must not pay for an import they will not use.
+    """
+    from fastembed.rerank.cross_encoder import TextCrossEncoder
+
+    model = TextCrossEncoder(model_name=model_name)
+
+    def rerank(query: str, documents: list[str]) -> list[float]:
+        return [float(score) for score in model.rerank(query, documents)]
+
+    return rerank
 
 
 def run_index(
@@ -315,6 +339,8 @@ def run_client_configs(
 
 def build_serve_deps(
     paths: PlatformPaths, *, embedder_factory: EmbedderFactory = _default_embedder_factory,
+    reranker_model: str | None = None,
+    reranker_factory: RerankerFactory = _default_reranker_factory,
 ) -> ServiceDeps:
     """Load real `ServiceDeps`, including a real query embedder; split from `_serve_stdio` so
     tests verify wiring, never the loop.
@@ -329,7 +355,13 @@ def build_serve_deps(
     `embedding_fingerprint`/`embedding_dimensions`; ANY mismatch raises a typed
     `embedding_model_mismatch` `CliError` instead of silently poisoning the vector leg with a
     query embedding space that does not match the indexed passage vectors -- worse than leaving
-    the vector leg off entirely."""
+    the vector leg off entirely.
+
+    `reranker_model` is `None` unless the operator named one. It is NOT read from the build
+    descriptor the way the embedder is, and the difference is not an oversight: passage vectors
+    are baked into the snapshot, so the query embedder must match what built them or the vector
+    leg searches the wrong space. A reranker reads text and writes nothing, so no snapshot can be
+    wrong about it and any model can be swapped in or dropped without re-indexing."""
     try:
         descriptor = load_build_descriptor(paths)
         embed, fingerprint, dimensions = embedder_factory(descriptor.embedding_model)
@@ -342,7 +374,8 @@ def build_serve_deps(
         def embed_query(text: str) -> bytes:
             return embed([text])[0]
 
-        return load_deps(paths, embed_query=embed_query)
+        rerank = reranker_factory(reranker_model) if reranker_model else None
+        return load_deps(paths, embed_query=embed_query, rerank=rerank)
     except PlatformError as error:
         raise CliError(error.code) from error
 
@@ -684,7 +717,7 @@ def _cmd_index(
 
 def _cmd_serve(args: argparse.Namespace) -> int:
     paths = _resolve_paths(args)
-    deps = build_serve_deps(paths)
+    deps = build_serve_deps(paths, reranker_model=getattr(args, "reranker", None))
     try:
         anyio.run(_serve_stdio, deps)
     except OSError as error:
@@ -696,6 +729,7 @@ def _cmd_serve(args: argparse.Namespace) -> int:
 
 def _cmd_ask(
     args: argparse.Namespace, *, embedder_factory: EmbedderFactory = _default_embedder_factory,
+    reranker_factory: RerankerFactory = _default_reranker_factory,
 ) -> int:
     """Run one investigation from the terminal and show what came back.
 
@@ -709,7 +743,10 @@ def _cmd_ask(
     MCP surface is still exactly `investigate_work` and `read_evidence`.
     """
     paths = _resolve_paths(args)
-    deps = build_serve_deps(paths, embedder_factory=embedder_factory)
+    deps = build_serve_deps(
+        paths, embedder_factory=embedder_factory,
+        reranker_model=getattr(args, "reranker", None), reranker_factory=reranker_factory,
+    )
     # The snapshot holds an open SQLite connection. `_cmd_serve` closes it in a finally and
     # `run_doctor` closes it before returning; this one never did, across five exits. On POSIX
     # that is a ResourceWarning nobody reads, and on Windows an unclosed connection is what
@@ -833,6 +870,9 @@ def _build_cli_parser() -> argparse.ArgumentParser:
                      help="read reference N's exact text. Repeat to read several.")
     ask.add_argument("--limit", type=int, default=8, help="references to list (default 8)")
     ask.add_argument("--json", action="store_true", help="the raw investigate_work result")
+    ask.add_argument("--reranker", default=None, metavar="MODEL",
+                     help="rerank the top documents with a cross-encoder. Off by default; "
+                          "measured in evals/project-memory/README.md")
     index_parser = add("index", "Build and promote a candidate index.", _cmd_index)
     index_parser.add_argument("--corpus-root", type=Path, required=True)
     index_parser.add_argument("--policy", type=Path, required=True)
@@ -861,7 +901,10 @@ def _build_cli_parser() -> argparse.ArgumentParser:
     add("skill-status", "Show the active set and generations on disk.", _cmd_skill_status)
     add("index-prune", "Delete unreferenced index generations.", _cmd_index_prune)
     add("skill-prune", "Delete unreferenced skill-set generations.", _cmd_skill_prune)
-    add("serve", "Run the two-tool MCP server over stdio.", _cmd_serve)
+    serve = add("serve", "Run the two-tool MCP server over stdio.", _cmd_serve)
+    serve.add_argument("--reranker", default=None, metavar="MODEL",
+                       help="rerank the top documents with a cross-encoder. Off by default; "
+                            "measured in evals/project-memory/README.md")
     add("doctor", "Read-only health check.", _cmd_doctor)
     return parser
 
