@@ -157,41 +157,54 @@ _PASSAGE_SCHEMA = (
     "CREATE TABLE passages (ref TEXT, document_ref TEXT, relative_path TEXT, heading_path TEXT,"
     " start_line INT, end_line INT, text TEXT, source_hash TEXT, vector BLOB)"
 )
-def _raw_snapshot(rows: list[tuple]):
+@pytest.fixture
+def raw_snapshot():
     """A minimal stand-in for an open snapshot, for corrupt-metadata and vector-drift cases
-    that the real build pipeline cannot produce."""
-    database = sqlite3.connect(":memory:")
-    database.execute(_PASSAGE_SCHEMA)
-    database.executemany("INSERT INTO passages VALUES (?,?,?,?,?,?,?,?,?)", rows)
-    return SimpleNamespace(database=database)
+    that the real build pipeline cannot produce.
+
+    A fixture rather than a plain helper so the connections it hands out are closed. They were
+    not, and while `:memory:` holds no file handle, the ResourceWarnings they raised were noise
+    that a real unclosed database would have hidden in -- which is how one reached Windows CI."""
+    opened = []
+
+    def make(rows: list[tuple]):
+        database = sqlite3.connect(":memory:")
+        database.execute(_PASSAGE_SCHEMA)
+        database.executemany("INSERT INTO passages VALUES (?,?,?,?,?,?,?,?,?)", rows)
+        opened.append(database)
+        return SimpleNamespace(database=database)
+
+    yield make
+    for database in opened:
+        database.close()
 def _raw_row(ref: str, *, heading: str = '["Heading"]', vector: bytes | None = None, dimensions: int = 3):
     blob = vector if vector is not None else array("f", [1.0] * dimensions).tobytes()
     return (ref, "doc:1", "a.md", heading, 1, 2, "an apple pie baking recipe", "0" * 64, blob)
-def test_leg_that_runs_but_matches_nothing_reports_explicit_degradation() -> None:
+def test_leg_that_runs_but_matches_nothing_reports_explicit_degradation(raw_snapshot) -> None:
     # Embedding-dimension drift: the leg runs to completion and ranks zero candidates. An empty
     # result is not the same as an unavailable leg, and neither may be silent.
-    raw = _raw_snapshot([_raw_row("p1"), _raw_row("p2")])
+    raw = raw_snapshot([_raw_row("p1"), _raw_row("p2")])
     outcome = search(raw, "apple pie", Budgets(), embed_query=lambda _: array("f", [1.0] * 384).tobytes())
     assert all(match.vector_rank is None for match in outcome.matches)
     assert "vector_leg_no_matches" in outcome.degradation
     lexical_miss = search(raw, "zzzznomatch", Budgets())
     assert "lexical_leg_no_matches" in lexical_miss.degradation
 @pytest.mark.parametrize("heading", ['"5"', "5", '{"a": 1}', "null", "[1, 2]", "[[]]"])
-def test_malformed_heading_path_fails_typed_and_never_corrupts_provenance(heading: str) -> None:
+def test_malformed_heading_path_fails_typed_and_never_corrupts_provenance(heading: str, raw_snapshot) -> None:
     # heading_path feeds the citation locator, so a wrong shape must fail typed rather than
     # crash untyped or quietly become a plausible-looking path such as ("5",) or ("a",).
-    raw = _raw_snapshot([_raw_row("p1", heading=heading)])
+    raw = raw_snapshot([_raw_row("p1", heading=heading)])
     with pytest.raises(RetrievalError) as caught:
         search(raw, "apple", Budgets())
     assert caught.value.code == "corrupt_snapshot_metadata"
-def test_one_corrupt_vector_costs_only_its_own_candidate() -> None:
-    raw = _raw_snapshot([_raw_row("p1"), _raw_row("p2"), _raw_row("p3", vector=b"\x00\x00\x00")])
+def test_one_corrupt_vector_costs_only_its_own_candidate(raw_snapshot) -> None:
+    raw = raw_snapshot([_raw_row("p1"), _raw_row("p2"), _raw_row("p3", vector=b"\x00\x00\x00")])
     outcome = search(raw, "apple pie", Budgets(), embed_query=lambda _: array("f", [1.0] * 3).tobytes())
     ranked = {match.ref: match.vector_rank for match in outcome.matches}
     assert ranked["p1"] is not None and ranked["p2"] is not None
     assert ranked["p3"] is None
     assert not any(item.startswith("vector_leg_failed") for item in outcome.degradation)
-def test_deadline_truncating_tokenization_never_escapes_untyped() -> None:
+def test_deadline_truncating_tokenization_never_escapes_untyped(raw_snapshot) -> None:
     # The scan finishes, then the deadline truncates tokenization at a _CLOCK_EVERY boundary while
     # `passages` stays full length. Scoring must handle the shorter prefix instead of letting
     # zip(strict=True) raise a bare ValueError during its iterator advance.
@@ -201,7 +214,7 @@ def test_deadline_truncating_tokenization_never_escapes_untyped() -> None:
         def fake_clock(_target: int = expire_at) -> float:
             calls["count"] += 1
             return 2.0 if calls["count"] == _target else 0.0
-        outcome = search(_raw_snapshot(rows), "apple pie", Budgets(max_elapsed_ms=1000), clock=fake_clock)
+        outcome = search(raw_snapshot(rows), "apple pie", Budgets(max_elapsed_ms=1000), clock=fake_clock)
         assert "max_elapsed_ms_exceeded" in outcome.degradation
 @requires_vault
 def test_eval_fixtures_are_bilingual_and_reference_real_corpus_notes() -> None:

@@ -65,3 +65,13 @@ dev = [
 addopts = "-ra"
 pythonpath = ["src"]
 testpaths = ["tests"]
+# No `filterwarnings` guard against unclosed connections, though one was tried and is worth
+# someone finishing. An unclosed SQLite connection is not cosmetic here: on POSIX it is a
+# descriptor nobody notices, because unlink succeeds against an open file, while on Windows the
+# same connection makes the file undeletable -- which is how a leak in `promote_candidate` reached
+# CI as an `index-prune` failure and as nothing at all locally. But the warning is raised by the
+# garbage collector, outside the context pytest applies these filters in, so neither
+# `error::ResourceWarning` nor `error::pytest.PytestUnraisableExceptionWarning` fails a test that
+# deliberately leaks one; both were probed. Catching it needs real machinery, not a filter line,
+# and a filter line that looks like a guard without being one is the thing this project refuses
+# everywhere else. The suite is currently clean of them, which is what makes the next one visible.
