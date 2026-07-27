@@ -255,7 +255,7 @@ unflattering ones are in the same table as the rest.
 | **Query latency** | **≈46µs per passage**, linear — 1k passages 45ms, 16k 734ms | [scale.py](https://github.com/leonardoprimero/bruriah/blob/main/evals/scale.py) |
 | **Index build** | ≈130 passages/second, embedding-dominated, one-off | |
 | **Index size** | ≈5 KB per passage — a 16k-passage corpus is ~79 MB | |
-| **Tests** | **999** passing on a fresh clone on Linux, identical on 3.12, 3.13 and 3.14 · **994** on native Windows, the difference being the five owner-only-mode tests that skip there | [CI](https://github.com/leonardoprimero/bruriah/actions/workflows/ci.yml) |
+| **Tests** | **1001** passing on a fresh clone on Linux, identical on 3.12, 3.13 and 3.14 · **996** on native Windows, the difference being the five owner-only-mode tests that skip there | [CI](https://github.com/leonardoprimero/bruriah/actions/workflows/ci.yml) |
 | **Install size** | 178 KB wheel; the embedding model downloads once, separately | |
 | **Sample size** | **12 questions, one corpus, two languages** | the honest caveat: treat the direction as established, the figures as indicative |
 
@@ -355,7 +355,7 @@ Bruriah assumes the corpus may be hostile.
 
 Honest state as of 2026-07-27.
 
-**Working and tested** — 999 tests pass on a fresh clone on Linux, byte-identical on 3.12, 3.13 and 3.14; 994 on native Windows, which is those 999 less the five that skip rather than assert a file mode nobody applied
+**Working and tested** — 1001 tests pass on a fresh clone on Linux, byte-identical on 3.12, 3.13 and 3.14; 996 on native Windows, which is those 1001 less the five that skip rather than assert a file mode nobody applied
 - Hybrid retrieval (BM25 + local vectors) over your corpus — both legs are pure Python over ordinary SQLite: BM25 scans the passage table, and the vector leg reads float blobs and scores them by cosine. There is no vec0 table and no ANN index. This line named `sqlite-vec` until 0.4.0, which was never true of the shipped path
 - The two-tool MCP contract, structured output, typed failures
 - Signed policy packs with Ed25519 manifests and fail-closed loading
