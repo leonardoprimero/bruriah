@@ -127,98 +127,109 @@ it should not be read as one. Getting a number that can be read that way is
 [issue #4](https://github.com/leonardoprimero/bruriah/issues/4), and it needs an external corpus and
 a question set large enough that the table above stops flipping.
 
-## A repository nobody here wrote, measured 2026-07-27
+## Two repositories nobody here wrote, measured 2026-07-27
 
-Everything else on this page is measured against this project's own history, by questions this
-project's author wrote. This section is not, and it is the least flattering thing here.
+Everything else on this page is this project measuring itself with questions its own author wrote.
+This section is not, and it is the least flattering thing here.
 
-**The corpus.** `square/leakcanary` — 1736 non-merge commits, **604 carrying an explanatory body**,
-derived by the shipped `bruriah corpus` and indexed by the shipped `bruriah index`. Chosen by a
-query rather than from memory: permissive licence, not archived, not a fork, 2000–30000 stars, a
-real language, at least five releases. The release filter replaced a first rule that sorted on
-stars alone and returned content collections — `public-apis`, `TheAlgorithms` — whose commits are
+**The corpora.** `square/leakcanary` (604 documents from 1736 commits) and `emilk/egui` (2119 from
+4366), both derived by the shipped `bruriah corpus` and indexed by the shipped `bruriah index`.
+Chosen by a query rather than from memory: permissive licence, not archived, not a fork, 2000–30000
+stars, a real language, at least five releases. That release filter replaced a first rule sorting on
+stars alone, which returned content collections — `public-apis`, `TheAlgorithms` — whose commits are
 "add X to list" and carry no reasoning by construction. Reasoning coverage across the first twelve
-candidates in that rule's own order has a **median of 23%**. This repository is at 100%, which is
-not a normal number and is worth knowing before reading anything below.
+candidates in the rule's own order has a **median of 23%**. This repository is at 100%, which is not
+a normal number and is worth knowing before reading anything below.
 
-**The questions.** 153, and **not one of them written by anybody who knew the answer.** Each comes
-from a GitHub issue that a commit's body says it closes, where the issue was opened by a different
-person, before that commit existed. `evals/retrieval/pairs.py` decides that; the surviving set is
-[`leakcanary-issues.jsonl`](leakcanary-issues.jsonl) and the 24 excluded by shape rules — raw stack
-traces, titles under 18 characters, release notes, complaints naming no subject — are in
-[`leakcanary-excluded.jsonl`](leakcanary-excluded.jsonl) with the rule that excluded each. Of 286
-commits naming an issue they close, 129 were rejected before that: 123 were the maintainer filing
-an issue about their own fix. The 177 survivors become 153 questions and 24 exclusions — one issue
-was closed by two commits four years apart, which is one question with a partial-credit second
-answer rather than two questions sharing a title.
+**The questions.** 236, and **not one written by anybody who knew the answer**: each is a GitHub
+issue title that a commit's body says it closes, where the issue came from a different person,
+before that commit existed. `evals/retrieval/pairs.py` decides that. The sets are
+[`leakcanary-issues.jsonl`](leakcanary-issues.jsonl) (153) and [`egui-issues.jsonl`](egui-issues.jsonl)
+(83); the 27 excluded by shape rules ship beside them with the rule that excluded each.
 
-Leakage, on the metric defined above and shipped before these questions existed:
+### The result
+
+recall@3, both models, both corpora:
+
+| | leakcanary (604 docs) | egui (2119 docs) |
+|---|---|---|
+| default `MiniLM` | 0.261 | 0.434 |
+| `jina-v2-base-es` | **0.340** | **0.530** |
+
+Against 0.83 on this repository. A foreign history is harder — and **"how well this does on someone
+else's repository" is not one number.** The two differ by more than 2×, and egui scores higher while
+carrying three and a half times more distractors. Restricting egui's ranked lists to a random
+604-document subset, to match leakcanary's corpus size, widens it further: 0.627 and 0.711.
+
+### Why they differ, which is not what the headline suggests
+
+egui's questions **give away more**:
 
 | | mean `share` | mean `peak` | `peak` ≥ 0.50 |
 |---|---|---|---|
 | this repository's own 12 | 0.577 | 0.589 | 83% |
-| leakcanary's 153 | **0.250** | 0.440 | 44% |
+| leakcanary's 153 | 0.250 | 0.440 | 44% |
+| egui's 83 | 0.450 | 0.565 | **69%** |
 
-### The result
+And once that is held fixed, most of the gap disappears. Splitting each set by leakage and comparing
+band against band, with jina:
 
-| | recall@3 | recall@10 | MRR@10 |
-|---|---|---|---|
-| default `paraphrase-multilingual-MiniLM-L12-v2` | **0.261** | 0.399 | 0.233 |
-| `jinaai/jina-embeddings-v2-base-es` | **0.340** | 0.451 | 0.290 |
+| | `peak` ≥ 0.50 | `peak` < 0.50 |
+|---|---|---|
+| leakcanary | 0.662 (n=68) | 0.082 (n=85) |
+| egui | 0.649 (n=57) | 0.269 (n=26) |
 
-Against 0.83 on this repository. **A foreign history is much harder, and the honest headline is
-that number, not the one above it.**
+**The high-leakage bands are near-identical**, with egui carrying 3.5× the distractors. So the
+headline difference is largely the composition of the question set rather than the engine's
+behaviour — which means comparing corpora by headline recall misleads, and only a leakage figure
+makes the honest comparison possible at all.
 
-### What is actually driving it
+### What holds across both, and what does not
 
-Four controls, so the figure is a measurement rather than an anecdote with decimals:
+**The direction holds.** In both corpora and under both models, questions sharing no distinctive
+term with their answer score far worse: 8.8× and 8.1× on leakcanary, 5.0× and 2.4× on egui. A better
+embedding lifts both bands and does not remove the dependence, which rules out blaming the default
+model.
+
+**The magnitude does not.** leakcanary's low-leakage band reaches 0.059 with the default model;
+egui's reaches 0.269 with jina, more than four times better. Stated from leakcanary alone, "without
+lexical overlap the right document is found six times in a hundred" would have been a claim about
+one repository dressed as a finding. It is why a second corpus came before anything else.
+
+### Four controls, so this is a measurement and not an anecdote with decimals
+
+Measured on leakcanary:
 
 | control | effect on recall@3 |
 |---|---|
 | embedding model, default → jina | +0.08 |
-| distractors, 604 → 147 documents | +0.15 *(approximate — see below)* |
-| ground-truth document length, shortest quartile → longest | +0.09 |
+| distractors, 604 → 147 documents | +0.15 *(upper bound — restricts the ranked list, does not re-index)* |
+| ground-truth document length, shortest → longest quartile | +0.09 |
 | passages per document | **none**: 2.00 here, 2.02 there |
 
-The distractor figure restricts the existing ranked list to a random 147-document subset containing
-the answer; it does not re-index, so BM25's IDF would shift slightly on a real corpus that size.
-Read it as an upper bound. The length control matters because leakcanary's documents are **3.6×
-shorter** than this repository's — median 445 characters against 1600 — so there is simply less
-reasoning per commit to match against. It explains less than it looks like it should.
-
-**And then the one that does not move.** Splitting the same 153 questions by how much they gave
-away, on bands of 68 and 85 rather than the two-question bands that made this comparison useless
-above:
-
-| | `peak` ≥ 0.50 | `peak` < 0.50 |
-|---|---|---|
-| default | 0.515 | **0.059** |
-| jina | 0.662 | **0.082** |
-
-**When the question shares no distinctive term with its answer, the correct document reaches the
-top three about six times in a hundred.** A better embedding lifts both bands by a similar factor
-and leaves the dependence exactly where it was, which is what rules out "the default model is the
-problem". This comparison is internal — one corpus, one question set, both models — so none of the
-four controls above touches it.
+Document length matters because these corpora's documents are far shorter than this repository's —
+median 445 and 497 characters against 1600 — so there is less reasoning per commit to match against.
+It explains less than it looks like it should. None of the four reaches the within-corpus leakage
+split, which is measured on one corpus, one question set, and both models at once.
 
 ### Two things this is not
 
-**Not a comparison with the 0.83.** The two question sets measure different tasks. This page's
-twelve ask for a decision's rationale (*why is the skill ceiling five*); leakcanary's ask about a
-symptom (*ToastEventListener leak*). Retrieving a commit from a why-question and retrieving it from
-the bug that provoked it are different jobs, and there is a case that the symptom is the more
-faithful one — nobody asks why a ceiling is five out of nowhere; they hit it, and then they ask.
-Either way the numbers sit in separate tables on purpose.
+**Not comparable with the 0.83.** The question sets measure different tasks. This page's twelve ask
+for a decision's rationale (*why is the skill ceiling five*); these ask about a symptom
+(*ToastEventListener leak*). Retrieving a commit from a why-question and retrieving it from the bug
+that provoked it are different jobs, and there is a case the symptom is the more faithful one —
+nobody asks why a ceiling is five out of nowhere; they hit it, and then they ask. Separate tables on
+purpose.
 
-**Not a verdict on the engine.** recall@10 of 0.451 against recall@3 of 0.340 says the right
-document is found considerably more often than it is ranked well. That is a ranking problem, and it
-is the same shape as the fusion defect recorded further down this page — where reciprocal-rank
-fusion was averaging a correct vector answer against a lexical leg that could not read the query's
-language. The external number now exists to measure a fix against, which is the thing this section
-was built to make possible.
+**Not a verdict on the engine.** recall@10 sits well above recall@3 in both corpora — 0.451 against
+0.340, and 0.723 against 0.530 — so the right document is *found* considerably more often than it is
+*ranked* well. That is a ranking problem, and the same shape as the fusion defect recorded further
+down this page, where reciprocal-rank fusion averaged a correct vector answer against a lexical leg
+that could not read the query's language. That defect had a number to beat. Now this one has two,
+from different corpora, which is what makes it safe to work against without fitting to either.
 
-One genuinely positive finding: jina improves on a foreign corpus too. The claim below that the
-model matters more than the weighting was, until now, one repository's opinion of itself.
+One finding is positive: jina improves on both foreign corpora. The claim below that the model
+matters more than the weighting was, until this, one repository's opinion of itself.
 
 ## The model matters more than the weighting, measured 2026-07-26
 
