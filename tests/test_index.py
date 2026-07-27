@@ -26,6 +26,7 @@ from bruriah.index import (
     build_candidate,
     open_candidate,
     promote_candidate,
+    prune_generations,
     recover_active,
     rollback_active,
     snapshot_active,
@@ -379,6 +380,66 @@ def test_edited_policy_promotes_and_discards_the_unretainable_generation(tmp_pat
     assert first.exists()
     with pytest.raises(ValueError, match="no_retained_index"):
         rollback_active(pointer, config(root, policy_path))
+
+
+def test_prune_removes_only_generations_the_pointer_does_not_reference(tmp_path: Path) -> None:
+    """Promotion leaves the outgoing index on disk, and a promotion under a changed policy now
+    drops it from `retained` rather than keeping it, so unreferenced generations accumulate with
+    nothing able to name them. `retain=1` here makes the third promotion strand the first."""
+    root, policy = write_corpus(tmp_path)
+    policy_path = tmp_path / "policy.yaml"
+    pointer = tmp_path / "active.json"
+    first, second, third = (tmp_path / f"candidate-{'ab' * 16}.sqlite3",
+                            tmp_path / f"candidate-{'cd' * 16}.sqlite3",
+                            tmp_path / f"candidate-{'ef' * 16}.sqlite3")
+    for candidate in (first, second, third):
+        build_candidate(config(root, policy_path), candidate, policy, fake_embeddings)
+        promote_candidate(candidate, pointer, config(root, policy_path), policy, retain=1)
+    value = json.loads(pointer.read_text(encoding="utf-8"))
+    assert value["active"]["database"] == third.name
+    assert [entry["database"] for entry in value["retained"]] == [second.name]
+
+    removed = prune_generations(pointer)
+
+    assert [path.name for path in removed] == [first.name]
+    assert not first.exists()
+    assert second.exists() and third.exists(), "a referenced generation was removed"
+    assert prune_generations(pointer) == (), "a second run has nothing left to do"
+
+
+def test_prune_cannot_name_anything_it_did_not_create(tmp_path: Path) -> None:
+    """The only unlink in the package. It matches the exact form `run_index` writes, so the
+    pointer, the build descriptor, the lock and whatever an operator left in the data directory
+    are not expressible as targets -- including files that merely look close."""
+    root, policy = write_corpus(tmp_path)
+    policy_path = tmp_path / "policy.yaml"
+    pointer = tmp_path / "active.json"
+    candidate = tmp_path / f"candidate-{'ab' * 16}.sqlite3"
+    build_candidate(config(root, policy_path), candidate, policy, fake_embeddings)
+    promote_candidate(candidate, pointer, config(root, policy_path), policy)
+    bystanders = [
+        tmp_path / "build-config.json",
+        tmp_path / "candidate.sqlite3",
+        tmp_path / "candidate-not-a-uuid.sqlite3",
+        tmp_path / f"candidate-{'ab' * 16}.sqlite3.bak",
+        tmp_path / f"CANDIDATE-{'ab' * 16}.sqlite3",
+    ]
+    for path in bystanders:
+        path.write_text("not mine to delete", encoding="utf-8")
+
+    assert prune_generations(pointer) == ()
+    for path in bystanders:
+        assert path.exists(), f"{path.name} was removed and never should have been"
+
+
+def test_prune_refuses_when_there_is_no_pointer_to_read(tmp_path: Path) -> None:
+    """With no pointer, every generation reads as unreferenced. Refusing is the only safe answer;
+    deleting on the strength of a file that is not there is the opposite one."""
+    stranded = tmp_path / f"candidate-{'ab' * 16}.sqlite3"
+    stranded.write_text("would be lost", encoding="utf-8")
+    with pytest.raises(ValueError, match="index_not_built"):
+        prune_generations(tmp_path / "active.json")
+    assert stranded.exists()
 
 
 def test_rollback_and_recovery_restore_retained_index_without_rebuild(tmp_path: Path) -> None:

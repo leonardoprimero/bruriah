@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 import sqlite3
 import tempfile
 import uuid
@@ -525,6 +526,54 @@ def promote_candidate(
         if database is not None:
             database.close()
         os.close(descriptor)
+
+
+# Only ever the shape `run_index` itself writes: `candidate-{uuid4().hex}.sqlite3`. This is the
+# one path in the package that unlinks a file, so it is spelled as an exact form rather than a
+# glob -- `active.json`, `build-config.json`, the lock, and anything an operator put in the data
+# directory cannot be named by it, whatever the pointer says.
+_GENERATION_NAME = re.compile(r"candidate-[0-9a-f]{32}\.sqlite3")
+
+
+def prune_generations(pointer: Path) -> tuple[Path, ...]:
+    """Delete every index generation the pointer does not reference; return what was removed.
+
+    Promotion leaves the outgoing index on disk on purpose -- nothing here removes a file it did
+    not create -- and since a promotion under a changed policy now drops that generation instead
+    of retaining it, they accumulate with no way to name them. This is that way.
+
+    The directory and pointer checks happen BEFORE the lock, for the reason `prune_skillset`
+    records: the lock file is created beside the pointer, so on an installation that never indexed
+    anything the lock itself would raise a bare `FileNotFoundError` rather than a typed refusal a
+    caller can act on. Refusing when the pointer is missing also matters more here than there --
+    with nothing to read, every generation would look unreferenced.
+    """
+    if not pointer.parent.is_dir() or not pointer.exists():
+        raise IndexLifecycleError("index_not_built")
+    return _prune_locked(pointer)
+
+
+@_serialized(0)
+def _prune_locked(pointer: Path) -> tuple[Path, ...]:
+    """Serialized on the pointer, so a promotion cannot retain a generation between the moment the
+    inventory is taken and the moment it is unlinked.
+
+    What the lock does NOT cover, stated rather than discovered: `build_candidate` writes its file
+    outside any lock -- that is the embedding phase, and holding the activation lock across it
+    would block every read for the length of a build. So a prune racing a build in the same data
+    directory can remove that build's candidate before it is ever promoted. Mutation here is a
+    command a human runs, `skill-prune` carries the identical exposure, and the failure is a
+    rebuild rather than a loss: the corpus is the source, the index is derived.
+    """
+    value = _read_pointer(pointer)
+    referenced = {value["active"]["database"], *(entry["database"] for entry in value["retained"])}
+    removed: list[Path] = []
+    for path in sorted(pointer.parent.iterdir()):
+        if path.name in referenced or not _GENERATION_NAME.fullmatch(path.name):
+            continue
+        path.unlink()
+        removed.append(path)
+    return tuple(removed)
 
 
 @_serialized(0)
