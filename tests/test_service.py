@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+import http.client
 import json
+import socket
 from array import array
 from contextlib import contextmanager
 from dataclasses import replace
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
 import pytest
@@ -755,3 +757,163 @@ def test_max_evidence_does_not_subsume_the_output_budget(tmp_path: Path) -> None
         )
         assert len(result.evidence) < 100  # the item ceiling was never the binding constraint
         assert len(result.model_dump_json()) <= 900
+
+
+# --- The refs investigate_work returns are refs read_evidence can read --------------------------
+# `fetch.py` mints `live:sha256:<32 hex>` for captured live evidence and `investigate()` hands it
+# back to the client. `read()` had no branch for that prefix, so those refs fell through to the
+# local passages table, found nothing, and returned `missing_ref`. The two tools disagreed about
+# refs one of them had just issued -- the exact contract `read_evidence` exists to keep.
+
+
+@contextmanager
+def _deps_with_live_research(tmp_path: Path, responder=None):
+    server = _LocalTlsServer(responder or _ok_responder())
+    try:
+        clock = _Clock(datetime(2026, 7, 24, 12, 0, 0, tzinfo=timezone.utc))
+        research_deps = _research_deps(tmp_path, server, clock)
+        with _snapshot_for(tmp_path, {
+            "en.md": f"# Apple\nAn apple pie baking recipe passage.\n{_FILLER}\n",
+        }) as active:
+            yield ServiceDeps(
+                registry=_real_registry(), snapshot=active, research=research_deps,
+            ), server, clock
+    finally:
+        server.close()
+
+
+def _investigate_one_live_url(deps, server) -> str:
+    request = InvestigationRequest(
+        task=_TASK, network_policy="public_https",
+        budgets=Budgets(max_output_chars=100_000),
+        candidate_material=[
+            CandidateMaterial(locator=_research_url(server), digest=_CANDIDATE_DIGEST),
+        ],
+    )
+    result = investigate(request, deps)
+    live = [item.ref for item in result.evidence if item.kind == "captured_live"]
+    assert live, f"no live evidence; degradation={result.degradation}"
+    return live[0]
+
+
+def test_a_live_ref_investigate_returned_can_be_read(tmp_path: Path) -> None:
+    with _deps_with_live_research(tmp_path) as (deps, server, _clock):
+        ref = _investigate_one_live_url(deps, server)
+        item = read(ReadRequest(refs=[ref]), deps).items[0]
+        assert item.status == "ok"
+        assert item.ref == ref
+        assert item.content
+        assert item.evidence_kind == "captured_live"
+        # Provenance is carried from the record investigate() already returned, never re-derived:
+        # the two tools must not be able to disagree about one piece of evidence.
+        assert item.locator and item.citation_locator
+        assert item.captured_at is not None
+
+
+def test_reading_a_live_ref_does_not_refetch(tmp_path: Path) -> None:
+    # `read_evidence` is documented read-only and resolving IMMUTABLE refs. A ref that reaches the
+    # network on read is not immutable, and the content served has to stay the permitted-minimum
+    # excerpt the cache computed under the reuse rules rather than a fresh unbounded body.
+    connects = {"n": 0}
+    server_box = {}
+
+    def _counting_connect(ip: str, port: int, timeout: float):
+        connects["n"] += 1
+        return socket.create_connection(("127.0.0.1", server_box["s"].port), timeout=timeout)
+
+    server = _LocalTlsServer(_ok_responder())
+    server_box["s"] = server
+    try:
+        clock = _Clock(datetime(2026, 7, 24, 12, 0, 0, tzinfo=timezone.utc))
+        research_deps = _research_deps(tmp_path, server, clock, connect=_counting_connect)
+        with _snapshot_for(tmp_path, {"en.md": f"# Apple\nAn apple pie recipe.\n{_FILLER}\n"}) as active:
+            deps = ServiceDeps(registry=_real_registry(), snapshot=active, research=research_deps)
+            ref = _investigate_one_live_url(deps, server)
+            assert connects["n"] == 1
+
+            assert read(ReadRequest(refs=[ref]), deps).items[0].status == "ok"
+            assert connects["n"] == 1, "read_evidence must never open a connection"
+    finally:
+        server.close()
+
+
+def test_an_expired_live_ref_is_expired_not_missing_and_withholds_content(tmp_path: Path) -> None:
+    # `expired_ref` was declared in the contract and documented as structurally unreachable from
+    # 7A's deps, because a single active snapshot has no history to age out. Cached live evidence
+    # does. "Had it, it aged out" is a different answer from "never had it", and expired material
+    # must never be presented as current.
+    with _deps_with_live_research(tmp_path) as (deps, server, clock):
+        ref = _investigate_one_live_url(deps, server)
+        assert read(ReadRequest(refs=[ref]), deps).items[0].status == "ok"
+
+        clock.advance(timedelta(days=2))  # past the 24h default TTL
+        item = read(ReadRequest(refs=[ref]), deps).items[0]
+        assert item.status == "expired_ref"
+        assert item.content is None
+
+
+def test_a_live_ref_is_missing_when_no_research_cache_is_configured(tmp_path: Path) -> None:
+    # `deps.research is None` is the shipped default, so there is nowhere a live ref could
+    # resolve. Typed as missing rather than as an error: from the client's side it genuinely
+    # is not here.
+    with _snapshot_for(tmp_path, {"en.md": f"# Apple\nAn apple pie recipe.\n{_FILLER}\n"}) as active:
+        deps = ServiceDeps(registry=_real_registry(), snapshot=active)
+        item = read(ReadRequest(refs=["live:sha256:" + "a" * 32]), deps).items[0]
+        assert item.status == "missing_ref"
+        assert item.content is None
+
+
+def test_one_read_call_mixes_local_and_live_refs(tmp_path: Path) -> None:
+    with _deps_with_live_research(tmp_path) as (deps, server, _clock):
+        live_ref = _investigate_one_live_url(deps, server)
+        local_result = investigate(InvestigationRequest(task=_TASK), deps)
+        local_ref = _local_ref(local_result)
+
+        items = read(ReadRequest(refs=[local_ref, live_ref]), deps).items
+        by_ref = {item.ref: item for item in items}
+        assert by_ref[local_ref].status == "ok" and by_ref[local_ref].evidence_kind == "local"
+        assert by_ref[live_ref].status == "ok" and by_ref[live_ref].evidence_kind == "captured_live"
+
+
+def test_the_network_budget_is_pooled_across_candidate_urls(tmp_path: Path, monkeypatch) -> None:
+    # `_candidate_urls` capped how many URLs were attempted at `max_network_requests` and nothing
+    # else: each attempt then received the full declared budget again, so bytes and elapsed time
+    # multiplied by the number of candidates while every individual fetch stayed honestly inside
+    # its limits. Measured before the ledger: 5 connections and 2,500,000 bytes served against a
+    # request declaring max_bytes=1,000,000.
+    # Measured CLIENT-SIDE. A responder counting what it wrote measures the wrong thing: the test
+    # server always `sendall`s the whole body, so a client that correctly stops reading at its
+    # ceiling still shows up as "bytes served". What the budget governs is what this process reads.
+    read_total = {"bytes": 0}
+    original_read = http.client.HTTPResponse.read
+
+    def _counting_read(self, amt=None):
+        data = original_read(self, amt)
+        read_total["bytes"] += len(data)
+        return data
+
+    monkeypatch.setattr(http.client.HTTPResponse, "read", _counting_read)
+
+    def _big_responder(_request: bytes) -> tuple[int, dict[str, str], bytes]:
+        return 200, {"Content-Type": "text/plain"}, b"k" * 400_000
+
+    with _deps_with_live_research(tmp_path, _big_responder) as (deps, server, _clock):
+        request = InvestigationRequest(
+            task=_TASK, network_policy="public_https",
+            budgets=Budgets(max_bytes=1_000_000, max_network_requests=5, max_evidence=50,
+                            max_output_chars=100_000),
+            candidate_material=[
+                CandidateMaterial(locator=_research_url(server, f"/big{i}"), digest=_CANDIDATE_DIGEST)
+                for i in range(5)
+            ],
+        )
+        result = investigate(request, deps)
+        # The ceiling, plus at most one detection byte per candidate. A stream cannot be known to
+        # have exceeded a limit without reading one byte past it, so that single byte is inherent
+        # rather than slack -- and it is a byte, not the 64 KB chunk it used to be.
+        assert read_total["bytes"] <= 1_000_000 + len(request.candidate_material), (
+            f"read {read_total['bytes']} bytes against a declared 1,000,000 ceiling"
+        )
+        # And the shortfall is named rather than silently absorbed: the candidates the pool could
+        # not fund come back as degradation entries, not as a quietly shorter evidence list.
+        assert any("network_budget_exhausted" in entry for entry in result.degradation)

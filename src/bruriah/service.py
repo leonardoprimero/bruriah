@@ -40,6 +40,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from urllib.parse import urlsplit
 
+from .cache import find_by_ref
 from .classify import classify
 from .context import assemble_context, compact_to_budget
 from .contracts import (
@@ -52,12 +53,16 @@ from .lookup import SkillMatch, discover, resolve_capability
 from .packs import CapabilityPolicy
 from .skills import PermissionEnvelope, SkillSet
 from .registries import Registry
-from .research import ResearchDeps, ResearchOutcome, research
+from .research import NetworkLedger, ResearchDeps, ResearchOutcome, research
 from .retrieval import EmbedQuery, search, to_evidence_records
 from .route import route
 
 _CAPABILITY_REF_PREFIX = "capability:"
 _SKILL_REF_PREFIX = "skill:"
+# The prefix `fetch.py` mints for captured live evidence (`live:sha256:<32 hex>`). It lives here
+# as a constant, next to the two it joins, so the routing table in `read()` reads as one list of
+# ref kinds rather than two named prefixes and a literal.
+_LIVE_REF_PREFIX = "live:"
 
 
 class ServiceError(ValueError):
@@ -306,7 +311,18 @@ def _run_research(request: InvestigationRequest, deps: ServiceDeps) -> list[Rese
     # here, and there is no fan-out to make ordering ambiguous.
     if deps.research is None:
         return []
-    return [research(request, url, deps.research) for url in _candidate_urls(request)]
+    # ONE ledger for the whole investigation, not one budget per URL. `_candidate_urls` already
+    # caps how many URLs are attempted at `max_network_requests`, which bounded the COUNT of
+    # fetches and nothing else: each of those fetches then received the full declared budget
+    # again, so bytes and elapsed time multiplied by the number of candidates while every
+    # individual call stayed honestly inside its limits. Measured before this line existed: a
+    # request declaring `max_bytes=1_000_000` and `max_network_requests=5` produced 5 connections
+    # and 2,500,000 bytes served.
+    #
+    # Built from `deps.research.clock` rather than this module's `deps.clock`, because the
+    # deadline has to be measured against the same monotonic source `fetch.py` compares it to.
+    ledger = NetworkLedger.for_request(request.budgets, deps.research.clock)
+    return [research(request, url, deps.research, ledger) for url in _candidate_urls(request)]
 
 
 def _fold_research(
@@ -560,6 +576,61 @@ def _read_skill_one(
     return item, remaining_total - len(window)
 
 
+def _read_live_one(
+    research_deps: ResearchDeps | None, ref: str, requested_range: object, cursor_start: int | None,
+    item_cap: int, remaining_total: int, request_id: str,
+) -> tuple[ReadItem, int]:
+    # Resolves a `live:sha256:<32 hex>` ref -- the refs `fetch.py` mints for captured live evidence
+    # and `investigate()` hands back to the client. Until now `read()` had no branch for them, so
+    # they fell through to the local passages table, found nothing, and returned `missing_ref`:
+    # `investigate_work` returned refs that `read_evidence` could not read, which is precisely the
+    # contract `read_evidence` exists to keep ("stable refs returned by investigate_work").
+    #
+    # Content is the CACHE EXCERPT, never a refetch. Two reasons, and the second is the important
+    # one. Refetching would make a read reach the network -- `read_evidence` is documented
+    # read-only and resolving "immutable refs", and a ref that re-fetches is not immutable. And
+    # the excerpt is already the permitted minimum `build_cache_entry` computed under the reuse
+    # rules: when reuse is anything but `permitted` it is capped at 280 characters. Serving
+    # anything larger here would route around that cap through a different door.
+    if research_deps is None:
+        # No research deps means no cache was ever configured for this process, so there is
+        # nowhere a live ref could resolve. Typed as missing rather than as an error: from the
+        # client's side the ref genuinely is not here.
+        return ReadItem(ref=ref, status="missing_ref"), remaining_total
+
+    lookup = find_by_ref(research_deps.cache_dir, ref, now=research_deps.now())
+    if lookup.expired:
+        # `expired_ref` was declared in the contract and documented as structurally unreachable
+        # from 7A's deps, because a single active snapshot has no history to age out. Cached live
+        # evidence does, so this is the status becoming reachable rather than a new one appearing.
+        # Content is withheld: expired material must never be presented as current.
+        return ReadItem(ref=ref, status="expired_ref"), remaining_total
+    if not lookup.hit or lookup.entry is None:
+        return ReadItem(ref=ref, status="missing_ref"), remaining_total
+
+    entry = lookup.entry
+    windowed = _window_text(entry.excerpt, requested_range, cursor_start, item_cap, remaining_total)
+    if windowed is None:
+        return ReadItem(ref=ref, status="invalid_range"), remaining_total
+    window, start, actual_end, truncated = windowed
+    next_cursor = _encode_cursor(request_id, ref, actual_end + 1) if truncated else None
+
+    evidence = entry.evidence
+    item = ReadItem(
+        ref=ref, status="ok", content=window, start=start, end=actual_end,
+        digest=evidence.digest, truncated=truncated, next_cursor=next_cursor,
+        captured_at=evidence.retrieved_at,
+        evidence_kind="captured_live", locator=evidence.locator,
+        citation_locator=evidence.citation_locator,
+        provenance_chain=list(evidence.provenance_chain),
+        # Carried from the record `investigate()` already returned, never re-derived here: the two
+        # tools must not be able to disagree about the authority of one piece of evidence.
+        authority=evidence.authority, freshness=evidence.freshness,
+        license=evidence.license, conflict=evidence.conflict,
+    )
+    return item, remaining_total - len(window)
+
+
 def read(request: ReadRequest, deps: ServiceDeps) -> ReadResult:
     """Resolve each `refs` entry to immutable local or capability evidence and return exact,
     budget-bounded content. Missing or out-of-range refs get typed per-ref failures -- never
@@ -598,6 +669,8 @@ def read(request: ReadRequest, deps: ServiceDeps) -> ReadResult:
                 reader, source = _read_skill_one, deps.skill_set
             elif ref.startswith(_CAPABILITY_REF_PREFIX):
                 reader, source = _read_capability_one, deps.registry
+            elif ref.startswith(_LIVE_REF_PREFIX):
+                reader, source = _read_live_one, deps.research
             else:
                 reader, source = _read_one, deps.snapshot.database
             item, remaining = reader(
