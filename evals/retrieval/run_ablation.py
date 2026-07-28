@@ -44,11 +44,18 @@ from bruriah.contracts import Budgets  # noqa: E402
 from bruriah.platform import resolve_paths  # noqa: E402
 from bruriah.retrieval import _RERANK_DEPTH, search  # noqa: E402
 
-# 200 is the ceiling `Budgets` allows and the pool the published ceiling table was measured at. It
-# changes no recall@3 -- `max_candidates` truncates the tail, never the head -- and buys the deep
-# ranks the bucket analysis needs. 120_000ms is likewise the ceiling: the point is to measure the
-# reranker, not to measure the timeout.
-_BUDGETS = Budgets(max_candidates=200, max_elapsed_ms=120_000)
+# Every one of these is the ceiling `Budgets` allows, and each ceiling is here because its default
+# was measured getting in the way rather than because bigger seemed safer.
+#
+# `max_extracted_chars` is the one that cost a run. At its 20,000 default the match loop stops
+# after roughly 60 documents, so the shipped ranking reads recall@3 0.261 here against the 0.340
+# `evals/project-memory/README.md` publishes -- the eval was measuring a text budget, not a
+# ranking. Raising it is what makes these figures comparable to the published ones.
+#
+# `max_elapsed_ms` at its 10s default drops the reranking stage outright on a corpus this size,
+# which would compare the shipped ranking against itself. `max_candidates` at 200 buys the deep
+# ranks the bucket analysis needs.
+_BUDGETS = Budgets(max_candidates=200, max_elapsed_ms=120_000, max_extracted_chars=200_000)
 
 
 def load_questions(path: Path) -> list[dict]:
