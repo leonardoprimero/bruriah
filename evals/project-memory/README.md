@@ -287,6 +287,64 @@ explanation available from four sets is worth stating as a mechanism. **Measure 
 corpus before turning it on**, which is a real instruction here because the flag makes that a
 one-command experiment and no re-index.
 
+### What reranking actually does, one question at a time, measured 2026-07-28
+
+Everything above this line is a corpus average, and the paragraph above admits what that costs:
+four question sets, three gained, one lost, and no mechanism worth stating. Averages cannot supply
+one — four numbers are four points. So the same runs were scored per question and the ranks
+committed, in [`leakcanary-ablation.jsonl`](leakcanary-ablation.jsonl) and
+[`egui-ablation.jsonl`](egui-ablation.jsonl). 236 questions, the rank the correct document held with
+the reranker off and with it on, produced by `evals/retrieval/run_ablation.py` against the default
+MiniLM index and read by `report_ablation.py` with no model and no index at all.
+
+**Read `vs null`, not `helped`/`hurt`.** Bucketing by the rank the shipped ranking gave a document
+is a biased selection: one at rank 1 can only move down, one at rank 40 can only move up, and a
+reranker scoring by coin flip reproduces exactly the shape a reader calls "it hurts where the
+ranking was strong". `vs null` is positions better than a uniform shuffle of the same 40-document
+head would have managed — the closed form is in `ablation.py`, and a test asserts a skill-free
+reranker scores as skill-free.
+
+Both corpora pooled:
+
+| rank before | n | helped | hurt | same | mean rank after | shuffle gives | **vs null** | recall@3 |
+|---|---|---|---|---|---|---|---|---|
+| 1 | 50 | 0 | 11 | **39** | 2.84 | 20.50 | **+17.66** | 1.000 -> 0.920 |
+| 2-3 | 26 | 18 | 4 | 4 | 2.00 | 20.50 | **+18.50** | 1.000 -> 0.846 |
+| 4-10 | 37 | 25 | 11 | 1 | 4.65 | 20.50 | **+15.85** | 0.000 -> 0.568 |
+| 11-40 | 41 | **32** | 9 | 0 | 11.44 | 20.50 | **+9.06** | 0.000 -> 0.366 |
+| 41+ | 25 | 0 | 0 | 25 | 63.96 | 63.96 | 0.00 | 0.000 -> 0.000 |
+
+**The stage is a trade, not a lift.** It leaves 39 of 50 already-correct top answers where they
+were and costs 11 of them; it pulls 32 of 41 documents up out of ranks 11-40. Where the top is
+nearly empty the trade is a large net gain, and where the top is already full there is more to lose
+than to win. That is a mechanism, and it is what the four corpus averages were the shadow of.
+
+It also disposes of the reading those averages invited. The reranker does not destroy strong
+rankings: given 50 documents the shipped ranking had already placed first, it moved 11 — against a
+null that would have moved essentially all of them. **`41+` is the row worth staring at.** Twenty-
+five questions whose answer sat past the reranked head did not move by a single position, because
+`_rerank_fused` reorders the head and carries the tail untouched. Reranking is not retrieval and
+cannot become it.
+
+**And it is not free even when it wins.** Across the 236, the answer set shrank from a mean of 181
+documents to 88, and **twelve questions had their correct document returned by the shipped ranking
+and not returned at all once reranked — none the other way.** The fused order ranks passages, so
+its head is drawn from many documents at one passage each; `_rerank_fused` groups every passage of
+a document together, so the same budget buys half as many distinct documents. At the shipped
+20,000-character `max_extracted_chars` the count is fourteen rather than nine, so this is worse at
+the default than at the ceiling these figures were measured at. The claim that reranking "changes
+the order of the evidence and never its membership" is true of `_rerank_fused` and false of
+`search`, which truncates afterwards.
+
+**What this does NOT support**, stated because the shape of the pooled table invites it: that gain
+is predictable from baseline strength. It is tempting — the four foreign-corpus configurations run
++0.164, +0.091, +0.036, -0.036 as the baseline rises from 0.261 to 0.530, which looks like a
+ceiling near 0.45. The internal English set refutes it. That set begins at 0.833, the strongest
+baseline on this page, and still reaches 1.000. Two of those four rows are also published figures
+from a `jina-v2-base-es` index rather than measurements taken here. The mechanism above is measured
+on 236 questions; the ceiling is a line drawn through four points with a counterexample already on
+the page, and it is recorded here as a thing to test rather than a thing to believe.
+
 ### The unit matters more than the size of the model
 
 The first attempt reranked **passages** and was nearly worthless. A passage here is roughly 250
