@@ -148,6 +148,25 @@ def test_a_document_outside_the_pool_is_counted_apart_and_never_averaged_in() ->
     assert sum(bucket.n for bucket in summary.buckets) == 1
 
 
+def test_a_document_the_reranker_dropped_from_the_answer_is_counted_as_evicted() -> None:
+    # Measured, not hypothetical: on `lc1124` the shipped ranking returned the correct document at
+    # rank 15 of 48 and the reranked one did not return it at all. `search` truncates on
+    # `max_extracted_chars` AFTER reranking, and `_rerank_fused` groups every passage of a document
+    # together, so the same character budget bought 48 documents unranked and 25 reranked.
+    summary = summarize("leakcanary", [
+        _outcome(15, None, id="evicted", pool_documents=48, reranked_pool_documents=25),
+        _outcome(2, 1, id="kept", pool_documents=48, reranked_pool_documents=25),
+    ])
+    assert summary.evicted == 1
+    assert summary.rescued == 0
+    assert summary.mean_pool_documents == 48.0
+    assert summary.mean_reranked_pool_documents == 25.0
+    # An evicted question is a miss for the reader and must move recall, but it is not an
+    # observation about reordering, so it stays out of the buckets.
+    assert summary.recall_at_3_after == pytest.approx(0.5)
+    assert sum(bucket.n for bucket in summary.buckets) == 1
+
+
 def test_overall_recall_moves_with_the_reranked_ranks() -> None:
     summary = summarize("egui", [
         _outcome(1, 8, id="a"), _outcome(9, 2, id="b"), _outcome(30, 30, id="c"),

@@ -92,9 +92,17 @@ class QuestionOutcome:
     """One question scored under both conditions, as written to the per-question artifact.
 
     `base_rank`/`reranked_rank` are `None` when the correct document was not in that condition's
-    pool at all. Reranking never changes membership -- `retrieval._rerank_fused` reorders the head
-    and carries the tail -- so the two are `None` together, and a run where they disagree is a bug
-    in the harness rather than a finding.
+    returned set. THE TWO DISAGREE, and an earlier version of this docstring said they could not:
+    it reasoned that `retrieval._rerank_fused` reorders the head and carries the tail, so
+    membership is preserved. That is true of `_rerank_fused` and false of `search`, which truncates
+    AFTERWARDS on `max_candidates` and `max_extracted_chars`.
+
+    The mechanism, measured rather than reasoned: the fused order ranks PASSAGES, so its head is
+    drawn from many documents at one passage each, while `_rerank_fused` groups every passage of a
+    document together. Under the same character budget, one leakcanary query returned 48 documents
+    across 48 passages unranked and 25 documents across 49 passages reranked. Both `pool_documents`
+    figures are therefore recorded: a document count that halves is the finding, and keeping only
+    one of them is what hid it.
     """
 
     id: str
@@ -103,6 +111,7 @@ class QuestionOutcome:
     reranked_rank: int | None
     pool_documents: int
     rerank_depth: int
+    reranked_pool_documents: int | None = None
 
     @property
     def moved(self) -> int | None:
@@ -189,9 +198,21 @@ def summarize_bucket(label: str, outcomes: Sequence[QuestionOutcome]) -> BucketS
 
 @dataclass(frozen=True)
 class AblationSummary:
+    """`evicted`/`rescued` are the asymmetry the docstring on `QuestionOutcome` used to deny.
+
+    `evicted` counts questions whose correct document the shipped ranking returned and the reranked
+    one did not. It is reported next to the recall figures rather than derived on demand, because a
+    stage that raises recall@3 while dropping documents out of the answer entirely is doing two
+    things and an average shows one of them.
+    """
+
     corpus: str
     questions: int
     outside_pool: int
+    evicted: int
+    rescued: int
+    mean_pool_documents: float | None
+    mean_reranked_pool_documents: float | None
     recall_at_3_before: float | None
     recall_at_3_after: float | None
     buckets: tuple[BucketSummary, ...]
@@ -214,6 +235,17 @@ def summarize(corpus: str, outcomes: Iterable[QuestionOutcome]) -> AblationSumma
         corpus=corpus,
         questions=len(every),
         outside_pool=len(every) - len(scoreable),
+        evicted=sum(
+            1 for outcome in every if outcome.base_rank is not None and outcome.reranked_rank is None
+        ),
+        rescued=sum(
+            1 for outcome in every if outcome.base_rank is None and outcome.reranked_rank is not None
+        ),
+        mean_pool_documents=_mean([float(outcome.pool_documents) for outcome in every]),
+        mean_reranked_pool_documents=_mean(
+            [float(outcome.reranked_pool_documents) for outcome in every
+             if outcome.reranked_pool_documents is not None]
+        ),
         recall_at_3_before=_mean(
             [1.0 if outcome.base_rank is not None and outcome.base_rank <= 3 else 0.0 for outcome in every]
         ),
