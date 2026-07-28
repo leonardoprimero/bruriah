@@ -258,6 +258,47 @@ def summarize(corpus: str, outcomes: Iterable[QuestionOutcome]) -> AblationSumma
     )
 
 
+@dataclass(frozen=True)
+class Reach:
+    """How deep a caller would have to look before the correct document appeared.
+
+    `never_ranked` is the figure that decides which problem this project has. A document the fused
+    order never ranks at all is a RETRIEVAL failure and no amount of reordering reaches it; one
+    ranked at 26 of 604 is an ORDERING failure wearing a budget's clothes, and the two call for
+    opposite work. `search` cannot answer this -- `Budgets.max_candidates` tops out at 200 -- so it
+    can only report that the answer was not in what it returned, which reads like the first and has
+    so far always been the second.
+    """
+
+    total_documents: int
+    questions: int
+    never_ranked: int
+    median_rank: int | None
+    within: tuple[tuple[int, int, float], ...]
+
+
+def reach(ranks: Sequence[int | None], ceilings: Sequence[int], total_documents: int) -> Reach:
+    """Cumulative share of questions whose answer sits within each ceiling.
+
+    `None` in `ranks` means never ranked and counts against every ceiling, because a caller who
+    looked that deep would still not have it -- unlike `rank_of`, where `None` had to stay out of
+    the averages. The difference is that this metric is about coverage and that one was about
+    movement.
+    """
+    present = sorted(rank for rank in ranks if rank is not None)
+    return Reach(
+        total_documents=total_documents,
+        questions=len(ranks),
+        never_ranked=len(ranks) - len(present),
+        median_rank=present[len(present) // 2] if present else None,
+        within=tuple(
+            (ceiling, sum(1 for rank in present if rank <= ceiling),
+             sum(1 for rank in present if rank <= ceiling) / len(ranks) if ranks else 0.0)
+            for ceiling in ceilings if ceiling <= total_documents
+        ),
+    )
+
+
 def rescore(outcome: QuestionOutcome, **changes: object) -> QuestionOutcome:
     """Small helper so tests can vary one field without restating the record."""
     return replace(outcome, **changes)  # type: ignore[arg-type]

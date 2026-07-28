@@ -345,6 +345,42 @@ from a `jina-v2-base-es` index rather than measurements taken here. The mechanis
 on 236 questions; the ceiling is a line drawn through four points with a counterexample already on
 the page, and it is recorded here as a thing to test rather than a thing to believe.
 
+### Nothing here is a retrieval failure, measured 2026-07-28
+
+The table above ends 25 questions at `41+` and 57 with the answer outside the returned pool
+entirely, and both read like retrieval not finding the document. Neither is. `search` cannot say
+which it is — `Budgets.max_candidates` tops out at 200 passages, so its only available report is
+that the answer was not in what it returned. `evals/retrieval/report_reach.py` reads the fused
+order before any budget:
+
+| | questions | **never ranked** | median rank of the answer |
+|---|---|---|---|
+| leakcanary | 153 | **0** | 26 of 604 |
+| egui | 83 | **0** | **4 of 2120** |
+
+**The correct document is ranked every single time, on both corpora.** On egui it sits fourth of
+2120 at the median. There is no retrieval failure on this page to work on: everything lost is lost
+in the last stretch of ordering, which is what the "ranking problem" paragraphs above claimed and
+undersold.
+
+How deep a caller would have to look:
+
+| | top 3 | top 10 | top 40 | top 183 | top 300 |
+|---|---|---|---|---|---|
+| leakcanary | 0.261 | 0.399 | **0.575** | 0.771 | 0.837 |
+| egui | 0.434 | 0.627 | **0.795** | 0.892 | 0.916 |
+
+The bolded column is the ceiling available to a reranker at the shipped depth of 40, and it is the
+number worth arguing with. Reranking converts leakcanary's 0.575 into 0.425 and egui's 0.795 into
+0.470. **The corpus with more headroom is the one the stage exploits worse** — 32 points left on
+egui's table against 15 on leakcanary's, in the same pool, with no second model and no re-index.
+That is a sharper statement of the same asymmetry the corpus averages showed as "egui loses", and
+it is measured rather than inferred.
+
+Reaching into `_fuse`/`_bm25_ranks`/`_vector_ranks` to get this is deliberate, and the script says
+so: the alternative is inferring the shape of a ranking from the part of it that fits inside a
+budget, which is the inference that produced "not in the pool" in the first place.
+
 ### The unit matters more than the size of the model
 
 The first attempt reranked **passages** and was nearly worthless. A passage here is roughly 250

@@ -20,6 +20,7 @@ from ablation import (  # noqa: E402
     document_ranking,
     expected_rank_under_shuffle,
     rank_of,
+    reach,
     strip_build_sha,
     summarize,
     summarize_bucket,
@@ -178,6 +179,35 @@ def test_overall_recall_moves_with_the_reranked_ranks() -> None:
 def test_buckets_cover_every_reachable_rank() -> None:
     assert [bucket_of(rank) for rank in (1, 2, 3, 4, 10, 11, 40, 41, 200)] == [
         "1", "2-3", "2-3", "4-10", "4-10", "11-40", "11-40", "41+", "41+"]
+
+
+# === reach: which problem this project actually has ==============================================
+
+
+def test_a_document_never_ranked_counts_against_every_ceiling() -> None:
+    # This is the distinction the whole metric exists to draw. `rank_of` treats `None` as "no
+    # observation about reordering" and keeps it out of the averages; here `None` means a caller
+    # who looked all the way down would still not have it, so it is a miss at every depth.
+    result = reach([1, None, 500], ceilings=[3, 604], total_documents=604)
+    assert result.never_ranked == 1
+    assert result.within == ((3, 1, pytest.approx(1 / 3)), (604, 2, pytest.approx(2 / 3)))
+
+
+def test_a_ceiling_deeper_than_the_corpus_is_not_reported() -> None:
+    # Printing "top 2120" for a 604-document corpus would invite reading 1.000 as headroom that
+    # exists rather than as a count of every document there is.
+    assert [ceiling for ceiling, _found, _share in
+            reach([1], ceilings=[3, 604, 2120], total_documents=604).within] == [3, 604]
+
+
+def test_the_median_is_the_figure_that_says_ordering_rather_than_retrieval() -> None:
+    # 26 of 604 is an ordering problem wearing a budget's clothes. The metric has to surface it,
+    # because `search` truncates at 200 candidates and can only ever say "not in what I returned".
+    assert reach([4, 26, 300], ceilings=[10], total_documents=604).median_rank == 26
+
+
+def test_no_scoreable_question_is_a_none_median_not_a_zero() -> None:
+    assert reach([None, None], ceilings=[3], total_documents=604).median_rank is None
 
 
 # === run_ablation.py: resuming ===================================================================
