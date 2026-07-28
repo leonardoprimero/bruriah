@@ -53,6 +53,11 @@ def render(summary: AblationSummary) -> list[str]:
         "",
         f"recall@3: **{_fmt(summary.recall_at_3_before, 3)}** -> **{_fmt(summary.recall_at_3_after, 3)}**",
         "",
+        f"documents returned: **{_fmt(summary.mean_pool_documents, 1)}** -> "
+        f"**{_fmt(summary.mean_reranked_pool_documents, 1)}** on average. "
+        f"**{summary.evicted}** questions had their correct document returned by the shipped "
+        f"ranking and dropped by the reranked one; **{summary.rescued}** the other way.",
+        "",
         "| base rank | n | helped | hurt | same | mean rank after | shuffle would give | **vs null** | recall@3 |",
         "|---|---|---|---|---|---|---|---|---|",
     ]

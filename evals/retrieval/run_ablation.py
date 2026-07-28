@@ -120,6 +120,7 @@ def run(corpus: str, questions: list[dict], deps, out: Path) -> list[QuestionOut
             reranked_rank=rank_of(reranked_order, ground_truth),
             pool_documents=len(base_order),
             rerank_depth=_RERANK_DEPTH,
+            reranked_pool_documents=len(reranked_order),
         )
         outcomes.append(outcome)
         with out.open("a", encoding="utf-8") as sink:
