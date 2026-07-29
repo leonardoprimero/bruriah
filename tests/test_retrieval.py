@@ -301,22 +301,51 @@ def test_every_passage_of_a_document_travels_with_it(multi_passage_snapshot) -> 
     assert len(seen) == len(set(seen))
 
 
-def test_the_reranker_is_handed_whole_documents_in_file_order_not_passages(
-    multi_passage_snapshot,
-) -> None:
+def _capturing_rerank(captured: dict[str, list[str]]):
+    def rerank(query: str, documents: list[str]) -> list[float]:
+        captured["documents"] = documents
+        return [0.0] * len(documents)
+    return rerank
+
+
+def test_the_reranker_is_handed_whole_documents_not_passages(multi_passage_snapshot) -> None:
     # The measured finding this stage rests on: passages are ~250 characters of a body whose
     # median is 445, and scoring them directly is worth a fraction of scoring documents. A future
     # change that quietly passed passages here would keep every other test green.
     captured: dict[str, list[str]] = {}
-
-    def rerank(query: str, documents: list[str]) -> list[float]:
-        captured["documents"] = documents
-        return [0.0] * len(documents)
-
-    search(multi_passage_snapshot, "apple", Budgets(), rerank=rerank)
+    search(multi_passage_snapshot, "apple", Budgets(), rerank=_capturing_rerank(captured))
     alpha = next(text for text in captured["documents"] if "apple one" in text)
     assert "apple two body" in alpha, "a document reached the reranker missing one of its passages"
-    assert alpha.index("apple one") < alpha.index("apple two body"), "passages arrived out of order"
+
+
+def test_a_documents_matching_passage_reaches_the_reranker_first(multi_passage_snapshot) -> None:
+    # Relevance order, not file order. The reranker's input is truncated, so whichever passage is
+    # laid out first is the one that survives the cut -- and under file order that is decided by
+    # where an author put it rather than by what the query asked for.
+    captured: dict[str, list[str]] = {}
+    search(multi_passage_snapshot, "two body", Budgets(), rerank=_capturing_rerank(captured))
+    alpha = next(text for text in captured["documents"] if "apple one" in text)
+    assert "apple one" in alpha, "the document must still arrive whole"
+    assert alpha.index("apple two body") < alpha.index("apple one"), (
+        "the passage the query matched must lead, or truncation keeps the wrong half")
+
+
+def test_a_long_documents_answer_survives_the_reranker_char_cap(tmp_path: Path) -> None:
+    # The defect this ordering exists to fix, in miniature. Measured on `emilk/egui`: a
+    # 14,071-character commit is the recorded answer to three questions and the shipped ranking put
+    # it first for all three, but its opening 4,000 characters are the pull-request template, so
+    # the cross-encoder was handed a CONTRIBUTING.md checklist and dropped it to ranks 18, 30, 35.
+    boilerplate = "Keep your PR:s small and focused. Read CONTRIBUTING before opening one. " * 80
+    with _snapshot_for(tmp_path, {
+        "long.md": f"# Checklist\n{boilerplate}\n\n## Details\nzarafium composition handling.\n",
+        "other.md": "# Other\nsomething else entirely about zarafium.\n",
+    }) as active:
+        captured: dict[str, list[str]] = {}
+        search(active, "zarafium composition", Budgets(), rerank=_capturing_rerank(captured))
+        long_document = next(text for text in captured["documents"] if "Keep your PR" in text)
+        assert len(boilerplate) > 4000, "the fixture must exceed the cap or it proves nothing"
+        assert "zarafium composition handling" in long_document[:4000], (
+            "the answer fell outside the reranker's character cap; it is reading boilerplate")
 
 
 @pytest.mark.parametrize("returned, expected", [

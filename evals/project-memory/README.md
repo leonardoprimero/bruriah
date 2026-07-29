@@ -381,6 +381,39 @@ Reaching into `_fuse`/`_bm25_ranks`/`_vector_ranks` to get this is deliberate, a
 so: the alternative is inferring the shape of a ranking from the part of it that fits inside a
 budget, which is the inference that produced "not in the pool" in the first place.
 
+### The reranker was reading pull-request templates, fixed 2026-07-28
+
+The per-question table showed the reranker demoting 8 of the 24 egui answers the shipped ranking
+had already placed first, against 3 of 26 on leakcanary. Three of those eight were catastrophic —
+rank 1 to 18, 30 and 35 — and they turned out to be **the same document**, the recorded answer to
+three different questions: a 14,071-character commit whose first 4,000 characters are this
+repository's pull-request template. `_document_text` assembled passages in FILE order and
+`_rerank_fused` truncated at `_RERANK_MAX_CHARS`, so the cross-encoder was asked whether *"Keep
+your PR:s small and focused"* answered a question about IME composition. It correctly said no.
+
+An earlier reading blamed CJK: all three questions name it, and a multilingual reranker scoring a
+foreign script is a tidy story. It is wrong — two documents in all of egui's 2120 contain CJK
+characters and the culprit contains none. What the three shared was one document, and that is what
+pointed at length instead of language.
+
+The fix orders a document's passages by the position `_fuse` already gave them before truncating.
+It needs no second model and no extra read: the ranking had already decided which passages match
+this query, and the code was not using it. A passage the fusion never ranked sorts last, in file
+order, so a document still arrives whole — which is the property that must not be lost, since whole
+documents beat passages by a wide measured margin.
+
+| | reranked recall@3 before | after | rank-1 answers demoted |
+|---|---|---|---|
+| egui | 0.470 | **0.518** | 8 → **6** |
+| leakcanary | 0.425 | **0.425** | 3 → 3 |
+
+**It gains where there was something to gain and moves nothing where there was not.** 25 of egui's
+2120 documents exceed the cap; leakcanary's median document is 445 characters and almost none
+reach it, so 147 of its 153 questions do not move at all. That is the shape a ranking change should
+have, and it is why this is reported from two corpora rather than the one that improved.
+
+Not closed by this: egui's reranked 0.518 still sits against a 0.795 ceiling in the same pool.
+
 ### The unit matters more than the size of the model
 
 The first attempt reranked **passages** and was nearly worthless. A passage here is roughly 250
