@@ -301,16 +301,36 @@ def _fuse(
     return [(ref, lexical_rank, vector_rank) for _, ref, lexical_rank, vector_rank in fused]
 
 
-def _document_text(passages: list[_Passage]) -> str:
-    """One document rebuilt from the passages already scanned, in file order.
+def _document_text(passages: list[_Passage], fused_position: dict[str, int]) -> str:
+    """One document rebuilt from the passages already scanned, MOST RELEVANT PASSAGE FIRST.
 
     The snapshot's `documents` table carries metadata and no text, so this is the only document
     text `search` can offer a reranker without a second read of the corpus -- which it cannot do
     anyway, being snapshot-bound. It was VALIDATED as the input rather than assumed: scoring text
     rebuilt this way reproduces the figure measured against the corpus files themselves, so the
     number in `_RERANK_DEPTH`'s note belongs to the pipeline that actually ships.
+
+    Relevance order, not file order, because the result is truncated at `_RERANK_MAX_CHARS` and
+    file order decides what survives that cut by where an author happened to put it. Measured on
+    `emilk/egui`: one 14,071-character commit is the recorded answer to three separate questions,
+    and the shipped ranking put it FIRST for all three. Its opening 4,000 characters are the
+    repository's pull-request template -- "Keep your PR:s small and focused" -- so the cross-encoder
+    was asked whether a CONTRIBUTING.md checklist answered a question about IME composition,
+    correctly said no, and dropped the answer to ranks 18, 30 and 35. The text it needed began at
+    character 4,100.
+
+    Ordering by the position `_fuse` already gave each passage costs nothing and needs no second
+    model: the ranking has ALREADY decided which passages match this query. A passage the fusion
+    never ranked -- possible when the vector leg is unavailable and BM25 matched nothing in it --
+    sorts after every ranked one, in file order, so a document still arrives whole. That is the
+    property this function must not lose: whole documents beat passages by a wide measured margin,
+    and reordering them is not the same as splitting them.
     """
-    return "\n\n".join(passage.text for passage in sorted(passages, key=lambda item: item.start_line))
+    ordered = sorted(
+        passages,
+        key=lambda item: (fused_position.get(item.ref, len(fused_position)), item.start_line),
+    )
+    return "\n\n".join(passage.text for passage in ordered)
 
 
 def _rerank_fused(
@@ -350,11 +370,15 @@ def _rerank_fused(
     grouped: dict[str, list[_Passage]] = {}
     for passage in passages:
         grouped.setdefault(passage.document_ref, []).append(passage)
+    # What `_fuse` already decided about every passage, reused so the truncation below keeps the
+    # part of a long document that matched rather than the part that came first in the file.
+    fused_position = {entry[0]: index for index, entry in enumerate(fused)}
 
     try:
         returned = list(rerank(
             query,
-            [_document_text(grouped.get(document_ref, []))[:_RERANK_MAX_CHARS] for document_ref in head],
+            [_document_text(grouped.get(document_ref, []), fused_position)[:_RERANK_MAX_CHARS]
+             for document_ref in head],
         ))
     except Exception as error:  # noqa: BLE001 -- caller-supplied untrusted callable, as embed_query
         degradation.append(f"rerank_failed:{type(error).__name__}")

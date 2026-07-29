@@ -1,4 +1,4 @@
-{"base_rank": 27, "corpus": "leakcanary", "id": "lc12", "pool_documents": 181, "rerank_depth": 40, "reranked_pool_documents": 93, "reranked_rank": 2}
+{"base_rank": 27, "corpus": "leakcanary", "id": "lc12", "pool_documents": 181, "rerank_depth": 40, "reranked_pool_documents": 93, "reranked_rank": 1}
 {"base_rank": 3, "corpus": "leakcanary", "id": "lc15", "pool_documents": 179, "rerank_depth": 40, "reranked_pool_documents": 93, "reranked_rank": 2}
 {"base_rank": 20, "corpus": "leakcanary", "id": "lc20", "pool_documents": 191, "rerank_depth": 40, "reranked_pool_documents": 93, "reranked_rank": 9}
 {"base_rank": 6, "corpus": "leakcanary", "id": "lc21", "pool_documents": 197, "rerank_depth": 40, "reranked_pool_documents": 100, "reranked_rank": 3}
@@ -11,7 +11,7 @@
 {"base_rank": 3, "corpus": "leakcanary", "id": "lc132", "pool_documents": 166, "rerank_depth": 40, "reranked_pool_documents": 93, "reranked_rank": 4}
 {"base_rank": 4, "corpus": "leakcanary", "id": "lc177", "pool_documents": 186, "rerank_depth": 40, "reranked_pool_documents": 101, "reranked_rank": 3}
 {"base_rank": 1, "corpus": "leakcanary", "id": "lc195", "pool_documents": 196, "rerank_depth": 40, "reranked_pool_documents": 100, "reranked_rank": 1}
-{"base_rank": 31, "corpus": "leakcanary", "id": "lc201", "pool_documents": 194, "rerank_depth": 40, "reranked_pool_documents": 93, "reranked_rank": 20}
+{"base_rank": 31, "corpus": "leakcanary", "id": "lc201", "pool_documents": 194, "rerank_depth": 40, "reranked_pool_documents": 93, "reranked_rank": 21}
 {"base_rank": 50, "corpus": "leakcanary", "id": "lc208", "pool_documents": 179, "rerank_depth": 40, "reranked_pool_documents": 100, "reranked_rank": 50}
 {"base_rank": 1, "corpus": "leakcanary", "id": "lc285", "pool_documents": 183, "rerank_depth": 40, "reranked_pool_documents": 93, "reranked_rank": 1}
 {"base_rank": 37, "corpus": "leakcanary", "id": "lc382", "pool_documents": 186, "rerank_depth": 40, "reranked_pool_documents": 97, "reranked_rank": 4}
@@ -54,7 +54,7 @@
 {"base_rank": 154, "corpus": "leakcanary", "id": "lc1407", "pool_documents": 180, "rerank_depth": 40, "reranked_pool_documents": 91, "reranked_rank": null}
 {"base_rank": 6, "corpus": "leakcanary", "id": "lc1489", "pool_documents": 169, "rerank_depth": 40, "reranked_pool_documents": 91, "reranked_rank": 8}
 {"base_rank": 1, "corpus": "leakcanary", "id": "lc1516", "pool_documents": 196, "rerank_depth": 40, "reranked_pool_documents": 100, "reranked_rank": 1}
-{"base_rank": 5, "corpus": "leakcanary", "id": "lc1523", "pool_documents": 175, "rerank_depth": 40, "reranked_pool_documents": 94, "reranked_rank": 6}
+{"base_rank": 5, "corpus": "leakcanary", "id": "lc1523", "pool_documents": 175, "rerank_depth": 40, "reranked_pool_documents": 94, "reranked_rank": 5}
 {"base_rank": null, "corpus": "leakcanary", "id": "lc1532", "pool_documents": 192, "rerank_depth": 40, "reranked_pool_documents": 100, "reranked_rank": null}
 {"base_rank": 1, "corpus": "leakcanary", "id": "lc1537", "pool_documents": 170, "rerank_depth": 40, "reranked_pool_documents": 99, "reranked_rank": 1}
 {"base_rank": null, "corpus": "leakcanary", "id": "lc1550", "pool_documents": 174, "rerank_depth": 40, "reranked_pool_documents": 99, "reranked_rank": null}
@@ -64,8 +64,8 @@
 {"base_rank": 5, "corpus": "leakcanary", "id": "lc1572", "pool_documents": 174, "rerank_depth": 40, "reranked_pool_documents": 97, "reranked_rank": 1}
 {"base_rank": null, "corpus": "leakcanary", "id": "lc1573", "pool_documents": 175, "rerank_depth": 40, "reranked_pool_documents": 97, "reranked_rank": null}
 {"base_rank": 4, "corpus": "leakcanary", "id": "lc1582", "pool_documents": 183, "rerank_depth": 40, "reranked_pool_documents": 101, "reranked_rank": 5}
-{"base_rank": 15, "corpus": "leakcanary", "id": "lc1584", "pool_documents": 174, "rerank_depth": 40, "reranked_pool_documents": 96, "reranked_rank": 31}
-{"base_rank": 4, "corpus": "leakcanary", "id": "lc1587", "pool_documents": 170, "rerank_depth": 40, "reranked_pool_documents": 100, "reranked_rank": 5}
+{"base_rank": 15, "corpus": "leakcanary", "id": "lc1584", "pool_documents": 174, "rerank_depth": 40, "reranked_pool_documents": 96, "reranked_rank": 32}
+{"base_rank": 4, "corpus": "leakcanary", "id": "lc1587", "pool_documents": 170, "rerank_depth": 40, "reranked_pool_documents": 100, "reranked_rank": 6}
 {"base_rank": null, "corpus": "leakcanary", "id": "lc1588", "pool_documents": 175, "rerank_depth": 40, "reranked_pool_documents": 97, "reranked_rank": null}
 {"base_rank": null, "corpus": "leakcanary", "id": "lc1592", "pool_documents": 176, "rerank_depth": 40, "reranked_pool_documents": 94, "reranked_rank": null}
 {"base_rank": 54, "corpus": "leakcanary", "id": "lc1595", "pool_documents": 189, "rerank_depth": 40, "reranked_pool_documents": 93, "reranked_rank": 54}
@@ -93,7 +93,7 @@
 {"base_rank": 31, "corpus": "leakcanary", "id": "lc1968", "pool_documents": 172, "rerank_depth": 40, "reranked_pool_documents": 100, "reranked_rank": 38}
 {"base_rank": 24, "corpus": "leakcanary", "id": "lc1982", "pool_documents": 180, "rerank_depth": 40, "reranked_pool_documents": 100, "reranked_rank": 25}
 {"base_rank": null, "corpus": "leakcanary", "id": "lc1983", "pool_documents": 178, "rerank_depth": 40, "reranked_pool_documents": 93, "reranked_rank": null}
-{"base_rank": 39, "corpus": "leakcanary", "id": "lc1986", "pool_documents": 176, "rerank_depth": 40, "reranked_pool_documents": 93, "reranked_rank": 7}
+{"base_rank": 39, "corpus": "leakcanary", "id": "lc1986", "pool_documents": 176, "rerank_depth": 40, "reranked_pool_documents": 93, "reranked_rank": 8}
 {"base_rank": 2, "corpus": "leakcanary", "id": "lc2016", "pool_documents": 168, "rerank_depth": 40, "reranked_pool_documents": 93, "reranked_rank": 1}
 {"base_rank": null, "corpus": "leakcanary", "id": "lc2023", "pool_documents": 183, "rerank_depth": 40, "reranked_pool_documents": 93, "reranked_rank": null}
 {"base_rank": 87, "corpus": "leakcanary", "id": "lc2051", "pool_documents": 192, "rerank_depth": 40, "reranked_pool_documents": 100, "reranked_rank": 87}
