@@ -54,7 +54,7 @@ from .packs import CapabilityPolicy
 from .skills import PermissionEnvelope, SkillSet
 from .registries import Registry
 from .research import NetworkLedger, ResearchDeps, ResearchOutcome, research
-from .retrieval import EmbedQuery, Rerank, search, to_evidence_records
+from .retrieval import EmbedQuery, Rerank, is_shortfall, search, to_evidence_records
 from .route import route
 
 _CAPABILITY_REF_PREFIX = "capability:"
@@ -447,7 +447,17 @@ def investigate(request: InvestigationRequest, deps: ServiceDeps) -> Investigati
             evidence = evidence[: request.budgets.max_evidence]
             degradation.append("max_evidence_exceeded")
             truncated = True
-        status = "partial" if truncated or research_degradation else "complete"
+        # `degradation` is consulted here, not only `truncated`. Retrieval reports a cut-short scan,
+        # an unavailable or failed vector leg and a failed reranker in `degradation` while leaving
+        # `truncated` False -- it is set only by the two budget ceilings in the match loop -- so a
+        # request whose corpus scan stopped at the deadline was labelled `complete`, meaning the
+        # client was told it had the whole picture of exactly the case where it did not.
+        # `is_shortfall` excludes the entries that disclose an applied rule rather than a loss.
+        status = (
+            "partial"
+            if truncated or research_degradation or any(is_shortfall(note) for note in degradation)
+            else "complete"
+        )
         if skill_dispatch is not None:
             skill_gaps, skill_actions = _skill_outcomes(skill_dispatch.skills)
             extra_gaps = list(skill_dispatch.gaps) + skill_gaps

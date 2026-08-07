@@ -17,7 +17,7 @@ from bruriah.corpus import CorpusPolicy
 from bruriah.index import BuildConfig, build_candidate, promote_candidate, snapshot_active
 from bruriah.packs import load_pack
 from bruriah.registries import Registry
-from bruriah.retrieval import RetrievalError
+from bruriah.retrieval import RetrievalError, is_shortfall
 from bruriah.service import ServiceDeps, ServiceError, _candidate_urls, investigate, read
 # Slice 12A-2: reuse test_research.py's real TLS-loopback harness (no test in this file ever
 # makes a real external network connection either) instead of re-implementing it -- same
@@ -102,6 +102,52 @@ def test_real_pipeline_proceed_retrieves_and_assembles_local_evidence(deps) -> N
     assert result.evidence
     assert {item.kind for item in result.evidence} == {"local", "capability"}
     assert result.claims == [] and result.host_actions == [] and result.gaps == []
+
+
+def _embed_query(_query: str) -> bytes:
+    return array("f", (1.0, 0.0, 0.0)).tobytes()
+
+
+def test_a_scan_cut_short_by_the_deadline_is_not_reported_as_complete(deps) -> None:
+    """`truncated` alone decided the status, and retrieval does not set it for a stopped scan.
+
+    It is set only by the two budget ceilings in the match loop, so a request whose corpus scan hit
+    `max_elapsed_ms` -- reported in `degradation` and nowhere else -- came back labelled `complete`.
+    The client was told it had the whole picture in exactly the case where it had a prefix of it.
+    """
+    calls = {"count": 0}
+
+    def fake_clock() -> float:
+        calls["count"] += 1
+        return 0.0 if calls["count"] <= 2 else 1_000_000.0
+
+    result = investigate(InvestigationRequest(task=_TASK), replace(deps, clock=fake_clock))
+    assert "max_elapsed_ms_exceeded" in result.degradation
+    assert result.status == "partial"
+
+
+def test_a_failed_leg_is_not_reported_as_complete(deps) -> None:
+    def broken_embedder(_query: str) -> bytes:
+        raise RuntimeError("model unavailable")
+
+    result = investigate(InvestigationRequest(task=_TASK),
+                         replace(deps, embed_query=broken_embedder))
+    assert any(note.startswith("vector_leg_failed:") for note in result.degradation)
+    assert result.status == "partial"
+
+
+def test_an_applied_ranking_rule_alone_does_not_downgrade_the_status(deps) -> None:
+    # The other half of the classification, and the reason it is not simply `any(degradation)`.
+    # `reranked:` records that an opt-in stage RAN. If disclosing an applied rule made a response
+    # `partial`, the field would come to mean "something is disclosed here" rather than "you got
+    # less than this engine can give", which is the erosion that made `complete` worthless.
+    result = investigate(
+        InvestigationRequest(task=_TASK),
+        replace(deps, embed_query=_embed_query, rerank=lambda query, documents: [0.0] * len(documents)),
+    )
+    assert any(note.startswith("reranked:") for note in result.degradation)
+    assert [note for note in result.degradation if is_shortfall(note)] == []
+    assert result.status == "complete"
 
 
 def test_real_pipeline_investigate_emits_capability_evidence_with_provenance(deps) -> None:
