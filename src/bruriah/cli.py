@@ -228,6 +228,17 @@ def run_index(
 
 _FRESHNESS_WARNING_DAYS = 7
 
+# Separate from staleness, and much earlier, because the two mean different things to whoever is
+# reading `doctor`. A stale pack still works. An EXPIRED one stops the whole registry loading --
+# `load_registry` is fail-closed and all-or-nothing -- so `serve` and `doctor` both stop working on
+# that date, on an installation nobody touched and every test of which still passes.
+#
+# The bundled packs happen to set `expires_at` equal to `reviewed_at + freshness_days`, so the
+# staleness warning fired on the same day and looked like coverage. It was seven days of notice,
+# worded "goes stale", for an event that is a shutdown. Ninety gives time to notice, upgrade, or
+# ask; `tests/test_packaging.py` warns the maintainer earlier still.
+_EXPIRY_WARNING_DAYS = 90
+
 
 def run_doctor(
     paths: PlatformPaths, *, today: date | None = None, now: datetime | None = None,
@@ -273,6 +284,13 @@ def run_doctor(
             days_left = (pack.reviewed_at + timedelta(days=pack.freshness_days) - effective_today).days
             if days_left <= _FRESHNESS_WARNING_DAYS:
                 report["warnings"].append(f"pack {pack.pack_id} goes stale in {days_left} day(s)")
+            expires_in = (pack.expires_at - effective_today).days
+            if expires_in <= _EXPIRY_WARNING_DAYS:
+                report["warnings"].append(
+                    f"pack {pack.pack_id} expires in {expires_in} day(s), on {pack.expires_at}; "
+                    "after that bruriah stops serving until it ships re-signed packs -- upgrade "
+                    "before then"
+                )
     except PlatformError as error:
         report["registry"] = {"status": "error", "code": error.code}
     try:
