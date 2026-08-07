@@ -383,6 +383,15 @@ def _rerank_fused(
     except Exception as error:  # noqa: BLE001 -- caller-supplied untrusted callable, as embed_query
         degradation.append(f"rerank_failed:{type(error).__name__}")
         return fused
+    # The deadline is checked on the way OUT as well as on the way in. It cannot bound the call --
+    # `rerank` is one opaque invocation over the whole head, and a caller-supplied callable cannot
+    # be interrupted from here -- but the alternative was worse than not bounding it: the check at
+    # the top of this function passes, forty cross-encoder passes then take as long as they take,
+    # and `search` returned late reporting nothing at all. A budget that is silently exceeded reads
+    # exactly like a budget that was met. The work is kept rather than discarded, because it is
+    # finished and correct; only its lateness is disclosed.
+    if clock() >= deadline:
+        degradation.append("max_elapsed_ms_exceeded")
     if len(returned) != len(head):
         degradation.append("rerank_failed:score_count_mismatch")
         return fused
@@ -437,6 +446,31 @@ def _rerank_fused(
         for document_ref in order
         if index < len(within[document_ref])
     ]
+
+
+# Degradation entries that describe a rule this engine APPLIED, not something it failed to do.
+#
+# `reranked:N_documents` records that an opt-in stage ran; `lexical_leg_discounted:...` records a
+# ranking weight chosen deliberately because the query's language does not match the corpus.
+# Neither is a shortfall, and calling a response `partial` for either would make the field mean
+# "something is disclosed here" instead of "you got less than this engine can give" -- which is
+# the same erosion that made `complete` worthless in the first place.
+_DISCLOSURE_PREFIXES = ("reranked:", "lexical_leg_discounted:")
+
+
+def is_shortfall(note: str) -> bool:
+    """Whether a degradation entry means the caller got LESS than a healthy request would return.
+
+    Deliberately fail-closed: anything not named above counts as a shortfall. A future degradation
+    added without revisiting this classifies as `partial`, which over-reports; the allowlist form
+    would classify it as `complete`, which is the failure this function exists to end. Over-
+    reporting is visible and gets fixed; under-reporting is what shipped for two releases.
+
+    Note that `*_leg_no_matches` IS a shortfall. A leg that ran and matched nothing is a real
+    answer about the corpus, but the response was still assembled from half the engine -- and this
+    is exactly how embedding-dimension drift used to be reported as a complete result.
+    """
+    return not note.startswith(_DISCLOSURE_PREFIXES)
 
 
 def _leg_state(ranks: dict[str, int] | None, leg: str, degradation: list[str]) -> None:

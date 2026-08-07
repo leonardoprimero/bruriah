@@ -16,6 +16,29 @@ Nothing in this package had to change for it. Bruriah uses six symbols from that
 `PublicFormat.Raw` — all of them stable API that the major release does not touch. The full suite
 passes unchanged.
 
+### Fixed: a request that ran out of time came back labelled `complete`
+
+`status` was derived from one flag, `truncated`, which retrieval sets only when a result hits
+`max_candidates` or `max_extracted_chars`. Everything else it reports — a corpus scan stopped by
+`max_elapsed_ms`, a vector leg that was unavailable or raised, a reranker that failed — went into
+`degradation` and left `truncated` alone. So the response said `complete` in exactly the cases
+where the client had a prefix of the picture rather than the picture.
+
+`status` now reads `degradation` too. Not all of it: entries that disclose a rule this engine
+*applied* — `reranked:N_documents`, `lexical_leg_discounted:...` — are not shortfalls, and marking
+those `partial` would turn the field into "something is disclosed here" instead of "you got less
+than this engine can give". The split is fail-closed (`retrieval.is_shortfall`): anything not
+explicitly named a disclosure counts as a shortfall, so a degradation added later over-reports
+rather than repeating this.
+
+**Expect more `partial` than before**, and expect it to be accurate. In particular a request with
+no embedder configured is `partial`, because half the ranking is not running.
+
+Relatedly, the reranking stage now checks the clock on the way out as well as in. It cannot bound
+the call — the reranker is one opaque invocation supplied by you — but forty cross-encoder passes
+used to run after the only deadline check had already passed, and `search` returned late reporting
+nothing at all.
+
 ### Fixed: `--reranker` was halving how many documents you got back
 
 Turning the reranking stage on grouped every document's passages together in the result. Because
