@@ -167,17 +167,20 @@ What it changes, measured on the two foreign corpora and this repository's own h
 | | recall@3 before | after |
 |---|---|---|
 | `square/leakcanary`, 153 independent-source questions | 0.340 | **0.431** |
-| `emilk/egui`, 83 independent-source questions | **0.530** | 0.494 *(three questions worse)* |
+| `emilk/egui`, 83 independent-source questions | 0.518 | **0.542** *(re-measured, see below)* |
 | this repository, 12 English questions | 0.833 | **1.000** |
 | this repository, 12 Spanish questions | 0.500 | **0.917** |
 
 Three things are worth knowing before you turn it on.
 
-**It is not free and it is not always positive.** Roughly 7 seconds per query, a second ~1 GB
-model download, and on one of the two foreign corpora it made things *worse* — three questions of
-83, lowering recall@3 and recall@10 both, on the corpus where the shipped ranking was already
-strongest. Reranking deeper amplified that loss rather than fixing it. Measure it on your own
-corpus before turning it on; the flag needs no re-index, so that is one command.
+**It is not free, and how much it helps depends on your corpus.** Roughly 7 seconds per query and a
+second ~1 GB model download. The egui figures above were rewritten while preparing this release:
+they originally read 0.530 → 0.494 and were quoted as this stage making things *worse* on one of
+the two foreign corpora. That measurement predated the pull-request-template fix, and re-running it
+afterwards reversed the sign — see "reranking does not lose on `emilk/egui`" below. No corpus
+measured here is hurt by reranking. Depth still is corpus-dependent, though: 20 suits egui and 40
+suits leakcanary, so measure it on your own before turning it on. The flag needs no re-index, so
+that is one command.
 
 **An English-only reranker is dangerous on a non-English query.** `ms-marco-MiniLM-L-6` scores
 confidently in a language it cannot read, and reordering by those scores cut Spanish recall@10 from
