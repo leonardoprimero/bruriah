@@ -290,15 +290,49 @@ def test_reranking_reorders_evidence_and_never_changes_which_evidence_exists(
     assert {m.ref: (m.lexical_rank, m.vector_rank) for m in reranked.matches} == ranks
 
 
-def test_every_passage_of_a_document_travels_with_it(multi_passage_snapshot) -> None:
-    outcome = search(multi_passage_snapshot, "apple", Budgets(),
-                     rerank=lambda query, documents: [float(i) for i in range(len(documents))])
+def _document_order(outcome) -> list[str]:
     seen: list[str] = []
     for match in outcome.matches:
-        if not seen or seen[-1] != match.relative_path:
+        if match.relative_path not in seen:
             seen.append(match.relative_path)
-    # A document appearing twice would mean its passages were split across the new ordering.
-    assert len(seen) == len(set(seen))
+    return seen
+
+
+def test_reranked_passages_interleave_rather_than_travel_with_their_document(
+    multi_passage_snapshot,
+) -> None:
+    """Until 2026-08-06 this asserted the opposite, and the opposite had no measurement behind it.
+
+    Grouping a document's passages together is only free when nothing truncates the result.
+    `max_candidates` counts PASSAGES, so grouping spends the budget on whichever documents happen
+    to be long: measured with a no-op reranker on 236 foreign-corpus questions it halved the
+    distinct documents returned and dropped the recorded answer for 21 of them. Interleaving keeps
+    the document ranking identical -- see the test below -- and spends the budget on breadth.
+    """
+    outcome = search(multi_passage_snapshot, "apple", Budgets(),
+                     rerank=lambda query, documents: [float(i) for i in range(len(documents))])
+    runs = [match.relative_path for match in outcome.matches]
+    assert len(set(runs)) == 3 and len(runs) > 3, "the fixture must give several documents passages"
+    # Contiguous would mean each document appears as one unbroken run.
+    contiguous = [path for index, path in enumerate(runs) if index == 0 or runs[index - 1] != path]
+    assert len(contiguous) > len(set(contiguous)), "passages are grouped, not interleaved"
+
+
+def test_interleaving_does_not_change_which_document_ranks_where(multi_passage_snapshot) -> None:
+    # The property that lets the change above be free: every recall figure on this project is
+    # measured over DOCUMENTS, deduped by first appearance. Interleaving moves passages within the
+    # result and moves no document, because a document's first passage keeps its position.
+    def rerank(query: str, documents: list[str]) -> list[float]:
+        return [float(index) for index in range(len(documents))]
+
+    full = search(multi_passage_snapshot, "apple", Budgets(), rerank=rerank)
+    assert _document_order(full) == sorted(set(_document_order(full)), key=_document_order(full).index)
+    # Under a budget too small to hold every passage, breadth is what interleaving buys.
+    narrow = search(multi_passage_snapshot, "apple", Budgets(max_candidates=3), rerank=rerank)
+    assert len(narrow.matches) == 3
+    assert _document_order(narrow) == _document_order(full)[:3], (
+        "a tight budget must still reach three distinct documents, one passage each"
+    )
 
 
 def _capturing_rerank(captured: dict[str, list[str]]):

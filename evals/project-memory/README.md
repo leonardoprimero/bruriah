@@ -508,6 +508,44 @@ named. The ceiling table says 0.758 is available on leakcanary and reranking the
 less from that than the ceiling suggests, since on egui more depth made things worse rather than
 better. Nobody has run it, and the latency is why it is not the default in any case.
 
+### The stage was halving the result before any model spoke, fixed 2026-08-06
+
+`_rerank_fused`'s docstring said reranking "changes the ORDER of the evidence and never its
+membership", and the commit messages above repeat it. That was true of the list the function
+returns and false of what the caller receives, because `search` then truncates at
+`max_candidates`, which counts **passages**, over a list grouped by **document**.
+
+Measured with a reranker returning one constant score for every document — by the stage's own
+tie-break rule a no-op, so anything measured here is the stage and not a model
+(`evals/retrieval/run_identity.py`, no download, no cross-encoder):
+
+| budget | corpus | distinct documents, no stage | grouped | interleaved |
+|---|---|---|---|---|
+| default | `square/leakcanary` | 48.4 | **24.3** | **49.5** |
+| default | `emilk/egui` | 46.1 | **17.8** | **50.0** |
+| raised | `square/leakcanary` | 188.0 | 97.4 | 199.6 |
+| raised | `emilk/egui` | 178.4 | 73.0 | 200.0 |
+
+Grouping changed the returned set on **100% of the 236 questions** and dropped the recorded answer
+out of the result entirely for **21** of them at the default budget. A few long documents spent the
+whole budget: on `emilk/egui`, where a single 14,071-character commit is the answer to three
+separate questions, the stage returned barely a third of the documents that not using it returns.
+
+Interleaving passages across documents fixes it, and it is free in the only currency this page
+measures. **The document-level rank of every answer already present moved for zero of the 236
+questions, at both budgets** — because a document's first passage sits at the same position under
+either arrangement, and every recall figure here is computed over documents deduped by first
+appearance. So none of the reranking numbers above change, and that was checked rather than
+assumed. All 21 dropped answers return, and distinct documents rise *above* the no-reranker
+baseline, since one passage per document is the most breadth a passage budget can buy.
+
+Two things this is worth saying plainly. The published reranking figures were taken with
+`max_candidates` raised to 200, where the effect is milder — the eval was measured in the
+condition where its own bug bites least, which is not a defence, it is how the bug survived. And
+the grouped arrangement had a test asserting it (`test_every_passage_of_a_document_travels_with_it`)
+and no measurement behind that assertion; the measured finding about whole documents concerns what
+the cross-encoder is **fed**, which is unchanged.
+
 ## The model matters more than the weighting, measured 2026-07-26
 
 `--model` has always been a flag on `bruriah index`, and nothing said what it was worth. It is
