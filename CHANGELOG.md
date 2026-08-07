@@ -16,6 +16,30 @@ Nothing in this package had to change for it. Bruriah uses six symbols from that
 `PublicFormat.Raw` — all of them stable API that the major release does not touch. The full suite
 passes unchanged.
 
+### Corrected: reranking does not lose on `emilk/egui` — that was a bug, and it is fixed
+
+The reranking write-up said this stage made things *worse* on one of the two foreign corpora, and
+that reranking deeper made it worse still. Both of those came from a run taken before `d767aab`,
+the commit that stopped the cross-encoder reading the first 4,000 characters of a document instead
+of the passage that actually matched — which on egui meant reading a pull-request template. The
+configuration that claim rested on was never re-run after the fix.
+
+It has been now, on a fresh clone:
+
+| egui, `jina-v2-base-es` | top 20 | top 40 *(shipped)* | no reranker |
+|---|---|---|---|
+| before the fix *(previously published)* | 0.518 | **0.494** | 0.530 |
+| after the fix | **0.566** | **0.542** | 0.518 |
+
+Both depths lost to the baseline before; both beat it now. **No corpus measured here is hurt by
+reranking any more.** What survives is milder: depth 20 suits egui and depth 40 suits leakcanary,
+so the best depth still depends on your corpus — which is why 40 remains a default rather than a
+tuned value, and why the stage remains opt-in.
+
+`evals/retrieval/run_ablation.py` grew a `--depth` flag. The depth table could previously only be
+produced by editing a module constant between runs, which is why it named no command and why the
+claim could not be checked when it was questioned.
+
 ### Fixed: a request that ran out of time came back labelled `complete`
 
 `status` was derived from one flag, `truncated`, which retrieval sets only when a result hits

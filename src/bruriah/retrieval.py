@@ -60,11 +60,19 @@ _LANGUAGE_SAMPLE_CHARS = 400
 # and 0.464. Depth is the whole cost of the stage: one cross-encoder pass per extra document.
 #
 # 40 is NOT the depth that maximises every corpus, and this constant should not be read as tuned.
-# On `emilk/egui` reranking loses to the shipped ranking (0.494 against 0.530) and losing DEEPER
-# loses MORE -- top 20 reads 0.518 there. Depth amplifies whichever direction the reranker has on
-# a given corpus rather than improving it, so a larger number here would not be safer. The value
-# is set where the corpora that gain, gain most, and the whole stage is opt-in precisely because
-# whether a corpus gains at all is not predictable from anything measured.
+#
+# This note used to say reranking LOSES on `emilk/egui` (0.494 against 0.530) and loses deeper.
+# That was measured before d767aab, and d767aab fixed the exact mechanism it observed: the
+# cross-encoder reading a 14,071-character egui commit's pull-request-template header instead of
+# the passage that matched. Re-measured on the same jina configuration afterwards, both depths
+# now BEAT the baseline -- 0.518 no-reranker, 0.542 at depth 40, 0.566 at depth 20. The loss was
+# a property of the bug, not of the corpus.
+#
+# What remains is the ordinary version: depth 20 wins on egui, depth 40 wins on leakcanary
+# (0.431 against 0.412), so the best depth depends on the corpus while no measured corpus is hurt
+# by the stage. That is still the whole reason 40 is a default rather than a tuned value, and the
+# reason the stage is opt-in: which depth suits a corpus is not predictable from anything measured
+# here, so measure it on yours with `evals/retrieval/run_ablation.py --depth`.
 #
 # DOCUMENTS, not passages, and that is the larger of the two findings. A passage here is ~250
 # characters of a commit body whose median length is 445, and scoring passages directly reaches

@@ -280,6 +280,44 @@ depth problem — more candidates do not give a struggling reranker more to work
 more opportunities to move the right document down. An earlier draft of this page said depth helped
 everywhere it was tried, on two corpora out of three. The third one is why that sentence is gone.
 
+### The egui loss was a bug, and it is gone — re-measured 2026-08-06
+
+The row above was taken on the `jina-v2-base-es` index **before `d767aab`**, and that commit
+attacked exactly the mechanism the row reports. Its own message names the case: a 14,071-character
+egui commit whose opening 4,000 characters are the repository's pull-request template, which the
+cross-encoder read instead of the passage that matched, dropping the answer to ranks 18, 30 and 35.
+That is what "the reranker hurts on egui" was describing. The jina configuration — the only one the
+claim rested on — was never re-run afterwards.
+
+Re-run now, on a fresh clone (2158 documents against the 2119 measured before, so the baseline
+sits slightly lower for having more distractors):
+
+| egui, `jina-v2-base-es` | top 20 | top 40 *(shipped)* | no reranker |
+|---|---|---|---|
+| before `d767aab` *(published above)* | 0.518 | **0.494** | 0.530 |
+| **after `d767aab`** | **0.566** | **0.542** | 0.518 |
+
+**Both depths lost to the baseline before. Both beat it now.** The loss is not a property of this
+corpus; it was a property of a bug, and the bug is fixed.
+
+What survives is smaller and more ordinary than "depth amplifies whichever direction the reranker
+has". Depth 20 still outperforms depth 40 here (0.566 against 0.542) while depth 40 outperforms
+depth 20 on leakcanary (0.431 against 0.412). So **the best depth depends on the corpus** — but no
+corpus measured is now hurt by reranking at all, and the mechanism has nothing to do with a
+struggling reranker being handed more rope. That sentence an earlier draft of this page carried,
+the one saying depth helped everywhere it was tried, was closer to right than the sentence that
+replaced it.
+
+`_RERANK_DEPTH` stays at 40 and the stage stays opt-in regardless, for the reason that never
+depended on this number: 40 is not the depth that maximises every corpus, and which depth does is
+not predictable from anything measured. Measure it on yours — `run_ablation.py --depth` exists now
+precisely because this table could previously only be produced by editing the source between runs,
+which is why nobody could re-run it when the measurement behind it was questioned.
+
+Per-question artifacts: `egui-jina-depth40-ablation.jsonl`, `egui-jina-depth20-ablation.jsonl`.
+Both were produced after the interleaving fix, so both read `evicted: 0` where the pre-fix run
+dropped 3 answers out of the pool entirely.
+
 So the rule this eval supports is narrower than "reranking helps", and narrower than the tidy story
 that it helps where retrieval is weak — the internal English set began at 0.833, the strongest
 baseline measured, and still went to 1.000. Four question sets: three gained, one lost, and no
