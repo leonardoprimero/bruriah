@@ -16,6 +16,29 @@ Nothing in this package had to change for it. Bruriah uses six symbols from that
 `PublicFormat.Raw` — all of them stable API that the major release does not touch. The full suite
 passes unchanged.
 
+### Fixed: `--reranker` was halving how many documents you got back
+
+Turning the reranking stage on grouped every document's passages together in the result. Because
+`max_candidates` counts passages, not documents, a few long documents could spend the whole budget
+— so the stage returned **fewer distinct documents than not using it at all**.
+
+Measured with a reranker that returns the same score for every document, which by the stage's own
+contract is a no-op, so this is the stage and not any model: it changed the returned set on 100% of
+the 236 foreign-corpus questions, took distinct documents at the default budget from 48.4 to 24.3
+on `square/leakcanary` and from 46.1 to 17.8 on `emilk/egui`, and dropped the recorded answer out
+of the result entirely for 21 of them.
+
+Passages now interleave across documents instead of grouping. The documents come back in exactly
+the order the reranker put them in — a document's first passage sits where it always did — so
+**no published recall figure changes**, and that was verified rather than assumed: across those
+236 questions at two budgets, the document-level rank of every answer moved for zero of them. All
+21 dropped answers return, and distinct documents at the default budget go to 49.5 and 50.0, above
+the no-reranker baseline, because one passage per document is the most breadth a passage budget can
+buy.
+
+If you were relying on a document's passages arriving as one contiguous run, they no longer do.
+That grouping was never measured to be worth anything; this is what it cost.
+
 ### Optional cross-encoder reranking — `--reranker`
 
 `bruriah ask` and `bruriah serve` take `--reranker MODEL`. It reorders the top 40 documents a

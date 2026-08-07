@@ -405,7 +405,38 @@ def _rerank_fused(
         )
     ]
     degradation.append(f"reranked:{len(head)}_documents")
-    return [entry for document_ref in ranked + tail for entry in within[document_ref]]
+    # Interleaved, NOT concatenated by document, and that is a budget decision rather than an
+    # ordering one. Both forms place the DOCUMENTS in exactly the ranking above -- a document's
+    # first passage sits at the same position either way -- so the document-level ranking every
+    # published figure is measured against is identical. What differs is which passages survive
+    # `max_candidates`, which counts passages.
+    #
+    # Concatenation spends that budget on whichever documents happen to hold many passages.
+    # Measured with a reranker returning one constant score for every document (a no-op by this
+    # docstring and by the tie-break note below): it changed the returned set on 100% of the 236
+    # foreign-corpus questions, halved the distinct documents returned at the default budget
+    # (48.4 -> 24.3 on leakcanary, 46.1 -> 17.8 on egui) and dropped the recorded answer out of
+    # the pool for 21 of them.
+    #
+    # Passages of one document are therefore NOT contiguous in the result. That was asserted here
+    # until 2026-08-06, and the assertion had no measurement behind it: the measured finding about
+    # whole documents is about what the cross-encoder is FED (`_document_text`), which is unchanged
+    # and still covered by its own test.
+    #
+    # After the change, on the same 236 questions: distinct documents returned at the default
+    # budget went 24.3 -> 49.5 (leakcanary) and 17.8 -> 50.0 (egui), ABOVE the 48.4 and 46.1 the
+    # same searches return with no reranker at all, since one passage per document is the most
+    # breadth a passage budget can buy. All 21 dropped answers came back, and the document-level
+    # rank of every answer already present moved for ZERO questions -- which is what makes this
+    # free: every recall figure this project publishes is measured over deduped documents.
+    order = ranked + tail
+    depth = max((len(within[document_ref]) for document_ref in order), default=0)
+    return [
+        within[document_ref][index]
+        for index in range(depth)
+        for document_ref in order
+        if index < len(within[document_ref])
+    ]
 
 
 def _leg_state(ranks: dict[str, int] | None, leg: str, degradation: list[str]) -> None:
