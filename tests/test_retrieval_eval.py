@@ -38,6 +38,7 @@ from metrics import (  # noqa: E402
     ndcg_at_10,
     recall_at_k,
 )
+from separation import MAD_TO_SIGMA, separation  # noqa: E402
 
 
 def _hash_file(path: Path) -> str:
@@ -217,6 +218,69 @@ def test_abstention_score_separation_empty_side_is_none() -> None:
     assert result.below_p25_fraction is None
     assert result.abstention_count == 0
     assert result.positive_count == 1
+
+
+# ---------------------------------------------------------------------------
+# separation
+# ---------------------------------------------------------------------------
+
+# Median 1.0, MAD 0.1: values 0.8, 0.9, 1.0, 1.1, 1.2 repeated four times.
+_NOISE = [1.0 + 0.1 * ((index % 5) - 2) for index in range(20)]
+
+
+def test_separation_hand_computed() -> None:
+    # rest = _NOISE, median 1.0, MAD 0.1 -> (5.0 - 1.0) / (1.4826 * 0.1)
+    assert separation([5.0, *_NOISE]) == pytest.approx(4.0 / (MAD_TO_SIGMA * 0.1))
+
+
+def test_separation_is_scale_free() -> None:
+    base = separation([5.0, *_NOISE])
+    assert separation([500.0, *[value * 100 for value in _NOISE]]) == pytest.approx(base)
+    assert separation([5.5, *[value + 0.5 for value in _NOISE]]) == pytest.approx(base)
+
+
+def test_separation_is_scale_free_but_not_shape_free() -> None:
+    """The limit that ended this line of work, kept as a test so it cannot be re-assumed.
+
+    Scale-invariance is what made a single threshold look like it could serve every embedding
+    model. It cannot, because a corpus does not rescale a distribution -- it RESHAPES one. Here
+    the same top score against equally-centred distributions of different width reads five times
+    apart, and neither is a rescaling of the other. Measured on real corpora this dominated: the
+    denser of two corpora separated more for every question, including questions whose answer it
+    did not contain. See evals/project-memory/README.md.
+    """
+    tight = [1.0 + 0.1 * ((index % 5) - 2) for index in range(20)]  # MAD 0.1
+    wide = [1.0 + 0.5 * ((index % 5) - 2) for index in range(20)]   # MAD 0.5, same median
+    assert separation([5.0, *tight]) == pytest.approx(5 * separation([5.0, *wide]))
+
+
+def test_separation_survives_a_query_with_several_good_answers() -> None:
+    # WHY MEDIAN AND MAD. A query with three good answers would inflate a standard deviation with
+    # exactly the scores that make it a good query, and then read as LESS separated than a lucky
+    # single hit. Asserting the robust form holds is not enough, so the naive one is computed here
+    # to show it moves where the robust one does not.
+    def naive_z(values: list[float]) -> float:
+        rest = values[1:]
+        mean = sum(rest) / len(rest)
+        spread = (sum((value - mean) ** 2 for value in rest) / len(rest)) ** 0.5
+        return (values[0] - mean) / spread
+
+    assert separation([5.0, *_NOISE]) == pytest.approx(separation([5.0, 4.8, 4.6, *_NOISE]))
+    assert naive_z([5.0, 4.8, 4.6, *_NOISE]) < naive_z([5.0, *_NOISE]) / 2
+
+
+def test_separation_tells_a_peak_from_a_plateau() -> None:
+    peak, plateau = separation([5.0, *_NOISE]), separation([1.25, *_NOISE])
+    assert peak is not None and plateau is not None and peak > plateau
+
+
+def test_separation_is_undefined_rather_than_zero_when_it_cannot_be_asked() -> None:
+    # `None`, never 0.0, for recall_at_k's reason: an undefined measurement averaged in as a zero
+    # is a fabricated observation. A distribution with no spread at all is what a constant-vector
+    # embedder produces, so this is a real path rather than a corner.
+    assert separation([5.0, 1.0, 1.0]) is None
+    assert separation([5.0, *[1.0] * 20]) is None
+    assert separation([]) is None
 
 
 # ---------------------------------------------------------------------------

@@ -23,6 +23,107 @@ Without that the scorer reports 0% and looks like a retrieval collapse rather th
 `tests/test_project_memory_eval.py` asserts every ground-truth document is still produced by this
 repository's own history, so the numbers below stay reproducible from the published repository.
 
+## Separation does not detect an unanswerable question, measured 2026-08-06
+
+**A negative result.** This engine cannot tell a question it can answer from one it cannot, and
+the most promising way of asking it to was measured and refuted. What follows is the whole
+attempt, because the shape of the failure is more useful than the conclusion.
+
+### Why a relevance floor is not expressible in the first place
+
+The obvious fix for "returns the nearest passage when it knows nothing" is a minimum score. There
+is nowhere to put one. `_fuse` scores a candidate `1/(k + rank)` and nothing else, so a rank-1
+document is worth ~1/61 whether it is the answer or noise — RRF discards magnitude deliberately,
+which is what lets it fuse two legs whose units have no common scale. Below the fusion it is no
+better: BM25 has no absolute scale (it moves with corpus IDF) and cosine similarity moves with the
+embedding model, which is the operator's choice via `--model`. Any fixed floor is a per-model
+constant in disguise, and would be wrong on at least one of the two configurations this page
+already measures.
+
+### What was measured instead, and why it was expressible
+
+Not a confidence. A confidence says *this passage is 0.87 relevant* — a claim about one piece of
+evidence, which `RetrievalMatch` refuses to carry and which `tests/test_retrieval.py`,
+`tests/test_lookup.py` and `tests/test_candidates.py` each forbid by name. **Separation** is a
+property of the SEARCH: how far the best score stands out from the distribution that same query
+produced, as `(top − median) / (1.4826 × MAD)` over one leg's own scores
+(`evals/retrieval/separation.py`). Median and MAD rather than mean and standard deviation, because
+a query with several good answers inflates a standard deviation with exactly the scores that make
+it good. It is scale-free, so no per-model constant appears in it.
+
+That distinction is what made it expressible. It is not what made it work.
+
+### The first measurement said yes, and the first measurement was wrong
+
+Asked of this repository's corpus, the 24 project-memory questions separated visibly more than the
+236 foreign issue titles used as unanswerable controls: vector AUC **0.856**, with 87.3% of the
+controls below the positives' 25th percentile. A threshold at 4.0 refused 87% of the unanswerable
+questions for 17% of the answerable ones.
+
+Positives and negatives in that comparison differ in more than answerability. They differ in
+author, vocabulary, domain and style — and by the measurement at the top of this page, ten of
+twelve positives leak a distinctive term toward their own answer. The comparison could not
+separate *has an answer here* from *was written by someone who knows this corpus*. That is the
+same confound that retracted 0.83 above.
+
+### The paired control, which is the actual measurement
+
+Every question asked **twice**: once of the corpus holding its recorded answer, once of a corpus
+that cannot hold it. Same author, same words, same domain, same day; the only variable left is
+whether the answer is present. The pairing is exact and the runner asserts it — 236/236 answers
+present under `home`, 0/236 under `foreign`. Each question is its own control, so the test is an
+exact binomial sign test with nothing distributional to argue about.
+
+`evals/retrieval/run_separation.py` restates the two legs' scoring, because the shipped helpers
+compute these scores and return only ranks. It asserts its restatement produces rank-for-rank
+identical output to `retrieval._bm25_ranks` and `_vector_ranks` on every query and aborts
+otherwise; without that guard the numbers would describe the script.
+
+| | pairs | home | foreign | home wins | p | AUC |
+|---|---|---|---|---|---|---|
+| **vector, pooled** | 236 | 4.20 | 4.39 | **117/236 (49.6%)** | **0.948** | 0.521 |
+| vector, egui questions | 83 | 6.25 | 3.90 | 70/83 (84.3%) | 1.3e-10 | 0.853 |
+| vector, leakcanary questions | 153 | 3.65 | 4.64 | **47/153 (30.7%)** | 2.1e-06 | 0.324 |
+| lexical, pooled | 226 | 10.99 | 7.82 | 144/226 (63.7%) | 4.5e-05 | 0.653 |
+| lexical, egui questions | 82 | 12.33 | 6.09 | 74/82 (90.2%) | 1.7e-14 | 0.818 |
+| lexical, leakcanary questions | 144 | 10.74 | 9.68 | 70/144 (48.6%) | 0.803 | 0.563 |
+
+Pooled, the vector leg is a coin. Split, it is **two large opposite effects that cancel** — and on
+leakcanary questions the corpus that CANNOT answer them separates more, significantly. The lexical
+leg's pooled 63.7% is not a weaker version of a real effect either; it is entirely egui, with
+leakcanary at p=0.803.
+
+An aggregate that averages two significant opposite effects is worse than no effect, because it
+looks settled. Read the per-corpus rows.
+
+### What it actually measures
+
+The egui index separates more for **every** question, including questions whose answer it does not
+contain: 4.64 for foreign questions against leakcanary's 3.65 for its own. egui is also where this
+engine retrieves nearly twice as well (recall@3 0.434 against 0.242). Separation tracks something
+closer to *the engine found it* than to *the answer exists* — which is precisely the useless
+direction, because when retrieval fails, separation fails with it and reports nothing wrong.
+
+### The reasoning error, named
+
+Scale-invariance was the property that made a single threshold look like it could serve every
+model, and it is real — `tests/test_retrieval_eval.py` pins it. **Scale-invariance is not
+shape-invariance.** A larger, denser corpus does not rescale a cosine distribution, it reshapes
+one, and reshaping moves this statistic further than the presence of an answer does. The argument
+covered the units and never covered the shape. `test_separation_is_scale_free_but_not_shape_free`
+exists so that is not re-assumed.
+
+### What this leaves standing
+
+`route.py`'s keyword gate remains the only abstention this engine has, and it decides before
+retrieval runs, from the words in the request and which packs are registered — never from the
+corpus. The tool description and the comparison table in the top-level README were corrected to
+say that, rather than to promise an abstention this cannot perform.
+
+No threshold from this work ships. Nothing here should be read as "separation needs tuning": it
+was measured under the control that removes the confound, and it did not survive it. A future
+attempt needs a different idea or different data, not a different constant.
+
 ## How much these questions give away, measured 2026-07-27
 
 Read this before any table below it. It is the strongest caveat on this page and it is a
