@@ -42,7 +42,8 @@ from ablation import QuestionOutcome, document_ranking, rank_of, summarize  # no
 from bruriah.cli import build_serve_deps  # noqa: E402
 from bruriah.contracts import Budgets  # noqa: E402
 from bruriah.platform import resolve_paths  # noqa: E402
-from bruriah.retrieval import _RERANK_DEPTH, search  # noqa: E402
+from bruriah import retrieval  # noqa: E402
+from bruriah.retrieval import search  # noqa: E402
 
 # Every one of these is the ceiling `Budgets` allows, and each ceiling is here because its default
 # was measured getting in the way rather than because bigger seemed safer.
@@ -126,7 +127,7 @@ def run(corpus: str, questions: list[dict], deps, out: Path) -> list[QuestionOut
             base_rank=rank_of(base_order, ground_truth),
             reranked_rank=rank_of(reranked_order, ground_truth),
             pool_documents=len(base_order),
-            rerank_depth=_RERANK_DEPTH,
+            rerank_depth=retrieval._RERANK_DEPTH,
             reranked_pool_documents=len(reranked_order),
         )
         outcomes.append(outcome)
@@ -145,11 +146,19 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--questions", type=Path, required=True)
     parser.add_argument("--reranker", required=True, help="cross-encoder model name")
     parser.add_argument("--out", type=Path, required=True, help="per-question JSONL to write")
+    # `_RERANK_DEPTH` is a module constant, so the depth table in evals/project-memory/README.md
+    # could only ever have been produced by editing the source between runs -- which is why that
+    # table names no command and could not be re-run when the measurement behind it was questioned.
+    # Every row it writes already records the depth it used, so a run stays self-describing.
+    parser.add_argument("--depth", type=int, default=None,
+                        help="override retrieval._RERANK_DEPTH for this run (default: shipped)")
     return parser.parse_args(argv)
 
 
 def main() -> int:
     args = parse_args()
+    if args.depth is not None:
+        retrieval._RERANK_DEPTH = args.depth
     questions = load_questions(args.questions)
     paths = resolve_paths(cli_data_dir=args.data_dir, env={})
     deps = build_serve_deps(paths, reranker_model=args.reranker)
