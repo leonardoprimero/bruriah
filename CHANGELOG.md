@@ -5,6 +5,17 @@ and the entries here name what changed for *you* rather than which files moved.
 
 ## [Unreleased]
 
+### Security: `cryptography` moves to 50
+
+`PYSEC-2026-3552` affects `cryptography` 49, and the fix is 50.0.0 — outside the `<50` ceiling this
+project declared, so the advisory could not be resolved by re-locking alone. The ceiling is now
+`<51` and the lock is regenerated.
+
+Nothing in this package had to change for it. Bruriah uses six symbols from that library —
+`Ed25519PrivateKey`, `Ed25519PublicKey`, `InvalidSignature`, `Encoding`, `PrivateFormat.PKCS8` and
+`PublicFormat.Raw` — all of them stable API that the major release does not touch. The full suite
+passes unchanged.
+
 ### Optional cross-encoder reranking — `--reranker`
 
 `bruriah ask` and `bruriah serve` take `--reranker MODEL`. It reorders the top 40 documents a

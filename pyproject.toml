@@ -42,7 +42,7 @@ classifiers = [
 # lands, it comes back with the code that uses it.
 dependencies = [
   "anyio>=4.11,<5",
-  "cryptography>=46,<50",
+  "cryptography>=46,<51",
   "fastembed==0.8.0",
   "markdown-it-py>=4.0.0,<5",
   "mcp>=1.28.1,<2",
