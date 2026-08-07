@@ -16,6 +16,34 @@ Nothing in this package had to change for it. Bruriah uses six symbols from that
 `PublicFormat.Raw` — all of them stable API that the major release does not touch. The full suite
 passes unchanged.
 
+### Corrected: this tool does not abstain when your corpus has no answer
+
+The `investigate_work` description promised it abstained "rather than answering from whatever
+looked closest", and the front-page comparison table said it "abstains, and says which domain it
+lacks". Both overstated what the code does, and both now say what it does instead.
+
+There *is* an abstention and it is real, but its gate is **registration, not relevance**: it fires
+when no approved pack covers the request's domain, it decides from the request text and the signed
+registry, and it runs before retrieval. Once it proceeds, ranking returns its best candidates
+whether or not any of them answers the question. There is no relevance floor. The abstention also
+never named the domain it lacked — `Gap` is a closed set of four strings and none of them carries
+one.
+
+Adding that floor was attempted and refused by measurement, which is the more useful half of this
+entry. RRF discards score magnitude by construction, so there is nowhere in the fused ranking to
+put a threshold; what was measured instead was *separation* — how far a query's best score stands
+out from the spread of its own scores, which is a property of the search and not a confidence
+attached to any passage. It looked strong (AUC 0.856) until the same questions were asked of a
+corpus that could not answer them: pooled, the vector leg then read 117/236, p=0.948. A coin. Split
+by corpus it was two large opposite effects that cancelled, one of them saying the *wrong* corpus
+separates more.
+
+Nothing from that work ships in the engine. It lives in `evals/retrieval/separation.py` with its
+472 per-question results committed beside it, written up under "Separation does not detect an
+unanswerable question" in `evals/project-memory/README.md`. If you were relying on the old promise,
+the practical change is: treat a returned ref as a place to look, never as a claim that the answer
+is in it.
+
 ### Corrected: reranking does not lose on `emilk/egui` — that was a bug, and it is fixed
 
 The reranking write-up said this stage made things *worse* on one of the two foreign corpora, and

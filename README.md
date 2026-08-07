@@ -205,7 +205,8 @@ comparison against **the common shape**: retrieve passages, put them in the prom
 | what picks the sources | a model, over the content | boolean set membership over a signed registry |
 | can a document influence **which sources are admissible** | yes — ranking is the only gate there is | **no** — routing never reads corpus prose. Ranking does, and only orders what routing already admitted |
 | how confident it sounds | the same, always | `supported` / `stale` / `expired` / `unknown`, stated — and `unknown` when nothing declared it |
-| when it knows nothing | returns the nearest passage | **abstains**, and says which domain it lacks |
+| when no approved pack covers the domain | answers anyway | **abstains**, before retrieval runs |
+| when a pack covers it but the corpus has no answer | returns the nearest passage | **the same** — the gate above is registration, not relevance ([measured](evals/project-memory/README.md#separation-does-not-detect-an-unanswerable-question-measured-2026-08-06)) |
 | trust in a retrieved document | implied by returning it | explicitly `not_assessed_by_retrieval` |
 
 The row that matters is the fourth. Everything else follows from it.
