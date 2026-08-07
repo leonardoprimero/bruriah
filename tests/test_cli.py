@@ -225,6 +225,29 @@ def test_doctor_is_read_only_and_reports_freshness(tmp_path: Path) -> None:
     assert not paths.cache_dir.exists()  # doctor never creates the cache dir either
 
 
+def test_doctor_warns_about_expiry_far_earlier_than_about_staleness(tmp_path: Path) -> None:
+    """Seven days' notice, worded "goes stale", for an event that is a shutdown.
+
+    A stale pack still works. An expired one fails `load_registry`, which is fail-closed and
+    all-or-nothing, so `serve` and `doctor` both stop on that date -- on an installation nobody
+    touched. The bundled packs set `expires_at` to exactly `reviewed_at + freshness_days`, so the
+    staleness warning fired the same week and looked like it had this covered.
+    """
+    paths = _paths(tmp_path)
+    early = cli.run_doctor(paths, today=date(2027, 4, 25), now=_NOW)
+    assert early["registry"]["status"] == "ok"
+    expiry = [warning for warning in early["warnings"] if "expires in" in warning]
+    assert expiry, "no expiry warning three months out"
+    assert "stops serving" in expiry[0], "the warning must say what actually happens"
+    assert not any("goes stale" in warning for warning in early["warnings"]), (
+        "staleness is a different, later, milder thing and must not fire this early"
+    )
+    # And it is a threshold, not a permanent banner: five days earlier is outside the window and
+    # says nothing, so the warning still means "soon" when it appears.
+    earlier = cli.run_doctor(paths, today=date(2027, 4, 20), now=_NOW)
+    assert not [warning for warning in earlier["warnings"] if "expires in" in warning]
+
+
 def test_doctor_reports_cache_stats_read_only_never_deletes_an_expired_entry(tmp_path: Path) -> None:
     """Slice 12D: `doctor` gains cache visibility but design.md's "`doctor` is read-only" holds --
     it never calls `cache.prune_expired`, so even a genuinely expired entry survives untouched."""

@@ -16,6 +16,29 @@ Nothing in this package had to change for it. Bruriah uses six symbols from that
 `PublicFormat.Raw` — all of them stable API that the major release does not touch. The full suite
 passes unchanged.
 
+### Fixed: nothing warned you that the bundled packs stop this tool on a fixed date
+
+Every bundled pack carries `expires_at`, and `load_registry` is fail-closed and all-or-nothing —
+one expired pack fails the whole registry, and `load_deps` builds `serve` and `doctor` on top of
+it. Verified by injecting the date: on **2027-07-23** everything loads, and on **2027-07-24**
+`load_registry` raises `registry_load_failed:expired_pack`. An installation nobody touched stops
+serving, and every test of it still passes, because every test in this repository pins `today` to a
+2026 literal — including the one asserting the expiry fires in 2027. The suite was arranged to
+confirm the deadline rather than to raise the alarm before it.
+
+Two warnings now exist where there were none worth the name:
+
+- **`bruriah doctor` warns 90 days out**, and says what happens: *"expires in N day(s), on DATE;
+  after that bruriah stops serving until it ships re-signed packs"*. There was a warning before,
+  but it gave seven days and was worded "goes stale" — a stale pack still works, an expired one
+  does not, and the two only looked equivalent because these packs set `expires_at` to exactly
+  `reviewed_at + freshness_days`.
+- **The test suite fails 120 days out**, so the maintainer finds out from CI months before any
+  user finds out from a broken install.
+
+Note what this does *not* do: the packs are signed, so a later `expires_at` needs a new signature.
+Nothing here extends any deadline — it makes the existing one impossible to walk into unaware.
+
 ### Corrected: this tool does not abstain when your corpus has no answer
 
 The `investigate_work` description promised it abstained "rather than answering from whatever
