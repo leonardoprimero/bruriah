@@ -204,7 +204,7 @@ comparison against **the common shape**: retrieve passages, put them in the prom
 | when the text arrives | immediately, in the prompt | only if the agent asks for it, bounded |
 | what picks the sources | a model, over the content | boolean set membership over a signed registry |
 | can a document influence **which sources are admissible** | yes — ranking is the only gate there is | **no** — routing never reads corpus prose. Ranking does, and only orders what routing already admitted |
-| how confident it sounds | the same, always | `supported` / `stale` / `expired` / `unknown`, stated — and `unknown` when nothing declared it |
+| how confident it sounds | the same, always | `current` / `stale` / `expired` / `unknown`, stated — and `unknown` when nothing declared it |
 | when no approved pack covers the domain | answers anyway | **abstains**, before retrieval runs |
 | when a pack covers it but the corpus has no answer | returns the nearest passage | **the same** — the gate above is registration, not relevance ([measured](evals/project-memory/README.md#separation-does-not-detect-an-unanswerable-question-measured-2026-08-06)) |
 | trust in a retrieved document | implied by returning it | explicitly `not_assessed_by_retrieval` |
@@ -219,11 +219,15 @@ Retrieval is the other half, and it is the ordinary kind: BM25 and a vector leg,
 
 **Everything is read-only.** The MCP surface is exactly two tools and neither writes anything. All mutation — indexing, approval, activation — lives in a CLI a human runs.
 
-**State is carried, never inferred.** *"I found something"* and *"I found something current and authoritative"* are different answers, and Bruriah tells you which one you got — `supported`, `stale`, `expired`, `unknown`.
+**State is carried, never inferred.** *"I found something"* and *"I found something current and authoritative"* are different answers, and Bruriah tells you which one you got — `freshness` is `current`, `stale`, `expired` or `unknown` on every evidence record.
+
+*(Both lines above said `supported` instead of `current` until 2026-08-06. `supported` is a value of a different field on a different record — `ClaimRecord.state` — and no response carries it, because `claims` is always empty. See below.)*
 
 Which one you get depends on whether anything **declared** it, and that is worth knowing before you look at a response. A signed pack declares a source's authority, review date and freshness window, so evidence covered by one carries real state. Your own git history is covered by no such pack, so its evidence comes back `unknown` with `not_assessed_by_retrieval` — not a placeholder for something unfinished, but the honest answer, since the alternative is retrieval deciding a document is authoritative because it retrieved it.
 
-For the same reason `claims` is empty for a local corpus. Forming a claim requires a *structured* statement of what a passage asserts, and deriving one from a decision written in prose is a semantic reading — exactly what nothing in this package is permitted to do to corpus text. Claims are assembled over research evidence, under a source policy that declares what a source may be cited for, and live research ships inert. An empty `claims` list on your own repository is the design holding, not a feature that has not landed.
+For the same reason `claims` is empty for a local corpus. Forming a claim requires a *structured* statement of what a passage asserts, and deriving one from a decision written in prose is a semantic reading — exactly what nothing in this package is permitted to do to corpus text.
+
+That much is the design. What this paragraph used to add is not: it said claims are assembled over research evidence and that an empty list is "the design holding, not a feature that has not landed". **Claim formation is not wired into `investigate()` at all.** The code that builds claims is reached only on the paths that do *not* retrieve, so `claims` is `[]` in every configuration, for every corpus, research or not — `service.py` sets it as a literal. This repository's own evaluation harness says so where it refuses to score those cells: *"claim formation is not wired into `investigate()`"*. It is a feature that has not landed, and the honest consequence is that `ClaimRecord.state` — the field carrying `supported` — never reaches you.
 
 
 ## What Bruriah does instead
