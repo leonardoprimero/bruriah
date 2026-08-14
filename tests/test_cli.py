@@ -6,6 +6,7 @@ from __future__ import annotations
 import json
 import os
 import stat
+import subprocess
 import sys
 from array import array
 from datetime import date, datetime, timedelta, timezone
@@ -819,3 +820,138 @@ def test_the_reranker_is_not_read_from_the_build_descriptor_like_the_embedder_is
     assert not any("rerank" in field.name for field in dataclasses.fields(BuildConfig)), (
         "a reranker was recorded in the build descriptor; then swapping one would need a re-index"
     )
+
+
+# --- `init --repo`: the quickstart in one command -------------------------------------------
+# The measured first-run path was ~90 seconds of machine work and four commands of reading
+# documentation first. These pin the one-shot's composition, not new retrieval behaviour:
+# every step it takes is a documented command's own function.
+
+
+def _decision_repo(tmp_path: Path) -> Path:
+    """Mirrors test_gitcorpus._repo: two non-merge commits, exactly one carrying reasoning."""
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    run = lambda *args: subprocess.run(["git", *args], cwd=repo, check=True, capture_output=True)
+    run("init", "-q")
+    run("config", "user.email", "test@example.invalid")
+    run("config", "user.name", "Test")
+    (repo / "a.txt").write_text("one")
+    run("add", "-A")
+    run("commit", "-q", "-m", "feat: add the thing\n\nBecause the other way needed two round trips.")
+    (repo / "b.txt").write_text("two")
+    run("add", "-A")
+    run("commit", "-q", "-m", "chore: tidy")  # no body: records what changed, never why
+    return repo
+
+
+def _init_repo_args(tmp_path: Path, repo: Path) -> "list[str]":
+    return [
+        "init", "--repo", str(repo),
+        "--config-dir", str(tmp_path / "config"), "--data-dir", str(tmp_path / "data"),
+        "--cache-dir", str(tmp_path / "cache"), "--log-dir", str(tmp_path / "log"),
+    ]
+
+
+def test_init_repo_bootstraps_policy_corpus_index_and_clients_in_one_command(
+    tmp_path: Path, capsys: pytest.CaptureFixture,
+) -> None:
+    repo = _decision_repo(tmp_path)
+    args = cli._build_cli_parser().parse_args(_init_repo_args(tmp_path, repo))
+    assert cli._cmd_init(args, embedder_factory=_fake_embedder_factory) == 0
+    captured = capsys.readouterr()
+
+    # Every artifact of the spelled-out quickstart, from one command, in the directories the
+    # tool already owns -- no new location was invented.
+    assert (tmp_path / "config" / "policy.yaml").read_text(
+        encoding="utf-8") == cli._DEFAULT_BOOTSTRAP_POLICY
+    assert len(list((tmp_path / "data" / "corpus").glob("*.md"))) == 1
+    assert (tmp_path / "data" / "active.json").is_file()
+    assert (tmp_path / "config" / "clients").is_dir()
+
+    # The suggested first question is the newest decision's own subject, so the first `ask`
+    # cannot come back empty -- and the paste carries ALL the directory flags this run used:
+    # dropping --cache-dir would re-download the model this run just cached, and dropping
+    # --data-dir would ask the right question of the wrong index.
+    assert 'bruriah ask "why feat add the thing"' in captured.err
+    assert f'--data-dir "{tmp_path / "data"}"' in captured.err
+    assert f'--cache-dir "{tmp_path / "cache"}"' in captured.err
+    assert f'--log-dir "{tmp_path / "log"}"' in captured.err
+    # stdout stays what plain `init` prints: the parseable client snippet, nothing else.
+    snippet = json.loads(captured.out)
+    assert snippet["args"][:2] == ["-m", "bruriah.cli"]
+
+
+def test_init_repo_refuses_a_directory_that_is_not_a_repository(
+    tmp_path: Path, capsys: pytest.CaptureFixture,
+) -> None:
+    plain = tmp_path / "plain"
+    plain.mkdir()
+    exit_code = cli.bruriah_main(_init_repo_args(tmp_path, plain))
+    assert exit_code == 1
+    assert "not_a_git_repository" in capsys.readouterr().err
+
+
+def test_init_repo_with_a_history_that_never_explains_stops_before_indexing(
+    tmp_path: Path, capsys: pytest.CaptureFixture,
+) -> None:
+    """An index of zero documents can only return nothing; building it would dress that up as a
+    completed setup, and writing client configs would point a client at it."""
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    run = lambda *args: subprocess.run(["git", *args], cwd=repo, check=True, capture_output=True)
+    run("init", "-q")
+    run("config", "user.email", "test@example.invalid")
+    run("config", "user.name", "Test")
+    (repo / "a.txt").write_text("one")
+    run("add", "-A")
+    run("commit", "-q", "-m", "chore: tidy")  # subject only: what changed, never why
+    exit_code = cli.bruriah_main(_init_repo_args(tmp_path, repo))
+    captured = capsys.readouterr()
+    assert exit_code == 1
+    assert "corpus_has_no_reasoning" in captured.err
+    assert "No commit carried an explanatory body" in captured.err
+    assert not (tmp_path / "data" / "active.json").exists()
+    assert not (tmp_path / "config" / "clients").exists()
+
+
+def test_init_repo_never_touches_an_existing_policy(tmp_path: Path) -> None:
+    repo = _decision_repo(tmp_path)
+    config_dir = tmp_path / "config"
+    config_dir.mkdir(parents=True)
+    theirs = "version: 1\ninclude: ['**']\nexclude: ['secrets/**']\n"
+    (config_dir / "policy.yaml").write_text(theirs, encoding="utf-8", newline="\n")
+    args = cli._build_cli_parser().parse_args(_init_repo_args(tmp_path, repo))
+    assert cli._cmd_init(args, embedder_factory=_fake_embedder_factory) == 0
+    assert (config_dir / "policy.yaml").read_text(encoding="utf-8") == theirs
+
+
+def test_the_model_cache_is_pinned_under_the_private_cache_dir(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """fastembed's own default cache is the OS temp directory, which macOS purges on its own
+    schedule -- so "the model downloads once" held only until the OS decided otherwise. Every
+    command resolves paths before any factory constructs a model, and the resolver pins the
+    cache under the tool's private `cache_dir` (`cache.py` only ever touches top-level `*.json`
+    there, so the subdirectory sits outside its deletion control)."""
+    monkeypatch.setenv("FASTEMBED_CACHE_PATH", "placeholder")  # registers the restore
+    monkeypatch.delenv("FASTEMBED_CACHE_PATH")
+    args = cli._build_cli_parser().parse_args([
+        "doctor", "--config-dir", str(tmp_path / "config"), "--data-dir", str(tmp_path / "data"),
+        "--cache-dir", str(tmp_path / "cache"), "--log-dir", str(tmp_path / "log"),
+    ])
+    cli._resolve_paths(args)
+    assert os.environ["FASTEMBED_CACHE_PATH"] == str(tmp_path / "cache" / "models")
+
+
+def test_an_operator_pinned_model_cache_is_respected(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """FASTEMBED_CACHE_PATH is fastembed's documented knob; an operator who set it keeps it."""
+    monkeypatch.setenv("FASTEMBED_CACHE_PATH", str(tmp_path / "operator-cache"))
+    args = cli._build_cli_parser().parse_args([
+        "doctor", "--config-dir", str(tmp_path / "config"), "--data-dir", str(tmp_path / "data"),
+        "--cache-dir", str(tmp_path / "cache"), "--log-dir", str(tmp_path / "log"),
+    ])
+    cli._resolve_paths(args)
+    assert os.environ["FASTEMBED_CACHE_PATH"] == str(tmp_path / "operator-cache")

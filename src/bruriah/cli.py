@@ -319,6 +319,63 @@ def run_init(paths: PlatformPaths) -> Path:
     return config_file
 
 
+# The front page's own default, byte for byte. Written only when no policy exists yet: an
+# existing `policy.yaml` is the operator's and is never touched.
+_DEFAULT_BOOTSTRAP_POLICY = "version: 1\ninclude: ['**']\nexclude: ['private/**']\n"
+
+
+def _suggested_question(corpus_root: Path) -> str | None:
+    """A first question this corpus is KNOWN to answer, so the first `ask` cannot come back empty.
+
+    The newest document's name is `YYYY-MM-DD-sha8-<slug>`, and the slug is the commit subject the
+    user themselves wrote -- asking "why" about it is guaranteed to have its answer in the index,
+    which is the one property a suggested first question has to have."""
+    documents = sorted(corpus_root.glob("*.md"))
+    if not documents:
+        return None
+    words = documents[-1].stem[20:].replace("-", " ").strip()  # 'YYYY-MM-DD-sha8-' is 20 chars
+    return f"why {words}" if words else None
+
+
+def run_bootstrap(
+    paths: PlatformPaths, repo: Path, *, limit: int | None = None, model_name: str,
+    embedder_factory: EmbedderFactory = _default_embedder_factory,
+) -> dict[str, object]:
+    """`init --repo`: from a cloned repository to an active index in one command.
+
+    The measured first-run path was about ninety seconds of machine work and four commands of
+    reading documentation first -- the machine was never the bottleneck, the ceremony was. This
+    composes the exact steps the front page spells out (default policy, `corpus`, `index`) with
+    no retrieval behaviour of its own: every step below is the documented command's own function,
+    so the one-shot cannot drift from the spelled-out path.
+
+    The corpus lands in `data_dir/corpus` and the policy in `config_dir/policy.yaml` -- inside
+    directories this tool already owns and `ensure_private_dirs` already protects, so the
+    bootstrap invents no new location. `index` is skipped when the history yielded nothing:
+    an index of zero documents can only return nothing, and building it would dress that up as
+    a completed setup."""
+    if not (repo / ".git").exists():
+        raise CliError("not_a_git_repository")
+    ensure_private_dirs(paths)
+    policy_path = paths.config_dir / "policy.yaml"
+    if not policy_path.exists():
+        policy_path.write_text(_DEFAULT_BOOTSTRAP_POLICY, encoding="utf-8", newline="\n")
+    corpus_root = paths.data_dir / "corpus"
+    corpus_result = gitcorpus.build(repo, corpus_root, limit)
+    index_result = (
+        run_index(
+            paths, corpus_root.resolve(), policy_path.resolve(), model_name=model_name,
+            embedder_factory=embedder_factory,
+        )
+        if corpus_result.written
+        else None
+    )
+    return {
+        "policy": policy_path, "corpus_root": corpus_root, "corpus": corpus_result,
+        "index": index_result, "question": _suggested_question(corpus_root),
+    }
+
+
 def _build_launch_manifest(paths: PlatformPaths) -> clients.LaunchManifest:
     """The one manifest every rendered client config derives from (Slice 12B-2): invokes this
     module directly via `sys.executable` (absolute, always importable) rather than a `which
@@ -642,7 +699,7 @@ def _cmd_skill_sign(args: argparse.Namespace) -> int:
 
 def _resolve_paths(args: argparse.Namespace) -> PlatformPaths:
     try:
-        return resolve_paths(
+        paths = resolve_paths(
             cli_config_dir=args.config_dir, cli_data_dir=args.data_dir,
             cli_cache_dir=args.cache_dir, cli_log_dir=args.log_dir,
             cli_network_enabled=args.network_enabled,
@@ -650,10 +707,49 @@ def _resolve_paths(args: argparse.Namespace) -> PlatformPaths:
         )
     except PlatformError as error:
         raise CliError(error.code) from error
+    # fastembed's own default model cache is `tempfile.gettempdir()/fastembed_cache`, and macOS
+    # purges the temp tree on its own schedule -- so "the model downloads once" held only until
+    # the OS decided otherwise, and the re-download then happened silently on whatever network was
+    # present. Pinned under this tool's private `cache_dir` instead, where its other caches
+    # already live (`cache.py` only ever touches top-level `*.json` there, so a subdirectory is
+    # outside its deletion control by construction). `setdefault`, not assignment:
+    # FASTEMBED_CACHE_PATH is fastembed's documented operator knob, and an operator who set it
+    # keeps it. Set here because every command funnels through this resolver before any factory
+    # constructs a model, which lets both factories keep the one-argument shape every injected
+    # test fake shares.
+    os.environ.setdefault("FASTEMBED_CACHE_PATH", str(paths.cache_dir / "models"))
+    return paths
 
 
-def _cmd_init(args: argparse.Namespace) -> int:
+def _cmd_init(
+    args: argparse.Namespace, *, embedder_factory: EmbedderFactory = _default_embedder_factory,
+) -> int:
     paths = _resolve_paths(args)
+    bootstrap: dict[str, object] | None = None
+    if args.repo is not None:
+        print(f"Reading the history of {args.repo}...", file=sys.stderr)
+        bootstrap = run_bootstrap(
+            paths, args.repo, limit=args.limit, model_name=args.model,
+            embedder_factory=embedder_factory,
+        )
+        corpus_result = bootstrap["corpus"]
+        print(
+            f"Corpus: {corpus_result.written} decision document(s) from "
+            f"{corpus_result.examined} non-merge commits -> {bootstrap['corpus_root']}",
+            file=sys.stderr,
+        )
+        _report_corpus_coverage(corpus_result)
+        if bootstrap["index"] is None:
+            # The coverage explanation above already said why; the typed code makes the stop
+            # scriptable. Config and client snippets are NOT written on this path: they would
+            # point a client at an index that does not exist.
+            raise CliError("corpus_has_no_reasoning")
+        index_result = bootstrap["index"]
+        print(
+            f"Index: {index_result.passages} passage(s) from {index_result.documents} "
+            f"document(s), build {index_result.build_id[:8]} is active",
+            file=sys.stderr,
+        )
     config_file = run_init(paths)
     print(f"Wrote private configuration to {config_file}", file=sys.stderr)
     try:
@@ -668,21 +764,30 @@ def _cmd_init(args: argparse.Namespace) -> int:
         print(f"    -> expected location: {capability.config_path_hint}", file=sys.stderr)
     print("See docs/client-guidance.md for full per-client detail.", file=sys.stderr)
     print(clients.render_generic_stdio(manifest))
+    if bootstrap is not None and bootstrap["question"]:
+        # Same quoting discipline as `_cmd_ask`'s bridge line, for the same reason: a suggestion
+        # that does not survive a paste is the design going undiscoverable one step from the end.
+        # All four directories, not the two the bridge line carries: this run may have just
+        # downloaded the model into a custom --cache-dir, and a paste that drops that flag
+        # re-downloads it into the default one -- the exact re-download this command exists to end.
+        directories = " ".join(
+            f'--{name.replace("_", "-")} "{getattr(args, name)}"'
+            for name in ("data_dir", "config_dir", "cache_dir", "log_dir")
+            if getattr(args, name, None) is not None
+        )
+        command = (
+            f'bruriah ask "{bootstrap["question"]}"' + (f" {directories}" if directories else "")
+        )
+        print(
+            "\nThe index is active. Ask it something it is known to answer -- this question is "
+            f"the newest decision\nin your own history:\n\n  {command}\n",
+            file=sys.stderr,
+        )
     return 0
 
 
-def _cmd_corpus(args: argparse.Namespace) -> int:
-    """Step one of the documented workflow, and for a while the only one you could not install.
-
-    It lived in `scripts/git_corpus.py`, which no wheel ships, so the front page opened by telling
-    a reader to run a file that `pip install bruriah` had never put on their disk."""
-    if not (args.repo / ".git").exists():
-        raise CliError("not_a_git_repository")
-    result = gitcorpus.build(args.repo, args.out, args.limit)
-    print(json.dumps(
-        {"documents": result.written, "commits_examined": result.examined, "out": str(args.out)},
-        indent=2, sort_keys=True,
-    ))
+def _report_corpus_coverage(result: gitcorpus.CorpusResult) -> None:
+    """Shared by `corpus` and `init --repo`: the same history deserves the same honesty."""
     if result.written == 0:
         print(
             "No commit carried an explanatory body. This history records what changed but not why, "
@@ -700,6 +805,21 @@ def _cmd_corpus(args: argparse.Namespace) -> int:
             "were skipped. That share is the ceiling on what any of this can retrieve.",
             file=sys.stderr,
         )
+
+
+def _cmd_corpus(args: argparse.Namespace) -> int:
+    """Step one of the documented workflow, and for a while the only one you could not install.
+
+    It lived in `scripts/git_corpus.py`, which no wheel ships, so the front page opened by telling
+    a reader to run a file that `pip install bruriah` had never put on their disk."""
+    if not (args.repo / ".git").exists():
+        raise CliError("not_a_git_repository")
+    result = gitcorpus.build(args.repo, args.out, args.limit)
+    print(json.dumps(
+        {"documents": result.written, "commits_examined": result.examined, "out": str(args.out)},
+        indent=2, sort_keys=True,
+    ))
+    _report_corpus_coverage(result)
     return 0
 
 
@@ -877,7 +997,17 @@ def _build_cli_parser() -> argparse.ArgumentParser:
         sub.set_defaults(handler=handler)
         return sub
 
-    add("init", "Create private config and print client snippets.", _cmd_init)
+    init_parser = add("init", "Create private config and print client snippets; "
+                              "--repo bootstraps a repository end to end.", _cmd_init)
+    init_parser.add_argument(
+        "--repo", type=Path, default=None,
+        help="bootstrap this git repository in one command: default policy, corpus, "
+             "index and client configs, ending with a first question the index can answer",
+    )
+    init_parser.add_argument("--limit", type=int, default=None, help="most recent N commits only")
+    init_parser.add_argument(
+        "--model", default="sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
+    )
     corpus_parser = add("corpus", "Turn a git history's reasoning into a corpus.", _cmd_corpus)
     corpus_parser.add_argument("--repo", type=Path, default=Path("."), help="repository to read")
     corpus_parser.add_argument("--out", type=Path, required=True, help="directory to write into")

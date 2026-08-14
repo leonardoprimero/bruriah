@@ -5,6 +5,36 @@ and the entries here name what changed for *you* rather than which files moved.
 
 ## [Unreleased]
 
+### Added: `bruriah init --repo .` — the quickstart in one command
+
+The first run was measured end to end on a foreign 4,429-commit repository: the machine work was
+about ninety seconds, and getting to it took four commands, a hand-written `policy.yaml`, and a
+directory convention learned from documentation. The machine was never the bottleneck; the
+ceremony was.
+
+`init --repo <path>` now composes the exact steps the front page spells out — default policy,
+`corpus`, `index`, client configs — using each documented command's own function, so the one-shot
+cannot drift from the spelled-out path. The policy lands in `config_dir/policy.yaml` (written only
+when absent; an existing file is the operator's), the corpus in `data_dir/corpus`, both inside
+directories the tool already owns and protects. It ends by suggesting a first question the index
+is *known* to answer — the newest decision's own subject from the user's own history — so the
+first `ask` cannot come back empty. Measured after the change: 62 seconds on `emilk/egui`,
+cold model download included, and the suggested question returns its document at rank 1.
+
+When no commit carries an explanatory body there is nothing to retrieve, so the bootstrap says so
+and stops with a typed `corpus_has_no_reasoning` instead of building an index of nothing and
+writing client configs that point at it.
+
+### Fixed: the embedding model cache now survives the operating system
+
+fastembed defaults its model cache to the system temp directory, which macOS purges on its own
+schedule — so "the model downloads once, separately" held only until the OS decided otherwise,
+and the re-download then happened silently on whatever network was present. Every command now
+pins the cache under this tool's own private `cache_dir` (in a `models/` subdirectory that
+`cache.py`'s deletion control never touches — it only ever reads top-level `*.json` there).
+`FASTEMBED_CACHE_PATH` remains fastembed's documented operator knob: when the operator set it,
+their value wins.
+
 ### Fixed: the wheel now carries the `py.typed` marker its metadata promised
 
 The package has classified itself `Typing :: Typed` since it was first published, and no built
