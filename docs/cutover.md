@@ -31,8 +31,9 @@ cache. It reports:
 - resolved `config_dir`/`data_dir`/`cache_dir`/`log_dir` and whether each
   exists,
 - `network_enabled` (network stays off unless explicitly configured),
-- registry status and pack freshness (a WARNING when a bundled pack goes
-  stale within 7 days),
+- registry status and pack freshness (a WARNING within 90 days of a
+  bundled pack's expiry date — the date `load_registry` stops loading
+  entirely — and, separately, within 7 days of the pack going stale),
 - candidate index/snapshot status (`ok` or a typed error code such as
   `index_not_built`),
 - cache visibility (Slice 12D): `entries`, `expired`, and `total_bytes`
