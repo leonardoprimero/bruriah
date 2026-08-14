@@ -23,14 +23,15 @@
 ```bash
 pip install bruriah          # Linux, macOS or Windows
 
-cd your-project
-bruriah init --repo .        # default policy, corpus, index and client configs, in one command
+B=~/.bruriah/myproject       # one directory per project, outside the repo
+bruriah init --repo . --data-dir "$B/data" --config-dir "$B/config"
 ```
 
-That is the whole first run — measured at 62 seconds on a 4,429-commit history, model download
-included. It ends by suggesting a first question your index is *known* to answer: the newest
-decision's own subject, from your own history, so the first `ask` cannot come back empty. The
-same steps spelled out, for a second project or a policy of your own:
+Run from inside your project, that is the whole first run — default policy, corpus, index and
+client configs, in one command, measured at 62 seconds on a 4,429-commit history with the model
+download included. It ends by suggesting a first question your index is *known* to answer: the
+newest decision's own subject, from your own history, so the first `ask` cannot come back empty.
+The same steps spelled out, for a policy of your own:
 
 ```bash
 B=~/.bruriah/myproject                              # one directory per project, outside the repo
