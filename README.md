@@ -246,7 +246,7 @@ flowchart TD
     style E fill:#1e3a2f,stroke:#2d6a4f,color:#fff
 ```
 
-That abstain branch is not a failure path. **It is the feature.** Bruriah would rather tell your agent *"I have no approved policy for employment law, I am not answering this"* than hand it the nearest-looking paragraph.
+That abstain branch is not a failure path. **It is the feature.** Bruriah would rather tell your agent *"no approved policy pack covers this, I am not answering"* than hand it the nearest-looking paragraph. (The refusal names the gap — `no_approved_domain_pack` — not the domain; an earlier version of this sentence quoted a refusal that named "employment law", which is a specificity the response does not have.)
 
 ## Measured
 
@@ -261,7 +261,7 @@ unflattering ones are in the same table as the rest.
 | **Index build** | ≈130 passages/second, embedding-dominated, one-off | |
 | **Index size** | ≈5 KB per passage — a 16k-passage corpus is ~79 MB | |
 | **Tests** | **1056** passing on a fresh clone on Linux, identical on 3.12, 3.13 and 3.14 · **1051** on native Windows, the difference being the five owner-only-mode tests that skip there | [CI](https://github.com/leonardoprimero/bruriah/actions/workflows/ci.yml) |
-| **Install size** | 178 KB wheel; the embedding model downloads once, separately | |
+| **Install size** | 215 KB wheel; the embedding model downloads once, separately | |
 | **Sample size** | **12 questions, one corpus, two languages** | the honest caveat: treat the direction as established, the figures as indicative |
 
 ### Where the retrieval numbers come from
@@ -283,7 +283,7 @@ So the lexical leg is now discounted to 0.1 when the query language and the corp
 
 The [eval](https://github.com/leonardoprimero/bruriah/blob/main/evals/project-memory/) carries the per-leg numbers and the weight sweep. It also carries the correction: 58% was described here as the vector leg's own ceiling, and it was not one. It was the ceiling of *ranking by two independently embedded vectors* — with `--reranker jinaai/jina-reranker-v2-base-multilingual` those twelve Spanish questions reach **92%**, on the same index and the same fusion, while English goes to **100%**. That is the second time a number on this page called a ceiling turned out to be a property of one replaceable component, which is the argument for measuring ceilings instead of asserting them.
 
-The stage is **off unless you name a model**, and that is measured rather than cautious: it costs a second ~1 GB download and roughly 7 seconds per query, it is worth fourteen questions on one foreign corpus and *costs* three on the other, and an English-only reranker actively destroyed a quarter of the Spanish recall@10 it was given. There is no safe default across languages and no guarantee it helps your corpus at all, so there is no default — [measure it on yours](https://github.com/leonardoprimero/bruriah/blob/main/evals/project-memory/), which needs no re-index.
+The stage is **off unless you name a model**, and that is measured rather than cautious: it costs a second ~1 GB download and roughly 7 seconds per query, and an English-only reranker actively destroyed a quarter of the Spanish recall@10 it was given. This sentence used to add that the stage *cost* three questions on one foreign corpus — that loss was re-measured after a passage-selection bug was fixed, and it is gone; [every corpus measured now gains](https://github.com/leonardoprimero/bruriah/blob/main/evals/project-memory/). But which rerank depth wins still differs per corpus, and nothing measured predicts whether a given model helps yours, so there is no default — [measure it on yours](https://github.com/leonardoprimero/bruriah/blob/main/evals/project-memory/), which needs no re-index.
 
 ### Where the latency numbers come from
 
@@ -360,7 +360,7 @@ Bruriah assumes the corpus may be hostile.
 
 ## Status — read this before installing
 
-Honest state as of 2026-07-27.
+Honest state as of 2026-08-14.
 
 **Working and tested** — 1056 tests pass on a fresh clone on Linux, byte-identical on 3.12, 3.13 and 3.14; 1051 on native Windows, which is those 1056 less the five that skip rather than assert a file mode nobody applied
 - Hybrid retrieval (BM25 + local vectors) over your corpus — both legs are pure Python over ordinary SQLite: BM25 scans the passage table, and the vector leg reads float blobs and scores them by cosine. There is no vec0 table and no ANN index. This line named `sqlite-vec` until 0.4.0, which was never true of the shipped path

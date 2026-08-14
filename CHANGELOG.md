@@ -3,6 +3,35 @@
 Notable changes, newest first. This project follows [semantic versioning](https://semver.org/),
 and the entries here name what changed for *you* rather than which files moved.
 
+## [Unreleased]
+
+### Fixed: the wheel now carries the `py.typed` marker its metadata promised
+
+The package has classified itself `Typing :: Typed` since it was first published, and no built
+wheel ever contained the `py.typed` file that classifier refers to. Under PEP 561 that marker is
+the whole mechanism: without it, a type checker ignores every annotation in the installed package —
+so the annotations this codebase writes everywhere were invisible to every downstream consumer.
+The marker now ships, and `tests/test_packaging.py` opens the real wheel and asserts it stays.
+
+### Corrected: the front page still quoted the loss 0.6.0 retracted
+
+0.6.0 re-measured the "reranking costs three questions on `egui`" claim, found it was the
+measurement of a bug already fixed, and retracted it — in the changelog and the eval pages. The
+README's copy of the sentence was missed and kept charging the stage for a loss that no longer
+exists. It now records the retraction instead. Three smaller front-page corrections ride along:
+the wheel is 215 KB, not 178; the abstain illustration quoted a refusal naming "employment law",
+a specificity the response does not have (the gap is `no_approved_domain_pack`, without a domain
+name); and "honest state as of" now carries a date from this release line, not four releases ago.
+
+### Docs: cutover and client guidance caught up with 0.6.0
+
+`docs/cutover.md` still taught the superseded 7-days-before-stale warning to the operator running
+the pre-cutover gate; it now describes the 90-day expiry warning 0.6.0 shipped, and the staleness
+one, as the two separate events they are. `docs/client-guidance.md` said a `bruriah --version`
+flag "would be" the user-facing counterpart but was blocked on a frozen `cli.py` — while its own
+previous section told readers to run that exact flag. The flag exists and is pinned by a test;
+the paragraph now says so.
+
 ## [0.6.0] — 2026-08-13
 
 ### Security: `cryptography` moves to 50

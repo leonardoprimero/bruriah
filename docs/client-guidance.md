@@ -52,10 +52,11 @@ To check the installed router version directly:
 python3 -c "import bruriah; print(bruriah.__version__)"
 ```
 
-A dedicated `bruriah --version` CLI flag would be the natural
-user-facing counterpart to this, but wiring it in requires touching
-`cli.py`, which stays frozen for this slice -- tracked as a possible
-follow-up alongside 12B-2 (wiring `clients.py` into `cli.py`'s `init`).
+The dedicated `bruriah --version` flag used above is that user-facing
+counterpart. An earlier revision of this paragraph tracked it as a
+follow-up blocked on a `cli.py` freeze; the freeze ended, the flag
+shipped, and `test_it_reports_its_own_version_without_a_subcommand`
+pins it.
 
 ## Claude Code
 

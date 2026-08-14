@@ -38,6 +38,13 @@ def test_wheel_bundles_the_package_and_its_signed_pack_data(wheel: zipfile.ZipFi
     assert "bruriah/data/trust-roots.json" in names
 
 
+def test_wheel_ships_the_py_typed_marker_its_metadata_promises(wheel: zipfile.ZipFile) -> None:
+    # pyproject classifies the package `Typing :: Typed`. Without this marker, PEP 561 tells every
+    # type checker to ignore the installed package's annotations entirely -- the classifier would
+    # be a claim the artifact does not honor.
+    assert "bruriah/py.typed" in wheel.namelist()
+
+
 def test_wheel_exposes_the_cerebro_mcp_console_script(wheel: zipfile.ZipFile) -> None:
     entry = next(name for name in wheel.namelist() if name.endswith("entry_points.txt"))
     assert "bruriah = bruriah.cli:bruriah_main" in wheel.read(entry).decode()
