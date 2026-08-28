@@ -358,6 +358,132 @@ def test_index_persists_absolute_paths_so_serve_survives_a_different_working_dir
 
 
 # ---------------------------------------------------------------------------
+# Bugfix regression: `run_index` built every candidate from scratch. `build_candidate` has always
+# accepted a `previous` to reuse rows from, but nothing ever handed it one, so a one-document edit
+# re-embedded the entire corpus to arrive at byte-identical vectors. It now resolves the active
+# pointer first.
+# ---------------------------------------------------------------------------
+
+
+def _counting_embedder_factory(
+    *, fingerprint: str = _FINGERPRINT,
+) -> tuple[cli.EmbedderFactory, list[str]]:
+    """A fake embedder that records every passage it was asked to embed.
+
+    The tally is the point. `reused_documents` is a number the build reports about itself, so a
+    test that only reads it would still pass if reuse were counted but the embedding ran anyway --
+    which is the entire cost this change exists to avoid. What proves work was skipped is that the
+    embedder was never asked."""
+    embedded: list[str] = []
+
+    def factory(model_name: str) -> tuple[cli.Embedder, str, int]:
+        def embed(texts: list[str]) -> list[bytes]:
+            embedded.extend(texts)
+            return [array("f", (1.0, 0.0, 0.0)).tobytes() for _ in texts]
+
+        return embed, fingerprint, 3
+
+    return factory, embedded
+
+
+def _two_document_corpus(tmp_path: Path) -> tuple[Path, Path]:
+    root = tmp_path / "vault"
+    (root / "public").mkdir(parents=True)
+    (root / "public" / "en.md").write_text(
+        f"# Apple\nAn apple pie baking recipe passage with real corpus text.\n{_FILLER}\n",
+        encoding="utf-8",
+    )
+    (root / "public" / "other.md").write_text(
+        f"# Schema\nA python schema validation library passage with real corpus text.\n{_FILLER}\n",
+        encoding="utf-8",
+    )
+    policy_path = tmp_path / "policy.yaml"
+    policy_path.write_text("version: 1\ninclude: ['public/**']\nexclude: []\n", encoding="utf-8")
+    return root, policy_path
+
+
+def test_reindexing_an_unchanged_corpus_embeds_nothing(tmp_path: Path) -> None:
+    """The second `index` over a corpus nobody touched must reuse every document and call the
+    embedder zero times. Before this, it re-embedded the whole corpus every time."""
+    root, policy_path = _two_document_corpus(tmp_path)
+    paths = _paths(tmp_path)
+    factory, embedded = _counting_embedder_factory()
+
+    first = cli.run_index(paths, root, policy_path, model_name="test/minilm", embedder_factory=factory)
+    assert first.documents == 2 and first.reused_documents == 0
+    assert len(embedded) == first.passages
+
+    embedded.clear()
+    second = cli.run_index(paths, root, policy_path, model_name="test/minilm", embedder_factory=factory)
+
+    assert second.documents == 2
+    assert second.reused_documents == 2
+    assert embedded == []
+
+
+def test_editing_one_document_re_embeds_only_that_document(tmp_path: Path) -> None:
+    """Reuse is decided per document, so an edit costs one document's passages -- not the corpus."""
+    root, policy_path = _two_document_corpus(tmp_path)
+    paths = _paths(tmp_path)
+    factory, embedded = _counting_embedder_factory()
+
+    cli.run_index(paths, root, policy_path, model_name="test/minilm", embedder_factory=factory)
+    (root / "public" / "other.md").write_text(
+        f"# Schema\nA rewritten python schema validation passage.\n{_FILLER}\n", encoding="utf-8",
+    )
+    embedded.clear()
+
+    result = cli.run_index(paths, root, policy_path, model_name="test/minilm", embedder_factory=factory)
+
+    assert result.documents == 2
+    assert result.reused_documents == result.documents - 1
+    assert embedded and all("rewritten" in text for text in embedded)
+
+
+def test_a_different_embedding_model_reuses_nothing_through_the_cli(tmp_path: Path) -> None:
+    """`_compatible` refuses a snapshot built under another embedding identity, and this is the
+    path a user actually reaches it by: reindexing after changing the model. Reusing there would
+    mix two vector spaces in one snapshot, which no later validation could detect."""
+    root, policy_path = _two_document_corpus(tmp_path)
+    paths = _paths(tmp_path)
+    first_factory, _ = _counting_embedder_factory()
+    cli.run_index(paths, root, policy_path, model_name="test/minilm", embedder_factory=first_factory)
+
+    other_factory, embedded = _counting_embedder_factory(
+        fingerprint=_FINGERPRINT.replace("snapshot-a", "snapshot-b")
+    )
+    result = cli.run_index(
+        paths, root, policy_path, model_name="test/other", embedder_factory=other_factory,
+    )
+
+    assert result.reused_documents == 0
+    assert len(embedded) == result.passages
+
+
+def test_the_index_command_reports_how_much_it_reused(
+    tmp_path: Path, capsys: pytest.CaptureFixture,
+) -> None:
+    """Reuse is invisible in the result -- the snapshot is identical either way -- so the only way
+    a user learns their reindex was cheap, or learns that a model change made it expensive, is if
+    the command says so."""
+    root, policy_path = _two_document_corpus(tmp_path)
+    config_dir, data_dir = tmp_path / "config", tmp_path / "data"
+    argv = [
+        "index", "--config-dir", str(config_dir), "--data-dir", str(data_dir),
+        "--corpus-root", str(root), "--policy", str(policy_path),
+    ]
+    args = cli._build_cli_parser().parse_args(argv)
+
+    assert cli._cmd_index(args, embedder_factory=_fake_embedder_factory) == 0
+    assert json.loads(capsys.readouterr().out)["reused_documents"] == 0
+
+    assert cli._cmd_index(args, embedder_factory=_fake_embedder_factory) == 0
+    captured = capsys.readouterr()
+    assert json.loads(captured.out)["reused_documents"] == 2
+    assert "2 reused, 0 embedded" in captured.err
+
+
+# ---------------------------------------------------------------------------
 # Bugfix regression: `build_serve_deps` used to call `platform.load_deps(paths)` with no
 # `embed_query`, so the deployed `bruriah serve` process always ran retrieval BM25-only
 # (`vector_leg_unavailable`). It now builds a real query embedder from the active snapshot's own

@@ -21,8 +21,8 @@ from fastembed import TextEmbedding
 from . import __version__, cache, clients, gitcorpus
 from .corpus import CorpusPolicy, CorpusPolicyError
 from .index import (
-    BuildConfig, BuildResult, Embedder, IndexLifecycleError, build_candidate, promote_candidate,
-    prune_generations,
+    BuildConfig, BuildResult, Embedder, IndexLifecycleError, active_database, build_candidate,
+    promote_candidate, prune_generations,
 )
 from .mcp_server import build_server
 from . import approvals, candidates, platform as platform_module, signing, skillset
@@ -194,7 +194,14 @@ def run_index(
     embedder_factory: EmbedderFactory = _default_embedder_factory,
 ) -> BuildResult:
     """Build+promote a candidate into the private `data_dir` (never `cerebro.db`); runs
-    `ensure_private_dirs` first, closing the carried Slice 8A-1 descriptor-on-missing-dir WARNING."""
+    `ensure_private_dirs` first, closing the carried Slice 8A-1 descriptor-on-missing-dir WARNING.
+
+    The build reuses the active snapshot's rows wherever the corpus has not moved. `build_candidate`
+    has been able to do that since it was written, but nothing ever handed it a `previous`, so every
+    reindex re-embedded the whole corpus to arrive at the same vectors -- the cost of a one-document
+    edit was the cost of a first build. What makes reuse safe is not this call: `_compatible`
+    refuses a snapshot built under a different model, parser or schema, and `_validate_candidate`
+    re-verifies every reused row before the candidate is promoted."""
     ensure_private_dirs(paths)
     policy = CorpusPolicy.load(policy_path)
     embed, fingerprint, dimensions = embedder_factory(model_name)
@@ -211,9 +218,12 @@ def run_index(
         embedding_revision=revision, embedding_dimensions=dimensions,
         embedding_fingerprint=fingerprint, ranking_config="rrf-v1",
     )
+    pointer = paths.data_dir / "active.json"
     candidate_path = paths.data_dir / f"candidate-{uuid.uuid4().hex}.sqlite3"
-    result = build_candidate(config, candidate_path, policy, embed)
-    activation = promote_candidate(candidate_path, paths.data_dir / "active.json", config, policy)
+    result = build_candidate(
+        config, candidate_path, policy, embed, previous=active_database(pointer)
+    )
+    activation = promote_candidate(candidate_path, pointer, config, policy)
     if activation.retention_discarded:
         print(
             "Note: the previous index in this data directory was built under a different "
@@ -224,6 +234,19 @@ def run_index(
         )
     write_build_descriptor(paths, config)
     return result
+
+
+def _index_summary_line(result: BuildResult) -> str:
+    """The one line `index` and `init --repo` both print, so the two cannot drift apart.
+
+    The split is counted in DOCUMENTS because that is the unit reuse is decided in:
+    `_stored_document` accepts or rejects a file's entire passage set, so a per-passage figure would
+    be arithmetic the build never performs."""
+    return (
+        f"Index: {result.passages} passage(s) from {result.documents} document(s) "
+        f"({result.reused_documents} reused, {result.documents - result.reused_documents} embedded)"
+        f", build {result.build_id[:8]} is active"
+    )
 
 
 _FRESHNESS_WARNING_DAYS = 7
@@ -744,12 +767,7 @@ def _cmd_init(
             # scriptable. Config and client snippets are NOT written on this path: they would
             # point a client at an index that does not exist.
             raise CliError("corpus_has_no_reasoning")
-        index_result = bootstrap["index"]
-        print(
-            f"Index: {index_result.passages} passage(s) from {index_result.documents} "
-            f"document(s), build {index_result.build_id[:8]} is active",
-            file=sys.stderr,
-        )
+        print(_index_summary_line(bootstrap["index"]), file=sys.stderr)
     config_file = run_init(paths)
     print(f"Wrote private configuration to {config_file}", file=sys.stderr)
     try:
@@ -848,8 +866,17 @@ def _cmd_index(
     except (CorpusPolicyError, IndexLifecycleError, FileExistsError, ValueError, OSError, yaml.YAMLError) as error:
         # yaml.YAMLError (a malformed --policy that exists) is neither ValueError nor OSError.
         raise CliError(f"index_failed:{getattr(error, 'code', type(error).__name__)}") from error
-    summary = {"build_id": result.build_id, "documents": result.documents, "passages": result.passages}
+    summary = {
+        "build_id": result.build_id, "documents": result.documents, "passages": result.passages,
+        # Reuse is the difference between a reindex that costs seconds and one that costs the whole
+        # corpus again, and it is invisible from the outside -- the resulting snapshot is identical
+        # either way. Reporting it is how the user learns that the second `index` was cheap, and how
+        # they find out when it was not: a full re-embed after a model or parser change shows up
+        # here as zero, on the run that took the time.
+        "reused_documents": result.reused_documents,
+    }
     print(json.dumps(summary, sort_keys=True))
+    print(_index_summary_line(result), file=sys.stderr)
     return 0
 
 
