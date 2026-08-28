@@ -141,6 +141,52 @@ def test_incremental_build_reuses_only_compatible_unchanged_documents(tmp_path: 
     ).reused_documents == 0
 
 
+def test_the_active_pointer_resolves_to_a_reusable_previous_index(tmp_path: Path) -> None:
+    """`active_database` is what turns a pointer into a `previous` for the next build. It answers
+    with a path only when there is a file to reuse, and with `None` for every other outcome --
+    reuse is an optimisation, and none of its failure modes may become a build that fails."""
+    root, policy = write_corpus(tmp_path)
+    policy_path = tmp_path / "policy.yaml"
+    pointer = tmp_path / "active.json"
+    candidate = tmp_path / "candidate-abc.sqlite3"
+
+    assert index_module.active_database(pointer) is None  # no index has ever been built here
+
+    build_candidate(config(root, policy_path), candidate, policy, fake_embeddings)
+    promote_candidate(candidate, pointer, config(root, policy_path), policy)
+    assert index_module.active_database(pointer) == candidate
+
+    candidate.unlink()  # a prune, or anything else, took the file the pointer still names
+    assert index_module.active_database(pointer) is None
+
+    pointer.write_text("not json", encoding="utf-8")
+    assert index_module.active_database(pointer) is None
+
+
+def test_a_previous_index_that_cannot_be_opened_is_not_reused_rather_than_fatal(
+    tmp_path: Path,
+) -> None:
+    """Builds hold no lock across the embedding phase, so the file named as `previous` can be
+    unlinked or replaced while the build that wanted to reuse it is running. Both outcomes have to
+    end in a complete build with nothing reused -- the corpus is the source of truth, and the point
+    of reuse is to save time, never to be required."""
+    root, policy = write_corpus(tmp_path)
+    policy_path = tmp_path / "policy.yaml"
+    missing = tmp_path / "gone.sqlite3"
+    not_a_database = tmp_path / "garbage.sqlite3"
+    not_a_database.write_bytes(b"this is not a sqlite file")
+
+    for previous, candidate in (
+        (missing, tmp_path / "from-missing.sqlite3"),
+        (not_a_database, tmp_path / "from-garbage.sqlite3"),
+    ):
+        result = build_candidate(
+            config(root, policy_path), candidate, policy, fake_embeddings, previous=previous
+        )
+        assert result.reused_documents == 0
+        assert result.documents == 2
+
+
 def test_failed_build_removes_candidate_and_preserves_existing_assets(tmp_path: Path) -> None:
     root, policy = write_corpus(tmp_path)
     policy_path = tmp_path / "policy.yaml"

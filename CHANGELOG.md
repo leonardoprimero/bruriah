@@ -25,6 +25,22 @@ When no commit carries an explanatory body there is nothing to retrieve, so the 
 and stops with a typed `corpus_has_no_reasoning` instead of building an index of nothing and
 writing client configs that point at it.
 
+### Fixed: reindexing no longer re-embeds documents that did not change
+
+`build_candidate` has been able to carry rows forward from a previous snapshot since it was
+written — same schema, same parser, same model, same file hash, and every carried row re-verified
+before the candidate is promoted. Nothing ever handed it a previous snapshot to carry from, so
+`bruriah index` embedded the whole corpus every time, producing byte-identical vectors at the price
+of a first build. Editing one document cost what indexing the corpus cost.
+
+`index` now resolves the active snapshot and reuses whatever the corpus has not moved, and both
+`index` and `init --repo` report the split, so a reindex that took the time says why:
+`Index: 4,312 passage(s) from 2,164 document(s) (2,100 reused, 64 embedded)`. Nothing about what
+is safe to reuse has changed — a different embedding model, parser or schema still reuses nothing,
+which is what that count reads as zero on the run that pays for it. Reuse is an optimisation and
+never a precondition: a previous snapshot that is missing, pruned mid-build or unreadable is simply
+not reused, never a build that fails.
+
 ### Fixed: the embedding model cache now survives the operating system
 
 fastembed defaults its model cache to the system temp directory, which macOS purges on its own

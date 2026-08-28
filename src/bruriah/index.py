@@ -377,6 +377,30 @@ def _entry(path: Path, metadata: dict[str, str]) -> dict[str, str]:
     return {"database": path.name, "build_id": metadata["build_id"]}
 
 
+def active_database(pointer: Path) -> Path | None:
+    """The generation the pointer currently calls active, for `build_candidate` to reuse rows from
+    -- or `None` when there is nothing to reuse.
+
+    Reuse is an optimisation, never a precondition, so every way of not finding a previous index is
+    answered with `None` rather than an exception: a first build has no pointer at all, and
+    `index-prune` may unlink the file this pointer names while a build is running, because builds
+    deliberately hold no lock across the embedding phase (see `_prune_locked`). Whoever asks this
+    question is about to spend minutes embedding a corpus; the one outcome it must never produce is
+    a build that fails because the *previous* build went missing.
+
+    `open_snapshot` is the wrong instrument here and was not used: it opens a connection and raises
+    `index_not_built`, which is the right answer for a reader and a fatal one for a builder that
+    only wanted to skip re-embedding. Compatibility is not decided here either -- `_compatible`
+    already refuses a snapshot built under another model, parser or schema, and `_validate_candidate`
+    re-verifies every row that survives that."""
+    try:
+        entry = _read_pointer(pointer)["active"]
+    except (IndexLifecycleError, OSError):
+        return None
+    previous = pointer.parent / entry["database"]
+    return previous if previous.is_file() else None
+
+
 _WINDOWS = os.name == "nt"
 
 
@@ -647,8 +671,15 @@ def build_candidate(
         database.executescript(SCHEMA)
         database.executemany("INSERT INTO manifest VALUES (?, ?)", manifest)
         if previous and previous.is_file():
-            prior = open_candidate(previous)
-            if not _compatible(prior, config):
+            # It was a file a moment ago; an `index-prune` racing this build may have unlinked it
+            # since, and builds hold no lock across the embedding phase precisely so that prune can
+            # run. A source that cannot be opened is a source that is not reused -- never a build
+            # that fails for want of the index it was going to replace.
+            try:
+                prior = open_candidate(previous)
+            except sqlite3.Error:
+                prior = None
+            if prior is not None and not _compatible(prior, config):
                 prior.close()
                 prior = None
         reused = 0
