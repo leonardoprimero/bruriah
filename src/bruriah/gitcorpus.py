@@ -44,6 +44,36 @@ def _git(repo: Path, *args: str) -> str:
     return result.stdout
 
 
+def _require_commit(repo: Path, revision: str) -> None:
+    """Fail on an unresolvable revision BEFORE any document is written, and say which one.
+
+    `git log` on an unknown revision reports `fatal: ambiguous argument`, which names the string but
+    not the thing the caller was trying to do; and a pinned revision fails for one mundane reason
+    far more often than any other -- a shallow clone simply does not have the object. So the failure
+    says the revision and says that, in this module's one error convention (`SystemExit`), rather
+    than leaking a CalledProcessError to a caller that has no idea a subprocess was involved.
+
+    `--quiet` silences only the unknown-revision complaint, so anything git still writes to stderr
+    is a problem with the repository rather than with the revision -- that one is reported as it
+    always was, because telling someone their sha is missing from a directory that is not a git
+    checkout at all sends them looking in the wrong place."""
+    try:
+        subprocess.run(
+            ["git", "rev-parse", "--verify", "--quiet", f"{revision}^{{commit}}"],
+            cwd=repo, capture_output=True, text=True, check=True,
+        )
+    except FileNotFoundError:
+        raise SystemExit("error: git is not on PATH")
+    except subprocess.CalledProcessError as error:
+        detail = (error.stderr or "").strip()
+        if detail:
+            raise SystemExit(f"error: git failed: {detail}")
+        raise SystemExit(
+            f"error: revision {revision!r} is not a commit in {repo.resolve()}. "
+            "A shallow clone is the usual reason -- fetch the full history."
+        )
+
+
 def _slug(text: str) -> str:
     return re.sub(r"[^a-z0-9]+", "-", text.lower())[:60].strip("-") or "untitled"
 
@@ -57,17 +87,29 @@ class CorpusResult:
     examined: int
 
 
-def build(repo: Path, out: Path, limit: int | None = None) -> CorpusResult:
+def build(
+    repo: Path, out: Path, limit: int | None = None, *, revision: str = "HEAD"
+) -> CorpusResult:
     """Write one document per commit that carries reasoning.
 
     Returns what was written AND what was read, because the gap between them is the single thing
     that decides whether any of this is worth installing -- and until it was returned, the caller
     could only see the numerator. A history that yields three documents from three commits and one
-    that yields three from three hundred are the same number on the way out."""
+    that yields three from three hundred are the same number on the way out.
+
+    `revision` names the point in history to derive from. It defaults to `HEAD`, which is what
+    anyone building a corpus of their own project wants -- but a corpus derived from a moving HEAD
+    cannot reproduce a published measurement, because this repository's own history IS the corpus
+    the eval measures: every commit added after the number was published changes the IDF the number
+    was computed against. Naming the revision is the whole of what makes such a figure checkable by
+    a reader, who otherwise runs the documented command and gets a different corpus than the table
+    below it describes, with nothing on the page to tell them why."""
+    _require_commit(repo, revision)
     fmt = _SEPARATOR_FMT.join(["%H", "%aI", "%an", "%s", "%b"]) + _RECORD_FMT
     args = ["log", "--no-merges", f"--format={fmt}"]
     if limit:
         args.append(f"-{limit}")
+    args.append(revision)
     out.mkdir(parents=True, exist_ok=True)
 
     written = examined = 0

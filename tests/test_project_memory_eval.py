@@ -67,6 +67,14 @@ def test_every_ground_truth_document_exists_in_the_generated_corpus() -> None:
 #
 # So the claim is pinned. Not the exact mean, which moves whenever a commit is added to the corpus
 # that changes an IDF, but the COUNT the README leans on, which is the number a reader acts on.
+#
+# And the CORPUS is pinned too, which this test did not do and had to learn. The corpus is derived
+# from this repository's own history, so it grew under the measurement: three commits later the
+# same computation returned nine, not because retrieval changed but because new commit messages
+# moved the IDF of the terms one question leaned on, dropping it from 0.51 to 0.49. The page was
+# never wrong -- it says which corpus it measured, right above the table -- the test was measuring
+# a different one and blaming the page. A published figure can only be checked against the corpus
+# it was published for; every commit after that is a different measurement wearing the same name.
 
 _EVALS_RETRIEVAL = ROOT / "evals" / "retrieval"
 if str(_EVALS_RETRIEVAL) not in sys.path:
@@ -74,6 +82,12 @@ if str(_EVALS_RETRIEVAL) not in sys.path:
 
 _PUBLISHED_ENGLISH_QUESTIONS_LEAKING_A_DISTINCTIVE_TERM = 10
 _LEAKAGE_THRESHOLD = 0.50
+# `evals/project-memory/README.md`, immediately above the table these figures come from: "147
+# documents, the corpus as of `9591f91`". Both halves are asserted -- the revision, because it is
+# what makes the number reproducible, and the count, because a revision that resolves to something
+# other than the history the page describes would otherwise measure a stranger in silence.
+_PUBLISHED_CORPUS_REVISION = "9591f91"
+_PUBLISHED_CORPUS_DOCUMENTS = 147
 
 
 def test_the_published_leakage_count_is_still_true() -> None:
@@ -83,13 +97,28 @@ def test_the_published_leakage_count_is_still_true() -> None:
                               capture_output=True, text=True, timeout=60)
     if toplevel.returncode != 0:
         pytest.skip("not a git checkout")
+    repo = toplevel.stdout.strip()
+    # A shallow clone -- the default of every CI checkout that has not asked otherwise -- simply
+    # does not have this object, and cannot be made to produce the published corpus. That is an
+    # absent measurement, not a failed one, so it skips and says which revision it wanted.
+    if subprocess.run(["git", "cat-file", "-e", f"{_PUBLISHED_CORPUS_REVISION}^{{commit}}"],
+                      cwd=repo, capture_output=True, timeout=60).returncode != 0:
+        pytest.skip(f"{_PUBLISHED_CORPUS_REVISION} is not in this checkout (shallow clone?); the "
+                    "published corpus cannot be derived, so the published figure cannot be checked")
     with tempfile.TemporaryDirectory() as workspace:
-        built = subprocess.run([sys.executable, str(GENERATOR), "--repo", toplevel.stdout.strip(),
-                                "--out", workspace], capture_output=True, text=True, timeout=300)
+        built = subprocess.run(
+            [sys.executable, str(GENERATOR), "--repo", repo, "--out", workspace,
+             "--revision", _PUBLISHED_CORPUS_REVISION],
+            capture_output=True, text=True, timeout=300)
         assert built.returncode == 0, built.stdout + built.stderr
         documents = {_SHA.sub(r"\1-", path.name): path.read_text(encoding="utf-8")
                      for path in Path(workspace).glob("*.md")}
 
+    assert len(documents) == _PUBLISHED_CORPUS_DOCUMENTS, (
+        f"README.md describes the corpus as of `{_PUBLISHED_CORPUS_REVISION}` as "
+        f"{_PUBLISHED_CORPUS_DOCUMENTS} documents; that revision now yields {len(documents)}. The "
+        "pin no longer resolves to the corpus the page describes -- a rewritten history, or the "
+        "wrong sha -- so nothing below this line is measuring what the page published.")
     statistics = TermStatistics.over(documents.values())
     leaking = 0
     measured = 0
@@ -98,7 +127,9 @@ def test_the_published_leakage_count_is_still_true() -> None:
             continue
         case = json.loads(line)
         target = case["ground_truth"]["must_include"][0]
-        assert target in documents, target  # covered by the test above; asserted so this one is honest
+        # The test above proves the ground truth exists at HEAD, which does not prove it existed at
+        # the pin -- a question added later would name a document this older corpus never held.
+        assert target in documents, f"{target} is not in the corpus as of {_PUBLISHED_CORPUS_REVISION}"
         measured += 1
         result = leakage(case["query"], documents[target], statistics)
         if result.peak is not None and result.peak >= _LEAKAGE_THRESHOLD:

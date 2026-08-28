@@ -26,6 +26,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--repo", type=Path, default=Path("."), help="repository to read")
     parser.add_argument("--out", type=Path, required=True, help="directory to write documents into")
     parser.add_argument("--limit", type=int, default=None, help="most recent N commits only")
+    parser.add_argument("--revision", default="HEAD", metavar="REV",
+                        help="derive the corpus as of this commit (default HEAD)")
     args = parser.parse_args(argv)
 
     print("note: `scripts/git_corpus.py` is deprecated; use `bruriah corpus`.", file=sys.stderr)
@@ -35,7 +37,7 @@ def main(argv: list[str] | None = None) -> int:
     # `build` returns what it read as well as what it wrote. This wrapper reports only the
     # numerator it always reported: it exists to keep an old command working, and the coverage
     # line belongs with the command people are being sent to.
-    result = build(args.repo, args.out, args.limit)
+    result = build(args.repo, args.out, args.limit, revision=args.revision)
     print(f"{result.written} decisions written to {args.out}")
     if result.written == 0:
         print(
