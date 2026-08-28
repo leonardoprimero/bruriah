@@ -71,6 +71,20 @@ an existing snapshot is reported as `snapshot_unreadable:invalid_candidate` rath
 the columns validation reads are the columns the running code needs, so the mismatch surfaces when
 the snapshot is opened instead of as a crash on someone's first question.
 
+Measured, paired: the same derived corpus indexed twice, once with each version, and asked the 236
+issue-title questions nobody here wrote. Combined recall@3 goes **0.309 → 0.377** — 18 questions
+entered the top three, 2 left it, exact two-sided binomial **p = 0.0004** — with `leakcanary` at
+0.242 → 0.301 (p = 0.0117) and `egui` at 0.434 → 0.518 (p = 0.0391). The effect sits at the top of
+the ranking and nowhere else: recall@10 moves 0.470 → 0.487 (p = 0.4545), recall@40 0.606 → 0.640
+(p = 0.0768), and the number of questions whose answer is never ranked at all does not move at all.
+**The twelve questions about this repository's own history disagree, and that is published too:**
+English recall@3 *falls* 0.833 → 0.750, because one question moved from rank 3 to rank 4 and crossed
+the ceiling — while the mean rank over those same twelve improved 4.42 → 4.00, and Spanish's
+improved 13.42 → 10.08 with recall@3 unchanged. Twelve questions is one question per eight points,
+and this is what that costs. `evals/project-memory/README.md` carries the method, the corpus pins,
+the paired counts and the caveat that the corpora are fresh clones rather than the ones behind the
+figures published there earlier.
+
 ### Fixed: reindexing no longer re-embeds documents that did not change
 
 `build_candidate` has been able to carry rows forward from a previous snapshot since it was
@@ -86,6 +100,12 @@ is safe to reuse has changed — a different embedding model, parser or schema s
 which is what that count reads as zero on the run that pays for it. Reuse is an optimisation and
 never a precondition: a previous snapshot that is missing, pruned mid-build or unreadable is simply
 not reused, never a build that fails.
+
+Measured on `emilk/egui` — 1,878 documents, 4,129 passages, default model, model cache already
+warm. A cold build with no previous snapshot takes **26.8 seconds** and reuses nothing. Re-running
+`index` over the unchanged corpus takes **4.8 seconds** and reuses all 1,878 documents. Editing
+exactly one document costs the same 4.8 seconds, reusing 1,877 — which is the point: the price is
+now the corpus you walked, not the corpus you embedded.
 
 ### Fixed: the published leakage figures are reproducible again — `bruriah corpus --revision`
 
