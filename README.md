@@ -266,31 +266,44 @@ unflattering ones are in the same table as the rest.
 
 | | | |
 |---|---|---|
-| **Retrieval, English** | recall@3 **83%** · recall@10 92% · MRR@10 0.80 | [eval](https://github.com/leonardoprimero/bruriah/blob/main/evals/project-memory/) |
-| **Retrieval, Spanish** | recall@3 **58%** default · **75%** with a better-suited model · recall@10 92% | [which model, measured](https://github.com/leonardoprimero/bruriah/blob/main/evals/project-memory/) — bigger is not the axis |
+| **Retrieval, 236 questions nobody here wrote** | recall@3 **0.377** · recall@10 0.487 · recall@40 0.640 · MRR@10 0.322 — issue titles from `square/leakcanary` (884 documents) and `emilk/egui` (1,878), 2026-08-28 | [eval](https://github.com/leonardoprimero/bruriah/blob/main/evals/project-memory/README.md#heading-ancestry-moves-the-top-of-the-ranking-and-nothing-deeper-measured-2026-08-28) |
+| **Retrieval, own history — indicative** | English recall@3 **0.750** · recall@10 0.917 · MRR@10 0.653 · Spanish recall@3 0.500 · recall@10 0.917 — twelve questions each, 178-document corpus, 2026-08-28 | [eval](https://github.com/leonardoprimero/bruriah/blob/main/evals/project-memory/README.md#heading-ancestry-moves-the-top-of-the-ranking-and-nothing-deeper-measured-2026-08-28) — twelve questions means one question is eight points |
+| **Retrieval, which Spanish model** | recall@3 **58%** default · **75%** with a better-suited model · recall@10 92% — twelve questions, the 152-passage corpus of 2026-07, not re-measured since | [which model, measured](https://github.com/leonardoprimero/bruriah/blob/main/evals/project-memory/) — bigger is not the axis |
 | **Query latency** | **≈46µs per passage**, linear — 1k passages 45ms, 16k 734ms | [scale.py](https://github.com/leonardoprimero/bruriah/blob/main/evals/scale.py) |
 | **Index build** | ≈130 passages/second, embedding-dominated, one-off | |
 | **Index size** | ≈5 KB per passage — a 16k-passage corpus is ~79 MB | |
-| **Tests** | **1056** passing on a fresh clone on Linux, identical on 3.12, 3.13 and 3.14 · **1051** on native Windows, the difference being the five owner-only-mode tests that skip there | [CI](https://github.com/leonardoprimero/bruriah/actions/workflows/ci.yml) |
+| **Tests** | **1,082** passing and 18 skipped on a fresh clone, measured on macOS and Python 3.14 · on native Windows the five owner-only-mode tests skip on top of those, rather than assert a file mode nobody applied | [CI](https://github.com/leonardoprimero/bruriah/actions/workflows/ci.yml) |
 | **Install size** | 215 KB wheel; the embedding model downloads once, separately | |
-| **Sample size** | **12 questions, one corpus, two languages** | the honest caveat: treat the direction as established, the figures as indicative |
+| **Sample size** | **236 externally-sourced questions** over two foreign repositories, headline · **24 own-history questions**, indicative | the twelve-question sets report a *loss* on the same change the 236 score as a clear win — that is what twelve questions are worth |
 
 ### Where the retrieval numbers come from
 
 I do not want you to take my word for any of this, so here are the numbers, including the bad one.
 
-Twelve "why was this decided" questions against this repository's own history — 76 commits carrying real reasoning, 152 passages at the time it was run; the corpus above is the same one, later. Ground truth is known because I wrote those commits deliberately.
+**The headline set is 236 questions nobody here wrote.** They are issue titles from `square/leakcanary` and `emilk/egui`, with the commit that closed each issue as ground truth and author-of-issue ≠ author-of-commit verified, so the words in the question are not words I picked. Measured 2026-08-28 on the day's HEAD of both clones, default model, no reranker, with `evals/retrieval/report_reach.py` reading the untruncated fused document rank:
+
+| set | n | recall@3 | recall@10 | recall@40 | MRR@10 |
+|---|---|---|---|---|---|
+| `square/leakcanary` — 884 documents | 153 | 0.301 | 0.412 | 0.569 | 0.256 |
+| `emilk/egui` — 1,878 documents | 83 | 0.518 | 0.627 | 0.771 | 0.442 |
+| **combined** | **236** | **0.377** | **0.487** | **0.640** | **0.322** |
+
+**Twelve "why was this decided" questions against this repository's own history stay on the page, as an indication and not as the headline.** 76 commits carrying real reasoning, 152 passages at the time this table was run. Ground truth is known because I wrote those commits deliberately — which is also why they cannot carry a headline.
 
 | question language | recall@3 | recall@10 | MRR@10 |
 |---|---|---|---|
 | English — matches the corpus | 83% | 92% | 0.80 |
 | Spanish — corpus is 95% English | **33% → 58%** | **83% → 92%** | **0.29 → 0.50** |
 
+Re-run on 2026-08-28 against this repository's history as it stands now — 178 documents, not the 152 passages above — the same twelve English questions read recall@3 0.750, recall@10 0.917 and MRR@10 0.653, and the twelve Spanish ones 0.500 and 0.917. **Those are not a later point on the series above.** A different corpus state is a different measurement: on that corpus the English recall@3 happens to land on the published 83% before the [heading-ancestry change](https://github.com/leonardoprimero/bruriah/blob/main/evals/project-memory/README.md#heading-ancestry-moves-the-top-of-the-ranking-and-nothing-deeper-measured-2026-08-28) and 0.750 after, while MRR@10 reads 0.642 before and 0.653 after against a published 0.80. Only the paired before-and-after inside one corpus is evidence about anything.
+
+**And the two sets disagree, which is why the twelve no longer carry the headline.** That heading-ancestry change is a clear win over the 236 external questions — recall@3 0.309 → 0.377, with 18 questions entering the top three against 2 leaving, exact two-sided binomial p=0.0004 — and a measured *loss* over the twelve English ones, 0.833 → 0.750. The loss is one question crossing the k=3 ceiling from rank 3 to rank 4: over the same twelve, MRR@10 went **up**, 0.642 → 0.653. Twelve questions means one question is eight points. Both numbers are printed, and the [full paired measurement](https://github.com/leonardoprimero/bruriah/blob/main/evals/project-memory/README.md#heading-ancestry-moves-the-top-of-the-ranking-and-nothing-deeper-measured-2026-08-28) carries the per-corpus tests and what it does not establish.
+
 The first measurement said Spanish cost two thirds of the top-3 precision. Then I measured each retrieval leg separately, and the answer was not what "cross-lingual is hard" suggests:
 
 **The fusion was worse than one of its own halves.** Asked in Spanish, the multilingual vector leg alone reached 58% — it *was* finding the right document, at rank 1 or 2. Reciprocal-rank fusion then averaged that against a BM25 leg which cannot match across languages at all, and the correct document fell out of the top three. Equal weight, 33%. The lexical leg was not failing to help; it was actively deleting the answer.
 
-So the lexical leg is now discounted to 0.1 when the query language and the corpus language differ — measured, disclosed in the response, and never applied when the two agree. English is untouched, because there BM25 is the *stronger* leg (83% against the vector leg's 58%) and dropping it would have traded one language's problem for the other's.
+So the lexical leg is now discounted to 0.1 when the query language and the corpus language differ — measured, disclosed in the response, and never applied when the two agree. English is untouched, because there BM25 is the *stronger* leg (83% against the vector leg's 58%, per-leg on the 152-passage corpus of 2026-07 and not re-measured since) and dropping it would have traded one language's problem for the other's.
 
 The [eval](https://github.com/leonardoprimero/bruriah/blob/main/evals/project-memory/) carries the per-leg numbers and the weight sweep. It also carries the correction: 58% was described here as the vector leg's own ceiling, and it was not one. It was the ceiling of *ranking by two independently embedded vectors* — with `--reranker jinaai/jina-reranker-v2-base-multilingual` those twelve Spanish questions reach **92%**, on the same index and the same fusion, while English goes to **100%**. That is the second time a number on this page called a ceiling turned out to be a property of one replaceable component, which is the argument for measuring ceilings instead of asserting them.
 
@@ -373,7 +386,7 @@ Bruriah assumes the corpus may be hostile.
 
 Honest state as of 2026-08-14.
 
-**Working and tested** — 1056 tests pass on a fresh clone on Linux, byte-identical on 3.12, 3.13 and 3.14; 1051 on native Windows, which is those 1056 less the five that skip rather than assert a file mode nobody applied
+**Working and tested** — 1,082 tests pass and 18 skip on a fresh clone, measured on macOS and Python 3.14; on native Windows five more skip rather than assert a file mode nobody applied
 - Hybrid retrieval (BM25 + local vectors) over your corpus — both legs are pure Python over ordinary SQLite: BM25 scans the passage table, and the vector leg reads float blobs and scores them by cosine. There is no vec0 table and no ANN index. This line named `sqlite-vec` until 0.4.0, which was never true of the shipped path
 - The two-tool MCP contract, structured output, typed failures
 - Signed policy packs with Ed25519 manifests and fail-closed loading — signatures, digests and schemas are absolute; an expired review is not, and degrades the pack's domains to abstention rather than stopping the server
@@ -393,7 +406,7 @@ Honest state as of 2026-08-14.
   case aborted the promotion outright with `index_failed:incompatible_candidate`, which made a data
   directory permanently unindexable once you edited your own policy; per-project `--data-dir`, as
   the quickstart shows, keeps the generations separate and the rollback intact.
-- Cross-lingual retrieval trails same-language on the **default** model: 58% against 83% at recall@3, after the fusion fix above recovered it from 33%. That 58% was described here as the vector leg's own ceiling, and [measuring it](https://github.com/leonardoprimero/bruriah/blob/main/evals/project-memory/) showed it was this model's ceiling instead — `bruriah index --model jinaai/jina-embeddings-v2-base-es` takes Spanish to **75%** and English to **92%**, improving both. The default stays multilingual on purpose: that model is Spanish-English bilingual, which is exactly this corpus, and would likely be the wrong pick for a German or Japanese one. Bigger is *not* the axis — the larger sibling of the default scored worse in both languages for five times the download. The choice is documented rather than made for you, and the numbers are per-question so you can see how thin twelve questions are. Adding `--reranker jinaai/jina-reranker-v2-base-multilingual` closes most of it — Spanish 92%, English 100% — at roughly 7 seconds per query, which is why it is a flag and not the default.
+- Cross-lingual retrieval trails same-language on the **default** model: 58% against 83% at recall@3 on the twelve-question, 152-passage corpus of 2026-07, after the fusion fix above recovered it from 33%. That 58% was described here as the vector leg's own ceiling, and [measuring it](https://github.com/leonardoprimero/bruriah/blob/main/evals/project-memory/) showed it was this model's ceiling instead — `bruriah index --model jinaai/jina-embeddings-v2-base-es` takes Spanish to **75%** and English to **92%**, improving both. The default stays multilingual on purpose: that model is Spanish-English bilingual, which is exactly this corpus, and would likely be the wrong pick for a German or Japanese one. Bigger is *not* the axis — the larger sibling of the default scored worse in both languages for five times the download. The choice is documented rather than made for you, and the numbers are per-question so you can see how thin twelve questions are. Adding `--reranker jinaai/jina-reranker-v2-base-multilingual` closes most of it — Spanish 92%, English 100% — at roughly 7 seconds per query, which is why it is a flag and not the default.
 - **Ranking, not retrieval, is where most of the loss is, and the size of that loss is now measured.** On the two foreign corpora the correct document is somewhere in the returned pool 76% and 92% of the time while recall@3 reads 0.340 and 0.530. recall@10 understates that headroom by about half, so every earlier statement here that called this "a ranking problem" was right and too modest. The optional reranker recovers part of it (0.340 → 0.431 on leakcanary) and explicitly does not chase the rest: reranking the whole 200-candidate pool is where the remaining ceiling lives, and nobody has paid the latency to find out what it is worth.
 - Models are not interchangeable in the pipeline: queries and passages are embedded identically, with no prefix and no per-model normalisation, so a model whose contract expects otherwise (`multilingual-e5-large` wants `query:`/`passage:`) cannot be evaluated fairly here at all. That is real open work — but it is a prerequisite for testing *more* candidates, not for the improvement above, which needed none of it.
 - The language detector is a function-word counter that abstains often in general — though not once on the 24 eval questions, where it was measured, so the cross-lingual discount was applied every time.
