@@ -23,6 +23,122 @@ Without that the scorer reports 0% and looks like a retrieval collapse rather th
 `tests/test_project_memory_eval.py` asserts every ground-truth document is still produced by this
 repository's own history, so the numbers below stay reproducible from the published repository.
 
+## Heading ancestry moves the top of the ranking and nothing deeper, measured 2026-08-28
+
+A passage used to be indexed as its own section and nothing more, so a `### Windows` section under
+`# Installation guide` / `## Prerequisites` was a section about installing on Windows in which
+neither "installation" nor "prerequisites" occurs. Indexing each passage under the document title
+and the headings above it — while leaving the bytes `read` returns untouched — shipped with that
+argument and no number. This is the number.
+
+### The method
+
+Paired A/B, and the pairing is the whole point. The **same derived corpus** is indexed twice, once
+with the code at `main` and once with the change; the only thing that differs between the two runs
+is the string handed to the tokenizer and the embedder. Ranking is read with
+`evals/retrieval/report_reach.py`, which reports the **untruncated** fused document rank of the
+correct answer — so a question that moves from rank 4 to rank 3 and a question that moves from 123
+to 82 are both visible, and only the first of them shows up in recall@3. Default embedder
+(`sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2`), no reranker, Python 3.14.6, macOS,
+M4 Pro.
+
+### The corpora, and why their absolute numbers are not the ones below
+
+Both derived by the shipped `bruriah corpus` from fresh clones, pinned:
+
+| repository | pinned at | commits | documents | questions |
+|---|---|---|---|---|
+| `square/leakcanary` | `0f7dbab17e2a` | 2,785 | 884 | 153 ([`leakcanary-issues.jsonl`](leakcanary-issues.jsonl)) |
+| `emilk/egui` | `5d3e958ecfd3` | 4,447 | 1,878 | 83 ([`egui-issues.jsonl`](egui-issues.jsonl)) |
+
+**These are not the corpora behind "Two repositories nobody here wrote" below.** Those were 604 and
+2,119 documents; these clones are at the day's HEAD, so leakcanary has grown to 884, while egui
+reads 1,878 — fewer documents from a longer history, which nothing here explains and which nobody
+should read as a finding. The absolute recall figures in this section therefore belong to *this*
+pair of corpora and not to that section's, and the two should not be compared cell by cell. What is
+established here is the difference, and it is established the way a difference has to be: identical
+corpus, identical questions, identical model on both sides, one string changed. (As it happens
+egui's before-side reproduces the published **0.434** exactly, while leakcanary's before-side reads
+**0.242** against a published 0.261 — a corpus that grew by a thousand commits moved the second one,
+which is the same effect `bruriah corpus --revision` exists to stop.)
+
+### The result
+
+recall@3 — the share of questions whose correct document is among the top three documents — before
+and after, with the paired counts and an exact two-sided binomial (McNemar) test over the
+discordant pairs:
+
+| set | n | before | after | entered the top 3 | left it | p |
+|---|---|---|---|---|---|---|
+| leakcanary | 153 | 0.242 | **0.301** | 10 | 1 | 0.0117 |
+| egui | 83 | 0.434 | **0.518** | 8 | 1 | 0.0391 |
+| **combined** | 236 | 0.309 | **0.377** | 18 | 2 | **0.0004** |
+
+### The deeper ceilings barely move, which is the interesting half
+
+Combined, over the same 236 questions:
+
+| | before | after | entered | left | p |
+|---|---|---|---|---|---|
+| recall@3 | 0.309 | **0.377** | 18 | 2 | **0.0004** |
+| recall@10 | 0.470 | 0.487 | 10 | 6 | 0.4545 |
+| recall@40 (top 40 documents) | 0.606 | 0.640 | 12 | 4 | 0.0768 |
+
+The pool behind those ceilings does not move either: the count of questions whose answer is **never
+ranked at all** is identical on both sides — 0 on leakcanary, 6 on egui.
+
+So this is not retrieval finding documents it could not find before. It is the ordering putting
+documents it had already found into the first three places. Over the 230 questions ranked by both
+versions — the six egui questions that are never ranked are unranked on both sides — the median
+document rank goes **12 → 10**, with 100 questions improving, 61 worsening and 69 unchanged. Most
+of what this engine misses at rank 3 it still misses at rank 40, before and after. The standing
+complaint on this page that ranking rather than retrieval is where the loss lives survives the
+change intact; the change moved a slice of it and left the shape alone.
+
+### The twelve-question set says the same change is a loss
+
+On this repository's own history — a 178-document corpus, and the twelve English and twelve Spanish
+questions this page opens with:
+
+| | recall@3 before | after | mean rank before | after |
+|---|---|---|---|---|
+| English | **0.833** | **0.750** | 4.42 | 4.00 |
+| Spanish | 0.500 | 0.500 | 13.42 | 10.08 |
+
+**English recall@3 went down.** One question (`w04`) moved from rank 3 to rank 4 and crossed the
+ceiling, and one question is eight points. Underneath that ceiling the same twelve improved on
+average, and the Spanish set improved considerably — `w02` moved from rank 123 to rank 82 — without
+crossing any ceiling in either direction.
+
+This is the "twelve questions means one question is eight points" caveat below happening in public
+instead of as a disclaimer: one change, a clear win over 236 questions written by strangers and a
+measured loss over twelve written here. Both are printed. The twelve-question number is not wrong,
+and it is not evidence about the change — it is evidence about twelve questions, and it is the
+strongest argument this page has for its own sample-size caveat.
+
+### What this does not establish
+
+Nothing about answers: `report_reach.py` reads where the correct **document** lands, and a document
+at rank 1 is not an answered question. Nothing about other heading structures — both corpora here
+are commit-derived, so their documents carry a shallow generated heading tree, and a hand-written
+documentation corpus nested four levels deep is a different measurement nobody has made. Nothing
+about other models or the reranker: one embedder, no rerank stage, so whether the ancestry survives
+a cross-encoder that reads `text` rather than `search_text` is unmeasured. And nothing at all about
+whether the twelve-question loss would survive a thirteenth question.
+
+### Reproduce
+
+```bash
+git clone --filter=blob:none https://github.com/emilk/egui && git -C egui checkout 5d3e958ecfd3
+bruriah corpus --repo egui --out /tmp/corpus-egui
+bruriah index --data-dir /tmp/d-egui --corpus-root /tmp/corpus-egui --policy policy.yaml
+python evals/retrieval/report_reach.py --corpus egui --data-dir /tmp/d-egui \
+    --questions evals/project-memory/egui-issues.jsonl
+```
+
+The before-side is the same three commands run from a checkout of the parent commit, into a
+separate `--data-dir`. `leakcanary` is the same recipe with its own clone, sha and question file.
+
 ## Separation does not detect an unanswerable question, measured 2026-08-06
 
 **A negative result.** This engine cannot tell a question it can answer from one it cannot, and
