@@ -67,6 +67,38 @@ def test_it_writes_nothing_to_the_repository_it_reads(tmp_path: Path) -> None:
     assert before == after == ""
 
 
+def test_a_named_revision_derives_the_corpus_that_history_had_at_that_point(tmp_path: Path) -> None:
+    """A corpus derived from a moving HEAD cannot reproduce a published measurement.
+
+    `evals/project-memory/README.md` publishes leakage figures computed over 147 documents derived
+    from this repository's own history -- which means every commit merged afterwards changes the
+    IDF those figures were computed against. The page names the revision it measured; without this,
+    nothing could take it up on that, and a reader running the documented command got a different
+    corpus with nothing to tell them why."""
+    repo = _repo(tmp_path)  # a reasoned commit, then a bodiless one
+    subprocess.run(["git", "commit", "-q", "--allow-empty", "-m",
+                    "feat: a later decision\n\nAdded after the measurement was published."],
+                   cwd=repo, check=True, capture_output=True)
+    first = subprocess.run(["git", "rev-list", "--max-parents=0", "HEAD"], cwd=repo,
+                           capture_output=True, text=True, check=True).stdout.strip()
+
+    assert gitcorpus.build(repo, tmp_path / "head").written == 2
+    pinned = gitcorpus.build(repo, tmp_path / "pinned", revision=first)
+    assert (pinned.written, pinned.examined) == (1, 1)
+    assert "a later decision" not in "".join(
+        path.read_text() for path in (tmp_path / "pinned").glob("*.md"))
+
+
+def test_a_revision_that_does_not_resolve_says_so_before_writing_anything(tmp_path: Path) -> None:
+    """The usual reason a pin fails is a shallow clone, and `fatal: ambiguous argument` does not
+    say that. Nor should a half-written corpus be left behind for the caller to mistake for one."""
+    repo = _repo(tmp_path)
+    with pytest.raises(SystemExit) as failure:
+        gitcorpus.build(repo, tmp_path / "out", revision="9591f91")
+    assert "9591f91" in str(failure.value) and "shallow" in str(failure.value)
+    assert not (tmp_path / "out").exists()
+
+
 def test_the_subcommand_refuses_a_directory_that_is_not_a_repository(tmp_path: Path) -> None:
     code = cli.bruriah_main(["corpus", "--repo", str(tmp_path), "--out", str(tmp_path / "out"),
                              "--data-dir", str(tmp_path / "d"), "--config-dir", str(tmp_path / "c")])

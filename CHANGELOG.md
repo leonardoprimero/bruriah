@@ -87,6 +87,25 @@ which is what that count reads as zero on the run that pays for it. Reuse is an 
 never a precondition: a previous snapshot that is missing, pruned mid-build or unreadable is simply
 not reused, never a build that fails.
 
+### Fixed: the published leakage figures are reproducible again — `bruriah corpus --revision`
+
+`evals/project-memory/README.md` publishes its leakage figures over a corpus derived from *this
+repository's own history*, and says so precisely: "147 documents, the corpus as of `9591f91`". The
+guard asserting those figures did not honour that. It rebuilt the corpus from whatever `HEAD` was,
+so the corpus grew under the measurement: three commits later the new messages had moved the IDF of
+`expired`, `pack` and `server`, one question fell from peak 0.51 to 0.49, and the test reported the
+page as stale. The page was right; the test was measuring a different corpus and blaming it. Every
+future commit re-rolled the same dice.
+
+`bruriah corpus` takes `--revision` (default `HEAD`, unchanged for anyone building a corpus of
+their own project), so a corpus can be derived from a named point in history rather than from a
+moving one. The documented reproduce recipe on that page now passes `--revision 9591f91` and gives
+a reader the 147 documents and the exact figures printed beneath it; the guard pins the same
+revision, and asserts the document count too, so a rewritten history or a bad pin fails loudly
+instead of quietly measuring a stranger. Where the revision is unavailable — a shallow clone — the
+guard skips and says which one it wanted, and `corpus` refuses before writing anything rather than
+leaving a half-built corpus behind. No published figure moved.
+
 ### Fixed: the embedding model cache now survives the operating system
 
 fastembed defaults its model cache to the system temp directory, which macOS purges on its own

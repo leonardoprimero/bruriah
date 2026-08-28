@@ -846,9 +846,10 @@ def _cmd_corpus(args: argparse.Namespace) -> int:
     a reader to run a file that `pip install bruriah` had never put on their disk."""
     if not (args.repo / ".git").exists():
         raise CliError("not_a_git_repository")
-    result = gitcorpus.build(args.repo, args.out, args.limit)
+    result = gitcorpus.build(args.repo, args.out, args.limit, revision=args.revision)
     print(json.dumps(
-        {"documents": result.written, "commits_examined": result.examined, "out": str(args.out)},
+        {"documents": result.written, "commits_examined": result.examined, "out": str(args.out),
+         "revision": args.revision},
         indent=2, sort_keys=True,
     ))
     _report_corpus_coverage(result)
@@ -1053,6 +1054,10 @@ def _build_cli_parser() -> argparse.ArgumentParser:
     corpus_parser.add_argument("--repo", type=Path, default=Path("."), help="repository to read")
     corpus_parser.add_argument("--out", type=Path, required=True, help="directory to write into")
     corpus_parser.add_argument("--limit", type=int, default=None, help="most recent N commits only")
+    corpus_parser.add_argument(
+        "--revision", default="HEAD", metavar="REV",
+        help="derive the corpus as of this commit (default HEAD). Pin it to reproduce a "
+             "published measurement: the history IS the corpus, so it grows under the number.")
     ask = add("ask", "Run one investigation and show the evidence.", _cmd_ask)
     ask.add_argument("question", help="what you want to know about your own corpus")
     ask.add_argument("--read", type=int, action="append", metavar="N",

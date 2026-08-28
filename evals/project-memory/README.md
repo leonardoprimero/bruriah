@@ -141,10 +141,12 @@ the derived corpus and reports two numbers: `share`, the weighted fraction of th
 also appears in its own answer, and `peak`, the single most distinctive term the question handed
 over, as a fraction of the highest IDF this corpus can produce. There is no stopword list — that
 would be a knob for deciding which words do not count, and picking a different list moves the mean
-by 0.12. IDF does the same work from the corpus itself. Reproduce with no index and no model:
+by 0.12. IDF does the same work from the corpus itself. Reproduce with no index and no model — the
+corpus is this repository's own history, so it grows under the measurement and `--revision` is what
+pins it back to the one these figures were computed over:
 
 ```bash
-bruriah corpus --repo . --out /tmp/corpus
+bruriah corpus --repo . --out /tmp/corpus --revision 9591f91
 python evals/retrieval/report_leakage.py --corpus /tmp/corpus \
     --questions evals/project-memory/decisions-en.jsonl
 ```
