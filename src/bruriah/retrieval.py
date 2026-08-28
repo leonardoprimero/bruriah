@@ -126,6 +126,10 @@ class _Passage:
     start_line: int
     end_line: int
     text: str
+    # `text` is the section's own bytes and `search_text` is that section under its heading
+    # ancestry. Only the second is scored: see `corpus._search_text`. Everything a human or a
+    # caller is shown -- snippets, rerank input, evidence -- comes from `text`.
+    search_text: str
     source_hash: str
     vector: bytes
 
@@ -156,7 +160,7 @@ def _scan_passages(
 ) -> tuple[list[_Passage], bool]:
     rows = database.execute(
         "SELECT ref, document_ref, relative_path, heading_path, start_line, end_line, "
-        "text, source_hash, vector FROM passages ORDER BY ref"
+        "text, search_text, source_hash, vector FROM passages ORDER BY ref"
     )
     passages: list[_Passage] = []
     stopped = False
@@ -164,11 +168,14 @@ def _scan_passages(
         if _expired(position, deadline, clock):
             stopped = True
             break
-        ref, document_ref, relative_path, heading_json, start_line, end_line, text, source_hash, vector = row
+        (
+            ref, document_ref, relative_path, heading_json, start_line, end_line, text,
+            search_text, source_hash, vector,
+        ) = row
         passages.append(
             _Passage(
                 ref, document_ref, relative_path, _heading_path(heading_json),
-                start_line, end_line, text, source_hash, vector,
+                start_line, end_line, text, search_text, source_hash, vector,
             )
         )
     return passages, stopped
@@ -192,7 +199,9 @@ def _bm25_ranks(
         if _expired(position, deadline, clock):
             stopped = True
             break
-        tokenized.append(_tokenize(passage.text))
+        # `search_text`, so a section is reachable by the headings it sits under. BM25 can only
+        # score terms it was handed, and a child section does not contain its parents' words.
+        tokenized.append(_tokenize(passage.search_text))
 
     lengths = [len(tokens) for tokens in tokenized]
     if not lengths:
@@ -280,7 +289,8 @@ def _corpus_language(passages: list[_Passage]) -> str | None:
     rather than all of it keeps this a rounding error against the BM25 scan that follows.
     """
     return language.dominant(
-        passage.text[:_LANGUAGE_SAMPLE_CHARS] for passage in passages[:_LANGUAGE_SAMPLE_PASSAGES]
+        passage.search_text[:_LANGUAGE_SAMPLE_CHARS]
+        for passage in passages[:_LANGUAGE_SAMPLE_PASSAGES]
     )
 
 

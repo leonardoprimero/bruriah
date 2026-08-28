@@ -25,6 +25,29 @@ When no commit carries an explanatory body there is nothing to retrieve, so the 
 and stops with a typed `corpus_has_no_reasoning` instead of building an index of nothing and
 writing client configs that point at it.
 
+### Changed: a passage is now indexed under the headings it sits beneath
+
+A passage is stored as its own section and nothing more, which is right for quoting it back and
+wrong for finding it. A `### Windows` section under `# Installation guide` / `## Prerequisites` is
+a section about installing on Windows in which the words "installation" and "prerequisites" never
+appear — so BM25, which can only score the terms it was handed, had no path from the question a
+user actually asks to the section that answers it, and the embedding of the same bare fragment
+lost the same context less visibly.
+
+Each passage now carries a second string alongside its text: the document's title and the headings
+above it, then the section. That string is what gets tokenized, embedded and language-sampled.
+What `read` returns is untouched — it still hands back the section's exact bytes, sliced by the
+same character offsets, so refs, cursors and quoted evidence all mean exactly what they meant
+before.
+
+This changes what an index contains, so the first `index` after upgrading rebuilds the whole
+corpus and re-embeds it once — a snapshot from an earlier version is refused rather than reused,
+and is not kept as a rollback target either, so `index` will say the previous index was built under
+a different configuration. Reindexing after that is incremental again. Until that rebuild happens,
+an existing snapshot is reported as `snapshot_unreadable:invalid_candidate` rather than served:
+the columns validation reads are the columns the running code needs, so the mismatch surfaces when
+the snapshot is opened instead of as a crash on someone's first question.
+
 ### Fixed: reindexing no longer re-embeds documents that did not change
 
 `build_candidate` has been able to carry rows forward from a previous snapshot since it was

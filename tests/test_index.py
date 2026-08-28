@@ -63,7 +63,7 @@ def config(root: Path, policy_path: Path) -> BuildConfig:
         root=root,
         policy_path=policy_path,
         schema_version=1,
-        parser_version="corpus-v1",
+        parser_version="corpus-v2",
         service_version="0.1.0",
         mcp_range=">=1.28.1,<2",
         embedding_model="test/minilm",
@@ -103,7 +103,7 @@ def test_candidate_declares_schema_metadata_manifest_and_model_identity(tmp_path
             FINGERPRINT.encode()
         ).hexdigest()
         assert metadata["schema_version"] == "1"
-        assert metadata["parser_version"] == "corpus-v1"
+        assert metadata["parser_version"] == "corpus-v2"
         assert metadata["ref_version"] == "v1"
         assert metadata["validation_state"] == "candidate"
         assert metadata["corpus_manifest_hash"] == result.manifest_hash
@@ -112,6 +112,81 @@ def test_candidate_declares_schema_metadata_manifest_and_model_identity(tmp_path
             ("public/two.md", hashlib.sha256((root / "public/two.md").read_bytes()).hexdigest()),
         ]
         assert database.execute("PRAGMA query_only").fetchone() == (1,)
+
+
+def test_every_passage_is_indexed_under_its_title_and_ancestry_and_stored_bare(
+    tmp_path: Path,
+) -> None:
+    """`search_text` carries what the section does not contain; `text` stays the section itself.
+
+    Both columns exist because the two jobs conflict: retrieval needs the headings a passage sits
+    beneath, and `read_evidence` needs bytes it can slice by the offsets a caller already holds. The
+    assertions below are that neither job borrowed from the other -- the ancestry never enters
+    `text`, and the section's own heading is never repeated into `search_text`, where it already is."""
+    root = tmp_path / "vault"
+    (root / "public").mkdir(parents=True)
+    (root / "public" / "guide.md").write_text(
+        "Opening lines before any heading.\n\n"
+        "# Installation guide\n\n## Prerequisites\n\n### Windows\n\nRun the installer.\n",
+        encoding="utf-8",
+    )
+    (root / "public" / "untitled.md").write_text("Just a body, no heading at all.\n", encoding="utf-8")
+    policy_path = tmp_path / "policy.yaml"
+    policy_path.write_text("version: 1\ninclude: ['public/**']\nexclude: []\n", encoding="utf-8")
+    policy = CorpusPolicy.load(policy_path)
+    candidate = tmp_path / "candidate.sqlite3"
+
+    build_candidate(config(root, policy_path), candidate, policy, fake_embeddings)
+
+    with closing(open_candidate(candidate)) as database:
+        stored = {
+            (row[0], row[1]): (row[2], row[3])
+            for row in database.execute(
+                "SELECT relative_path, heading_path, text, search_text FROM passages"
+            )
+        }
+
+    # An H3: the title and both ancestors, then the section, whose own heading is not repeated.
+    text, search_text = stored[("public/guide.md", '["Installation guide", "Prerequisites", "Windows"]')]
+    assert text == "### Windows\n\nRun the installer.\n"
+    assert search_text == "Installation guide\nPrerequisites\n\n" + text
+
+    # A preamble sits under no heading at all, so it gets the document's title and nothing else.
+    text, search_text = stored[("public/guide.md", "[]")]
+    assert text == "Opening lines before any heading.\n\n"
+    assert search_text == "Installation guide\n\n" + text
+
+    # A document with no H1 has no title to borrow; its file name is the only other thing that is
+    # always present and always about the document.
+    text, search_text = stored[("public/untitled.md", "[]")]
+    assert search_text == "untitled\n\n" + text
+
+    # The section's own heading is already the first line of `text`, and for an H1 it is also the
+    # title -- prefixing either would only make the passage repeat itself.
+    text, search_text = stored[("public/guide.md", '["Installation guide"]')]
+    assert search_text == text
+
+
+def test_a_snapshot_built_before_search_text_fails_typed_instead_of_at_query_time(
+    tmp_path: Path,
+) -> None:
+    """An index built by an earlier version has no `search_text` column, and the build descriptor it
+    left behind describes itself consistently -- so no version marker on its own stops `serve` from
+    opening it. What stops it is that validation reads the columns the running code needs: the
+    missing column surfaces as a typed `invalid_candidate` when the snapshot is opened, not as a
+    bare `OperationalError` on the first query a user asks."""
+    root, policy = write_corpus(tmp_path)
+    policy_path = tmp_path / "policy.yaml"
+    candidate = tmp_path / "candidate.sqlite3"
+    build_candidate(config(root, policy_path), candidate, policy, fake_embeddings)
+    with closing(sqlite3.connect(candidate)) as database, database:
+        database.execute("ALTER TABLE passages DROP COLUMN search_text")
+
+    with closing(open_candidate(candidate)) as database:
+        with pytest.raises(IndexLifecycleError) as caught:
+            index_module.validate_candidate(database, config(root, policy_path), policy)
+
+    assert caught.value.code == "invalid_candidate"
 
 
 def test_incremental_build_reuses_only_compatible_unchanged_documents(tmp_path: Path) -> None:
@@ -134,7 +209,11 @@ def test_incremental_build_reuses_only_compatible_unchanged_documents(tmp_path: 
     assert rows[0][1:] == ("# One\nFirst passage.\n", fake_embeddings(["# One\nFirst passage.\n"])[0])
     assert rows[1][1] == "# Two\nChanged.\n"
 
-    incompatible = replace(config(root, policy_path), parser_version="corpus-v2")
+    # `corpus-v1` is the real previous value, not an invented one: the parser now emits
+    # `search_text` per passage, so a snapshot built before that has no column to reuse from and
+    # every one of its rows would be a passage indexed without its heading ancestry. The version
+    # marker is what makes that refusal automatic -- one full rebuild, then reuse resumes.
+    incompatible = replace(config(root, policy_path), parser_version="corpus-v1")
     third = tmp_path / "third.sqlite3"
     assert build_candidate(
         incompatible, third, policy, fake_embeddings, previous=second
@@ -379,7 +458,7 @@ def test_invalid_or_incompatible_promotion_keeps_last_known_good(tmp_path: Path)
         database.execute(
             "UPDATE passages SET vector = X'00' WHERE ref = (SELECT ref FROM passages LIMIT 1)"
         )
-    changed = replace(config(root, policy_path), parser_version="corpus-v2")
+    changed = replace(config(root, policy_path), parser_version="corpus-v1")
     build_candidate(changed, incompatible, policy, fake_embeddings)
 
     with pytest.raises(ValueError, match="invalid_candidate"):

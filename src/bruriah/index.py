@@ -134,6 +134,10 @@ CREATE TABLE passages (
     ref TEXT PRIMARY KEY, document_ref TEXT NOT NULL, relative_path TEXT NOT NULL,
     heading_path TEXT NOT NULL, start_line INTEGER NOT NULL, end_line INTEGER NOT NULL,
     text TEXT NOT NULL, source_hash TEXT NOT NULL, metadata TEXT NOT NULL,
+    -- `search_text` sits before `vector` on purpose: `_stored_document` compares `stored[:-1]`
+    -- against the expected tuple and type-checks the last column as the blob, so `vector` has to
+    -- stay last for a new column to be compared rather than skipped.
+    search_text TEXT NOT NULL,
     vector BLOB NOT NULL, FOREIGN KEY(document_ref) REFERENCES documents(document_ref)
 ) WITHOUT ROWID;
 """
@@ -208,7 +212,8 @@ def _stored_document(
     ).fetchone()
     passages = source.execute(
         "SELECT ref, document_ref, relative_path, heading_path, start_line, end_line, "
-        "text, source_hash, metadata, vector FROM passages WHERE document_ref = ? ORDER BY ref",
+        "text, source_hash, metadata, search_text, vector FROM passages "
+        "WHERE document_ref = ? ORDER BY ref",
         (document.document_ref,),
     ).fetchall()
     expected_passages = sorted(
@@ -222,6 +227,7 @@ def _stored_document(
             passage.text,
             passage.source_hash,
             metadata,
+            passage.search_text,
         )
         for passage in document.passages
     )
@@ -247,7 +253,7 @@ def _reuse_document(
         return False
     row, passages = stored
     target.execute("INSERT INTO documents VALUES (?, ?, ?, ?)", row)
-    target.executemany("INSERT INTO passages VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", passages)
+    target.executemany("INSERT INTO passages VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", passages)
     return True
 
 
@@ -689,7 +695,9 @@ def build_candidate(
                 reused += 1
                 passage_count += len(document.passages)
                 continue
-            texts = [passage.text for passage in document.passages]
+            # The ancestry-carrying string, not the bare section: the vector must describe the
+            # passage the way the query will ask for it. `text` stays what evidence is read from.
+            texts = [passage.search_text for passage in document.passages]
             vectors = embedder(texts)
             if len(vectors) != len(texts) or any(
                 len(vector) != config.embedding_dimensions * 4 for vector in vectors
@@ -701,7 +709,7 @@ def build_candidate(
                 (document.document_ref, document.relative_path, document.source_hash, metadata),
             )
             database.executemany(
-                "INSERT INTO passages VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                "INSERT INTO passages VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 [
                     (
                         passage.ref,
@@ -713,6 +721,7 @@ def build_candidate(
                         passage.text,
                         passage.source_hash,
                         metadata,
+                        passage.search_text,
                         vector,
                     )
                     for passage, vector in zip(document.passages, vectors, strict=True)

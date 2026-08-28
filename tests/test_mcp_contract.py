@@ -58,7 +58,7 @@ def _snapshot_for(tmp_path: Path, notes: dict[str, str]):
     policy_path.write_text("version: 1\ninclude: ['public/**']\nexclude: []\n", encoding="utf-8")
     policy = CorpusPolicy.load(policy_path)
     config = BuildConfig(
-        root=tmp_path / "vault", policy_path=policy_path, schema_version=1, parser_version="corpus-v1",
+        root=tmp_path / "vault", policy_path=policy_path, schema_version=1, parser_version="corpus-v2",
         service_version="0.1.0", mcp_range=">=1.28.1,<2", embedding_model="test/minilm",
         embedding_revision="snapshot-a", embedding_dimensions=3, embedding_fingerprint=FINGERPRINT,
         ranking_config="rrf-v1",

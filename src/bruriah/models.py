@@ -20,6 +20,12 @@ class Passage:
     start_line: int
     end_line: int
     text: str
+    # The two are deliberately separate, and the separation is the whole point. `text` is the
+    # section's exact bytes: it is what `read_evidence` slices by character offset and hands back
+    # as quoted evidence, so anything prepended to it would shift every offset a caller holds.
+    # `search_text` is the same section under its ancestry, and is what the retrieval stages read.
+    # See `corpus._search_text` for why a passage needs the ancestry it does not contain.
+    search_text: str
     source_hash: str
     metadata: SourceMetadata
 

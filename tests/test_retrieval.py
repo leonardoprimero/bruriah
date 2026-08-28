@@ -41,7 +41,7 @@ def _snapshot_for(tmp_path: Path, notes: dict[str, str]):
     policy_path.write_text("version: 1\ninclude: ['public/**']\nexclude: []\n", encoding="utf-8")
     policy = CorpusPolicy.load(policy_path)
     config = BuildConfig(
-        root=tmp_path / "vault", policy_path=policy_path, schema_version=1, parser_version="corpus-v1",
+        root=tmp_path / "vault", policy_path=policy_path, schema_version=1, parser_version="corpus-v2",
         service_version="0.1.0", mcp_range=">=1.28.1,<2", embedding_model="test/minilm",
         embedding_revision="snapshot-a", embedding_dimensions=3, embedding_fingerprint=FINGERPRINT,
         ranking_config="rrf-v1",
@@ -69,6 +69,38 @@ def test_bilingual_exact_and_broad_recall(snapshot) -> None:
     assert broad_en.matches[0].relative_path in {"public/en.md", "public/es.md"}
     assert broad_en.matches[0].lexical_rank is None
     assert broad_en.matches[0].vector_rank is not None
+def test_a_section_is_reachable_by_the_headings_it_sits_under(tmp_path: Path) -> None:
+    """The behavioural point of `search_text`, stated as the query it makes possible.
+
+    A passage is stored as its own section's lines, so "Windows" under `# Kubernetes deployment` /
+    `## Rollout` is a section in which the words "kubernetes" and "deployment" never appear. BM25
+    can only score terms it was handed, so before the ancestry was indexed alongside the text there
+    was no lexical path from that query to that section at all -- and the vector leg is off here, so
+    nothing else can rescue it. The snippet assertion is the other half: the words that found the
+    passage are still not in the passage."""
+    notes = {
+        "guide.md": (
+            "# Kubernetes deployment\n\n## Rollout\n\nGeneral notes about rolling changes out.\n\n"
+            "### Windows\n\nRun the installer and then reboot the node.\n"
+        ),
+        "decoy.md": f"# Unrelated\n\nSomething else entirely.\n{_FILLER}\n",
+    }
+    with _snapshot_for(tmp_path, notes) as active:
+        stored = {
+            row[0]: row[1] for row in active.database.execute("SELECT text, search_text FROM passages")
+        }
+        section = next(text for text in stored if "installer" in text)
+        assert "kubernetes" not in section.casefold()
+        assert stored[section].startswith("Kubernetes deployment\nRollout\n\n### Windows")
+
+        outcome = search(active, "kubernetes deployment", Budgets())
+
+    windows = next(match for match in outcome.matches if match.heading_path[-1] == "Windows")
+    assert windows.relative_path == "public/guide.md"
+    assert windows.lexical_rank is not None
+    assert "kubernetes" not in windows.snippet.casefold()
+
+
 def test_rank_is_ordinal_never_a_confidence_score(snapshot) -> None:
     field_names = {item.name for item in fields(RetrievalMatch)}
     assert "score" not in field_names and "confidence" not in field_names
@@ -155,7 +187,7 @@ def test_empty_and_oversized_query_raise_typed_retrieval_error(snapshot) -> None
     assert oversized.value.code == "query_too_long"
 _PASSAGE_SCHEMA = (
     "CREATE TABLE passages (ref TEXT, document_ref TEXT, relative_path TEXT, heading_path TEXT,"
-    " start_line INT, end_line INT, text TEXT, source_hash TEXT, vector BLOB)"
+    " start_line INT, end_line INT, text TEXT, search_text TEXT, source_hash TEXT, vector BLOB)"
 )
 @pytest.fixture
 def raw_snapshot():
@@ -170,7 +202,7 @@ def raw_snapshot():
     def make(rows: list[tuple]):
         database = sqlite3.connect(":memory:")
         database.execute(_PASSAGE_SCHEMA)
-        database.executemany("INSERT INTO passages VALUES (?,?,?,?,?,?,?,?,?)", rows)
+        database.executemany("INSERT INTO passages VALUES (?,?,?,?,?,?,?,?,?,?)", rows)
         opened.append(database)
         return SimpleNamespace(database=database)
 
@@ -179,7 +211,8 @@ def raw_snapshot():
         database.close()
 def _raw_row(ref: str, *, heading: str = '["Heading"]', vector: bytes | None = None, dimensions: int = 3):
     blob = vector if vector is not None else array("f", [1.0] * dimensions).tobytes()
-    return (ref, "doc:1", "a.md", heading, 1, 2, "an apple pie baking recipe", "0" * 64, blob)
+    text = "an apple pie baking recipe"
+    return (ref, "doc:1", "a.md", heading, 1, 2, text, text, "0" * 64, blob)
 def test_leg_that_runs_but_matches_nothing_reports_explicit_degradation(raw_snapshot) -> None:
     # Embedding-dimension drift: the leg runs to completion and ranks zero candidates. An empty
     # result is not the same as an unavailable leg, and neither may be silent.
