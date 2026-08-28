@@ -216,21 +216,22 @@ _EXPIRY_WARNING_DAYS = 120
 def test_the_bundled_packs_are_not_about_to_expire() -> None:
     """The one test here that can fail without anyone touching the code, and that is its whole job.
 
-    Every bundled pack carries `expires_at`, and `platform.load_registry` is fail-closed and
-    all-or-nothing: one expired pack fails the entire registry, which is what `load_deps` builds
-    `serve` and `doctor` on top of. So the day the earliest pack expires, a correct, unmodified,
-    fully-tested installation stops serving -- verified by injection, `load_registry` raises
-    `registry_load_failed:expired_pack` on that exact date and every date after it.
+    Every bundled pack carries `expires_at`, and past it the pack stops registering its domains: a
+    correct, unmodified, fully-tested installation quietly loses the routing those domains had, and
+    every request that used to be answered abstains with a `pack_expired:` gap naming the pack.
+    `serve` no longer stops -- `load_registry` loads an aged pack rather than refusing -- but a
+    capability the user silently loses on a date they did not choose is not a smaller problem for
+    being a quieter one, and only the maintainer can fix it.
 
     Nothing warned about that. Every other test in this repository pins `today` to a 2026 literal,
-    including `tests/test_platform.py`, which asserts the expiry fires in 2027 -- so the suite was
+    including `tests/test_platform.py`, which asserts the aging fires in 2027 -- so the suite was
     arranged to CONFIRM the deadline rather than to raise the alarm before it, and would have
-    stayed green through the outage and forever after.
+    stayed green through the degradation and forever after.
 
     This fails `_EXPIRY_WARNING_DAYS` ahead instead, which is the point: a red CI months early is a
-    reminder, and re-signing the packs is the fix. Do not extend this window to silence it -- the
-    packs are signed, so a new `expires_at` needs a new signature, and that is exactly the work
-    being asked for.
+    reminder, and re-signing the packs is still the only fix. Do not extend this window to silence
+    it -- the packs are signed, so a new `expires_at` needs a new signature, and that is exactly the
+    work being asked for.
     """
     from datetime import date
 
@@ -246,8 +247,8 @@ def test_the_bundled_packs_are_not_about_to_expire() -> None:
     earliest_name, earliest = min(dated.items(), key=lambda item: item[1])
     remaining = (earliest - date.today()).days
     assert remaining > _EXPIRY_WARNING_DAYS, (
-        f"{earliest_name} expires {earliest} ({remaining} days away). On that date "
-        f"load_registry raises registry_load_failed:expired_pack, and every installed copy of "
-        f"bruriah -- including ones nobody upgrades -- stops serving. Re-review and re-sign the "
-        f"bundled packs, then release."
+        f"{earliest_name} expires {earliest} ({remaining} days away). From that date the pack "
+        f"stops registering its domains, so every installed copy of bruriah -- including ones "
+        f"nobody upgrades -- abstains on those domains with a pack_expired gap. Re-review and "
+        f"re-sign the bundled packs, then release."
     )

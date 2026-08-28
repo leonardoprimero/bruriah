@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass
-from datetime import date, timedelta
+from datetime import date
 from pathlib import Path
 from typing import Annotated, Literal
 
@@ -19,6 +19,9 @@ from .packs import (
     check_router_compatibility,
     check_version_floor,
     encode_pack,
+    # Re-exported below: domain packs and skill packs age identically, so they read the same
+    # answer out of the same function rather than two that could drift.
+    pack_currency,
     parse_pack_bytes,
     read_pack_bytes,
     verify_manifest_bytes,
@@ -143,18 +146,6 @@ class SkillPack(ClosedModel):
         if len(set(identifiers)) != len(identifiers):
             raise ValueError("duplicate_skill_id")
         return self
-def pack_currency(pack: "SkillPack", today: date) -> str:
-    """`current`, `stale`, or `expired` for a loaded pack.
-
-    The same three words `EvidenceRecord.freshness` already uses, so a demoted skill reports its
-    state in the vocabulary the contract has always spoken rather than in a new one."""
-    if pack.expires_at < today:
-        return "expired"
-    if pack.reviewed_at + timedelta(days=pack.freshness_days) < today:
-        return "stale"
-    return "current"
-
-
 @dataclass(frozen=True)
 class SkillSet:
     """Frozen, deterministically ordered set of loaded skill packs. Mirrors `registries.Registry`:

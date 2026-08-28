@@ -202,6 +202,27 @@ def test_precedence_schema_beats_manifest_checks(tmp_path: Path) -> None:
 def test_precedence_unknown_signer_beats_digest_mismatch(tmp_path: Path) -> None:
     mutate = lambda p, m: (p.update({"maintainer": "tampered"}), m.update({"signer": "unknown"}))
     assert _code(tmp_path, mutate) == "unknown_signer"
+def test_enforce_currency_false_survives_aging_but_nothing_else(tmp_path: Path) -> None:
+    """The serving path's exemption, and its exact edges.
+
+    Aging is what a running server must be allowed to survive: a review that came due while a pack
+    was in service is a statement about the review, and the honest answer is to disclose it rather
+    than to refuse to start. Everything that establishes the pack IS what it claims stays enforced,
+    and so does a review dated in the future -- that is not an aged pack, it is a pack whose dates
+    cannot both be true, which is a signing fault."""
+    aged = date(2030, 1, 1)
+    assert _load(tmp_path, None, today=aged, enforce_currency=False).pack_id == "research.minimal"
+
+    assert _code(tmp_path, None, today=date(2020, 1, 1), enforce_currency=False) == "future_review"
+    tampered = lambda pack, manifest: manifest.update({"signature": "AA=="})
+    assert _code(tmp_path, tampered, today=aged, enforce_currency=False) == "invalid_signature"
+    digest = lambda pack, manifest: pack.update({"maintainer": "tampered"})
+    assert _code(tmp_path, digest, today=aged, enforce_currency=False) == "digest_mismatch"
+    assert _code(
+        tmp_path, None, today=aged, enforce_currency=False, router_version="1.0.0"
+    ) == "incompatible_pack"
+
+
 def test_precedence_digest_mismatch_beats_invalid_signature(tmp_path: Path) -> None:
     mutate = lambda p, m: (p.update({"maintainer": "tampered"}), m.update({"signature": "AA=="}))
     assert _code(tmp_path, mutate) == "digest_mismatch"

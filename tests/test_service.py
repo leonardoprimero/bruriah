@@ -16,6 +16,7 @@ from bruriah.contracts import (
 from bruriah.corpus import CorpusPolicy
 from bruriah.index import BuildConfig, build_candidate, promote_candidate, snapshot_active
 from bruriah.packs import load_pack
+from bruriah.platform import load_registry
 from bruriah.registries import Registry
 from bruriah.retrieval import RetrievalError, is_shortfall
 from bruriah.service import ServiceDeps, ServiceError, _candidate_urls, investigate, read
@@ -437,6 +438,62 @@ def test_read_resolves_real_ref_with_exact_content(deps) -> None:
     assert item.status == "ok"
     assert item.digest == evidence.digest
     assert item.content and item.truncated is False
+
+
+# ---------------------------------------------------------------------------
+# The bundled packs carry fixed expiry dates. `load_registry` used to refuse the whole registry on
+# that date, so `serve` stopped for every installation nobody had touched. It now loads an aged
+# pack and lets the consequence land where a caller can see it, one request at a time.
+# ---------------------------------------------------------------------------
+
+_EXPIRED_TODAY = date(2027, 8, 1)  # past every bundled pack's `expires_at`
+_RECORDED_DECISION = "Why did we choose this python retry policy in our own decision record"
+
+
+@contextmanager
+def _deps_with_registry(tmp_path: Path, registry: Registry):
+    with _snapshot_for(tmp_path, {
+        "en.md": f"# Retry\nWe chose this python retry policy for recorded reasons.\n{_FILLER}\n",
+    }) as active:
+        yield ServiceDeps(registry=registry, snapshot=active)
+
+
+def test_an_expired_pack_abstains_naming_itself_rather_than_stopping_the_server(
+    tmp_path: Path,
+) -> None:
+    """Past expiry the server still starts, and the request that used to be routed abstains.
+
+    Abstaining is the right answer -- an expired review is not licence to keep speaking for a
+    domain -- but `no_approved_domain_pack` alone is indistinguishable from a domain this tool never
+    covered, and those are not the same situation: one is out of scope, the other is a pack that can
+    be re-signed. The gap names the pack, so the abstention says which."""
+    with _deps_with_registry(tmp_path, load_registry(today=_EXPIRED_TODAY)) as deps:
+        result = investigate(InvestigationRequest(task=_RECORDED_DECISION), deps)
+
+    assert result.status == "abstained"
+    assert "no_approved_domain_pack" in result.gaps
+    assert {"pack_expired:programming.minimal", "pack_expired:project.memory"} <= set(result.gaps)
+
+
+def test_a_stale_pack_still_answers_and_says_so(tmp_path: Path) -> None:
+    """Stale means the review is due, not that it is void, so the gap rides alongside the answer.
+
+    The bundled packs cannot reach `stale` -- their freshness window closes the same day they expire
+    -- so the state is reached here by shortening one pack's window, which is exactly the shape a
+    future pack with a tighter review cadence would have."""
+    packs = [
+        pack.model_copy(update={"freshness_days": 30}) if pack.pack_id == "project.memory" else pack
+        for pack in load_registry(today=date(2026, 7, 25)).packs
+    ]
+    registry = Registry.from_packs(packs, today=date(2026, 9, 30))
+    assert registry.currency_of("project.memory") == "stale"
+
+    with _deps_with_registry(tmp_path, registry) as deps:
+        result = investigate(InvestigationRequest(task=_RECORDED_DECISION), deps)
+
+    assert result.status in {"complete", "partial"}
+    assert "pack_stale:project.memory" in result.gaps
+    assert not any(gap.startswith("pack_expired:") for gap in result.gaps)
 
 
 def test_read_returns_the_section_bytes_not_the_string_retrieval_scored(tmp_path: Path) -> None:

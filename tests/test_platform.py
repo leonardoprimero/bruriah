@@ -218,20 +218,35 @@ def test_open_snapshot_without_a_built_index_is_typed_and_read_only(tmp_path: Pa
 
 
 def test_load_registry_freshness_is_date_injectable_not_wall_clock() -> None:
-    # Injected date so freshness is deterministic, not a wall-clock time bomb after the window.
-    assert load_registry(today=date(2026, 7, 25)).pack_ids == (
-        "programming.minimal", "project.memory", "research.minimal")
-    # Loading is all-or-nothing: the earliest-expiring bundled pack takes the whole registry down
-    # rather than leaving a silently truncated one, which a caller could not distinguish from a
-    # deliberately small registry.
-    with pytest.raises(PlatformError) as expired:
-        load_registry(today=date(2027, 7, 24))
-    assert expired.value.code == "registry_load_failed:expired_pack"
-    # A pack whose review is in the future is refused too, which is what keeps a mis-dated pack from
-    # quietly loading.
+    # Injected date so currency is deterministic, not a wall-clock time bomb after the window.
+    registry = load_registry(today=date(2026, 7, 25))
+    assert registry.pack_ids == ("programming.minimal", "project.memory", "research.minimal")
+    assert all(registry.currency_of(pack_id) == "current" for pack_id in registry.pack_ids)
+
+    # An expired pack no longer takes the registry -- and with it `serve` and `doctor` -- down on a
+    # date nobody chose. It loads, is marked expired, and degrades where the consequence is visible:
+    # `lookup` stops registering its domains and the request abstains naming the pack.
+    aged = load_registry(today=date(2027, 7, 24))
+    assert aged.pack_ids == registry.pack_ids
+    assert aged.currency_of("research.minimal") == "expired"
+
+    # Verifiability is still all-or-nothing. A review dated in the future is not an aged pack; it is
+    # a pack whose dates cannot both be true, and a signing fault is not something to serve through.
     with pytest.raises(PlatformError) as future:
         load_registry(today=date(2026, 7, 24))
     assert future.value.code == "registry_load_failed:future_review"
+
+
+def test_the_bundled_registry_still_loads_after_every_pack_has_expired() -> None:
+    """The headline: a date past every bundled pack's expiry must still produce a registry.
+
+    This is the failure the change exists to remove. The packs expire on fixed dates in 2027, and
+    `serve` used to stop on that day for every installation nobody had touched -- unpredictable from
+    anything the user did, and unfixable by them, since only the maintainer can re-sign a pack."""
+    registry = load_registry(today=date(2027, 8, 1))
+
+    assert registry.pack_ids == ("programming.minimal", "project.memory", "research.minimal")
+    assert all(registry.currency_of(pack_id) == "expired" for pack_id in registry.pack_ids)
 
 
 def test_real_index_then_load_deps_produces_a_working_service_deps(tmp_path: Path) -> None:
@@ -343,6 +358,66 @@ def test_the_bundled_registry_resolves_only_the_domains_it_should() -> None:
     assert supported == {"programming", "general"}
     # The property that must never quietly change: the professional domains still refuse.
     assert supported & {"law", "accounting", "cybersecurity", "ux_design", "unsupported"} == set()
+
+
+def test_an_expired_pack_stops_registering_its_domains_and_names_itself(tmp_path: Path) -> None:
+    """What an expired domain pack costs, stated exactly: its domains, and nothing else.
+
+    This is the domain-pack half of what `dispatch` already does to an expired skill -- demote it
+    out of the vetted set rather than delete it. The domains stop resolving, so a request that used
+    to be routed by the pack abstains; the pack id survives in the lookup so the abstention can name
+    the review that lapsed, which is the only part an operator can act on."""
+    import typing
+
+    from bruriah.classify import Domain, RequestClassification
+    from bruriah.lookup import discover
+
+    def _supported(registry) -> set[str]:
+        return {
+            domain
+            for domain in typing.get_args(Domain)
+            if discover(
+                RequestClassification(intent="investigate", domain=domain, claim_type="factual",
+                                      risk="low", jurisdiction="unknown"),
+                registry,
+            ).domain_supported
+        }
+
+    assert _supported(load_registry(today=_TODAY)) == {"programming", "general"}
+
+    expired = load_registry(today=date(2027, 8, 1))
+    assert _supported(expired) == set()
+    lookup = discover(
+        RequestClassification(intent="investigate", domain="programming", claim_type="factual",
+                              risk="low", jurisdiction="unknown"),
+        expired,
+    )
+    assert lookup.expired_pack_ids == ("programming.minimal", "project.memory")
+    assert lookup.stale_pack_ids == () and lookup.sources == ()
+
+
+def test_load_deps_still_assembles_a_working_service_after_every_pack_expires(
+    tmp_path: Path,
+) -> None:
+    """The headline, at the level a user meets it: `serve` starts on a date past every expiry.
+
+    `load_deps` is what `serve` calls, and it used to raise `registry_load_failed:expired_pack`
+    here -- on an installation nobody had touched, for a reason the user could neither predict nor
+    fix. The snapshot, the skills and the ceiling all still load; what changed is that an aged pack
+    now degrades one request at a time instead of taking the process with it."""
+    data_dir = tmp_path / "data"
+    config = _build_and_promote(tmp_path, data_dir)
+    paths = resolve_paths(cli_data_dir=data_dir, cli_config_dir=tmp_path / "config", env={})
+    write_build_descriptor(paths, config)
+
+    deps = load_deps(paths, today=date(2027, 8, 1))
+    try:
+        assert deps.registry.pack_ids == (
+            "programming.minimal", "project.memory", "research.minimal")
+        assert deps.snapshot.build_id
+        assert deps.skill_ceiling == DEFAULT_SKILL_CEILING
+    finally:
+        deps.snapshot.database.close()
 
 
 def test_the_retired_test_signer_is_no_longer_trusted() -> None:

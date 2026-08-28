@@ -112,10 +112,38 @@ class LookupResult:
     sources: tuple[SourceMatch, ...]
     capabilities: tuple[CapabilityPolicy, ...]
     skills: tuple[SkillMatch, ...] = ()
+    # Packs that declare this domain and whose review window has passed. Both default empty, so a
+    # registry that made no currency claim produces the exact `LookupResult` it always did.
+    stale_pack_ids: tuple[str, ...] = ()
+    expired_pack_ids: tuple[str, ...] = ()
 
 
 def _domain_applicable_pack_ids(registry: Registry, domain: str) -> frozenset[str]:
-    return frozenset(pack.pack_id for pack in registry.packs if domain in pack.domains)
+    """The packs that declare `domain` AND may still speak for it.
+
+    An EXPIRED pack is dropped here, which is what makes the domain read as unregistered downstream:
+    `domain_supported` goes false, no source of that pack's is offered, and `route` abstains. That is
+    the domain-pack equivalent of what `dispatch` already does to an expired skill -- demote it out
+    of the vetted set rather than delete it -- and it is deliberately not the same as pretending the
+    pack was never installed: the id is preserved in `expired_pack_ids` so the abstention can NAME
+    the pack whose review lapsed, which is the one thing that tells an operator what to fix.
+
+    A STALE pack still speaks. Stale means the review is due, not that it is void; the honest
+    response is to answer and say so, and `service` emits a `pack_stale:` gap alongside the answer.
+    Drawing the line anywhere else would collapse two different facts into one behaviour."""
+    return frozenset(
+        pack.pack_id
+        for pack in registry.packs
+        if domain in pack.domains and registry.currency_of(pack.pack_id) != "expired"
+    )
+
+
+def _degraded_pack_ids(registry: Registry, domain: str, currency: str) -> tuple[str, ...]:
+    return tuple(
+        pack.pack_id
+        for pack in registry.packs
+        if domain in pack.domains and registry.currency_of(pack.pack_id) == currency
+    )
 
 
 def _pack_id_by_source_id(registry: Registry) -> dict[str, str]:
@@ -162,6 +190,8 @@ def discover(
     return LookupResult(
         domain_supported=domain_supported, sources=sources, capabilities=capabilities,
         skills=_domain_applicable_skills(skill_set, classification.domain),
+        stale_pack_ids=_degraded_pack_ids(registry, classification.domain, "stale"),
+        expired_pack_ids=_degraded_pack_ids(registry, classification.domain, "expired"),
     )
 
 

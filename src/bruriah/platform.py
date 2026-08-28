@@ -290,25 +290,35 @@ def load_active_skills(paths: PlatformPaths, today: date | None = None) -> Skill
 
 def load_registry(today: date | None = None) -> Registry:
     """Load every bundled domain pack into a `Registry`. `today` is injectable (default: real date)
-    so the fail-closed freshness/expiry check is deterministic in tests instead of a wall-clock time
-    bomb; production uses the real date, surfacing an expired bundled pack as `registry_load_failed`.
+    so currency is deterministic in tests instead of a wall-clock time bomb.
 
-    Loading is all-or-nothing: one unverifiable pack fails the whole registry rather than serving a
-    partial one, because a caller cannot tell a deliberately small registry from a silently truncated
-    one. The packs are loaded in a fixed order so the reported code is deterministic when more than
-    one is bad."""
+    Loading is all-or-nothing on VERIFIABILITY: one pack with a bad signature, a wrong digest, a
+    malformed schema or a review dated in the future fails the whole registry rather than serving a
+    partial one, because a caller cannot tell a deliberately small registry from a silently
+    truncated one. The packs are loaded in a fixed order so the reported code is deterministic when
+    more than one is bad.
+
+    Aging is NOT loaded all-or-nothing, and that is the difference `enforce_currency=False` buys.
+    The bundled packs carry fixed expiry dates, so under the old gate the day the first one passed
+    took `serve` and `doctor` down on every installation nobody had touched -- an outcome the user
+    could neither predict from anything they did nor fix, since only the maintainer can re-sign a
+    pack. The registry now loads, each pack's review window is assessed and recorded, and the
+    consequence lands where it is visible and scoped: `lookup` stops registering an expired pack's
+    domains and the request abstains naming it, while a stale pack still answers and says so.
+    Re-signing is still the fix; it is no longer the only thing standing between a user and a
+    server that starts."""
     try:
         roots = json.loads((_BUNDLED_DATA / "trust-roots.json").read_text(encoding="utf-8"))
         packs = [
             load_pack(
                 _BUNDLED_DATA / f"{name}.json", _BUNDLED_DATA / f"{name}.manifest.json", roots,
-                today=today,
+                today=today, enforce_currency=False,
             )
             for name in _BUNDLED_PACKS
         ]
     except PackError as error:
         raise PlatformError(f"registry_load_failed:{error.code}") from error
-    return Registry.from_packs(packs)
+    return Registry.from_packs(packs, today=today or date.today())
 
 
 def open_snapshot(paths: PlatformPaths) -> ActiveSnapshot:
