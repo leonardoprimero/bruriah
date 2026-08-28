@@ -49,7 +49,7 @@ from .contracts import (
 )
 from .dispatch import DEFAULT_SKILL_CEILING, SkillDispatch, dispatch
 from .index import ActiveSnapshot
-from .lookup import SkillMatch, discover, resolve_capability
+from .lookup import LookupResult, SkillMatch, discover, resolve_capability
 from .packs import CapabilityPolicy
 from .skills import PermissionEnvelope, SkillSet
 from .registries import Registry
@@ -245,6 +245,25 @@ def _drafting_action(classification, dispatched) -> HostAction | None:
     )
 
 
+def _pack_currency_gaps(lookup: LookupResult) -> list[str]:
+    """Name the domain packs whose review window has passed, whatever the request goes on to do.
+
+    An expired pack no longer registers its domains (`lookup._domain_applicable_pack_ids`), so the
+    request abstains with `no_approved_domain_pack` -- which, on its own, is indistinguishable from
+    a domain this tool never covered. It is not the same situation at all, and only the operator
+    can tell the difference matters: one is out of scope, the other is a review that lapsed and a
+    pack that can be re-signed. The gap names the pack so the abstention says which.
+
+    A stale pack still answers; the gap rides alongside the result rather than instead of it, which
+    is the whole distinction between "the review is due" and "the review is void". Both are emitted
+    on every outcome, because an aged pack is a fact about the installation and not about whether
+    this particular request happened to reach retrieval."""
+    return [
+        *(f"pack_expired:{pack_id}" for pack_id in lookup.expired_pack_ids),
+        *(f"pack_stale:{pack_id}" for pack_id in lookup.stale_pack_ids),
+    ]
+
+
 def _skill_outcomes(entries: tuple[SkillDispatch, ...]) -> tuple[list[str], list[HostAction]]:
     """Turn availability into gaps and host actions. Divergence is never reported as approved."""
     gaps: list[str] = []
@@ -389,6 +408,7 @@ def investigate(request: InvestigationRequest, deps: ServiceDeps) -> Investigati
     opted_in = request.host_skills is not None
     lookup = discover(classification, deps.registry, deps.skill_set if opted_in else None)
     decision = route(classification, lookup, request)
+    pack_gaps = _pack_currency_gaps(lookup)
 
     if decision.outcome != "proceed":
         # `assemble_context`'s `_request_id` recomputes the identical content-hash formula this
@@ -396,10 +416,10 @@ def investigate(request: InvestigationRequest, deps: ServiceDeps) -> Investigati
         # -> sha256:), so delegating here keeps `request_id` byte-identical to a manually built
         # result -- `mode="full"` still routes to the route-gated branch because `assemble_context`
         # gates on `decision.outcome`, not on `mode`, whenever it isn't already "proceed".
-        return assemble_context(request, decision, mode="full")
+        return assemble_context(request, decision, mode="full", extra_gaps=pack_gaps)
 
     evidence, warnings, degradation, status, host_actions = [], [], [], decision.outcome, []
-    extra_gaps: list[str] = []
+    extra_gaps: list[str] = list(pack_gaps)
     if decision.outcome == "proceed":
         # Capability evidence (Slice 7A-2): one EvidenceRecord per matched `lookup.capabilities`
         # entry -- "Method and tool discovery" requires capability refs alongside knowledge, not

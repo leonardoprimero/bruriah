@@ -8,6 +8,7 @@ from datetime import date
 
 from .contracts import HostSkill
 from .lookup import LookupResult, SkillMatch
+from .packs import Currency
 from .skills import pack_currency
 
 # Pure, bounded skill dispatch: decide WHICH vetted skills apply to a request and what the host's
@@ -34,7 +35,6 @@ DEFAULT_SKILL_CEILING = 5
 # every other kind of evidence out of that budget.
 
 Availability = Literal["installed", "not_installed", "digest_divergent"]
-Currency = Literal["current", "stale", "expired"]
 
 
 @dataclass(frozen=True)

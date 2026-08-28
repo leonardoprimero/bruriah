@@ -227,19 +227,21 @@ def test_doctor_is_read_only_and_reports_freshness(tmp_path: Path) -> None:
 
 
 def test_doctor_warns_about_expiry_far_earlier_than_about_staleness(tmp_path: Path) -> None:
-    """Seven days' notice, worded "goes stale", for an event that is a shutdown.
+    """Seven days' notice, worded "goes stale", for a capability the user silently loses.
 
-    A stale pack still works. An expired one fails `load_registry`, which is fail-closed and
-    all-or-nothing, so `serve` and `doctor` both stop on that date -- on an installation nobody
-    touched. The bundled packs set `expires_at` to exactly `reviewed_at + freshness_days`, so the
-    staleness warning fired the same week and looked like it had this covered.
+    A stale pack still answers and says so. An expired one stops registering its domains, so every
+    request that used to be routed by it abstains -- on an installation nobody touched, on a date
+    nobody chose, and only re-signed packs restore it. The bundled packs set `expires_at` to exactly
+    `reviewed_at + freshness_days`, so the staleness warning fired the same week and looked like it
+    had this covered.
     """
     paths = _paths(tmp_path)
     early = cli.run_doctor(paths, today=date(2027, 4, 25), now=_NOW)
     assert early["registry"]["status"] == "ok"
     expiry = [warning for warning in early["warnings"] if "expires in" in warning]
     assert expiry, "no expiry warning three months out"
-    assert "stops serving" in expiry[0], "the warning must say what actually happens"
+    # Naming the consequence, and naming it accurately: the gap a caller will actually receive.
+    assert "abstain" in expiry[0] and "pack_expired:research.minimal" in expiry[0]
     assert not any("goes stale" in warning for warning in early["warnings"]), (
         "staleness is a different, later, milder thing and must not fire this early"
     )
@@ -247,6 +249,25 @@ def test_doctor_warns_about_expiry_far_earlier_than_about_staleness(tmp_path: Pa
     # says nothing, so the warning still means "soon" when it appears.
     earlier = cli.run_doctor(paths, today=date(2027, 4, 20), now=_NOW)
     assert not [warning for warning in earlier["warnings"] if "expires in" in warning]
+
+
+def test_doctor_reports_each_packs_currency_and_stays_healthy_past_expiry(tmp_path: Path) -> None:
+    """`registry: ok` is no longer the same question as every pack in it still being able to speak.
+
+    Past every bundled expiry the registry still loads, so a report that said only `ok` would show
+    nothing at all on the day three domains stopped being routed. The per-pack currency is what
+    connects the two."""
+    paths = _paths(tmp_path)
+
+    report = cli.run_doctor(paths, today=date(2027, 8, 1), now=_NOW)
+
+    assert report["registry"]["status"] == "ok"
+    assert report["registry"]["pack_currency"] == {
+        "programming.minimal": "expired", "project.memory": "expired", "research.minimal": "expired",
+    }
+    assert cli.run_doctor(paths, today=_TODAY, now=_NOW)["registry"]["pack_currency"] == {
+        "programming.minimal": "current", "project.memory": "current", "research.minimal": "current",
+    }
 
 
 def test_doctor_reports_cache_stats_read_only_never_deletes_an_expired_entry(tmp_path: Path) -> None:

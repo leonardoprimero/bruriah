@@ -113,6 +113,7 @@ def _escalation_host_actions(gaps: Sequence[str]) -> list[HostAction]:
 
 def _route_gated_result(
     request: InvestigationRequest, route_decision: RouteDecision, request_id: str, *, forced: bool,
+    extra_gaps: Sequence[str] = (),
 ) -> InvestigationResult:
     """`route_decision.outcome in ("route_only", "abstained")`, or rollback `mode="route_only"`
     forcing a `proceed` decision down to route-only (guarantees #1 and #5): assemble ONLY the
@@ -129,8 +130,8 @@ def _route_gated_result(
             host_actions.append(_CONSEQUENTIAL_ACTION_HOST_ACTION)
     result = InvestigationResult(
         schema_version="1", status=status, request_id=request_id, evidence=[], claims=[],
-        conflicts=[], gaps=list(route_decision.gaps), host_actions=host_actions, warnings=warnings,
-        degradation=degradation, budgets=request.budgets, next_cursor=None,
+        conflicts=[], gaps=[*route_decision.gaps, *extra_gaps], host_actions=host_actions,
+        warnings=warnings, degradation=degradation, budgets=request.budgets, next_cursor=None,
     )
     return compact_to_budget(result, request.budgets.max_output_chars)
 
@@ -315,6 +316,7 @@ def _fallback_result(request: object, code: str) -> InvestigationResult:
 def _assemble_context_inner(
     request: InvestigationRequest, route_decision: RouteDecision, assessments: Sequence[ClaimAssessment],
     evidence_pool: Sequence[EvidenceRecord], research_outcomes: Sequence[ResearchOutcome], *, mode: AssemblyMode,
+    extra_gaps: Sequence[str] = (),
 ) -> InvestigationResult:
     if not isinstance(request, InvestigationRequest):
         raise ContextError("invalid_request_type")
@@ -328,11 +330,15 @@ def _assemble_context_inner(
         raise ContextError("invalid_research_outcomes_type")
     if mode not in ("full", "route_only"):
         raise ContextError("invalid_mode")
+    if not isinstance(extra_gaps, (list, tuple)):
+        raise ContextError("invalid_extra_gaps_type")
 
     request_id = _request_id(request)
 
     if mode == "route_only" or route_decision.outcome != "proceed":
-        return _route_gated_result(request, route_decision, request_id, forced=mode == "route_only")
+        return _route_gated_result(
+            request, route_decision, request_id, forced=mode == "route_only", extra_gaps=extra_gaps,
+        )
 
     return _assembled_result(request, request_id, assessments, evidence_pool, research_outcomes)
 
@@ -345,15 +351,25 @@ def assemble_context(
     research_outcomes: Sequence[ResearchOutcome] = (),
     *,
     mode: AssemblyMode = "full",
+    extra_gaps: Sequence[str] = (),
 ) -> InvestigationResult:
     """Total, typed context-assembly entry point (guarantee #6): never raises. Deterministic --
     identical arguments always yield an identical `InvestigationResult`. Reads only its already-
     computed arguments; performs no I/O, network, install, execution, or wall-clock access of its
     own (guarantee #7). A typed `ContextError` or any unenumerated exception is converted into a
     safe `abstained` result with a named `warnings` reason -- never a manufactured `complete`.
+
+    `extra_gaps` carries facts the ROUTER cannot express. `RouteDecision.gaps` is a closed `Literal`,
+    deliberately, so nothing from a request can be echoed back through it. A gap naming which loaded
+    pack aged out is neither a routing rule nor caller-supplied text, and it is what turns "this
+    domain is not supported" into something an operator can act on -- so it arrives beside the
+    routing gaps instead of being smuggled into their vocabulary.
     """
     try:
-        return _assemble_context_inner(request, route_decision, assessments, evidence_pool, research_outcomes, mode=mode)
+        return _assemble_context_inner(
+            request, route_decision, assessments, evidence_pool, research_outcomes,
+            mode=mode, extra_gaps=extra_gaps,
+        )
     except ContextError as error:
         return _fallback_result(request, error.code)
     except Exception:  # Backstop (#6): no bare exception may ever escape `assemble_context()`.

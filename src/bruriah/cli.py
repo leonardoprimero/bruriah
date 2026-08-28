@@ -252,9 +252,14 @@ def _index_summary_line(result: BuildResult) -> str:
 _FRESHNESS_WARNING_DAYS = 7
 
 # Separate from staleness, and much earlier, because the two mean different things to whoever is
-# reading `doctor`. A stale pack still works. An EXPIRED one stops the whole registry loading --
-# `load_registry` is fail-closed and all-or-nothing -- so `serve` and `doctor` both stop working on
-# that date, on an installation nobody touched and every test of which still passes.
+# reading `doctor`. A stale pack still answers and says so. An EXPIRED one stops registering its
+# domains, so every request that used to be routed by it abstains, carrying a `pack_expired:` gap
+# that names it -- on an installation nobody touched and every test of which still passes.
+#
+# It no longer takes the server down with it: `load_registry` loads an aged pack and records its
+# currency rather than refusing. The warning stays, and stays this early, because the consequence
+# is still a capability the user silently loses on a date they did not choose, and re-signed packs
+# are still the only thing that restores it.
 #
 # The bundled packs happen to set `expires_at` equal to `reviewed_at + freshness_days`, so the
 # staleness warning fired on the same day and looked like coverage. It was seven days of notice,
@@ -302,7 +307,15 @@ def run_doctor(
     }
     try:
         registry = load_registry(effective_today)
-        report["registry"] = {"status": "ok", "pack_ids": list(registry.pack_ids)}
+        report["registry"] = {
+            "status": "ok", "pack_ids": list(registry.pack_ids),
+            # Per pack, because the registry loading is no longer the same question as every pack
+            # in it still being able to speak. Without this the operator sees `status: ok` on the
+            # day a domain stopped being routed and has nothing to connect the two.
+            "pack_currency": {
+                pack_id: registry.currency_of(pack_id) for pack_id in registry.pack_ids
+            },
+        }
         for pack in registry.packs:
             days_left = (pack.reviewed_at + timedelta(days=pack.freshness_days) - effective_today).days
             if days_left <= _FRESHNESS_WARNING_DAYS:
@@ -311,7 +324,8 @@ def run_doctor(
             if expires_in <= _EXPIRY_WARNING_DAYS:
                 report["warnings"].append(
                     f"pack {pack.pack_id} expires in {expires_in} day(s), on {pack.expires_at}; "
-                    "after that bruriah stops serving until it ships re-signed packs -- upgrade "
+                    f"after that, requests in {', '.join(pack.domains)} abstain with a "
+                    f"pack_expired:{pack.pack_id} gap until re-signed packs ship -- upgrade "
                     "before then"
                 )
     except PlatformError as error:

@@ -205,10 +205,39 @@ def verify_manifest(
     except OSError as error:
         raise PackError("malformed_manifest") from error
     return verify_manifest_bytes(raw, manifest_raw, trust_roots, pack_id, version)
-def check_review_window(reviewed_at: date, expires_at: date, freshness_days: int, now: date) -> None:
-    """Fixed order: future_review -> expired_pack -> stale_pack."""
+Currency = Literal["current", "stale", "expired"]
+
+
+def pack_currency(pack: object, today: date) -> Currency:
+    """`current`, `stale`, or `expired` for a loaded pack -- domain pack or skill pack alike.
+
+    The same three words `EvidenceRecord.freshness` already uses, so an aged pack reports its state
+    in the vocabulary the contract has always spoken rather than in a new one. It reads only the
+    three review-window fields both pack shapes declare, which is why one function serves both:
+    aging is a property of a review date, not of what the pack contains."""
+    if pack.expires_at < today:
+        return "expired"
+    if pack.reviewed_at + timedelta(days=pack.freshness_days) < today:
+        return "stale"
+    return "current"
+
+
+def check_review_window(
+    reviewed_at: date, expires_at: date, freshness_days: int, now: date,
+    *, enforce_currency: bool = True,
+) -> None:
+    """Fixed order: future_review -> expired_pack -> stale_pack.
+
+    `future_review` is outside what `enforce_currency` relaxes, and the split is the point of the
+    keyword. Aging is what a serving path must be allowed to survive: a review that came due while
+    the pack was in service is a statement about the review, answered by disclosing it rather than
+    by refusing to start. A review dated in the FUTURE is not an aged pack -- it is a pack whose
+    dates cannot both be true, which is a signing fault, and a signing fault is never something to
+    keep serving through."""
     if reviewed_at > now:
         raise PackError("future_review")
+    if not enforce_currency:
+        return
     if expires_at < now:
         raise PackError("expired_pack")
     if reviewed_at + timedelta(days=freshness_days) < now:
@@ -237,7 +266,19 @@ def load_pack(
     domain: str | None = None,
     jurisdiction: str | None = None,
     allow_unsigned_local: bool = False,
+    enforce_currency: bool = True,
 ) -> DomainPack:
+    """Load and verify one domain pack from disk.
+
+    `enforce_currency=False` is for the SERVING path only, and mirrors `load_skill_pack`'s keyword
+    of the same name for the same reason. Signature, digest, schema, router window and version floor
+    are enforced absolutely either way; only aging is relaxed. The bundled packs carry a fixed
+    expiry date, so with the gate on, the day it passes takes `serve` and `doctor` down on every
+    installation nobody touched -- and does it to a user who has no way to re-sign anything. With it
+    off, the registry still loads and an aged pack degrades where the consequence is visible and
+    scoped: `lookup` stops registering an expired pack's domains, and the request abstains naming
+    the pack. Activation still keeps the strict gate: you do not put expired content INTO service,
+    you only keep serving content that expired WHILE in service."""
     raw = read_pack_bytes(pack_path)
     data = parse_pack_bytes(raw, pack_path.suffix.lower())
     encoded = encode_pack(data)
@@ -253,7 +294,10 @@ def load_pack(
     else:
         verify_manifest(raw, manifest_path, trust_roots, pack.pack_id, pack.version)
     now = today or date.today()
-    check_review_window(pack.reviewed_at, pack.expires_at, pack.freshness_days, now)
+    check_review_window(
+        pack.reviewed_at, pack.expires_at, pack.freshness_days, now,
+        enforce_currency=enforce_currency,
+    )
     check_router_compatibility(pack.min_router_version, pack.max_router_version, router_version)
     check_version_floor(pack.pack_id, pack.version, minimum_versions)
     if domain and domain not in pack.domains:

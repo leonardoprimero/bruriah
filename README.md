@@ -376,7 +376,7 @@ Honest state as of 2026-08-14.
 **Working and tested** — 1056 tests pass on a fresh clone on Linux, byte-identical on 3.12, 3.13 and 3.14; 1051 on native Windows, which is those 1056 less the five that skip rather than assert a file mode nobody applied
 - Hybrid retrieval (BM25 + local vectors) over your corpus — both legs are pure Python over ordinary SQLite: BM25 scans the passage table, and the vector leg reads float blobs and scores them by cosine. There is no vec0 table and no ANN index. This line named `sqlite-vec` until 0.4.0, which was never true of the shipped path
 - The two-tool MCP contract, structured output, typed failures
-- Signed policy packs with Ed25519 manifests and fail-closed loading
+- Signed policy packs with Ed25519 manifests and fail-closed loading — signatures, digests and schemas are absolute; an expired review is not, and degrades the pack's domains to abstention rather than stopping the server
 - Domain-gated discovery with explicit abstention
 - Atomic index and skill-set build / promote / rollback
 - The full skill lifecycle from the terminal

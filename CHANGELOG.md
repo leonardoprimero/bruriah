@@ -25,6 +25,29 @@ When no commit carries an explanatory body there is nothing to retrieve, so the 
 and stops with a typed `corpus_has_no_reasoning` instead of building an index of nothing and
 writing client configs that point at it.
 
+### Changed: an expired policy pack degrades instead of stopping `serve`
+
+Every bundled pack carries `expires_at`, and until now `load_registry` was fail-closed and
+all-or-nothing about it: one expired pack failed the whole registry, and `load_deps` builds `serve`
+and `doctor` on top of that. So on **2027-07-23** an installation nobody had touched would simply
+stop starting — unpredictable from anything the user did, and unfixable by them, because only the
+maintainer can re-sign a pack. 0.6.0 added a 90-day warning for that date; a warning is not an
+answer when the thing being warned about is a shutdown the reader cannot prevent.
+
+Aging now degrades where the consequence is visible and scoped, exactly as it already did for
+skills. The registry loads and records each pack's currency. An **expired** pack stops registering
+its domains, so a request that used to be routed by it abstains carrying `pack_expired:<pack_id>`
+alongside `no_approved_domain_pack` — the pack is named, because "this domain is not supported" and
+"this pack's review lapsed" are different situations and only the second one can be fixed. A
+**stale** pack still answers and says so, with a `pack_stale:<pack_id>` gap beside the result.
+
+What did not move: signatures, digests, schemas, the router-version window and the version floor are
+enforced absolutely, and a pack whose review date is in the *future* is still refused outright —
+that is not an aged pack but a pack whose dates cannot both be true. Activation keeps the strict
+gate too: you do not put expired content into service, you only keep serving content that expired
+while in service. `doctor` still warns 90 days ahead, now saying what actually happens, and reports
+each pack's currency; re-signing the packs is still the fix.
+
 ### Changed: a passage is now indexed under the headings it sits beneath
 
 A passage is stored as its own section and nothing more, which is right for quoting it back and
