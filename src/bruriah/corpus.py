@@ -134,6 +134,32 @@ def _metadata(frontmatter: dict[str, Any]) -> SourceMetadata:
     )
 
 
+def _search_text(title: str, heading_path: tuple[str, ...], text: str) -> str:
+    """The passage as the retrieval stages read it: the section under its ancestry.
+
+    A passage holds its own section's lines and nothing more, so the headings it sits beneath are
+    absent from it. A "Windows" section under `# Installation guide` / `## Prerequisites` is a
+    section about installing on Windows in which the word "installation" never occurs, and BM25 can
+    only score terms it was given, so the query the user actually asks cannot reach it. Embedding
+    the same bare fragment loses the same context, in a way that is harder to see.
+
+    The ancestry is therefore prefixed once here, at parse time, and stored BESIDE the text rather
+    than inside it. Only this string is tokenized, embedded and language-sampled; `text` remains the
+    exact section bytes that `read_evidence` slices by character offset, and a prefix there would
+    silently move every offset a caller already holds.
+
+    Two things are dropped where they would only repeat themselves: the section's own heading, which
+    is already the first line of `text`, and the document title when it is the same H1 the heading
+    path starts from. The blank line is a separator, so the last word of a heading and the first
+    word of the body cannot fuse into one token."""
+    own = heading_path[-1] if heading_path else None
+    context: list[str] = []
+    for item in (title, *heading_path[:-1]):
+        if item and item != own and item not in context:
+            context.append(item)
+    return "\n".join([*context, "", text]) if context else text
+
+
 def parse_document(path: Path, root: Path, policy: CorpusPolicy) -> Document:
     reason = policy.exclusion_reason(path, root)
     if reason:
@@ -170,6 +196,17 @@ def parse_document(path: Path, root: Path, policy: CorpusPolicy) -> Document:
     elif not headings and body_start < len(lines):
         headings.append((body_start, 0, ""))
 
+    # The document's own name, for `_search_text` to put every passage under. Markdown carries no
+    # title field this parser reads, so the first H1 is it -- that is what a reader treats as the
+    # document's name, and it is the one heading a lower section is most likely to be missing. A
+    # document without one falls back to its file name, which is the only other thing that is always
+    # present and always about the document.
+    # Named apart from the loops below, which both bind a `title` of their own: this one is the
+    # DOCUMENT's, and a section heading overwriting it would silently empty the prefix.
+    document_title = next(
+        (heading for _, level, heading in headings if level == 1 and heading), Path(relative).stem
+    )
+
     passages: list[Passage] = []
     stack: list[str] = []
     occurrences: dict[tuple[str, ...], int] = {}
@@ -185,6 +222,7 @@ def parse_document(path: Path, root: Path, policy: CorpusPolicy) -> Document:
         occurrences[heading_path] = ordinal + 1
         end = headings[index + 1][0] if index + 1 < len(headings) else len(lines)
         ref = f"chunk:v1:{_digest(relative, *heading_path, str(ordinal), '0')}"
+        body = "".join(lines[start:end])
         passages.append(
             Passage(
                 ref,
@@ -193,7 +231,8 @@ def parse_document(path: Path, root: Path, policy: CorpusPolicy) -> Document:
                 heading_path,
                 start + 1,
                 end,
-                "".join(lines[start:end]),
+                body,
+                _search_text(document_title, heading_path, body),
                 source_hash,
                 metadata,
             )

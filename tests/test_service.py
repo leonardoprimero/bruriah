@@ -62,7 +62,7 @@ def _snapshot_for(tmp_path: Path, notes: dict[str, str]):
     policy_path.write_text("version: 1\ninclude: ['public/**']\nexclude: []\n", encoding="utf-8")
     policy = CorpusPolicy.load(policy_path)
     config = BuildConfig(
-        root=tmp_path / "vault", policy_path=policy_path, schema_version=1, parser_version="corpus-v1",
+        root=tmp_path / "vault", policy_path=policy_path, schema_version=1, parser_version="corpus-v2",
         service_version="0.1.0", mcp_range=">=1.28.1,<2", embedding_model="test/minilm",
         embedding_revision="snapshot-a", embedding_dimensions=3, embedding_fingerprint=FINGERPRINT,
         ranking_config="rrf-v1",
@@ -437,6 +437,31 @@ def test_read_resolves_real_ref_with_exact_content(deps) -> None:
     assert item.status == "ok"
     assert item.digest == evidence.digest
     assert item.content and item.truncated is False
+
+
+def test_read_returns_the_section_bytes_not_the_string_retrieval_scored(tmp_path: Path) -> None:
+    """Retrieval reads a passage under its heading ancestry; `read` must not.
+
+    The two live in separate columns for exactly this reason. `read` slices by 1-indexed character
+    offsets into the passage, and callers hold those offsets across requests -- a cursor from one
+    call is resumed in the next -- so prefixing the stored text with anything would move every
+    offset that was already handed out, silently, and quote back lines the document does not have
+    at those positions. This asserts the offsets still land in the section itself."""
+    body = "# Installation guide\n\n## Prerequisites\n\n### Windows\n\nRun the installer.\n"
+    with _snapshot_for(tmp_path, {"guide.md": body}) as active:
+        ref, text = active.database.execute(
+            "SELECT ref, text FROM passages WHERE search_text != text ORDER BY ref LIMIT 1"
+        ).fetchone()
+        service_deps = ServiceDeps(registry=_real_registry(), snapshot=active)
+
+        whole = read(ReadRequest(refs=[ref]), service_deps).items[0]
+        window = read(
+            ReadRequest(refs=[ref], ranges=[ReadRange(ref=ref, start=1, end=3)]), service_deps
+        ).items[0]
+
+    assert whole.status == "ok" and whole.content == text
+    assert "Installation guide\n" not in whole.content  # the ancestry stayed out of the bytes
+    assert window.content == text[:3]  # offsets index the section, not a prefixed copy of it
 
 
 def test_read_never_substitutes_evidence_across_refs(deps) -> None:

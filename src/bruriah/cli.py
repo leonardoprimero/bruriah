@@ -128,7 +128,7 @@ def main() -> None:
             arguments.root,
             arguments.policy,
             1,
-            "corpus-v1",
+            "corpus-v2",
             "0.1.0",
             ">=1.28.1,<2",
             arguments.model,
@@ -207,13 +207,13 @@ def run_index(
     embed, fingerprint, dimensions = embedder_factory(model_name)
     revision = json.loads(fingerprint)["snapshot"]
     # `service_version` is NOT `bruriah.__version__` and must not be wired to it. It belongs to the
-    # same family as `parser_version="corpus-v1"` and `ranking_config="rrf-v1"`: a symbolic marker of
+    # same family as `parser_version="corpus-v2"` and `ranking_config="rrf-v1"`: a symbolic marker of
     # the snapshot contract, carried into the `expected` metadata that `promote_candidate` validates
     # (`index.py`). Binding it to the package version would put every release into the index
     # identity, so a patch bump would refuse the user's existing snapshot and force a full re-embed
     # of their corpus. It moves when the snapshot contract moves, and it has not moved.
     config = BuildConfig(
-        root=root, policy_path=policy_path, schema_version=1, parser_version="corpus-v1",
+        root=root, policy_path=policy_path, schema_version=1, parser_version="corpus-v2",
         service_version="0.1.0", mcp_range=">=1.28.1,<2", embedding_model=model_name,
         embedding_revision=revision, embedding_dimensions=dimensions,
         embedding_fingerprint=fingerprint, ranking_config="rrf-v1",
