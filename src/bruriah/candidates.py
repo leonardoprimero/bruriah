@@ -7,7 +7,6 @@ import re
 import tempfile
 import unicodedata
 from dataclasses import dataclass
-from datetime import date
 from pathlib import Path
 
 from .packs import MAX_PACK_BYTES, PackError, parse_pack_bytes

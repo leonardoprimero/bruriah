@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from datetime import date
 from pathlib import Path
 
-from .candidates import AnalysisReport, CandidateError, analyze_candidate
+from .candidates import CandidateError, analyze_candidate
 
 # Human approval: the second of the two STRONG axes in this project's trust model, the other being
 # the permission envelope. A signature says who published a skill; only this says a person read it.
