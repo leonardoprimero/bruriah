@@ -228,7 +228,8 @@ def _assess_claim_inner(
         return ClaimAssessment(claim_text=claim_text, state="insufficient", jurisdiction=jurisdiction,
                                 uncertainty=["no_evidence"])
 
-    applicable, non_applicable = [], []
+    applicable: list[EvidenceClaim] = []
+    non_applicable: list[EvidenceClaim] = []
     for item in evidence_claims:
         (applicable if _is_applicable(item, jurisdiction, as_of, requested_version) else non_applicable).append(item)
     non_applicable_refs = [item.envelope.record.ref for item in non_applicable]

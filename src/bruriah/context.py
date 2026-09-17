@@ -177,10 +177,10 @@ def _assembled_result(
 
     evidence: list[EvidenceRecord] = []
     for ref in referenced_refs:
-        record = evidence_by_ref.get(ref)
-        if record is None:
+        item = evidence_by_ref.get(ref)
+        if item is None:
             raise ContextError("evidence_ref_not_in_pool")
-        evidence.append(record)
+        evidence.append(item)
 
     degradation: list[str] = []
     seen_evidence_refs = {item.ref for item in evidence}
