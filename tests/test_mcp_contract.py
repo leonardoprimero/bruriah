@@ -11,12 +11,14 @@
 from __future__ import annotations
 
 import json
+import threading
 from array import array
 from contextlib import contextmanager
 from datetime import date
 from pathlib import Path
 
 import anyio
+import pytest
 from bruriah.corpus import CorpusPolicy
 from bruriah.index import BuildConfig, build_candidate, promote_candidate, snapshot_active
 from bruriah.mcp_server import INVESTIGATE_TOOL, READ_TOOL, build_server
@@ -305,3 +307,31 @@ def test_cross_field_validators_still_run_on_the_json_path(tmp_path) -> None:
 
     with _deps_for(tmp_path, _default_notes()) as deps:
         anyio.run(_drive, deps, body)
+
+
+def test_tool_execution_is_offloaded_to_worker_thread(tmp_path) -> None:
+    event_loop_thread: threading.Thread | None = None
+    execution_threads: list[threading.Thread] = []
+
+    async def body(session) -> None:
+        nonlocal event_loop_thread
+        event_loop_thread = threading.current_thread()
+        result = await session.call_tool(INVESTIGATE_TOOL, {"task": _TASK})
+        assert result.isError is False
+
+    with _deps_for(tmp_path, _default_notes()) as deps:
+        import bruriah.mcp_server
+        real_handler = bruriah.mcp_server._handle_investigate
+
+        def wrapped_handler(*args, **kwargs):
+            execution_threads.append(threading.current_thread())
+            return real_handler(*args, **kwargs)
+
+        with pytest.MonkeyPatch.context() as mp:
+            mp.setattr(bruriah.mcp_server, "_handle_investigate", wrapped_handler)
+            anyio.run(_drive, deps, body)
+
+    assert event_loop_thread is not None
+    assert len(execution_threads) == 1
+    assert execution_threads[0] != event_loop_thread
+
