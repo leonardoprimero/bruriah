@@ -10,7 +10,6 @@ import uuid
 import warnings
 from array import array
 from collections.abc import Callable
-from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
@@ -19,21 +18,63 @@ import mcp.server.stdio
 import yaml
 from fastembed import TextEmbedding
 
-from . import __version__, cache, clients, gitcorpus
+from . import __version__, clients, gitcorpus
+from ._cli.common import CliError, resolve_cli_paths as _resolve_paths
+from ._cli.doctor import cmd_doctor as _cmd_doctor, run_doctor
+from ._cli.skills import (
+    cmd_skill_activate as _cmd_skill_activate,
+    cmd_skill_analyze as _cmd_skill_analyze,
+    cmd_skill_approve as _cmd_skill_approve,
+    cmd_skill_ingest as _cmd_skill_ingest,
+    cmd_skill_prune as _cmd_skill_prune,
+    cmd_skill_rollback as _cmd_skill_rollback,
+    cmd_skill_sign as _cmd_skill_sign,
+    cmd_skill_status as _cmd_skill_status,
+    run_skill_activate,
+    run_skill_analyze,
+    run_skill_approve,
+    run_skill_ingest,
+    run_skill_prune,
+    run_skill_rollback,
+    run_skill_sign,
+    run_skill_status,
+)
 from .corpus import CorpusPolicy, CorpusPolicyError
 from .index import (
     BuildConfig, BuildResult, Embedder, IndexLifecycleError, active_database, build_candidate,
     promote_candidate, prune_generations,
 )
 from .mcp_server import build_server
-from . import approvals, candidates, platform as platform_module, signing, skillset
 from .platform import (
     PlatformError, PlatformPaths, ensure_private_dirs, load_build_descriptor, load_deps,
-    load_registry, open_snapshot, resolve_paths, write_build_descriptor,
+    resolve_paths, write_build_descriptor,
 )
 from .contracts import InvestigationRequest, ReadRequest
 from .retrieval import Rerank
 from .service import ServiceDeps, investigate, read
+
+__all__ = [
+    "CliError",
+    "EmbedderFactory",
+    "RerankerFactory",
+    "bruriah_main",
+    "build_serve_deps",
+    "main",
+    "resolve_paths",
+    "run_bootstrap",
+    "run_client_configs",
+    "run_doctor",
+    "run_index",
+    "run_init",
+    "run_skill_activate",
+    "run_skill_analyze",
+    "run_skill_approve",
+    "run_skill_ingest",
+    "run_skill_prune",
+    "run_skill_rollback",
+    "run_skill_sign",
+    "run_skill_status",
+]
 
 # Slice 8A-2: `bruriah {init,serve,index,doctor}` over Slice 8A-1's `platform.py` loader.
 # `_embedding_fingerprint`/`main` below stay unchanged (Slice-3 entry point, imported by name).
@@ -56,14 +97,6 @@ EmbedderFactory = Callable[[str], tuple[Embedder, str, int]]
 # against here -- a reranker touches no stored vector, so it cannot be mismatched with the
 # snapshot and needs no fingerprint pinned in the build descriptor.
 RerankerFactory = Callable[[str], Rerank]
-
-
-class CliError(ValueError):
-    """Typed failure for every `bruriah` command, mirroring `PlatformError`/`ServiceError`."""
-
-    def __init__(self, code: str):
-        self.code = code
-        super().__init__(code)
 
 
 def _embedding_fingerprint(model: TextEmbedding) -> str:
@@ -250,101 +283,7 @@ def _index_summary_line(result: BuildResult) -> str:
     )
 
 
-_FRESHNESS_WARNING_DAYS = 7
 
-# Separate from staleness, and much earlier, because the two mean different things to whoever is
-# reading `doctor`. A stale pack still answers and says so. An EXPIRED one stops registering its
-# domains, so every request that used to be routed by it abstains, carrying a `pack_expired:` gap
-# that names it -- on an installation nobody touched and every test of which still passes.
-#
-# It no longer takes the server down with it: `load_registry` loads an aged pack and records its
-# currency rather than refusing. The warning stays, and stays this early, because the consequence
-# is still a capability the user silently loses on a date they did not choose, and re-signed packs
-# are still the only thing that restores it.
-#
-# The bundled packs happen to set `expires_at` equal to `reviewed_at + freshness_days`, so the
-# staleness warning fired on the same day and looked like coverage. It was seven days of notice,
-# worded "goes stale", for an event that is a shutdown. Ninety gives time to notice, upgrade, or
-# ask; `tests/test_packaging.py` warns the maintainer earlier still.
-_EXPIRY_WARNING_DAYS = 90
-
-
-def run_doctor(
-    paths: PlatformPaths, *, today: date | None = None, now: datetime | None = None,
-) -> dict[str, Any]:
-    """Read-only: resolved dirs, registry load, snapshot open, cache stats. Never creates/writes
-    anything -- including the cache: `cache.cache_stats` only reads (never calls
-    `cache.prune_expired`), so a mutating prune stays out of `doctor` entirely (Slice 12D).
-    Adds an early WARNING within `_FRESHNESS_WARNING_DAYS` of pack staleness; the hard
-    fail-closed staleness/expiry check in `load_registry` itself is unchanged."""
-    effective_today = today or date.today()
-    effective_now = now or datetime.now(timezone.utc)
-    report: dict[str, Any] = {
-        "config_dir": str(paths.config_dir), "data_dir": str(paths.data_dir),
-        "dirs_exist": {
-            "config": paths.config_dir.is_dir(), "data": paths.data_dir.is_dir(),
-            "cache": paths.cache_dir.is_dir(), "log": paths.log_dir.is_dir(),
-        },
-        "network_enabled": paths.network_enabled,
-        # Surfaced because six first-party skills ship and the default admits five: without this,
-        # the operator sees `skill_ceiling_exceeded:1` in a response and has no way to learn what
-        # the number is, let alone that it is theirs to change.
-        "skill_ceiling": paths.skill_ceiling,
-        # Every site that narrows permissions is already guarded by `os.name == "posix"`, so on
-        # Windows those calls correctly do nothing rather than pretending -- `os.chmod` there only
-        # toggles a read-only attribute and would be theatre. What was missing is that the user had
-        # no way to LEARN this. In practice the data lives under the per-user profile directory,
-        # whose inherited ACL already denies other standard users, so the protection is real; it is
-        # just not the one the code asked for, and not one this process verified. Writing an
-        # explicit DACL was considered and rejected: a hand-rolled ACL that looks restrictive while
-        # inheriting something permissive is precisely the silently-weaker outcome this codebase
-        # refuses everywhere else. Saying so out loud is the honest version.
-        "owner_only_file_modes": os.name == "posix",
-        "warnings": (
-            [] if os.name == "posix" else
-            ["this platform does not enforce owner-only file modes; private data is protected by "
-             "the user profile directory's inherited permissions, which bruriah does not verify"]
-        ),
-    }
-    try:
-        registry = load_registry(effective_today)
-        report["registry"] = {
-            "status": "ok", "pack_ids": list(registry.pack_ids),
-            # Per pack, because the registry loading is no longer the same question as every pack
-            # in it still being able to speak. Without this the operator sees `status: ok` on the
-            # day a domain stopped being routed and has nothing to connect the two.
-            "pack_currency": {
-                pack_id: registry.currency_of(pack_id) for pack_id in registry.pack_ids
-            },
-        }
-        for pack in registry.packs:
-            days_left = (pack.reviewed_at + timedelta(days=pack.freshness_days) - effective_today).days
-            if days_left <= _FRESHNESS_WARNING_DAYS:
-                report["warnings"].append(f"pack {pack.pack_id} goes stale in {days_left} day(s)")
-            expires_in = (pack.expires_at - effective_today).days
-            if expires_in <= _EXPIRY_WARNING_DAYS:
-                report["warnings"].append(
-                    f"pack {pack.pack_id} expires in {expires_in} day(s), on {pack.expires_at}; "
-                    f"after that, requests in {', '.join(pack.domains)} abstain with a "
-                    f"pack_expired:{pack.pack_id} gap until re-signed packs ship -- upgrade "
-                    "before then"
-                )
-    except PlatformError as error:
-        report["registry"] = {"status": "error", "code": error.code}
-    try:
-        snapshot = open_snapshot(paths)
-        snapshot.database.close()
-        report["snapshot"] = {"status": "ok", "build_id": snapshot.build_id}
-    except PlatformError as error:
-        report["snapshot"] = {"status": "error", "code": error.code}
-    stats = cache.cache_stats(paths.cache_dir, now=effective_now)
-    report["cache"] = {
-        "entries": stats.entries, "expired": stats.expired, "total_bytes": stats.total_bytes,
-    }
-    report["healthy"] = (
-        report["registry"].get("status") == "ok" and report["snapshot"].get("status") == "ok"
-    )
-    return report
 
 
 def run_init(paths: PlatformPaths) -> Path:
@@ -499,198 +438,7 @@ async def _serve_stdio(deps: ServiceDeps) -> None:
         await server.run(read_stream, write_stream, server.create_initialization_options())
 
 
-# The skill lifecycle is CLI-confined by design: the MCP surface stays two read-only tools, and
-# every mutation -- ingest, approve, sign -- happens here, run by a human who can see what they are
-# agreeing to. `run_*` carries the behaviour and is directly testable; `_cmd_*` only formats.
 
-_ANALYSIS_LIMITS = (
-    "Structural checks only. An advisory means a person should look at this, never that it is "
-    "dangerous, and the absence of advisories never means it is safe. Whether prose persuades an "
-    "agent to act against you is not observable by inspection; the permission envelope and your own "
-    "reading of the text are what protect you."
-)
-
-
-def run_skill_ingest(paths: PlatformPaths, source: Path) -> dict[str, Any]:
-    """Store a candidate pack privately, addressed by its own content digest."""
-    try:
-        record = candidates.ingest_candidate(source, paths.data_dir)
-    except candidates.CandidateError as error:
-        raise CliError(f"candidate_rejected:{error.code}") from error
-    return {"path": str(record.path), "digest": record.digest,
-            "pack_id": record.pack_id, "version": record.version}
-
-
-def run_skill_analyze(candidate: Path) -> dict[str, Any]:
-    """Report structural findings. The result carries its own limits so that copying the output
-    copies the caveat with it -- a report that travels without its disclaimer becomes a clearance."""
-    try:
-        report = candidates.analyze_candidate(candidate)
-    except candidates.CandidateError as error:
-        raise CliError(f"candidate_rejected:{error.code}") from error
-    return {
-        "digest": report.digest, "pack_id": report.pack_id, "version": report.version,
-        "skill_ids": list(report.skill_ids),
-        "advisories": [
-            {"id": item.identifier, "code": item.code, "skill_id": item.skill_id,
-             "detail": item.detail}
-            for item in report.advisories
-        ],
-        "analysis_limits": _ANALYSIS_LIMITS,
-    }
-
-
-def run_skill_approve(
-    paths: PlatformPaths, candidate: Path, acknowledge: list[str], *, today: date | None = None,
-) -> dict[str, Any]:
-    """Record human approval, bound to each skill's current body digest."""
-    try:
-        records = approvals.approve_candidate(
-            candidate, paths.data_dir, acknowledge=acknowledge, today=today or date.today(),
-        )
-    except approvals.ApprovalError as error:
-        raise CliError(f"approval_refused:{error.code}") from error
-    return {"approved": [record.as_json() for record in records],
-            "analysis_limits": _ANALYSIS_LIMITS}
-
-
-def run_skill_sign(key: Path, signer: str, pack: Path, out: Path | None) -> dict[str, Any]:
-    """Sign a pack through the same `signing` module the release script uses, so a manifest produced
-    here and one produced there cannot drift apart."""
-    try:
-        manifest = signing.sign_pack(key, signer, pack, out)
-    except signing.SigningError as error:
-        raise CliError(f"signing_failed:{error.code}") from error
-    return {"manifest": str(manifest), "signer": signer,
-            "note": "A signature establishes who signed these bytes. It is not a claim that they "
-                    "are correct or safe."}
-
-
-def run_skill_activate(
-    paths: PlatformPaths, candidates_: list[Path], *,
-    allow_unsigned_local: bool = False, today: date | None = None,
-) -> dict[str, Any]:
-    """Compile the named approved candidates into one generation and promote it.
-
-    Candidates are named EXPLICITLY rather than swept up from "everything approved". Approval says
-    "I read this and accept it"; activation says "this goes into service now". A mode that activated
-    everything approved would collapse the two and make approval an implicit activation, which is
-    the exact door the review gate exists to close.
-
-    Compile validates the whole set -- signatures, dates, envelope invariants, and an approval bound
-    to each skill's current digest -- and writes nothing if any of it fails. Promotion then swaps the
-    pointer atomically under a lock, so a reader mid-request keeps serving the previous generation."""
-    if not candidates_:
-        raise CliError("no_candidates_named")
-    skills_dir = paths.data_dir / "skills"
-    skills_dir.mkdir(parents=True, exist_ok=True)
-    sources = [
-        skillset.SkillSource(path, _manifest_for(path), allow_unsigned_local=allow_unsigned_local)
-        for path in candidates_
-    ]
-    try:
-        destination = skillset.generation_path(skills_dir)
-        skillset.compile_skillset(
-            sources, destination, platform_module.load_trust_roots(),
-            approvals.load_approvals(paths.data_dir), today=today,
-        )
-        result = skillset.promote_skillset(
-            destination, skills_dir / "active.json", platform_module.load_trust_roots(),
-            approvals.load_approvals(paths.data_dir), today=today,
-        )
-    except (skillset.SkillSetError, approvals.ApprovalError) as error:
-        raise CliError(f"activation_refused:{error.code}") from error
-    return {"active": str(result.path), "build_id": result.build_id, "durable": result.durable,
-            "skills": list(result.skill_set.skill_ids)}
-
-
-def run_skill_rollback(paths: PlatformPaths, *, today: date | None = None) -> dict[str, Any]:
-    """Restore the most recently retained generation, revalidating it first."""
-    try:
-        result = skillset.rollback_skillset(
-            paths.data_dir / "skills" / "active.json", platform_module.load_trust_roots(),
-            approvals.load_approvals(paths.data_dir), today=today,
-        )
-    except (skillset.SkillSetError, approvals.ApprovalError) as error:
-        raise CliError(f"rollback_refused:{error.code}") from error
-    return {"active": str(result.path), "build_id": result.build_id,
-            "skills": list(result.skill_set.skill_ids)}
-
-
-def run_skill_status(paths: PlatformPaths, *, today: date | None = None) -> dict[str, Any]:
-    """Report what is active and what is sitting on disk. NEVER raises on a broken pointer: status is
-    the command an operator runs precisely when something is wrong."""
-    pointer = paths.data_dir / "skills" / "active.json"
-    state = skillset.open_skillset(
-        pointer, platform_module.load_trust_roots(), approvals.load_approvals(paths.data_dir),
-        today=today,
-    )
-    report: dict[str, Any] = {
-        "active": state.build_id, "skills": list(state.skill_set.skill_ids) if state.skill_set else [],
-        "warning": state.warning,
-    }
-    try:
-        inventory = skillset.list_generations(pointer)
-        report["retained"] = [item.name for item in inventory.retained]
-        report["unreferenced"] = [item.name for item in inventory.unreferenced]
-    except skillset.SkillSetError as error:
-        report["retained"], report["unreferenced"] = [], []
-        # A fresh install has no pointer and that is not a fault. Only report the inventory as
-        # UNAVAILABLE when a pointer exists and could not be read -- conflating "nothing here yet"
-        # with "something is broken" would send an operator looking for a problem that is not there.
-        if pointer.exists() or pointer.is_symlink():
-            report["inventory_unavailable"] = error.code
-    return report
-
-
-def run_skill_prune(paths: PlatformPaths) -> dict[str, Any]:
-    """Delete only unreferenced generations. Refuses entirely without a readable pointer, because
-    nothing can be known to be unreferenced without one."""
-    try:
-        removed = skillset.prune_skillset(paths.data_dir / "skills" / "active.json")
-    except skillset.SkillSetError as error:
-        raise CliError(f"prune_refused:{error.code}") from error
-    return {"removed": [item.name for item in removed]}
-
-
-def _manifest_for(candidate: Path) -> Path | None:
-    manifest = candidate.with_suffix(".manifest.json")
-    return manifest if manifest.is_file() else None
-
-
-def _cmd_skill_activate(args: argparse.Namespace) -> int:
-    result = run_skill_activate(_resolve_paths(args), args.candidate or [],
-                                allow_unsigned_local=args.allow_unsigned_local)
-    print(json.dumps(result, indent=2, sort_keys=True))
-    print(f"Activated {len(result['skills'])} skill(s) as {result['build_id'][:16]}", file=sys.stderr)
-    if not result["durable"]:
-        print("Warning: the directory fsync failed; the pointer is written but less durable.",
-              file=sys.stderr)
-    return 0
-
-
-def _cmd_skill_rollback(args: argparse.Namespace) -> int:
-    result = run_skill_rollback(_resolve_paths(args))
-    print(json.dumps(result, indent=2, sort_keys=True))
-    print(f"Rolled back to {result['build_id'][:16]}", file=sys.stderr)
-    return 0
-
-
-def _cmd_skill_status(args: argparse.Namespace) -> int:
-    result = run_skill_status(_resolve_paths(args))
-    print(json.dumps(result, indent=2, sort_keys=True))
-    if result["warning"]:
-        print(f"Skills layer disabled: {result['warning']}", file=sys.stderr)
-    elif result["active"] is None:
-        print("Skills layer inactive: nothing has been activated.", file=sys.stderr)
-    return 0
-
-
-def _cmd_skill_prune(args: argparse.Namespace) -> int:
-    result = run_skill_prune(_resolve_paths(args))
-    print(json.dumps(result, indent=2, sort_keys=True))
-    print(f"Removed {len(result['removed'])} unreferenced generation(s).", file=sys.stderr)
-    return 0
 
 
 def _cmd_index_prune(args: argparse.Namespace) -> int:
@@ -704,59 +452,7 @@ def _cmd_index_prune(args: argparse.Namespace) -> int:
     return 0
 
 
-def _cmd_skill_ingest(args: argparse.Namespace) -> int:
-    result = run_skill_ingest(_resolve_paths(args), args.pack)
-    print(json.dumps(result, indent=2, sort_keys=True))
-    print(f"Stored candidate at {result['path']}", file=sys.stderr)
-    return 0
 
-
-def _cmd_skill_analyze(args: argparse.Namespace) -> int:
-    result = run_skill_analyze(args.candidate)
-    print(json.dumps(result, indent=2, sort_keys=True))
-    count = len(result["advisories"])
-    print(f"{count} advisor{'y' if count == 1 else 'ies'} for review.", file=sys.stderr)
-    print(_ANALYSIS_LIMITS, file=sys.stderr)
-    return 0
-
-
-def _cmd_skill_approve(args: argparse.Namespace) -> int:
-    result = run_skill_approve(_resolve_paths(args), args.candidate, args.acknowledge or [])
-    print(json.dumps(result, indent=2, sort_keys=True))
-    for record in result["approved"]:
-        print(f"Approved {record['skill_id']} bound to {record['body_digest']}", file=sys.stderr)
-    return 0
-
-
-def _cmd_skill_sign(args: argparse.Namespace) -> int:
-    result = run_skill_sign(args.key, args.signer, args.pack, args.out)
-    print(json.dumps(result, indent=2, sort_keys=True))
-    print(f"Wrote manifest to {result['manifest']}", file=sys.stderr)
-    return 0
-
-
-def _resolve_paths(args: argparse.Namespace) -> PlatformPaths:
-    try:
-        paths = resolve_paths(
-            cli_config_dir=args.config_dir, cli_data_dir=args.data_dir,
-            cli_cache_dir=args.cache_dir, cli_log_dir=args.log_dir,
-            cli_network_enabled=args.network_enabled,
-            cli_skill_ceiling=getattr(args, "skill_ceiling", None),
-        )
-    except PlatformError as error:
-        raise CliError(error.code) from error
-    # fastembed's own default model cache is `tempfile.gettempdir()/fastembed_cache`, and macOS
-    # purges the temp tree on its own schedule -- so "the model downloads once" held only until
-    # the OS decided otherwise, and the re-download then happened silently on whatever network was
-    # present. Pinned under this tool's private `cache_dir` instead, where its other caches
-    # already live (`cache.py` only ever touches top-level `*.json` there, so a subdirectory is
-    # outside its deletion control by construction). `setdefault`, not assignment:
-    # FASTEMBED_CACHE_PATH is fastembed's documented operator knob, and an operator who set it
-    # keeps it. Set here because every command funnels through this resolver before any factory
-    # constructs a model, which lets both factories keep the one-argument shape every injected
-    # test fake shares.
-    os.environ.setdefault("FASTEMBED_CACHE_PATH", str(paths.cache_dir / "models"))
-    return paths
 
 
 def _cmd_init(
@@ -1002,11 +698,7 @@ def _cmd_ask(
         deps.snapshot.database.close()
 
 
-def _cmd_doctor(args: argparse.Namespace) -> int:
-    paths = _resolve_paths(args)
-    report = run_doctor(paths)
-    print(json.dumps(report, sort_keys=True))
-    return 0 if report["healthy"] else 1
+
 
 
 def _add_platform_arguments(parser: argparse.ArgumentParser) -> None:
