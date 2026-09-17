@@ -852,3 +852,66 @@ def test_concurrent_readers_and_promoters_keep_complete_history(tmp_path: Path) 
     assert observed == {result.build_id for result in results}
 
 
+def test_lineage_table_records_supersessions_and_resolves_predecessors(tmp_path: Path) -> None:
+    root = tmp_path / "corpus"
+    root.mkdir()
+    policy_path = tmp_path / "policy.yaml"
+    policy_path.write_text("version: 1\ninclude: ['**']\nexclude: []\n", encoding="utf-8")
+    policy = CorpusPolicy.load(policy_path)
+
+    doc1_content = (
+        "---\ncommit: a1b2c3d4e5f6\n---\n"
+        "# Initial Decision\n\n**Decided:** 2026-01-01 · **Commit:** `a1b2c3d4e5f6` · **Author:** Alice\n\n"
+        "Original architecture reasoning.\n"
+    )
+    (root / "doc1.md").write_text(doc1_content, encoding="utf-8")
+
+    doc2_content = (
+        "---\ncommit: f6e5d4c3b2a1\nsupersedes:\n  - a1b2c3d4e5f6\ndeprecates:\n  - deadbeef0000\n---\n"
+        "# Replacement Decision\n\n**Decided:** 2026-02-01 · **Commit:** `f6e5d4c3b2a1` · **Author:** Bob\n\n"
+        "New architecture reasoning that replaces the initial one.\n"
+    )
+    (root / "doc2.md").write_text(doc2_content, encoding="utf-8")
+
+    destination = tmp_path / "candidate.sqlite3"
+    build_candidate(config(root, policy_path), destination, policy, fake_embeddings)
+
+    with closing(sqlite3.connect(destination)) as db:
+        rows = db.execute(
+            "SELECT successor_ref, predecessor_target, predecessor_ref, relation FROM lineage ORDER BY relation DESC"
+        ).fetchall()
+        assert len(rows) == 2
+        # supersedes row
+        succ_ref, pred_target, pred_ref, rel = rows[0]
+        assert rel == "supersedes"
+        assert pred_target == "a1b2c3d4e5f6"
+        assert pred_ref is not None and pred_ref.startswith("doc:v1:")
+        assert succ_ref.startswith("doc:v1:")
+        # deprecates row
+        _, dep_target, dep_ref, dep_rel = rows[1]
+        assert dep_rel == "deprecates"
+        assert dep_target == "deadbeef0000"
+        assert dep_ref is None  # not in corpus
+
+
+def test_lineage_detects_and_rejects_cycles(tmp_path: Path) -> None:
+    root = tmp_path / "corpus"
+    root.mkdir()
+    policy_path = tmp_path / "policy.yaml"
+    policy_path.write_text("version: 1\ninclude: ['**']\nexclude: []\n", encoding="utf-8")
+    policy = CorpusPolicy.load(policy_path)
+
+    (root / "doc1.md").write_text(
+        "---\ncommit: 111111111111\nsupersedes:\n  - 222222222222\n---\n# Doc 1\n\nBody 1.\n",
+        encoding="utf-8",
+    )
+    (root / "doc2.md").write_text(
+        "---\ncommit: 222222222222\nsupersedes:\n  - 111111111111\n---\n# Doc 2\n\nBody 2.\n",
+        encoding="utf-8",
+    )
+
+    destination = tmp_path / "cycle.sqlite3"
+    with pytest.raises(IndexLifecycleError, match="lineage_cycle_detected"):
+        build_candidate(config(root, policy_path), destination, policy, fake_embeddings)
+
+

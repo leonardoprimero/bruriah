@@ -132,14 +132,14 @@ def _metadata(frontmatter: dict[str, Any]) -> SourceMetadata:
         items = raw if isinstance(raw, list) else [raw]
         res: list[str] = []
         for it in items:
-            if isinstance(it, str):
-                for sub in it.replace(",", " ").split():
+            if it is not None:
+                for sub in str(it).replace(",", " ").split():
                     if sub.strip():
                         res.append(sub.strip().lower())
         return tuple(dict.fromkeys(res))
 
     commit_raw = frontmatter.get("commit")
-    commit = str(commit_raw).strip().lower() if commit_raw else None
+    commit = str(commit_raw).strip().lower() if commit_raw is not None else None
 
     return SourceMetadata(
         provenance=tuple(dict.fromkeys(provenance)),
