@@ -26,6 +26,7 @@ from __future__ import annotations
 import json
 from typing import Any, TypeVar
 
+import anyio.to_thread
 from mcp.server.lowlevel import Server
 from mcp.types import CallToolResult, TextContent
 from mcp.types import Tool as MCPTool
@@ -197,9 +198,9 @@ def build_server(deps: ServiceDeps) -> Server:
     @server.call_tool(validate_input=False)
     async def call_tool(name: str, arguments: dict[str, Any]) -> CallToolResult:
         if name == INVESTIGATE_TOOL:
-            return _handle_investigate(arguments, deps)
+            return await anyio.to_thread.run_sync(_handle_investigate, arguments, deps)
         if name == READ_TOOL:
-            return _handle_read(arguments, deps)
+            return await anyio.to_thread.run_sync(_handle_read, arguments, deps)
         # Unreachable through a client that only calls names from our own tools/list, but a
         # defensive typed error keeps an out-of-band tools/call for a nonexistent name from
         # ever becoming an unhandled exception that breaks the session.

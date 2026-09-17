@@ -173,7 +173,7 @@ def _metadata(config: BuildConfig, manifest_hash: str, build_id: str) -> dict[st
 
 
 def open_candidate(path: Path) -> sqlite3.Connection:
-    database = sqlite3.connect(f"file:{path.resolve()}?mode=ro", uri=True)
+    database = sqlite3.connect(f"file:{path.resolve()}?mode=ro", uri=True, check_same_thread=False)
     database.execute("PRAGMA query_only = ON")
     return database
 
@@ -435,7 +435,7 @@ def _open_descriptor(path: Path, file_descriptor: int) -> sqlite3.Connection:
         location = path.as_posix().replace("?", "%3f").replace("#", "%23")
     else:
         location = f"/dev/fd/{file_descriptor}"
-    database = sqlite3.connect(f"file:{location}?mode=ro&immutable=1", uri=True)
+    database = sqlite3.connect(f"file:{location}?mode=ro&immutable=1", uri=True, check_same_thread=False)
     database.execute("PRAGMA query_only = ON")
     return database
 
