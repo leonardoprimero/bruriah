@@ -215,6 +215,14 @@ def _bm25_ranks(
 
     total_documents = len(tokenized)
     terms = set(query_tokens)
+    idfs = {
+        term: math.log(1 + (total_documents - document_frequency[term] + 0.5) / (document_frequency[term] + 0.5))
+        for term in terms
+        if term in document_frequency
+    }
+    k1_plus_1 = _BM25_K1 + 1
+    b_part = 1 - _BM25_B
+    b_over_avg = _BM25_B / average_length if average_length > 0 else 0.0
     scored: list[tuple[float, str]] = []
     # The deadline can truncate `tokenized` independently of `passages`, so score only the prefix
     # that was actually tokenized. Zipping the full `passages` under strict= would raise a bare
@@ -230,14 +238,13 @@ def _bm25_ranks(
         for token in tokens:
             counts[token] = counts.get(token, 0) + 1
         total = 0.0
-        for term in terms:
+        len_factor = _BM25_K1 * (b_part + length * b_over_avg)
+        for term, idf in idfs.items():
             frequency = counts.get(term, 0)
             if frequency == 0:
                 continue
-            document_count = document_frequency.get(term, 0)
-            idf = math.log(1 + (total_documents - document_count + 0.5) / (document_count + 0.5))
-            denominator = frequency + _BM25_K1 * (1 - _BM25_B + _BM25_B * length / average_length)
-            total += idf * (frequency * (_BM25_K1 + 1)) / denominator
+            denominator = frequency + len_factor
+            total += idf * (frequency * k1_plus_1) / denominator
         if total > 0:
             scored.append((total, passage.ref))
     return _ranked(scored), stopped
@@ -262,7 +269,9 @@ def _vector_ranks(
     if query_norm == 0:
         return None, False
 
-    dimensions = len(query)
+    inv_query_norm = 1.0 / query_norm
+    norm_query = tuple(value * inv_query_norm for value in query)
+    dimensions = len(norm_query)
     scored: list[tuple[float, str]] = []
     stopped = False
     for position, passage in enumerate(passages):
@@ -273,11 +282,14 @@ def _vector_ranks(
         candidate = _floats(passage.vector)
         if candidate is None or len(candidate) != dimensions:
             continue
-        candidate_norm = math.sqrt(sum(value * value for value in candidate))
-        if candidate_norm == 0:
+        dot = 0.0
+        candidate_sum_sq = 0.0
+        for q_val, c_val in zip(norm_query, candidate, strict=True):
+            dot += q_val * c_val
+            candidate_sum_sq += c_val * c_val
+        if candidate_sum_sq == 0.0:
             continue
-        dot = sum(a * b for a, b in zip(query, candidate, strict=True))
-        scored.append((dot / (query_norm * candidate_norm), passage.ref))
+        scored.append((dot / math.sqrt(candidate_sum_sq), passage.ref))
     return _ranked(scored), stopped
 
 
