@@ -272,7 +272,7 @@ unflattering ones are in the same table as the rest.
 | **Query latency** | **≈46µs per passage**, linear — 1k passages 45ms, 16k 734ms | [scale.py](https://github.com/leonardoprimero/bruriah/blob/main/evals/scale.py) |
 | **Index build** | ≈130 passages/second, embedding-dominated, one-off | |
 | **Index size** | ≈5 KB per passage — a 16k-passage corpus is ~79 MB | |
-| **Tests** | **1,082** passing and 18 skipped on a fresh clone, measured on macOS and Python 3.14 · on native Windows the five owner-only-mode tests skip on top of those, rather than assert a file mode nobody applied | [CI](https://github.com/leonardoprimero/bruriah/actions/workflows/ci.yml) |
+| **Tests** | **1,083** passing and 18 skipped on a fresh clone, measured on macOS and Python 3.14 · on native Windows the five owner-only-mode tests skip on top of those, rather than assert a file mode nobody applied | [CI](https://github.com/leonardoprimero/bruriah/actions/workflows/ci.yml) |
 | **Install size** | 215 KB wheel; the embedding model downloads once, separately | |
 | **Sample size** | **236 externally-sourced questions** over two foreign repositories, headline · **24 own-history questions**, indicative | the twelve-question sets report a *loss* on the same change the 236 score as a clear win — that is what twelve questions are worth |
 
@@ -384,15 +384,16 @@ Bruriah assumes the corpus may be hostile.
 
 ## Status — read this before installing
 
-Honest state as of 2026-08-14.
+Honest state as of 2026-09-17.
 
-**Working and tested** — 1,082 tests pass and 18 skip on a fresh clone, measured on macOS and Python 3.14; on native Windows five more skip rather than assert a file mode nobody applied
-- Hybrid retrieval (BM25 + local vectors) over your corpus — both legs are pure Python over ordinary SQLite: BM25 scans the passage table, and the vector leg reads float blobs and scores them by cosine. There is no vec0 table and no ANN index. This line named `sqlite-vec` until 0.4.0, which was never true of the shipped path
-- The two-tool MCP contract, structured output, typed failures
+**Working and tested** — 1,083 tests pass and 18 skip on a fresh clone, measured on macOS and Python 3.14; on native Windows five more skip rather than assert a file mode nobody applied
+- Hybrid retrieval (BM25 + local vectors) over your corpus — both legs are pure Python over ordinary SQLite: BM25 scans the passage table with precomputed query IDF, and the vector leg reads float blobs and scores them by cosine in a single memory pass. There is no vec0 table and no ANN index. This line named `sqlite-vec` until 0.4.0, which was never true of the shipped path
+- The two-tool MCP contract, structured output, typed failures — with CPU-bound tool execution offloaded to worker threads via `anyio` to keep event-loop protocol I/O responsive
 - Signed policy packs with Ed25519 manifests and fail-closed loading — signatures, digests and schemas are absolute; an expired review is not, and degrades the pack's domains to abstention rather than stopping the server
 - Domain-gated discovery with explicit abstention
 - Atomic index and skill-set build / promote / rollback
 - The full skill lifecycle from the terminal
+- CI safety ratchets: automated Ruff linting and strict Mypy static type checking (0 errors across 38 source files)
 
 **Limits, stated rather than buried**
 - A data directory holds one project, and rollback does not survive a policy change. Promoting into
