@@ -9,6 +9,10 @@ class SourceMetadata:
     provenance_urls: tuple[str, ...] = ()
     status: str = "unknown"
     verification_date: str = "unknown"
+    supersedes: tuple[str, ...] = ()
+    deprecates: tuple[str, ...] = ()
+    amends: tuple[str, ...] = ()
+    commit: str | None = None
 
 
 @dataclass(frozen=True)

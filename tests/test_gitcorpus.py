@@ -226,3 +226,43 @@ def test_windows_is_supported_rather_than_refused() -> None:
     from the POSIX suite means the day someone tightens the gate back to a POSIX-only check, CI says
     so on Linux instead of only on a Windows machine nobody runs."""
     assert _import_bruriah_fresh(hide_fcntl=True, os_name="nt").__version__
+
+
+def test_gitcorpus_extracts_lineage_trailers_into_document_metadata(tmp_path: Path) -> None:
+    repo = tmp_path / "lineage_repo"
+    repo.mkdir()
+    run = lambda *args: subprocess.run(["git", *args], cwd=repo, check=True, capture_output=True)
+    run("init", "-q")
+    run("config", "user.email", "test@example.invalid")
+    run("config", "user.name", "Test")
+    (repo / "f1.txt").write_text("v1")
+    run("add", "-A")
+    run("commit", "-q", "-m", "feat: initial approach\n\nUsing FastMCP because it seemed easy.")
+    c1 = subprocess.run(["git", "rev-parse", "HEAD"], cwd=repo, capture_output=True, text=True, check=True).stdout.strip()
+
+    (repo / "f2.txt").write_text("v2")
+    run("add", "-A")
+    msg = (
+        "feat: replace with lowlevel server\n\n"
+        "Because FastMCP disables extra=forbid validation.\n\n"
+        f"Supersedes: {c1[:12]}\n"
+        "Deprecates: deadbeef1234\n"
+        "Amends: feedface5678"
+    )
+    run("commit", "-q", "-m", msg)
+
+    out = tmp_path / "corpus_out"
+    gitcorpus.build(repo, out)
+
+    docs = sorted(out.glob("*.md"))
+    assert len(docs) == 2
+
+    from bruriah.corpus import CorpusPolicy, parse_document
+    policy = CorpusPolicy(include=("**",), exclude=())
+    target_doc = next(p for p in docs if "replace-with-lowlevel" in p.name)
+    doc2 = parse_document(target_doc, out, policy)
+
+    assert doc2.metadata.supersedes == (c1[:12].lower(),)
+    assert doc2.metadata.deprecates == ("deadbeef1234",)
+    assert doc2.metadata.amends == ("feedface5678",)
+    assert doc2.metadata.commit is not None

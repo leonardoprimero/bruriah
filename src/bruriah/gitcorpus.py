@@ -105,7 +105,19 @@ def build(
     a reader, who otherwise runs the documented command and gets a different corpus than the table
     below it describes, with nothing on the page to tell them why."""
     _require_commit(repo, revision)
-    fmt = _SEPARATOR_FMT.join(["%H", "%aI", "%an", "%s", "%b"]) + _RECORD_FMT
+    fmt = (
+        _SEPARATOR_FMT.join([
+            "%H",
+            "%aI",
+            "%an",
+            "%s",
+            "%(trailers:key=Supersedes,valueonly=true)",
+            "%(trailers:key=Deprecates,valueonly=true)",
+            "%(trailers:key=Amends,valueonly=true)",
+            "%b",
+        ])
+        + _RECORD_FMT
+    )
     args = ["log", "--no-merges", f"--format={fmt}"]
     if limit:
         args.append(f"-{limit}")
@@ -115,16 +127,39 @@ def build(
     written = examined = 0
     for entry in _git(repo, *args).split(_RECORD):
         parts = entry.strip("\n").split(_SEPARATOR)
-        if len(parts) < 5:
+        if len(parts) < 8:
             continue
-        sha, when, author, subject, body = (part.strip() for part in parts[:5])
+        sha, when, author, subject, raw_supersedes, raw_deprecates, raw_amends, body = (
+            part.strip() for part in parts[:8]
+        )
         examined += 1
         if not body:
             continue  # a subject records what changed, never why
         files = _git(repo, "show", "--stat", "--format=", "--name-only", sha).split()
 
+        def _clean_hashes(raw: str) -> list[str]:
+            return [it.strip().lower() for it in raw.replace(",", " ").split() if it.strip()]
+
+        supersedes = _clean_hashes(raw_supersedes)
+        deprecates = _clean_hashes(raw_deprecates)
+        amends = _clean_hashes(raw_amends)
+
+        frontmatter_lines = ["---", f"commit: {sha}"]
+        if supersedes:
+            frontmatter_lines.append("supersedes:")
+            frontmatter_lines.extend(f"  - {item}" for item in supersedes)
+        if deprecates:
+            frontmatter_lines.append("deprecates:")
+            frontmatter_lines.extend(f"  - {item}" for item in deprecates)
+        if amends:
+            frontmatter_lines.append("amends:")
+            frontmatter_lines.extend(f"  - {item}" for item in amends)
+        frontmatter_lines.append("---")
+        frontmatter = "\n".join(frontmatter_lines) + "\n\n"
+
         document = (
-            f"# {subject}\n\n"
+            frontmatter
+            + f"# {subject}\n\n"
             f"**Decided:** {when[:10]} · **Commit:** `{sha[:12]}` · **Author:** {author}\n\n"
             f"{body[:_MAX_BODY]}\n\n"
             "## Files this decision touched\n"

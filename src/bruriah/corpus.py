@@ -126,11 +126,30 @@ def _metadata(frontmatter: dict[str, Any]) -> SourceMetadata:
         "unknown",
     )
     status = frontmatter.get("status") or "unknown"
+
+    def _extract_list(field: str) -> tuple[str, ...]:
+        raw = frontmatter.get(field, [])
+        items = raw if isinstance(raw, list) else [raw]
+        res: list[str] = []
+        for it in items:
+            if isinstance(it, str):
+                for sub in it.replace(",", " ").split():
+                    if sub.strip():
+                        res.append(sub.strip().lower())
+        return tuple(dict.fromkeys(res))
+
+    commit_raw = frontmatter.get("commit")
+    commit = str(commit_raw).strip().lower() if commit_raw else None
+
     return SourceMetadata(
         provenance=tuple(dict.fromkeys(provenance)),
         provenance_urls=tuple(dict.fromkeys(urls)),
         status=str(status),
         verification_date=str(verified),
+        supersedes=_extract_list("supersedes"),
+        deprecates=_extract_list("deprecates"),
+        amends=_extract_list("amends"),
+        commit=commit,
     )
 
 
