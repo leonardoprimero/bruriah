@@ -12,6 +12,7 @@ from contextlib import closing
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any
 
 from .corpus import CorpusPolicy, parse_document
 from .pointer import (
@@ -370,7 +371,7 @@ def validate_candidate(
 _POINTER_ENTRY_KEYS = frozenset({"database", "build_id"})
 
 
-def _read_pointer(pointer: Path) -> dict[str, object]:
+def _read_pointer(pointer: Path) -> dict[str, Any]:
     return read_pointer(
         pointer, entry_keys=_POINTER_ENTRY_KEYS, name_key="database", error=IndexLifecycleError
     )
