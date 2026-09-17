@@ -7,7 +7,7 @@ import re
 import sqlite3
 import tempfile
 import uuid
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from contextlib import closing
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import Any
 
 from .corpus import CorpusPolicy, parse_document
+from .models import Document
 from .pointer import (
     activation_lock,
     controlled_file,
@@ -197,7 +198,7 @@ def _compatible(previous: sqlite3.Connection, config: BuildConfig) -> bool:
 
 
 def _stored_document(
-    source: sqlite3.Connection, document: object, dimensions: int
+    source: sqlite3.Connection, document: Document, dimensions: int
 ) -> tuple[tuple[object, ...], list[tuple[object, ...]]] | None:
     metadata = json.dumps(document.metadata.__dict__, sort_keys=True)
     expected_document = (
@@ -247,7 +248,7 @@ def _stored_document(
 
 
 def _reuse_document(
-    source: sqlite3.Connection, target: sqlite3.Connection, document: object, dimensions: int
+    source: sqlite3.Connection, target: sqlite3.Connection, document: Document, dimensions: int
 ) -> bool:
     stored = _stored_document(source, document, dimensions)
     if stored is None:
@@ -261,7 +262,7 @@ def _reuse_document(
 def _validate_candidate(
     database: sqlite3.Connection,
     config: BuildConfig,
-    documents: list[object],
+    documents: Sequence[Document],
     manifest: list[tuple[str, str]],
     metadata: dict[str, str],
 ) -> None:
@@ -704,10 +705,10 @@ def build_candidate(
                 len(vector) != config.embedding_dimensions * 4 for vector in vectors
             ):
                 raise ValueError("invalid_embedding_output")
-            metadata = json.dumps(document.metadata.__dict__, sort_keys=True)
+            doc_metadata = json.dumps(document.metadata.__dict__, sort_keys=True)
             database.execute(
                 "INSERT INTO documents VALUES (?, ?, ?, ?)",
-                (document.document_ref, document.relative_path, document.source_hash, metadata),
+                (document.document_ref, document.relative_path, document.source_hash, doc_metadata),
             )
             database.executemany(
                 "INSERT INTO passages VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
@@ -721,7 +722,7 @@ def build_candidate(
                         passage.end_line,
                         passage.text,
                         passage.source_hash,
-                        metadata,
+                        doc_metadata,
                         passage.search_text,
                         vector,
                     )
@@ -729,9 +730,9 @@ def build_candidate(
                 ],
             )
             passage_count += len(document.passages)
-        metadata = _metadata(config, manifest_hash, build_id)
-        database.executemany("INSERT INTO index_meta VALUES (?, ?)", metadata.items())
-        _validate_candidate(database, config, documents, manifest, metadata)
+        index_meta = _metadata(config, manifest_hash, build_id)
+        database.executemany("INSERT INTO index_meta VALUES (?, ?)", index_meta.items())
+        _validate_candidate(database, config, documents, manifest, index_meta)
         database.commit()
         database.close()
         database = None
