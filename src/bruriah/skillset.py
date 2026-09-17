@@ -10,7 +10,7 @@ from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from datetime import date
 from pathlib import Path
-from typing import Annotated, Any, Literal
+from typing import Annotated, Any, Literal, cast
 
 from pydantic import Field, ValidationError
 
@@ -109,7 +109,7 @@ def _canonical(packs: list[GenerationPack]) -> bytes:
     ).encode("utf-8")
 
 
-def _entry(source: SkillSource, trust_roots: dict[str, str], gates: dict) -> tuple[str, GenerationPack]:
+def _entry(source: SkillSource, trust_roots: dict[str, str], gates: dict[str, Any]) -> tuple[str, GenerationPack]:
     """Verify one source through the full fail-closed path and capture its bytes verbatim.
 
     Reading the manifest eagerly is correct HERE, unlike in `load_skill_pack`: compile is not the
@@ -139,7 +139,7 @@ def _entry(source: SkillSource, trust_roots: dict[str, str], gates: dict) -> tup
     except PackError as error:
         raise SkillSetError(error.code) from error
     return pack.pack_id, GenerationPack(
-        format=source.pack_path.suffix.lower(),
+        format=cast(Literal[".json", ".yaml", ".yml"], source.pack_path.suffix.lower()),
         source=base64.b64encode(raw).decode("ascii"),
         manifest=None if manifest_raw is None else base64.b64encode(manifest_raw).decode("ascii"),
     )
@@ -169,7 +169,9 @@ def compile_skillset(
     gates = {"today": today, "router_version": router_version, "minimum_versions": minimum_versions}
     entries = [_entry(source, trust_roots, gates) for source in sources]
     raw = _canonical([pack for _, pack in sorted(entries, key=lambda item: item[0])])
-    result = validate_skillset_bytes(raw, trust_roots, approvals, **gates)
+    result = validate_skillset_bytes(
+        raw, trust_roots, approvals, today=today, router_version=router_version, minimum_versions=minimum_versions
+    )
     _write_generation(destination, raw)
     return result
 
@@ -450,12 +452,13 @@ def rollback_skillset(
 
     The outgoing active only has its digest re-derived, matching `promote_skillset`: rolling back
     away from a broken generation must not be blocked by that generation being broken."""
-    gates = {"today": today, "router_version": router_version, "minimum_versions": minimum_versions}
     value = _read_pointer(pointer)
     if not value["retained"]:
         raise SkillSetError("no_retained_skillset")
     selected_path, raw = _entry_bytes(pointer, value["retained"][0])
-    result = validate_skillset_bytes(raw, trust_roots, approvals, **gates)
+    result = validate_skillset_bytes(
+        raw, trust_roots, approvals, today=today, router_version=router_version, minimum_versions=minimum_versions
+    )
     current_path, current_raw = _entry_bytes(pointer, value["active"])
     current = _pointer_entry(current_path, hashlib.sha256(current_raw).hexdigest())
     selected = _pointer_entry(selected_path, result.build_id)
@@ -480,13 +483,17 @@ def recover_skillset(
     skipped rather than reported, because a corrupt generation is the expected input here, not an
     error; if none survives, `no_recoverable_skillset` says so rather than leaving a pointer that
     names something unreadable."""
-    gates = {"today": today, "router_version": router_version, "minimum_versions": minimum_versions}
     value = _read_pointer(pointer)
     survivors: list[tuple[Path, ValidatedSkillSet]] = []
     for entry in [value["active"], *value["retained"]]:
         try:
             path, raw = _entry_bytes(pointer, entry)
-            survivors.append((path, validate_skillset_bytes(raw, trust_roots, approvals, **gates)))
+            survivors.append((
+                path,
+                validate_skillset_bytes(
+                    raw, trust_roots, approvals, today=today, router_version=router_version, minimum_versions=minimum_versions
+                ),
+            ))
         except SkillSetError:
             continue
     if not survivors:
