@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import json
 import os
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from datetime import date
 from pathlib import Path
@@ -68,12 +68,12 @@ def _private_defaults() -> PlatformPaths:
     )
 
 
-def _env_path(environment: dict[str, str], suffix: str) -> Path | None:
+def _env_path(environment: Mapping[str, str], suffix: str) -> Path | None:
     value = environment.get(ENV_PREFIX + suffix)
     return Path(value).expanduser() if value else None
 
 
-def _env_bool(environment: dict[str, str], suffix: str) -> bool | None:
+def _env_bool(environment: Mapping[str, str], suffix: str) -> bool | None:
     value = environment.get(ENV_PREFIX + suffix)
     return None if value is None else value.strip().lower() in {"1", "true", "yes", "on"}
 
@@ -92,7 +92,7 @@ def _parse_ceiling(text: str) -> int:
         raise PlatformError("invalid_config") from None
 
 
-def _env_ceiling(environment: dict[str, str], suffix: str) -> int | None:
+def _env_ceiling(environment: Mapping[str, str], suffix: str) -> int | None:
     value = environment.get(ENV_PREFIX + suffix)
     return None if value is None else _parse_ceiling(value)
 
@@ -136,7 +136,7 @@ def resolve_paths(
     cli_log_dir: Path | None = None,
     cli_network_enabled: bool | None = None,
     cli_skill_ceiling: str | None = None,
-    env: dict[str, str] | None = None,
+    env: Mapping[str, str] | None = None,
     config_path: Path | None = None,
 ) -> PlatformPaths:
     """Resolve private dirs, network policy and the skill-dispatch ceiling. Precedence: CLI arg >
@@ -214,6 +214,8 @@ def write_build_descriptor(paths: PlatformPaths, config: BuildConfig) -> None:
 
 def load_build_descriptor(paths: PlatformPaths) -> BuildConfig:
     payload = _read_json(paths.data_dir / "build-config.json", "index_not_built", "corrupt_build_descriptor")
+    if not isinstance(payload, dict):
+        raise PlatformError("corrupt_build_descriptor")
     try:
         return BuildConfig(
             root=Path(payload["root"]), policy_path=Path(payload["policy_path"]),
