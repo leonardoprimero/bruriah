@@ -12,6 +12,7 @@ from array import array
 from collections.abc import Callable
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
+from typing import Any
 
 import anyio
 import mcp.server.stdio
@@ -66,7 +67,7 @@ class CliError(ValueError):
 
 
 def _embedding_fingerprint(model: TextEmbedding) -> str:
-    backend = model.model
+    backend: Any = model.model
     description = backend.model_description
     pooling = {
         "OnnxTextEmbedding": "cls-normalized",
@@ -270,7 +271,7 @@ _EXPIRY_WARNING_DAYS = 90
 
 def run_doctor(
     paths: PlatformPaths, *, today: date | None = None, now: datetime | None = None,
-) -> dict[str, object]:
+) -> dict[str, Any]:
     """Read-only: resolved dirs, registry load, snapshot open, cache stats. Never creates/writes
     anything -- including the cache: `cache.cache_stats` only reads (never calls
     `cache.prune_expired`), so a mutating prune stays out of `doctor` entirely (Slice 12D).
@@ -278,7 +279,7 @@ def run_doctor(
     fail-closed staleness/expiry check in `load_registry` itself is unchanged."""
     effective_today = today or date.today()
     effective_now = now or datetime.now(timezone.utc)
-    report: dict[str, object] = {
+    report: dict[str, Any] = {
         "config_dir": str(paths.config_dir), "data_dir": str(paths.data_dir),
         "dirs_exist": {
             "config": paths.config_dir.is_dir(), "data": paths.data_dir.is_dir(),
@@ -377,7 +378,7 @@ def _suggested_question(corpus_root: Path) -> str | None:
 def run_bootstrap(
     paths: PlatformPaths, repo: Path, *, limit: int | None = None, model_name: str,
     embedder_factory: EmbedderFactory = _default_embedder_factory,
-) -> dict[str, object]:
+) -> dict[str, Any]:
     """`init --repo`: from a cloned repository to an active index in one command.
 
     The measured first-run path was about ninety seconds of machine work and four commands of
@@ -510,7 +511,7 @@ _ANALYSIS_LIMITS = (
 )
 
 
-def run_skill_ingest(paths: PlatformPaths, source: Path) -> dict[str, object]:
+def run_skill_ingest(paths: PlatformPaths, source: Path) -> dict[str, Any]:
     """Store a candidate pack privately, addressed by its own content digest."""
     try:
         record = candidates.ingest_candidate(source, paths.data_dir)
@@ -520,7 +521,7 @@ def run_skill_ingest(paths: PlatformPaths, source: Path) -> dict[str, object]:
             "pack_id": record.pack_id, "version": record.version}
 
 
-def run_skill_analyze(candidate: Path) -> dict[str, object]:
+def run_skill_analyze(candidate: Path) -> dict[str, Any]:
     """Report structural findings. The result carries its own limits so that copying the output
     copies the caveat with it -- a report that travels without its disclaimer becomes a clearance."""
     try:
@@ -541,7 +542,7 @@ def run_skill_analyze(candidate: Path) -> dict[str, object]:
 
 def run_skill_approve(
     paths: PlatformPaths, candidate: Path, acknowledge: list[str], *, today: date | None = None,
-) -> dict[str, object]:
+) -> dict[str, Any]:
     """Record human approval, bound to each skill's current body digest."""
     try:
         records = approvals.approve_candidate(
@@ -553,7 +554,7 @@ def run_skill_approve(
             "analysis_limits": _ANALYSIS_LIMITS}
 
 
-def run_skill_sign(key: Path, signer: str, pack: Path, out: Path | None) -> dict[str, object]:
+def run_skill_sign(key: Path, signer: str, pack: Path, out: Path | None) -> dict[str, Any]:
     """Sign a pack through the same `signing` module the release script uses, so a manifest produced
     here and one produced there cannot drift apart."""
     try:
@@ -568,7 +569,7 @@ def run_skill_sign(key: Path, signer: str, pack: Path, out: Path | None) -> dict
 def run_skill_activate(
     paths: PlatformPaths, candidates_: list[Path], *,
     allow_unsigned_local: bool = False, today: date | None = None,
-) -> dict[str, object]:
+) -> dict[str, Any]:
     """Compile the named approved candidates into one generation and promote it.
 
     Candidates are named EXPLICITLY rather than swept up from "everything approved". Approval says
@@ -603,7 +604,7 @@ def run_skill_activate(
             "skills": list(result.skill_set.skill_ids)}
 
 
-def run_skill_rollback(paths: PlatformPaths, *, today: date | None = None) -> dict[str, object]:
+def run_skill_rollback(paths: PlatformPaths, *, today: date | None = None) -> dict[str, Any]:
     """Restore the most recently retained generation, revalidating it first."""
     try:
         result = skillset.rollback_skillset(
@@ -616,7 +617,7 @@ def run_skill_rollback(paths: PlatformPaths, *, today: date | None = None) -> di
             "skills": list(result.skill_set.skill_ids)}
 
 
-def run_skill_status(paths: PlatformPaths, *, today: date | None = None) -> dict[str, object]:
+def run_skill_status(paths: PlatformPaths, *, today: date | None = None) -> dict[str, Any]:
     """Report what is active and what is sitting on disk. NEVER raises on a broken pointer: status is
     the command an operator runs precisely when something is wrong."""
     pointer = paths.data_dir / "skills" / "active.json"
@@ -624,7 +625,7 @@ def run_skill_status(paths: PlatformPaths, *, today: date | None = None) -> dict
         pointer, platform_module.load_trust_roots(), approvals.load_approvals(paths.data_dir),
         today=today,
     )
-    report: dict[str, object] = {
+    report: dict[str, Any] = {
         "active": state.build_id, "skills": list(state.skill_set.skill_ids) if state.skill_set else [],
         "warning": state.warning,
     }
@@ -642,7 +643,7 @@ def run_skill_status(paths: PlatformPaths, *, today: date | None = None) -> dict
     return report
 
 
-def run_skill_prune(paths: PlatformPaths) -> dict[str, object]:
+def run_skill_prune(paths: PlatformPaths) -> dict[str, Any]:
     """Delete only unreferenced generations. Refuses entirely without a readable pointer, because
     nothing can be known to be unreferenced without one."""
     try:
@@ -762,7 +763,7 @@ def _cmd_init(
     args: argparse.Namespace, *, embedder_factory: EmbedderFactory = _default_embedder_factory,
 ) -> int:
     paths = _resolve_paths(args)
-    bootstrap: dict[str, object] | None = None
+    bootstrap: dict[str, Any] | None = None
     if args.repo is not None:
         print(f"Reading the history of {args.repo}...", file=sys.stderr)
         bootstrap = run_bootstrap(

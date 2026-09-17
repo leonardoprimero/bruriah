@@ -116,7 +116,6 @@ ignore_missing_imports = true
 # Ratchet: lock the 26 cleaned modules in CI while migrating the rest
 [[tool.mypy.overrides]]
 module = [
-  "bruriah.cli",
   "bruriah.winfs",
 ]
 ignore_errors = true
