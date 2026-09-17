@@ -19,7 +19,7 @@ if _WINDOWS:  # pragma: no cover -- exercised on Windows CI, not on the POSIX su
 
     fcntl: Any = None
 else:
-    import fcntl  # type: ignore[no-redef]
+    import fcntl
 
 # Generic atomic-pointer and activation-lock primitives, extracted verbatim from `index.py` so a
 # second artifact kind can reuse the same guarantees instead of duplicating ~105 lines of
