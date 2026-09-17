@@ -6,6 +6,7 @@ import stat
 import tempfile
 from contextlib import contextmanager
 from pathlib import Path
+from typing import Any
 
 # One platform decision, made once, at import. Every primitive below then reads as a single named
 # operation instead of an `os.name` check repeated at each atomicity-critical site -- which is what
@@ -16,9 +17,9 @@ _WINDOWS = os.name == "nt"
 if _WINDOWS:  # pragma: no cover -- exercised on Windows CI, not on the POSIX suite
     from . import winfs
 
-    fcntl = None
+    fcntl: Any = None
 else:
-    import fcntl
+    import fcntl  # type: ignore[no-redef]
 
 # Generic atomic-pointer and activation-lock primitives, extracted verbatim from `index.py` so a
 # second artifact kind can reuse the same guarantees instead of duplicating ~105 lines of
@@ -60,7 +61,7 @@ def _read_pointer_text(pointer: Path) -> str:
 
 def read_pointer(
     pointer: Path, *, entry_keys: frozenset[str], name_key: str, error: ErrorType
-) -> dict[str, object]:
+) -> dict[str, Any]:
     """Parse and structurally validate a pointer file. Rejects symlinked pointers, unexpected
     shapes, and any entry whose `name_key` value is not a bare filename (path traversal)."""
     if pointer.is_symlink():
@@ -216,12 +217,14 @@ def activation_lock(pointer: Path):
         if _WINDOWS:  # pragma: no cover -- Windows-only
             winfs.acquire_exclusive(descriptor)
         else:
+            assert fcntl is not None
             fcntl.flock(descriptor, fcntl.LOCK_EX)
         yield
     finally:
         if _WINDOWS:  # pragma: no cover -- Windows-only
             winfs.release(descriptor)
         else:
+            assert fcntl is not None
             fcntl.flock(descriptor, fcntl.LOCK_UN)
         os.close(descriptor)
 

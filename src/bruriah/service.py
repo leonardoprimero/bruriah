@@ -38,6 +38,7 @@ import sqlite3
 import time
 from collections.abc import Callable
 from dataclasses import dataclass
+from typing import Any, Literal
 from urllib.parse import urlsplit
 
 from .cache import find_by_ref
@@ -45,7 +46,7 @@ from .classify import classify
 from .context import assemble_context, compact_to_budget
 from .contracts import (
     EvidenceRecord, HostAction, InvestigationRequest, InvestigationResult, PermissionDisclosure,
-    ReadItem, ReadRequest, ReadResult,
+    ReadItem, ReadRange, ReadRequest, ReadResult,
 )
 from .dispatch import DEFAULT_SKILL_CEILING, SkillDispatch, dispatch
 from .index import ActiveSnapshot
@@ -121,7 +122,7 @@ def _encode_cursor(request_id: str, ref: str, start: int) -> str:
     return base64.urlsafe_b64encode(payload.encode("utf-8")).decode("ascii")
 
 
-def _decode_cursor(token: str) -> dict[str, object] | None:
+def _decode_cursor(token: str) -> dict[str, Any] | None:
     try:
         value = json.loads(base64.urlsafe_b64decode(token.encode("ascii")))
     except (ValueError, UnicodeDecodeError, json.JSONDecodeError):
@@ -295,7 +296,7 @@ def _skill_outcomes(entries: tuple[SkillDispatch, ...]) -> tuple[list[str], list
 
 
 def _window_text(
-    text: str, requested_range: object, cursor_start: int | None, item_cap: int, remaining_total: int,
+    text: str, requested_range: ReadRange | None, cursor_start: int | None, item_cap: int, remaining_total: int,
 ) -> tuple[str, int, int, bool] | None:
     # Shared exact-window/truncation logic for both local passages and capability disclosure
     # text: 1-indexed start, budget-capped window, and honest truncation reporting. `None` signals
@@ -418,7 +419,11 @@ def investigate(request: InvestigationRequest, deps: ServiceDeps) -> Investigati
         # gates on `decision.outcome`, not on `mode`, whenever it isn't already "proceed".
         return assemble_context(request, decision, mode="full", extra_gaps=pack_gaps)
 
-    evidence, warnings, degradation, status, host_actions = [], [], [], decision.outcome, []
+    evidence: list[EvidenceRecord] = []
+    warnings: list[str] = []
+    degradation: list[str] = []
+    status: Literal["complete", "partial", "route_only", "abstained"] = "complete"
+    host_actions: list[HostAction] = []
     extra_gaps: list[str] = list(pack_gaps)
     if decision.outcome == "proceed":
         # Capability evidence (Slice 7A-2): one EvidenceRecord per matched `lookup.capabilities`
@@ -512,7 +517,7 @@ def investigate(request: InvestigationRequest, deps: ServiceDeps) -> Investigati
 
 
 def _read_one(
-    database: sqlite3.Connection, ref: str, requested_range: object, cursor_start: int | None,
+    database: sqlite3.Connection, ref: str, requested_range: ReadRange | None, cursor_start: int | None,
     item_cap: int, remaining_total: int, request_id: str,
 ) -> tuple[ReadItem, int]:
     row = database.execute(
@@ -540,7 +545,7 @@ def _read_one(
 
 
 def _read_capability_one(
-    registry: Registry, ref: str, requested_range: object, cursor_start: int | None,
+    registry: Registry, ref: str, requested_range: ReadRange | None, cursor_start: int | None,
     item_cap: int, remaining_total: int, request_id: str,
 ) -> tuple[ReadItem, int]:
     # Resolves a `capability:<id>` ref via the frozen `resolve_capability` (6B-2) -- never a
@@ -574,7 +579,7 @@ def _read_capability_one(
 
 
 def _read_skill_one(
-    skill_set: SkillSet | None, ref: str, requested_range: object, cursor_start: int | None,
+    skill_set: SkillSet | None, ref: str, requested_range: ReadRange | None, cursor_start: int | None,
     item_cap: int, remaining_total: int, request_id: str,
 ) -> tuple[ReadItem, int]:
     # Resolves a `skill:<id>@<version>` ref against the ACTIVE set, mirroring `_read_capability_one`.
@@ -613,7 +618,7 @@ def _read_skill_one(
 
 
 def _read_live_one(
-    research_deps: ResearchDeps | None, ref: str, requested_range: object, cursor_start: int | None,
+    research_deps: ResearchDeps | None, ref: str, requested_range: ReadRange | None, cursor_start: int | None,
     item_cap: int, remaining_total: int, request_id: str,
 ) -> tuple[ReadItem, int]:
     # Resolves a `live:sha256:<32 hex>` ref -- the refs `fetch.py` mints for captured live evidence
@@ -694,26 +699,24 @@ def read(request: ReadRequest, deps: ServiceDeps) -> ReadResult:
             or decoded.get("ref") not in request.refs or not isinstance(decoded.get("start"), int)
         ):
             raise ServiceError("invalid_cursor")
-        cursor_ref, cursor_start = decoded["ref"], decoded["start"]
+        cursor_ref, cursor_start = str(decoded["ref"]), int(decoded["start"])
 
     ranges_by_ref = {item.ref: item for item in request.ranges}
     remaining = request.budgets.max_output_chars
     items: list[ReadItem] = []
     try:
         for ref in request.refs:
+            rng = ranges_by_ref.get(ref)
+            pos = cursor_start if ref == cursor_ref else None
+            cap = request.budgets.max_extracted_chars
             if ref.startswith(_SKILL_REF_PREFIX):
-                reader, source = _read_skill_one, deps.skill_set
+                item, remaining = _read_skill_one(deps.skill_set, ref, rng, pos, cap, remaining, request_id)
             elif ref.startswith(_CAPABILITY_REF_PREFIX):
-                reader, source = _read_capability_one, deps.registry
+                item, remaining = _read_capability_one(deps.registry, ref, rng, pos, cap, remaining, request_id)
             elif ref.startswith(_LIVE_REF_PREFIX):
-                reader, source = _read_live_one, deps.research
+                item, remaining = _read_live_one(deps.research, ref, rng, pos, cap, remaining, request_id)
             else:
-                reader, source = _read_one, deps.snapshot.database
-            item, remaining = reader(
-                source, ref, ranges_by_ref.get(ref),
-                cursor_start if ref == cursor_ref else None,
-                request.budgets.max_extracted_chars, remaining, request_id,
-            )
+                item, remaining = _read_one(deps.snapshot.database, ref, rng, pos, cap, remaining, request_id)
             items.append(item)
     except sqlite3.DatabaseError as error:
         raise ServiceError("snapshot_unreadable") from error

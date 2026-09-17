@@ -10,7 +10,7 @@ from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from datetime import date
 from pathlib import Path
-from typing import Annotated, Literal
+from typing import Annotated, Any, Literal
 
 from pydantic import Field, ValidationError
 
@@ -321,7 +321,7 @@ class SkillSetActivation:
     skill_set: SkillSet
 
 
-def _read_pointer(pointer: Path) -> dict[str, object]:
+def _read_pointer(pointer: Path) -> dict[str, Any]:
     return read_pointer(
         pointer, entry_keys=_POINTER_ENTRY_KEYS, name_key="skillset", error=SkillSetError
     )
