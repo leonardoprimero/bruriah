@@ -17,7 +17,7 @@ import os
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import PurePath
-from typing import Callable
+from typing import Any, Callable, Mapping
 
 from . import __version__ as _ROUTER_VERSION
 
@@ -237,7 +237,7 @@ CLIENT_CAPABILITIES: dict[ClientId, ClientCapability] = {
 }
 
 
-def _canonical_json(payload: dict[str, object]) -> str:
+def _canonical_json(payload: Mapping[str, Any]) -> str:
     # Deterministic, byte-identical for the same input every call: sorted keys, stable indent,
     # no wall-clock, no set/dict-ordering dependence (payload is built from sorted/tuple sources).
     return json.dumps(payload, indent=2, sort_keys=True) + "\n"
