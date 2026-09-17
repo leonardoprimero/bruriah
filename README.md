@@ -125,6 +125,36 @@ empirically against a real FastMCP counter-example during review.
 
 That is a real answer to *why*, written by the person deciding at the moment of deciding, with the commit hash that proves it. No model wrote that sentence — not then, not now. It was already sitting in your repository. Nothing your agent had could reach it.
 
+### Recording decision lineage: Supersedes, Deprecates, Amends
+
+When an architecture decision replaces, deprecates, or amends an earlier one, declare it in the Git commit message using standard Git trailers:
+
+```gitcommit
+feat(server): migrate from FastMCP to lowlevel server
+
+Because FastMCP disables extra="forbid" schema validation.
+
+Supersedes: e8f3003bda26
+Deprecates: deadbeef1234
+Amends: feedface5678
+```
+
+Or in Markdown document YAML frontmatter:
+
+```yaml
+---
+commit: f6e5d4c3b2a1
+supersedes:
+  - e8f3003bda26
+deprecates:
+  - deadbeef0000
+amends:
+  - feedface5678
+---
+```
+
+When `bruriah corpus` parses your repository, it extracts these trailers into document metadata. `bruriah index` records directed edges in a SQLite lineage DAG and verifies acyclicity via DFS (aborting with `IndexLifecycleError("lineage_cycle_detected")` if a loop is found). At query time, `investigate_work` resolves superseded decisions: older evidence is marked `stale` with `conflict: declared`, active successors are automatically injected into the evidence list, and explicit `ClaimRecord` entries with `state: "conflicted"` are emitted.
+
 ## Use it if — and when not to
 
 **This will earn its place if:**
@@ -232,13 +262,27 @@ Retrieval is the other half, and it is the ordinary kind: BM25 and a vector leg,
 
 **State is carried, never inferred.** *"I found something"* and *"I found something current and authoritative"* are different answers, and Bruriah tells you which one you got — `freshness` is `current`, `stale`, `expired` or `unknown` on every evidence record.
 
-*(Both lines above said `supported` instead of `current` until 2026-08-06. `supported` is a value of a different field on a different record — `ClaimRecord.state` — and no response carries it, because `claims` is always empty. See below.)*
+*(Until 2026-08-06, this text confused `current` with `supported`. `supported` is a value of `ClaimRecord.state`, which is populated when explicit decision lineage or policy packs establish claim validity. See below.)*
 
-Which one you get depends on whether anything **declared** it, and that is worth knowing before you look at a response. A signed pack declares a source's authority, review date and freshness window, so evidence covered by one carries real state. Your own git history is covered by no such pack, so its evidence comes back `unknown` with `not_assessed_by_retrieval` — not a placeholder for something unfinished, but the honest answer, since the alternative is retrieval deciding a document is authoritative because it retrieved it.
+Which one you get depends on whether anything **declared** it, and that is worth knowing before you look at a response:
+- **Signed domain packs** declare a source's authority, review date and freshness window, so external evidence carries real state.
+- **Your own git history and Markdown ADRs** carry state whenever you record decision lineage. Commits and documents can declare `Supersedes:`, `Deprecates:` or `Amends:` trailers (or frontmatter). When an older decision is retrieved, Bruriah checks the index's lineage DAG: if superseded, its evidence is marked `freshness: "stale"`, `conflict: "declared"`, and `uncertainty: ["superseded_by:<successor>"]`, while the active successor is automatically injected as `freshness: "current"`.
+- **Unannotated commits** come back `unknown` with `not_assessed_by_retrieval` — not a placeholder for something unfinished, but the honest answer, since retrieval cannot decide a document is authoritative merely because it retrieved it.
 
-For the same reason `claims` is empty for a local corpus. Forming a claim requires a *structured* statement of what a passage asserts, and deriving one from a decision written in prose is a semantic reading — exactly what nothing in this package is permitted to do to corpus text.
+**Claims and conflicts are formed strictly through declared structure, never semantic reading.** Forming a claim requires a *structured* statement of what a passage asserts; deriving one by asking an LLM to interpret corpus prose is a semantic reading — exactly what nothing in this package is permitted to do.
 
-That much is the design. What this paragraph used to add is not: it said claims are assembled over research evidence and that an empty list is "the design holding, not a feature that has not landed". **Claim formation is not wired into `investigate()` at all.** The code that builds claims is reached only on the paths that do *not* retrieve, so `claims` is `[]` in every configuration, for every corpus, research or not — `service.py` sets it as a literal. This repository's own evaluation harness says so where it refuses to score those cells: *"claim formation is not wired into `investigate()`"*. It is a feature that has not landed, and the honest consequence is that `ClaimRecord.state` — the field carrying `supported` — never reaches you.
+What changed with decision lineage is that **claims are no longer permanently empty.** When a human author declares an explicit causal relationship in Git or frontmatter (e.g. commit B declares `Supersedes: <commit-A>`), that statement *is* structured and authoritative. When `investigate_work` retrieves a decision that has been superseded, it emits a structured `ClaimRecord`:
+
+```jsonc
+{
+  "text": "Decision in 2026-01-01-a1b2c3d4-initial.md was superseded by 2026-02-01-f6e5d4c3-replace.md",
+  "state": "conflicted",
+  "supporting_refs": ["chunk:v1:..."],
+  "conflicting_refs": ["chunk:v1:..."]
+}
+```
+
+and records the explicit replacement in `InvestigationResult.conflicts`. When no lineage relations exist or apply to the retrieved evidence, `claims` remains `[]` — because without a declared structural relation, there is no honest claim to emit.
 
 
 ## What Bruriah does instead
@@ -272,7 +316,7 @@ unflattering ones are in the same table as the rest.
 | **Query latency** | **≈46µs per passage**, linear — 1k passages 45ms, 16k 734ms | [scale.py](https://github.com/leonardoprimero/bruriah/blob/main/evals/scale.py) |
 | **Index build** | ≈130 passages/second, embedding-dominated, one-off | |
 | **Index size** | ≈5 KB per passage — a 16k-passage corpus is ~79 MB | |
-| **Tests** | **1,083** passing and 18 skipped on a fresh clone, measured on macOS and Python 3.14 · on native Windows the five owner-only-mode tests skip on top of those, rather than assert a file mode nobody applied | [CI](https://github.com/leonardoprimero/bruriah/actions/workflows/ci.yml) |
+| **Tests** | **1,087** passing and 18 skipped on a fresh clone, measured on macOS and Python 3.14 · on native Windows the five owner-only-mode tests skip on top of those, rather than assert a file mode nobody applied | [CI](https://github.com/leonardoprimero/bruriah/actions/workflows/ci.yml) |
 | **Install size** | 215 KB wheel; the embedding model downloads once, separately | |
 | **Sample size** | **236 externally-sourced questions** over two foreign repositories, headline · **24 own-history questions**, indicative | the twelve-question sets report a *loss* on the same change the 236 score as a clear win — that is what twelve questions are worth |
 
@@ -386,9 +430,10 @@ Bruriah assumes the corpus may be hostile.
 
 Honest state as of 2026-09-17.
 
-**Working and tested** — 1,083 tests pass and 18 skip on a fresh clone, measured on macOS and Python 3.14; on native Windows five more skip rather than assert a file mode nobody applied
+**Working and tested** — 1,087 tests pass and 18 skip on a fresh clone, measured on macOS and Python 3.14; on native Windows five more skip rather than assert a file mode nobody applied
 - Hybrid retrieval (BM25 + local vectors) over your corpus — both legs are pure Python over ordinary SQLite: BM25 scans the passage table with precomputed query IDF, and the vector leg reads float blobs and scores them by cosine in a single memory pass. There is no vec0 table and no ANN index. This line named `sqlite-vec` until 0.4.0, which was never true of the shipped path
 - The two-tool MCP contract, structured output, typed failures — with CPU-bound tool execution offloaded to worker threads via `anyio` to keep event-loop protocol I/O responsive
+- Decision lineage DAG and deterministic supersession resolution: parses Git trailers (`Supersedes:`, `Deprecates:`, `Amends:`) and frontmatter into a cycle-verified SQLite DAG; marks superseded evidence as `stale`, injects successor evidence, and populates `claims` and `conflicts`
 - Signed policy packs with Ed25519 manifests and fail-closed loading — signatures, digests and schemas are absolute; an expired review is not, and degrades the pack's domains to abstention rather than stopping the server
 - Domain-gated discovery with explicit abstention
 - Atomic index and skill-set build / promote / rollback
