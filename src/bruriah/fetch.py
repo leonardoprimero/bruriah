@@ -61,10 +61,12 @@ import zlib
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import Literal
+from typing import Any, Literal
 from urllib.parse import urljoin, urlsplit, urlunsplit
 
 from .contracts import Budgets, EvidenceRecord
+
+ExtractionMethod = Literal["raw_lines", "markdown_section", "html_text", "pdf_text", "api_json", "unknown"]
 
 # hostname -> distinct numeric IP strings, called EXACTLY ONCE per hop (see module docstring, #4).
 Resolver = Callable[[str], list[str]]
@@ -135,8 +137,9 @@ def default_resolver(host: str) -> list[str]:
         raise FetchError("dns_resolution_failed") from error
     ips: list[str] = []
     for _family, _type, _proto, _canon, sockaddr in infos:
-        if sockaddr[0] not in ips:
-            ips.append(sockaddr[0])
+        ip = str(sockaddr[0])
+        if ip not in ips:
+            ips.append(ip)
     if not ips:
         raise FetchError("dns_resolution_failed")
     return ips
@@ -243,7 +246,7 @@ def _fetch_one_hop(
     return connection, response, canonical
 
 
-def _decompressor(encoding: str) -> zlib.decompressobj | None:
+def _decompressor(encoding: str) -> Any:
     if encoding in ("", "identity"):
         return None
     if encoding == "gzip":
@@ -327,7 +330,7 @@ def _content_type_allowed(content_type: str) -> bool:
     )
 
 
-def _extraction_method(content_type: str) -> str:
+def _extraction_method(content_type: str) -> ExtractionMethod:
     if content_type == "application/pdf":
         return "pdf_text"
     if content_type == "application/json" or content_type.endswith("+json"):

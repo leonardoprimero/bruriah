@@ -6,7 +6,7 @@ import json
 import re
 from datetime import date, timedelta
 from pathlib import Path
-from typing import Annotated, Literal
+from typing import Annotated, Literal, Protocol
 
 import yaml
 from cryptography.exceptions import InvalidSignature
@@ -208,7 +208,13 @@ def verify_manifest(
 Currency = Literal["current", "stale", "expired"]
 
 
-def pack_currency(pack: object, today: date) -> Currency:
+class ExpirablePack(Protocol):
+    expires_at: date
+    reviewed_at: date
+    freshness_days: int
+
+
+def pack_currency(pack: ExpirablePack, today: date) -> Currency:
     """`current`, `stale`, or `expired` for a loaded pack -- domain pack or skill pack alike.
 
     The same three words `EvidenceRecord.freshness` already uses, so an aged pack reports its state

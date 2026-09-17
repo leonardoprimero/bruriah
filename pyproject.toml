@@ -118,9 +118,7 @@ ignore_missing_imports = true
 module = [
   "bruriah.cli",
   "bruriah.evaluation",
-  "bruriah.fetch",
   "bruriah.index",
-  "bruriah.packs",
   "bruriah.skillset",
   "bruriah.winfs",
 ]
