@@ -142,6 +142,16 @@ CREATE TABLE passages (
     search_text TEXT NOT NULL,
     vector BLOB NOT NULL, FOREIGN KEY(document_ref) REFERENCES documents(document_ref)
 ) WITHOUT ROWID;
+CREATE TABLE lineage (
+    successor_ref TEXT NOT NULL,
+    predecessor_target TEXT NOT NULL,
+    predecessor_ref TEXT,
+    relation TEXT NOT NULL,
+    PRIMARY KEY (successor_ref, predecessor_target, relation),
+    FOREIGN KEY(successor_ref) REFERENCES documents(document_ref)
+) WITHOUT ROWID;
+CREATE INDEX idx_lineage_pred ON lineage(predecessor_target);
+CREATE INDEX idx_lineage_pred_ref ON lineage(predecessor_ref);
 """
 
 
@@ -652,6 +662,68 @@ def recover_active(pointer: Path, config: BuildConfig) -> ActivationResult:
     return ActivationResult(path, valid[0]["build_id"], durable)
 
 
+def _build_lineage_records(
+    documents: Sequence[Document],
+) -> list[tuple[str, str, str | None, str]]:
+    lookup: dict[str, str] = {}
+    for doc in documents:
+        lookup[doc.document_ref] = doc.document_ref
+        lookup[doc.relative_path] = doc.document_ref
+        lookup[Path(doc.relative_path).name] = doc.document_ref
+        lookup[Path(doc.relative_path).stem] = doc.document_ref
+        if doc.metadata.commit:
+            commit = doc.metadata.commit.lower()
+            lookup[commit] = doc.document_ref
+            if len(commit) >= 7:
+                lookup[commit[:7]] = doc.document_ref
+                lookup[commit[:8]] = doc.document_ref
+                lookup[commit[:12]] = doc.document_ref
+
+    records: list[tuple[str, str, str | None, str]] = []
+    for doc in documents:
+        for relation, targets in (
+            ("supersedes", doc.metadata.supersedes),
+            ("deprecates", doc.metadata.deprecates),
+            ("amends", doc.metadata.amends),
+        ):
+            for target in targets:
+                target_clean = target.lower()
+                pred_ref = lookup.get(target_clean)
+                if not pred_ref and len(target_clean) >= 7:
+                    for k, ref in lookup.items():
+                        if k.startswith(target_clean) or target_clean.startswith(k):
+                            pred_ref = ref
+                            break
+                records.append((doc.document_ref, target_clean, pred_ref, relation))
+    return records
+
+
+def _detect_lineage_cycles(lineage_records: list[tuple[str, str, str | None, str]]) -> None:
+    adj: dict[str, list[str]] = {}
+    for succ, target, pred_ref, rel in lineage_records:
+        if rel == "supersedes":
+            pred = pred_ref or target
+            adj.setdefault(succ, []).append(pred)
+
+    visited: set[str] = set()
+    visiting: set[str] = set()
+
+    def dfs(node: str) -> None:
+        if node in visiting:
+            raise IndexLifecycleError("lineage_cycle_detected")
+        if node in visited:
+            return
+        visiting.add(node)
+        for neighbor in adj.get(node, []):
+            dfs(neighbor)
+        visiting.remove(node)
+        visited.add(node)
+
+    for start_node in list(adj):
+        if start_node not in visited:
+            dfs(start_node)
+
+
 def build_candidate(
     config: BuildConfig,
     destination: Path,
@@ -730,6 +802,9 @@ def build_candidate(
                 ],
             )
             passage_count += len(document.passages)
+        lineage_records = _build_lineage_records(documents)
+        _detect_lineage_cycles(lineage_records)
+        database.executemany("INSERT INTO lineage VALUES (?, ?, ?, ?)", lineage_records)
         index_meta = _metadata(config, manifest_hash, build_id)
         database.executemany("INSERT INTO index_meta VALUES (?, ?)", index_meta.items())
         _validate_candidate(database, config, documents, manifest, index_meta)
