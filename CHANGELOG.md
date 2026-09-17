@@ -3,6 +3,15 @@
 Notable changes, newest first. This project follows [semantic versioning](https://semver.org/),
 and the entries here name what changed for *you* rather than which files moved.
 
+## [0.8.0] — 2026-09-17
+
+### Added: Decision lineage DAG and deterministic supersession resolution
+
+Corpus documents and Git commits can now declare causal decision lineage through Git trailers (`Supersedes:`, `Deprecates:`, `Amends:`) or YAML frontmatter:
+- **Corpus Ingestion:** `bruriah corpus` parses Git trailers and YAML frontmatter into structured `SourceMetadata`.
+- **DAG Indexing & Cycle Validation:** `bruriah index` records directed edges in a dedicated `lineage` SQLite table and validates acyclicity via DFS (`IndexLifecycleError('lineage_cycle_detected')`).
+- **Runtime Resolution:** When `investigate_work` encounters a superseded decision, evidence is marked `freshness="stale"`, `conflict="declared"`, and `uncertainty=["superseded_by:<successor>"]`. The active successor is injected as `freshness="current"`, `InvestigationResult.conflicts` is populated, and structured `ClaimRecord(state="conflicted")` entries are emitted without semantic LLM inference.
+
 ## [0.7.0] — 2026-09-17
 
 ### Added: MCP server async thread offloading
