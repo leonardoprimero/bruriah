@@ -117,7 +117,6 @@ ignore_missing_imports = true
 [[tool.mypy.overrides]]
 module = [
   "bruriah.cli",
-  "bruriah.evaluation",
   "bruriah.index",
   "bruriah.skillset",
   "bruriah.winfs",

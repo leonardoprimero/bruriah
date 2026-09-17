@@ -280,10 +280,12 @@ def _build_evidence_claim(item: DomainEvidenceItem) -> EvidenceClaim:
 
 
 def run_invocation_gate(cases: Sequence[InvestigationCase], deps: ServiceDeps) -> list[GateCell]:
-    return [
-        _safe_cell("invocation", case.case_id, lambda case=case: _run_invocation_case(case, deps))
-        for case in cases if case.dimension == "invocation"
-    ]
+    cells: list[GateCell] = []
+    for case in cases:
+        if case.dimension == "invocation":
+            current_case = case
+            cells.append(_safe_cell("invocation", case.case_id, lambda: _run_invocation_case(current_case, deps)))
+    return cells
 
 
 def _run_invocation_case(case: InvestigationCase, deps: ServiceDeps) -> tuple[GateStatus, str]:
@@ -412,7 +414,8 @@ def _check_typed_stage_error_envelope(deps: ServiceDeps) -> tuple[GateStatus, st
 def run_domain_gate(cases: Sequence[DomainClaimCase], today: date) -> list[GateCell]:
     cells: list[GateCell] = []
     for case in cases:
-        cells.append(_safe_cell("domain", f"unit_{case.case_id}", lambda case=case: _run_domain_case(case, today)))
+        current_case = case
+        cells.append(_safe_cell("domain", f"unit_{case.case_id}", lambda: _run_domain_case(current_case, today)))
         cells.append(GateCell(
             dimension="domain", cell_id=f"end_to_end_{case.case_id}", status="not_validated",
             reason=(
