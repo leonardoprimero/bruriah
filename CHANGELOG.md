@@ -3,7 +3,36 @@
 Notable changes, newest first. This project follows [semantic versioning](https://semver.org/),
 and the entries here name what changed for *you* rather than which files moved.
 
-## [Unreleased]
+## [0.7.0] — 2026-09-17
+
+### Added: MCP server async thread offloading
+
+`investigate_work` and `read_evidence` tool execution are now offloaded from the anyio async
+event loop to threadpool workers via `anyio.to_thread.run_sync`. High-latency neural embedding
+inference (`fastembed`/ONNX) and candidate scoring no longer freeze the event loop, ensuring
+protocol heartbeats, cancellation requests, and concurrent client traffic remain responsive.
+Immutable read-only SQLite connections are marked `check_same_thread=False` for thread safety.
+
+### Added: CI quality ratchets for Ruff and Mypy
+
+Added automated Ruff linting and Mypy static type checking to `.github/workflows/ci.yml`. Strict
+type annotations resolve all 114 static typing errors across 38 source files.
+
+### Changed: BM25 IDF precomputed and vector scoring in single memory pass
+
+BM25 IDF values for query terms are now precomputed once per query outside candidate passage
+loops. Vector cosine scoring computes dot products and passage norm square accumulations in a
+single contiguous pass.
+
+### Refactored: CLI monolith modularized into `_cli` submodules
+
+Extracted `doctor`, `skills`, and `parser` construction from monolithic `cli.py` into internal
+submodules under `src/bruriah/_cli/`, reducing `cli.py` by over 380 lines while preserving all
+public contracts and wheel packaging invariants.
+
+### Security: `pip` bumped to 26.2.1
+
+Upgraded `pip` in `uv.lock` resolving vulnerability `PYSEC-2026-3721`.
 
 ### Added: `bruriah init --repo .` — the quickstart in one command
 
