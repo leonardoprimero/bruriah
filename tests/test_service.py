@@ -1045,3 +1045,49 @@ def test_the_network_budget_is_pooled_across_candidate_urls(tmp_path: Path, monk
         # And the shortfall is named rather than silently absorbed: the candidates the pool could
         # not fund come back as degradation entries, not as a quietly shorter evidence list.
         assert any("network_budget_exhausted" in entry for entry in result.degradation)
+
+
+def test_investigate_superseded_decision_marks_stale_and_emits_claims_and_conflicts(tmp_path: Path) -> None:
+    notes = {
+        "2026-01-01-a1b2c3d4-initial.md": (
+            "---\ncommit: a1b2c3d4e5f6\n---\n"
+            "# Choose FastMCP\n\n**Decided:** 2026-01-01 · **Commit:** a1b2c3d4e5f6 · **Author:** Alice\n\n"
+            "We decided to use FastMCP for python schema validation library.\n"
+        ),
+        "2026-02-01-f6e5d4c3-replace.md": (
+            "---\ncommit: f6e5d4c3b2a1\nsupersedes:\n  - a1b2c3d4e5f6\n---\n"
+            "# Replace FastMCP with lowlevel Server\n\n**Decided:** 2026-02-01 · **Commit:** f6e5d4c3b2a1 · **Author:** Bob\n\n"
+            "FastMCP disables extra=forbid validation so we replaced it with lowlevel Server for schema validation.\n"
+        ),
+    }
+    with _snapshot_for(tmp_path, notes) as snapshot:
+        deps = ServiceDeps(registry=_real_registry(), snapshot=snapshot)
+        req = InvestigationRequest(
+            task="Find a python schema validation library",
+            budgets=Budgets(max_evidence=20),
+        )
+        result = investigate(req, deps)
+        assert result.status in {"complete", "partial"}
+
+        # Check evidence records
+        stale_records = [e for e in result.evidence if "initial.md" in e.locator]
+        assert len(stale_records) >= 1
+        for rec in stale_records:
+            assert rec.freshness == "stale"
+            assert rec.conflict == "declared"
+            assert any("superseded_by:" in u for u in rec.uncertainty)
+
+        # Check successor record was included
+        current_records = [e for e in result.evidence if "replace.md" in e.locator]
+        assert len(current_records) >= 1
+        assert current_records[0].freshness == "current"
+
+        # Check conflicts and claims
+        assert len(result.conflicts) >= 1
+        assert "was superseded by" in result.conflicts[0]
+
+        assert len(result.claims) >= 1
+        claim = result.claims[0]
+        assert claim.state == "conflicted"
+        assert len(claim.supporting_refs) >= 1
+        assert len(claim.conflicting_refs) >= 1
