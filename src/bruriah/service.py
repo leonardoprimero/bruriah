@@ -45,7 +45,7 @@ from .cache import find_by_ref
 from .classify import classify
 from .context import assemble_context, compact_to_budget
 from .contracts import (
-    EvidenceRecord, HostAction, InvestigationRequest, InvestigationResult, PermissionDisclosure,
+    ClaimRecord, EvidenceRecord, HostAction, InvestigationRequest, InvestigationResult, PermissionDisclosure,
     ReadItem, ReadRange, ReadRequest, ReadResult,
 )
 from .dispatch import DEFAULT_SKILL_CEILING, SkillDispatch, dispatch
@@ -377,6 +377,150 @@ def _fold_research(
     return host_actions, degradation, evidence
 
 
+def _apply_lineage(
+    local_evidence: list[EvidenceRecord],
+    snapshot: ActiveSnapshot,
+) -> tuple[list[EvidenceRecord], list[ClaimRecord], list[str]]:
+    if not local_evidence:
+        return local_evidence, [], []
+
+    try:
+        has_table = snapshot.database.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='lineage'"
+        ).fetchone()
+        if not has_table:
+            return local_evidence, [], []
+    except sqlite3.DatabaseError:
+        return local_evidence, [], []
+
+    ref_keys = [rec.ref for rec in local_evidence]
+    placeholders = ",".join("?" for _ in ref_keys)
+    try:
+        rows = snapshot.database.execute(
+            f"SELECT ref, document_ref, relative_path FROM passages WHERE ref IN ({placeholders})",
+            ref_keys,
+        ).fetchall()
+    except sqlite3.DatabaseError:
+        return local_evidence, [], []
+
+    ref_to_doc = {r[0]: (r[1], r[2]) for r in rows}
+    doc_to_refs: dict[str, list[str]] = {}
+    for ref, (doc_ref, _) in ref_to_doc.items():
+        doc_to_refs.setdefault(doc_ref, []).append(ref)
+
+    doc_refs = list(doc_to_refs)
+    if not doc_refs:
+        return local_evidence, [], []
+
+    doc_placeholders = ",".join("?" for _ in doc_refs)
+    try:
+        lineage_rows = snapshot.database.execute(
+            f"SELECT successor_ref, predecessor_target, predecessor_ref, relation FROM lineage "
+            f"WHERE predecessor_ref IN ({doc_placeholders}) OR successor_ref IN ({doc_placeholders})",
+            [*doc_refs, *doc_refs],
+        ).fetchall()
+    except sqlite3.DatabaseError:
+        return local_evidence, [], []
+
+    if not lineage_rows:
+        return local_evidence, [], []
+
+    claims: list[ClaimRecord] = []
+    conflicts: list[str] = []
+    updated_evidence = list(local_evidence)
+    additional_evidence: list[EvidenceRecord] = []
+    existing_refs = {rec.ref for rec in local_evidence}
+    ref_overrides: dict[str, dict[str, Any]] = {}
+
+    for succ_ref, pred_target, pred_ref, rel in lineage_rows:
+        if pred_ref and pred_ref in doc_to_refs:
+            succ_row = snapshot.database.execute(
+                "SELECT relative_path FROM documents WHERE document_ref = ?", (succ_ref,)
+            ).fetchone()
+            succ_path = succ_row[0] if succ_row else succ_ref
+
+            for target_ref in doc_to_refs[pred_ref]:
+                overrides = ref_overrides.setdefault(target_ref, {})
+                if rel == "supersedes":
+                    overrides["freshness"] = "stale"
+                    overrides["conflict"] = "declared"
+                    overrides.setdefault("uncertainty", []).append(f"superseded_by:{succ_path}")
+                elif rel == "deprecates":
+                    overrides["freshness"] = "stale"
+                    overrides.setdefault("uncertainty", []).append(f"deprecated_by:{succ_path}")
+
+            if rel == "supersedes":
+                pred_path = ref_to_doc[doc_to_refs[pred_ref][0]][1]
+                conflicts.append(f"Decision in {pred_path} was superseded by {succ_path}")
+
+                succ_passages = snapshot.database.execute(
+                    "SELECT ref, relative_path, start_line, end_line, source_hash FROM passages "
+                    "WHERE document_ref = ? ORDER BY start_line LIMIT 1",
+                    (succ_ref,),
+                ).fetchall()
+                supporting_refs: list[str] = []
+                for p_ref, p_path, p_start, p_end, p_hash in succ_passages:
+                    supporting_refs.append(p_ref)
+                    if p_ref not in existing_refs:
+                        existing_refs.add(p_ref)
+                        additional_evidence.append(
+                            EvidenceRecord(
+                                ref=p_ref,
+                                kind="local",
+                                publisher=p_path,
+                                locator=p_path,
+                                citation_locator=f"{p_path}#{p_start}-{p_end}",
+                                digest=f"sha256:{p_hash}",
+                                extraction_method="markdown_section",
+                                authority="unknown",
+                                authority_rationale="not_assessed_by_retrieval",
+                                freshness="current",
+                                license="unknown",
+                                conflict="none",
+                            )
+                        )
+                claims.append(
+                    ClaimRecord(
+                        text=f"Decision in {pred_path} was superseded by {succ_path}",
+                        state="conflicted",
+                        supporting_refs=supporting_refs,
+                        conflicting_refs=doc_to_refs[pred_ref],
+                    )
+                )
+
+        if succ_ref in doc_to_refs and rel == "supersedes":
+            for target_ref in doc_to_refs[succ_ref]:
+                overrides = ref_overrides.setdefault(target_ref, {})
+                overrides["freshness"] = "current"
+                overrides["conflict"] = "none"
+
+        if succ_ref in doc_to_refs and rel == "amends":
+            for target_ref in doc_to_refs[succ_ref]:
+                ref_overrides.setdefault(target_ref, {}).setdefault("provenance_chain", []).append(
+                    f"amends:{pred_target}"
+                )
+
+    result_evidence: list[EvidenceRecord] = []
+    for rec in updated_evidence:
+        if rec.ref in ref_overrides:
+            ov = ref_overrides[rec.ref]
+            rec_dict = rec.model_dump()
+            if "freshness" in ov:
+                rec_dict["freshness"] = ov["freshness"]
+            if "conflict" in ov:
+                rec_dict["conflict"] = ov["conflict"]
+            if "uncertainty" in ov:
+                rec_dict["uncertainty"] = list(rec.uncertainty) + ov["uncertainty"]
+            if "provenance_chain" in ov:
+                rec_dict["provenance_chain"] = list(rec.provenance_chain) + ov["provenance_chain"]
+            result_evidence.append(EvidenceRecord.model_validate(rec_dict))
+        else:
+            result_evidence.append(rec)
+
+    result_evidence.extend(additional_evidence)
+    return result_evidence, claims, conflicts
+
+
 def investigate(request: InvestigationRequest, deps: ServiceDeps) -> InvestigationResult:
     """Compose classify -> discover -> route, then, only on `proceed`, retrieve over the
     snapshot AND run bounded live research (Slice 12A-2) over any `http`/`https` candidate-
@@ -425,6 +569,8 @@ def investigate(request: InvestigationRequest, deps: ServiceDeps) -> Investigati
     status: Literal["complete", "partial", "route_only", "abstained"] = "complete"
     host_actions: list[HostAction] = []
     extra_gaps: list[str] = list(pack_gaps)
+    lineage_claims: list[ClaimRecord] = []
+    lineage_conflicts: list[str] = []
     if decision.outcome == "proceed":
         # Capability evidence (Slice 7A-2): one EvidenceRecord per matched `lookup.capabilities`
         # entry -- "Method and tool discovery" requires capability refs alongside knowledge, not
@@ -443,7 +589,8 @@ def investigate(request: InvestigationRequest, deps: ServiceDeps) -> Investigati
             deps.snapshot, request.task, request.budgets,
             embed_query=deps.embed_query, rerank=deps.rerank, clock=deps.clock,
         )
-        local_evidence = to_evidence_records(outcome)
+        raw_local_evidence = to_evidence_records(outcome)
+        local_evidence, lineage_claims, lineage_conflicts = _apply_lineage(raw_local_evidence, deps.snapshot)
         warnings = list(outcome.warnings)
         degradation = list(outcome.degradation)
         truncated = outcome.truncated
@@ -494,7 +641,7 @@ def investigate(request: InvestigationRequest, deps: ServiceDeps) -> Investigati
 
     result = InvestigationResult(
         schema_version="1", status=status, request_id=request_id, evidence=evidence,
-        claims=[], conflicts=[], gaps=list(decision.gaps) + extra_gaps, host_actions=host_actions,
+        claims=lineage_claims, conflicts=lineage_conflicts, gaps=list(decision.gaps) + extra_gaps, host_actions=host_actions,
         warnings=warnings, degradation=degradation, budgets=request.budgets, next_cursor=None,
     )
     # `max_output_chars` is enforced HERE and nowhere else on this path. Both non-`proceed`
