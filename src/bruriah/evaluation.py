@@ -55,7 +55,7 @@ from .contracts import (
 from .evidence import EvidenceClaim, assess_claim, wrap_evidence
 from .mcp_server import INVESTIGATE_TOOL, READ_TOOL, build_server
 from .packs import SourcePolicy
-from .research import ConcurrencyLimiter, ResearchDeps
+from .research import ResearchDeps
 from .service import ServiceDeps, investigate, read
 
 GateStatus = Literal["pass", "fail", "not_validated"]

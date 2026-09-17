@@ -71,6 +71,7 @@ module-name = "bruriah"
 dev = [
   "pip-audit>=2.10.0,<3",
   "pytest>=9.0.2,<10",
+  "ruff>=0.9.0",
   # Only `evals/retrieval/adapters.py` imports this, to read the legacy `cerebro.db`'s vec0 tables
   # for the router-vs-predecessor benchmark. It was a runtime dependency through 0.3.0 and no
   # shipped module has ever called it.
@@ -91,3 +92,15 @@ testpaths = ["tests"]
 # deliberately leaks one; both were probed. Catching it needs real machinery, not a filter line,
 # and a filter line that looks like a guard without being one is the thing this project refuses
 # everywhere else. The suite is currently clean of them, which is what makes the next one visible.
+
+[tool.ruff]
+target-version = "py312"
+line-length = 120
+
+[tool.ruff.lint]
+select = ["E", "F", "W"]
+ignore = ["E501", "E731"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["E402", "E702", "F401"]
+
