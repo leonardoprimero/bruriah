@@ -287,3 +287,18 @@ def test_descriptions_do_not_change_the_response_shape() -> None:
     dumped = EvidenceRecord(**_EVIDENCE_FIELDS).model_dump(mode="json")
     assert "envelope" not in dumped
     assert InvestigationRequest(task="t").host_skills is None
+
+
+def test_investigation_code_target_validation() -> None:
+    req = InvestigationRequest(task="why line", code_target="src/bruriah/cli.py:42")
+    assert req.code_target == "src/bruriah/cli.py:42"
+    assert InvestigationRequest(task="why line").code_target is None
+
+    # Empty string should fail min_length=1
+    with pytest.raises(ValidationError):
+        InvestigationRequest(task="why line", code_target="")
+
+    # Too long should fail max_length=4096
+    with pytest.raises(ValidationError):
+        InvestigationRequest(task="why line", code_target="a" * 4097)
+

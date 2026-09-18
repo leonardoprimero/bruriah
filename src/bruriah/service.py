@@ -34,6 +34,7 @@ from __future__ import annotations
 import base64
 import hashlib
 import json
+from pathlib import Path
 import sqlite3
 import time
 from collections.abc import Callable
@@ -57,6 +58,7 @@ from .registries import Registry
 from .research import NetworkLedger, ResearchDeps, ResearchOutcome, research
 from .retrieval import EmbedQuery, Rerank, is_shortfall, search, to_evidence_records
 from .route import route
+from .why import WhyError, trace_causal_archaeology
 
 _CAPABILITY_REF_PREFIX = "capability:"
 _SKILL_REF_PREFIX = "skill:"
@@ -101,6 +103,8 @@ class ServiceDeps:
     # foreign corpus and one question out of eighty-three on the other, while costing a 1.11 GB
     # download and a cross-encoder pass per candidate document. That is an operator's call.
     rerank: Rerank | None = None
+    repo: Path = Path(".")
+
 
 
 def _canonical_json(payload: object) -> str:
@@ -541,6 +545,142 @@ def _apply_lineage(
     return result_evidence, claims, conflicts
 
 
+def _resolve_code_target_causality(
+    code_target: str,
+    repo: Path,
+    snapshot: ActiveSnapshot,
+) -> tuple[list[EvidenceRecord], list[ClaimRecord], list[str], list[str], list[str]]:
+    """Trace the governing architectural decision for a code target in Git + SQLite."""
+    evidence: list[EvidenceRecord] = []
+    claims: list[ClaimRecord] = []
+    conflicts: list[str] = []
+    warnings: list[str] = []
+    degradation: list[str] = []
+
+    try:
+        res = trace_causal_archaeology(repo, snapshot.database, code_target)
+    except WhyError as error:
+        degradation.append(f"code_target_unavailable:{error.code}")
+        return evidence, claims, conflicts, warnings, degradation
+    except Exception:
+        degradation.append("code_target_unavailable:unexpected_error")
+        return evidence, claims, conflicts, warnings, degradation
+
+    if res.governing_decision is None:
+        warnings.append(f"code_target_no_decision:{res.line_commit.sha[:12]}")
+        degradation.append("code_target_unindexed_decision")
+        return evidence, claims, conflicts, warnings, degradation
+
+    gov = res.governing_decision
+    try:
+        passages_rows = snapshot.database.execute(
+            "SELECT ref, relative_path, start_line, end_line, source_hash "
+            "FROM passages WHERE document_ref = ? ORDER BY start_line",
+            (gov.document_ref,),
+        ).fetchall()
+    except sqlite3.DatabaseError:
+        degradation.append("code_target_passages_unreadable")
+        return evidence, claims, conflicts, warnings, degradation
+
+    if not passages_rows:
+        warnings.append(f"code_target_passages_missing:{gov.document_ref}")
+        return evidence, claims, conflicts, warnings, degradation
+
+    p_ref, p_path, p_start, p_end, p_hash = passages_rows[0]
+
+    alerts = res.lineage_alerts
+    freshness: Literal["current", "stale", "expired", "unknown"] = "stale" if alerts else "current"
+    conflict_state: Literal["none", "declared", "unknown"] = "declared" if alerts else "none"
+    uncertainty: list[str] = [
+        f"{a.relation}:{a.successor_commit[:12] if a.successor_commit else a.successor_ref}"
+        for a in alerts
+    ]
+
+    rationale = (
+        f"Governing architectural decision for {code_target} decided by {gov.author} "
+        f"on {gov.date} (commit {gov.commit_sha[:12]})."
+    )
+
+    ev_record = EvidenceRecord(
+        ref=p_ref,
+        kind="local",
+        publisher=p_path,
+        locator=p_path,
+        citation_locator=f"{p_path}#{p_start}-{p_end}",
+        digest=f"sha256:{p_hash}",
+        extraction_method="markdown_section",
+        provenance_chain=[
+            f"commit:{gov.commit_sha[:12]}",
+            f"line_commit:{res.line_commit.sha[:12]}",
+            f"author:{gov.author}",
+            f"target:{code_target}",
+        ][:10],
+        authority="primary",
+        authority_rationale=rationale,
+        freshness=freshness,
+        license="permitted",
+        reuse="permitted",
+        conflict=conflict_state,
+        uncertainty=uncertainty[:10],
+    )
+    evidence.append(ev_record)
+
+    conflicting_refs: list[str] = []
+    if alerts:
+        for alert in alerts:
+            conflicts.append(
+                f"Decision in {p_path} governing {code_target} has been {alert.relation} "
+                f"by {alert.successor_commit[:8] if alert.successor_commit else alert.successor_ref}: "
+                f"{alert.successor_subject or 'successor'}"
+            )
+            try:
+                succ_passages = snapshot.database.execute(
+                    "SELECT ref, relative_path, start_line, end_line, source_hash FROM passages "
+                    "WHERE document_ref = ? ORDER BY start_line LIMIT 1",
+                    (alert.successor_ref,),
+                ).fetchall()
+                for s_ref, s_path, s_start, s_end, s_hash in succ_passages:
+                    conflicting_refs.append(s_ref)
+                    evidence.append(
+                        EvidenceRecord(
+                            ref=s_ref,
+                            kind="local",
+                            publisher=s_path,
+                            locator=s_path,
+                            citation_locator=f"{s_path}#{s_start}-{s_end}",
+                            digest=f"sha256:{s_hash}",
+                            extraction_method="markdown_section",
+                            authority="primary",
+                            authority_rationale=f"Successor decision ({alert.relation}) for {code_target}",
+                            freshness="current",
+                            license="permitted",
+                            conflict="none",
+                        )
+                    )
+            except sqlite3.DatabaseError:
+                pass
+
+        claims.append(
+            ClaimRecord(
+                text=f"Governing decision {gov.commit_sha[:8]} for {code_target} is {alerts[0].relation}",
+                state="conflicted",
+                supporting_refs=[p_ref],
+                conflicting_refs=conflicting_refs,
+            )
+        )
+    else:
+        claims.append(
+            ClaimRecord(
+                text=f"Decision {gov.commit_sha[:8]} ({gov.subject}) governs {code_target}",
+                state="supported",
+                supporting_refs=[p_ref],
+                conflicting_refs=[],
+            )
+        )
+
+    return evidence, claims, conflicts, warnings, degradation
+
+
 def investigate(request: InvestigationRequest, deps: ServiceDeps) -> InvestigationResult:
     """Compose classify -> discover -> route, then, only on `proceed`, retrieve over the
     snapshot AND run bounded live research (Slice 12A-2) over any `http`/`https` candidate-
@@ -605,7 +745,19 @@ def investigate(request: InvestigationRequest, deps: ServiceDeps) -> Investigati
             if opted_in else None
         )
         skill_evidence = [_skill_evidence_record(item) for item in skill_dispatch.skills] if skill_dispatch else []
-        prefix_evidence = skill_evidence + capability_evidence
+
+        causal_evidence: list[EvidenceRecord] = []
+        if request.code_target:
+            c_ev, c_claims, c_conflicts, c_warn, c_deg = _resolve_code_target_causality(
+                request.code_target, deps.repo, deps.snapshot
+            )
+            causal_evidence = c_ev
+            lineage_claims = lineage_claims + c_claims
+            lineage_conflicts = lineage_conflicts + c_conflicts
+            warnings = warnings + c_warn
+            degradation = degradation + c_deg
+
+        prefix_evidence = skill_evidence + causal_evidence + capability_evidence
         prefix_count = len(prefix_evidence)
         max_evidence = request.budgets.max_evidence
 
@@ -624,10 +776,15 @@ def investigate(request: InvestigationRequest, deps: ServiceDeps) -> Investigati
             embed_query=deps.embed_query, rerank=deps.rerank, clock=deps.clock,
         )
         raw_local_evidence = to_evidence_records(outcome)
-        local_evidence, lineage_claims, lineage_conflicts = _apply_lineage(raw_local_evidence, deps.snapshot)
-        page_local = local_evidence[:remaining_slots]
-        warnings = list(outcome.warnings)
-        degradation = list(outcome.degradation)
+        local_evidence, search_claims, search_conflicts = _apply_lineage(raw_local_evidence, deps.snapshot)
+        lineage_claims = lineage_claims + search_claims
+        lineage_conflicts = lineage_conflicts + search_conflicts
+
+        seen_prefix_refs = {rec.ref for rec in page_prefix}
+        deduped_local = [rec for rec in local_evidence if rec.ref not in seen_prefix_refs]
+        page_local = deduped_local[:remaining_slots]
+        warnings = warnings + list(outcome.warnings)
+        degradation = degradation + list(outcome.degradation)
 
         # Bounded live research (Slice 12A-2): run only when `deps.research` was actually
         # provisioned (`_run_research` returns `[]` otherwise -- the byte-identical-to-12A-1
@@ -643,7 +800,7 @@ def investigate(request: InvestigationRequest, deps: ServiceDeps) -> Investigati
         evidence = page_prefix + page_local + page_research
 
         prefix_has_more = (cursor_offset + len(page_prefix) < prefix_count)
-        local_has_more = (len(local_evidence) > len(page_local))
+        local_has_more = (len(deduped_local) > len(page_local))
         search_has_more = outcome.truncated
         research_has_more = (len(research_evidence) > len(page_research))
         has_more = prefix_has_more or local_has_more or search_has_more or research_has_more

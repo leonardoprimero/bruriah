@@ -3,6 +3,7 @@ from __future__ import annotations
 import http.client
 import json
 import socket
+import subprocess
 from array import array
 from contextlib import contextmanager
 from dataclasses import replace
@@ -1187,6 +1188,130 @@ def test_investigate_cursor_tampering_and_mismatch_rejected(tmp_path: Path) -> N
         with pytest.raises(ServiceError) as caught:
             investigate(InvestigationRequest(task=task, cursor=invalid_offset_cursor), deps)
         assert caught.value.code == "invalid_cursor"
+
+
+def test_investigate_code_target_resolves_governing_decision(tmp_path: Path) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    subprocess.run(["git", "init"], cwd=repo, check=True, capture_output=True)
+    subprocess.run(["git", "config", "user.name", "Leonardo Caliva"], cwd=repo, check=True, capture_output=True)
+    subprocess.run(["git", "config", "user.email", "leo@example.com"], cwd=repo, check=True, capture_output=True)
+    (repo / "code.py").write_text("def core():\n    return 42\n", encoding="utf-8")
+    subprocess.run(["git", "add", "code.py"], cwd=repo, check=True, capture_output=True)
+    subprocess.run(["git", "commit", "-m", "feat(core): implement core engine"], cwd=repo, check=True, capture_output=True)
+    sha = subprocess.run(["git", "rev-parse", "HEAD"], cwd=repo, capture_output=True, text=True, check=True).stdout.strip()
+
+    decision_md = f"""---
+commit: {sha}
+verification_date: 2026-07-23
+---
+# feat(core): implement core engine
+
+**Decided:** 2026-07-23 · **Commit:** `{sha[:12]}` · **Author:** Leonardo Caliva
+
+We implemented the core engine using return 42 because it is the answer.
+
+## Files this decision touched
+- `code.py`
+"""
+    notes = {"decision.md": decision_md}
+    with _snapshot_for(tmp_path, notes) as active:
+        deps = ServiceDeps(registry=_real_registry(), snapshot=active, repo=repo, embed_query=lambda q: _embed([q])[0])
+        req = InvestigationRequest(
+            task=f"{_TASK}, why return 42",
+            code_target="code.py:2",
+            budgets=Budgets(max_evidence=10),
+        )
+        res = investigate(req, deps)
+        assert res.status == "complete"
+        assert len(res.evidence) >= 1
+        gov_ev = res.evidence[0]
+        assert gov_ev.kind == "local"
+        assert gov_ev.authority == "primary"
+        assert gov_ev.freshness == "current"
+        assert gov_ev.conflict == "none"
+        assert "Governing architectural decision for code.py:2" in gov_ev.authority_rationale
+        assert any(claim.state == "supported" and sha[:8] in claim.text for claim in res.claims)
+
+
+def test_investigate_code_target_with_superseded_decision(tmp_path: Path) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    subprocess.run(["git", "init"], cwd=repo, check=True, capture_output=True)
+    subprocess.run(["git", "config", "user.name", "Leonardo Caliva"], cwd=repo, check=True, capture_output=True)
+    subprocess.run(["git", "config", "user.email", "leo@example.com"], cwd=repo, check=True, capture_output=True)
+    (repo / "code.py").write_text("def legacy():\n    pass\n", encoding="utf-8")
+    subprocess.run(["git", "add", "code.py"], cwd=repo, check=True, capture_output=True)
+    subprocess.run(["git", "commit", "-m", "feat: legacy implementation"], cwd=repo, check=True, capture_output=True)
+    sha_old = subprocess.run(["git", "rev-parse", "HEAD"], cwd=repo, capture_output=True, text=True, check=True).stdout.strip()
+
+    sha_new = "bbbbbbbbccccddddeeeeffff0000111122223333"
+
+    old_doc = f"""---
+commit: {sha_old}
+verification_date: 2026-01-01
+---
+# feat: legacy implementation
+
+**Decided:** 2026-01-01 · **Commit:** `{sha_old[:12]}` · **Author:** Leonardo Caliva
+
+Legacy rationale.
+
+## Files this decision touched
+- `code.py`
+"""
+    new_doc = f"""---
+commit: {sha_new}
+verification_date: 2026-07-01
+supersedes:
+  - {sha_old}
+---
+# feat: modern implementation
+
+**Decided:** 2026-07-01 · **Commit:** `{sha_new[:12]}` · **Author:** Leonardo Caliva
+
+Modern rationale replacing legacy.
+
+## Files this decision touched
+- `code.py`
+"""
+    notes = {"old.md": old_doc, "new.md": new_doc}
+    with _snapshot_for(tmp_path, notes) as active:
+        deps = ServiceDeps(registry=_real_registry(), snapshot=active, repo=repo, embed_query=lambda q: _embed([q])[0])
+        req = InvestigationRequest(
+            task=f"{_TASK}, why legacy function",
+            code_target="code.py:1",
+            budgets=Budgets(max_evidence=10),
+        )
+        res = investigate(req, deps)
+        assert res.status == "complete"
+        gov_ev = res.evidence[0]
+        assert gov_ev.freshness == "stale"
+        assert gov_ev.conflict == "declared"
+        assert len(res.conflicts) > 0
+        assert any(claim.state == "conflicted" for claim in res.claims)
+
+
+def test_investigate_code_target_untracked_file_degrades_gracefully(tmp_path: Path) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    subprocess.run(["git", "init"], cwd=repo, check=True, capture_output=True)
+    subprocess.run(["git", "config", "user.name", "Leonardo Caliva"], cwd=repo, check=True, capture_output=True)
+    subprocess.run(["git", "config", "user.email", "leo@example.com"], cwd=repo, check=True, capture_output=True)
+    (repo / "dummy.txt").write_text("hello\n", encoding="utf-8")
+    subprocess.run(["git", "add", "dummy.txt"], cwd=repo, check=True, capture_output=True)
+    subprocess.run(["git", "commit", "-m", "initial"], cwd=repo, check=True, capture_output=True)
+    notes = {"one.md": "# One\napple pie baking recipe one.\n"}
+    with _snapshot_for(tmp_path, notes) as active:
+        deps = ServiceDeps(registry=_real_registry(), snapshot=active, repo=repo)
+        req = InvestigationRequest(
+            task=f"{_TASK}, check untracked",
+            code_target="untracked.py:1",
+            budgets=Budgets(max_evidence=10),
+        )
+        res = investigate(req, deps)
+        assert any("code_target_unavailable:file_not_in_git" in d for d in res.degradation)
+
 
 
 

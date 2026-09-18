@@ -75,6 +75,16 @@ class InvestigationRequest(ClosedModel):
             "OMITTING this field opts out entirely and you receive no skill guidance at all."
         ),
     )
+    code_target: Annotated[
+        ShortText | None,
+        Field(
+            default=None,
+            description=(
+                "Optional repository file or line target (e.g. 'src/bruriah/mcp_server.py:42' or "
+                "'src/bruriah/mcp_server.py') to resolve its governing architectural decision and lineage alerts."
+            ),
+        ),
+    ] = None
     budgets: Budgets = Budgets()
 class EvidenceRecord(ClosedModel):
     ref: Ref

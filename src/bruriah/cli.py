@@ -406,6 +406,7 @@ def build_serve_deps(
     paths: PlatformPaths, *, embedder_factory: EmbedderFactory = _default_embedder_factory,
     reranker_model: str | None = None,
     reranker_factory: RerankerFactory = _default_reranker_factory,
+    repo: Path | None = None,
 ) -> ServiceDeps:
     """Load real `ServiceDeps`, including a real query embedder; split from `_serve_stdio` so
     tests verify wiring, never the loop.
@@ -440,7 +441,7 @@ def build_serve_deps(
             return embed([f"{descriptor.query_prefix}{text}"])[0]
 
         rerank = reranker_factory(reranker_model) if reranker_model else None
-        return load_deps(paths, embed_query=embed_query, rerank=rerank)
+        return load_deps(paths, embed_query=embed_query, rerank=rerank, repo=repo)
     except PlatformError as error:
         raise CliError(error.code) from error
 
@@ -611,7 +612,9 @@ def _cmd_index(
 
 def _cmd_serve(args: argparse.Namespace) -> int:
     paths = _resolve_paths(args)
-    deps = build_serve_deps(paths, reranker_model=getattr(args, "reranker", None))
+    raw_repo = getattr(args, "repo", None)
+    repo = raw_repo.resolve() if raw_repo is not None else Path.cwd()
+    deps = build_serve_deps(paths, repo=repo, reranker_model=getattr(args, "reranker", None))
     try:
         anyio.run(_serve_stdio, deps)
     except OSError as error:

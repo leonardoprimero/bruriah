@@ -5,6 +5,15 @@ and the entries here name what changed for *you* rather than which files moved.
 
 ## [Unreleased]
 
+### Added: MCP Causal Archaeology via `code_target` in `investigate_work`
+
+Autonomous coding agents can now perform causal archaeology directly through the Model Context Protocol without breaking the Two-Tool Public Contract (`investigate_work` and `read_evidence`):
+- **Direct Code Investigation:** `InvestigationRequest` accepts optional `code_target` (e.g. `src/bruriah/mcp_server.py:42` or `src/bruriah/mcp_server.py`).
+- **Primary Governing Decision Evidence:** `service.investigate` resolves target lines through Git blame/log to find governing architectural decisions and surfaces them as primary `EvidenceRecord` entries.
+- **DAG Lineage & Conflict Warnings:** If a governing decision has been `superseded`, `deprecated`, or `amended`, the evidence is marked `freshness="stale"`, `conflict="declared"`, alerts are injected into `conflicts`, and a `ClaimRecord(state="conflicted")` is published to warn the agent before modifying code.
+- **Full Read Continuity:** The agent reads exact, unmodified governing lines and successor rationales via `read_evidence(refs=[...])`.
+- **Server CLI Flag:** Added `--repo PATH` flag to `bruriah serve` to bind MCP server to repository root (defaults to current working directory).
+
 ## [0.9.0] — 2026-09-17
 
 ### Added: `bruriah why` — Causal Archaeology for Codebases

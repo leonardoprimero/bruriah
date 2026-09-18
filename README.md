@@ -198,6 +198,45 @@ Lineage Alerts:
 
 Pass `--json` to integrate causal archaeology directly into editor hover providers (VS Code, Neovim), CLI pipelines, or PR review bots.
 
+### Causal Archaeology for Coding Agents (MCP)
+
+Coding agents (Claude Code, Cursor, Antigravity) can perform causal archaeology directly through the MCP protocol without breaking the Two-Tool Public Contract, using the optional `code_target` parameter in `investigate_work`:
+
+```jsonc
+// 1. Agent investigates a specific line of code before refactoring
+agent → investigate_work({
+  "task": "refactor mcp protocol handler",
+  "code_target": "src/bruriah/mcp_server.py:42"
+})
+
+// 2. Bruriah returns the governing architectural decision as primary evidence with DAG alerts
+bruriah ← {
+  "status": "complete",
+  "evidence": [
+    {
+      "ref": "chunk:v1:6d43293...",
+      "kind": "local",
+      "authority": "primary",
+      "authority_rationale": "Governing architectural decision for src/bruriah/mcp_server.py:42...",
+      "freshness": "stale",
+      "conflict": "declared"
+    }
+  ],
+  "conflicts": [
+    "Decision in 2026-07-23-e8f3003b.md governing src/bruriah/mcp_server.py:42 has been superseded by..."
+  ],
+  "claims": [
+    {
+      "text": "Governing decision e8f3003b for src/bruriah/mcp_server.py:42 is supersedes",
+      "state": "conflicted"
+    }
+  ]
+}
+
+// 3. Agent reads the exact unmodified reasoning bytes before touching the code
+agent → read_evidence({"refs": ["chunk:v1:6d43293..."]})
+```
+
 ## Use it if — and when not to
 
 **This will earn its place if:**

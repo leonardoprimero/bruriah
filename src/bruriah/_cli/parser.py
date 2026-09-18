@@ -151,6 +151,13 @@ def build_cli_parser(
     add("skill-prune", "Delete unreferenced skill-set generations.")
     serve = add("serve", "Run the two-tool MCP server over stdio.")
     serve.add_argument(
+        "--repo",
+        type=Path,
+        default=Path("."),
+        metavar="PATH",
+        help="repository root for code causal archaeology (defaults to current working directory)",
+    )
+    serve.add_argument(
         "--reranker",
         default=None,
         metavar="MODEL",

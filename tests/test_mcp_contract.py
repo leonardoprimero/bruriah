@@ -11,6 +11,7 @@
 from __future__ import annotations
 
 import json
+import subprocess
 import threading
 from array import array
 from contextlib import contextmanager
@@ -334,4 +335,55 @@ def test_tool_execution_is_offloaded_to_worker_thread(tmp_path) -> None:
     assert event_loop_thread is not None
     assert len(execution_threads) == 1
     assert execution_threads[0] != event_loop_thread
+
+
+def test_investigate_tool_with_code_target_over_mcp(tmp_path: Path) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    subprocess.run(["git", "init"], cwd=repo, check=True, capture_output=True)
+    subprocess.run(["git", "config", "user.name", "Tester"], cwd=repo, check=True, capture_output=True)
+    subprocess.run(["git", "config", "user.email", "test@example.com"], cwd=repo, check=True, capture_output=True)
+    (repo / "script.py").write_text("print('hello')\n", encoding="utf-8")
+    subprocess.run(["git", "add", "script.py"], cwd=repo, check=True, capture_output=True)
+    subprocess.run(["git", "commit", "-m", "feat: script hello"], cwd=repo, check=True, capture_output=True)
+    sha = subprocess.run(["git", "rev-parse", "HEAD"], cwd=repo, capture_output=True, text=True, check=True).stdout.strip()
+
+    notes = {
+        "decision.md": (
+            f"---\ncommit: {sha}\nverification_date: 2026-07-23\n---\n"
+            f"# feat: script hello\n\n"
+            f"**Decided:** 2026-07-23 · **Commit:** `{sha[:12]}` · **Author:** Tester\n\n"
+            f"Why script was added.\n\n"
+            f"## Files this decision touched\n- `script.py`\n"
+        ),
+    }
+    with _snapshot_for(tmp_path, notes) as active:
+        deps = ServiceDeps(
+            registry=_real_registry(), snapshot=active, repo=repo,
+            embed_query=lambda q: _embed([q])[0],
+        )
+
+        async def body(session) -> None:
+            result = await session.call_tool(
+                INVESTIGATE_TOOL,
+                {"task": f"{_TASK}, why script", "code_target": "script.py:1"},
+            )
+            assert result.isError is False
+            structured = result.structuredContent
+            assert structured is not None
+            assert structured["status"] == "complete"
+            gov_ev = next(ev for ev in structured["evidence"] if ev["authority"] == "primary")
+            assert gov_ev["kind"] == "local"
+            assert "Governing architectural decision for script.py:1" in gov_ev["authority_rationale"]
+
+            # Read the exact lines using READ_TOOL
+            ref = gov_ev["ref"]
+            read_result = await session.call_tool(READ_TOOL, {"refs": [ref]})
+            assert read_result.isError is False
+            read_structured = read_result.structuredContent
+            assert read_structured["items"][0]["status"] == "ok"
+            assert "Why script was added" in read_structured["items"][0]["content"]
+
+        anyio.run(_drive, deps, body)
+
 
