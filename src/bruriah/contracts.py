@@ -59,10 +59,8 @@ class InvestigationRequest(ClosedModel):
             min_length=1,
             max_length=2048,
             description=(
-                "Reserved for future investigation pagination; NOT currently supported. Any "
-                "non-null value is rejected with a typed `cursor_not_supported` error rather than "
-                "silently ignored. (Evidence-read pagination IS supported via `read_evidence`'s "
-                "own cursor.)"
+                "Opaque token returned in a previous InvestigationResult.next_cursor to resume "
+                "and paginate subsequent evidence. Set to null on the initial request."
             ),
         ),
     ] | None = None

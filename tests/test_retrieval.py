@@ -528,3 +528,37 @@ def test_retrieval_falls_back_when_lexical_index_absent(raw_snapshot) -> None:
     assert "lexical_leg_unavailable" not in outcome.degradation
 
 
+def test_search_offset_paginates_candidates_deterministically(multi_passage_snapshot) -> None:
+    # Full unpaginated search
+    full = search(multi_passage_snapshot, "apple", Budgets(max_candidates=10))
+    assert len(full.matches) >= 3
+
+    # Page 1: 2 candidates, offset 0
+    p1 = search(multi_passage_snapshot, "apple", Budgets(max_candidates=2), offset=0)
+    assert len(p1.matches) == 2
+    assert p1.matches[0].ref == full.matches[0].ref
+    assert p1.matches[0].rank == 1
+    assert p1.matches[1].ref == full.matches[1].ref
+    assert p1.matches[1].rank == 2
+
+    # Page 2: 2 candidates, offset 2
+    p2 = search(multi_passage_snapshot, "apple", Budgets(max_candidates=2), offset=2)
+    assert len(p2.matches) == 2
+    assert p2.matches[0].ref == full.matches[2].ref
+    assert p2.matches[0].rank == 3
+    assert p2.matches[1].ref == full.matches[3].ref
+    assert p2.matches[1].rank == 4
+
+    # Offset beyond available candidates
+    p_empty = search(multi_passage_snapshot, "apple", Budgets(max_candidates=10), offset=100)
+    assert len(p_empty.matches) == 0
+    assert "no_eligible_results" not in p_empty.warnings
+
+
+def test_search_negative_offset_raises_typed_error(snapshot) -> None:
+    with pytest.raises(RetrievalError) as caught:
+        search(snapshot, "apple", Budgets(), offset=-1)
+    assert caught.value.code == "invalid_offset"
+
+
+

@@ -21,16 +21,12 @@ def test_public_contract_schemas_are_nested_closed() -> None:
 
     for name in contracts.__all__:
         _assert_closed(getattr(contracts, name).model_json_schema())
-def test_investigation_cursor_is_documented_as_reserved_not_supported() -> None:
-    # Contract honesty: `investigate_work` carries a `cursor` field but the runtime rejects any
-    # non-null value with `cursor_not_supported` (retrieval has no offset yet), so the PUBLISHED
-    # schema MUST say so -- a client must never infer an investigation-pagination capability that
-    # does not exist. `read_evidence`'s cursor, by contrast, IS supported.
+def test_investigation_cursor_is_documented_for_pagination() -> None:
     cursor = str(InvestigationRequest.model_json_schema()["properties"]["cursor"]).lower()
-    assert "not currently supported" in cursor
-    assert "cursor_not_supported" in cursor
+    assert "paginate" in cursor
+    assert "next_cursor" in cursor
     read_cursor = str(ReadRequest.model_json_schema()["properties"]["cursor"]).lower()
-    assert "cursor_not_supported" not in read_cursor
+    assert "cursor" in read_cursor
 @pytest.mark.parametrize(
     "payload",
     [

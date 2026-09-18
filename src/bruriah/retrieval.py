@@ -605,6 +605,8 @@ def search(
         raise RetrievalError("empty_query")
     if len(query) > _MAX_QUERY_CHARS:
         raise RetrievalError("query_too_long")
+    if offset < 0:
+        raise RetrievalError("invalid_offset")
 
     deadline = clock() + budgets.max_elapsed_ms / 1000
     degradation: list[str] = []

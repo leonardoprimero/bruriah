@@ -19,7 +19,10 @@ from bruriah.packs import load_pack
 from bruriah.platform import load_registry
 from bruriah.registries import Registry
 from bruriah.retrieval import RetrievalError, is_shortfall
-from bruriah.service import ServiceDeps, ServiceError, _candidate_urls, investigate, read
+from bruriah.service import (
+    ServiceDeps, ServiceError, _candidate_urls, _encode_cursor, _encode_investigate_cursor,
+    investigate, read,
+)
 # Slice 12A-2: reuse test_research.py's real TLS-loopback harness (no test in this file ever
 # makes a real external network connection either) instead of re-implementing it -- same
 # discipline as test_research.py's own module docstring.
@@ -414,7 +417,7 @@ def test_typed_errors_for_adversarial_inputs_never_escape_bare(deps) -> None:
     cases = [
         (lambda: investigate(None, deps), "invalid_request_type"),
         (lambda: investigate(InvestigationRequest(task="x"), object()), "invalid_deps_type"),
-        (lambda: investigate(InvestigationRequest(task=_TASK, cursor="opaque-token"), deps), "cursor_not_supported"),
+        (lambda: investigate(InvestigationRequest(task=_TASK, cursor="opaque-token"), deps), "invalid_cursor"),
         (lambda: read(None, deps), "invalid_request_type"),
         (lambda: read(ReadRequest(refs=["some-ref"], cursor="not-a-real-cursor"), deps), "invalid_cursor"),
     ]
@@ -1091,3 +1094,99 @@ def test_investigate_superseded_decision_marks_stale_and_emits_claims_and_confli
         assert claim.state == "conflicted"
         assert len(claim.supporting_refs) >= 1
         assert len(claim.conflicting_refs) >= 1
+
+
+def test_investigate_cursor_pagination_walks_evidence_without_loss_or_duplicates(tmp_path: Path) -> None:
+    notes = {
+        "one.md": "# One\napple pie baking recipe one.\n",
+        "two.md": "# Two\napple pie baking recipe two.\n",
+        "three.md": "# Three\napple pie baking recipe three.\n",
+        "four.md": "# Four\napple pie baking recipe four.\n",
+        "five.md": "# Five\napple pie baking recipe five.\n",
+    }
+    with _snapshot_for(tmp_path, notes) as snapshot:
+        deps = ServiceDeps(
+            registry=_real_registry(),
+            snapshot=snapshot,
+            embed_query=_embed_query,
+        )
+        task = _TASK
+
+        # Baseline: full query with large budget
+        full = investigate(InvestigationRequest(task=task, budgets=Budgets(max_evidence=20)), deps)
+        assert len(full.evidence) >= 5
+        full_refs = [e.ref for e in full.evidence]
+
+        # Page 1: 2 items
+        p1 = investigate(InvestigationRequest(task=task, budgets=Budgets(max_evidence=2)), deps)
+        assert len(p1.evidence) == 2
+        assert p1.status == "partial"
+        assert p1.next_cursor is not None
+
+        # Page 2: 2 items
+        p2 = investigate(
+            InvestigationRequest(task=task, budgets=Budgets(max_evidence=2), cursor=p1.next_cursor),
+            deps,
+        )
+        assert len(p2.evidence) == 2
+        assert p2.status == "partial"
+        assert p2.next_cursor is not None
+
+        # Page 3: remaining items
+        p3 = investigate(
+            InvestigationRequest(task=task, budgets=Budgets(max_evidence=2), cursor=p2.next_cursor),
+            deps,
+        )
+        assert len(p3.evidence) >= 1
+        assert p3.next_cursor is None
+        assert p3.status == "complete"
+
+        # All paginated refs combined
+        paginated_refs = [e.ref for e in p1.evidence] + [e.ref for e in p2.evidence] + [e.ref for e in p3.evidence]
+        assert paginated_refs == full_refs
+        # Verify no duplicate refs were emitted
+        assert len(paginated_refs) == len(set(paginated_refs))
+
+
+def test_investigate_cursor_tampering_and_mismatch_rejected(tmp_path: Path) -> None:
+    notes = {
+        "one.md": "# One\napple pie baking recipe one.\n",
+        "two.md": "# Two\napple pie baking recipe two.\n",
+    }
+    with _snapshot_for(tmp_path, notes) as snapshot:
+        deps = ServiceDeps(registry=_real_registry(), snapshot=snapshot)
+        task = _TASK
+        p1 = investigate(InvestigationRequest(task=task, budgets=Budgets(max_evidence=1)), deps)
+        assert p1.next_cursor is not None
+
+        # 1. Cursor used on different task
+        with pytest.raises(ServiceError) as caught:
+            investigate(InvestigationRequest(task="different task", cursor=p1.next_cursor), deps)
+        assert caught.value.code == "invalid_cursor"
+
+        # 2. Malformed cursor
+        with pytest.raises(ServiceError) as caught:
+            investigate(InvestigationRequest(task=task, cursor="garbage-not-base64"), deps)
+        assert caught.value.code == "invalid_cursor"
+
+        # 3. Cursor from read_evidence (missing investigate kind) passed to investigate_work
+        read_cursor = _encode_cursor("some_req_id", "some_ref", 10)
+        with pytest.raises(ServiceError) as caught:
+            investigate(InvestigationRequest(task=task, cursor=read_cursor), deps)
+        assert caught.value.code == "invalid_cursor"
+
+        # 4. Cross-snapshot cursor reuse rejected
+        with _snapshot_for(tmp_path / "other", notes) as other_snapshot:
+            deps_other = ServiceDeps(registry=_real_registry(), snapshot=other_snapshot)
+            with pytest.raises(ServiceError) as caught:
+                investigate(InvestigationRequest(task=task, cursor=p1.next_cursor), deps_other)
+            assert caught.value.code == "invalid_cursor"
+
+        # 5. Invalid / non-positive offset
+        invalid_offset_cursor = _encode_investigate_cursor(p1.request_id, snapshot.build_id, -1)
+        with pytest.raises(ServiceError) as caught:
+            investigate(InvestigationRequest(task=task, cursor=invalid_offset_cursor), deps)
+        assert caught.value.code == "invalid_cursor"
+
+
+

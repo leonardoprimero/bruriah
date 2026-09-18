@@ -130,6 +130,26 @@ def _decode_cursor(token: str) -> dict[str, Any] | None:
     return value if isinstance(value, dict) else None
 
 
+def _encode_investigate_cursor(request_id: str, build_id: str, offset: int) -> str:
+    payload = _canonical_json({"build_id": build_id, "kind": "investigate", "offset": offset, "request_id": request_id})
+    return base64.urlsafe_b64encode(payload.encode("utf-8")).decode("ascii")
+
+
+def _decode_investigate_cursor(token: str, expected_request_id: str, expected_build_id: str) -> int:
+    decoded = _decode_cursor(token)
+    if (
+        decoded is None
+        or decoded.get("kind") != "investigate"
+        or decoded.get("request_id") != expected_request_id
+        or decoded.get("build_id") != expected_build_id
+        or not isinstance(decoded.get("offset"), int)
+        or decoded["offset"] < 1
+    ):
+        raise ServiceError("invalid_cursor")
+    return decoded["offset"]
+
+
+
 def _validate_deps(deps: object) -> ServiceDeps:
     if not isinstance(deps, ServiceDeps):
         raise ServiceError("invalid_deps_type")
@@ -537,15 +557,14 @@ def investigate(request: InvestigationRequest, deps: ServiceDeps) -> Investigati
     if not isinstance(request, InvestigationRequest):
         raise ServiceError("invalid_request_type")
     deps = _validate_deps(deps)
-    if request.cursor is not None:
-        # retrieval.search (frozen Slice 6A) has no offset/exclusion parameter, so a facade
-        # cursor here could never actually resume a truncated request -- returning one anyway
-        # would be a false promise. `status=partial` plus `degradation` already signal
-        # truncation honestly; real investigate() pagination needs a 6A extension, not a 7A
-        # workaround, so a client-supplied cursor fails typed instead of being silently dropped.
-        raise ServiceError("cursor_not_supported")
 
     request_id = _content_hash(request)
+    cursor_offset = 0
+    if request.cursor is not None:
+        cursor_offset = _decode_investigate_cursor(
+            request.cursor, request_id, deps.snapshot.build_id
+        )
+
     classification = classify(request)
     # The opt-in gate, applied once and early: a request without `host_skills` never reaches the
     # skill set, so dispatch cannot emit a ref, a gap, an action, or a new enum member to a
@@ -571,6 +590,7 @@ def investigate(request: InvestigationRequest, deps: ServiceDeps) -> Investigati
     extra_gaps: list[str] = list(pack_gaps)
     lineage_claims: list[ClaimRecord] = []
     lineage_conflicts: list[str] = []
+    next_cursor: str | None = None
     if decision.outcome == "proceed":
         # Capability evidence (Slice 7A-2): one EvidenceRecord per matched `lookup.capabilities`
         # entry -- "Method and tool discovery" requires capability refs alongside knowledge, not
@@ -585,21 +605,30 @@ def investigate(request: InvestigationRequest, deps: ServiceDeps) -> Investigati
             if opted_in else None
         )
         skill_evidence = [_skill_evidence_record(item) for item in skill_dispatch.skills] if skill_dispatch else []
+        prefix_evidence = skill_evidence + capability_evidence
+        prefix_count = len(prefix_evidence)
+        max_evidence = request.budgets.max_evidence
+
+        if cursor_offset < prefix_count:
+            page_prefix = prefix_evidence[cursor_offset : cursor_offset + max_evidence]
+            remaining_slots = max_evidence - len(page_prefix)
+            local_offset = 0
+        else:
+            page_prefix = []
+            remaining_slots = max_evidence
+            local_offset = cursor_offset - prefix_count
+
         outcome = search(
             deps.snapshot, request.task, request.budgets,
+            offset=local_offset,
             embed_query=deps.embed_query, rerank=deps.rerank, clock=deps.clock,
         )
         raw_local_evidence = to_evidence_records(outcome)
         local_evidence, lineage_claims, lineage_conflicts = _apply_lineage(raw_local_evidence, deps.snapshot)
+        page_local = local_evidence[:remaining_slots]
         warnings = list(outcome.warnings)
         degradation = list(outcome.degradation)
-        truncated = outcome.truncated
-        # Combine capabilities first, then local retrieval, in each side's own deterministic order
-        # (registry pack_id-then-id order; retrieval's own ranking). Capabilities lead because they
-        # most directly answer "which tool/library" -- the reason `route()` proceeded on a
-        # capability_recommendation claim -- and are typically the smaller, most specific set;
-        # local passages fill the remaining budget. This ordering is the truncation preference below.
-        evidence = skill_evidence + capability_evidence + local_evidence
+
         # Bounded live research (Slice 12A-2): run only when `deps.research` was actually
         # provisioned (`_run_research` returns `[]` otherwise -- the byte-identical-to-12A-1
         # invariant), then fold outcomes the same way `context.py`'s `_assembled_result` folds
@@ -607,24 +636,28 @@ def investigate(request: InvestigationRequest, deps: ServiceDeps) -> Investigati
         # `research_unavailable:<code>` degradation entry plus its already-computed host actions.
         research_outcomes = _run_research(request, deps)
         host_actions, research_degradation, research_evidence = _fold_research(research_outcomes)
-        evidence = evidence + research_evidence
         degradation = degradation + research_degradation
-        # Enforce the declared `max_evidence` ceiling over the COMBINED set (capability + local +
-        # research). retrieval.search bounds by `max_candidates` (a scan ceiling), not by
-        # `max_evidence` (the result-item ceiling), so without this an investigation could return
-        # more evidence items than the smaller declared budget -- "Bounded Investigation": every
-        # request MUST enforce the declared evidence-items ceiling. Truncation is reported, never
-        # silent.
-        if len(evidence) > request.budgets.max_evidence:
-            evidence = evidence[: request.budgets.max_evidence]
-            degradation.append("max_evidence_exceeded")
+
+        available_slots = max_evidence - len(page_prefix) - len(page_local)
+        page_research = research_evidence[: max(0, available_slots)]
+        evidence = page_prefix + page_local + page_research
+
+        prefix_has_more = (cursor_offset + len(page_prefix) < prefix_count)
+        local_has_more = (len(local_evidence) > len(page_local))
+        search_has_more = outcome.truncated
+        research_has_more = (len(research_evidence) > len(page_research))
+        has_more = prefix_has_more or local_has_more or search_has_more or research_has_more
+
+        if has_more:
+            next_offset = cursor_offset + len(evidence)
+            next_cursor = _encode_investigate_cursor(request_id, deps.snapshot.build_id, next_offset)
             truncated = True
-        # `degradation` is consulted here, not only `truncated`. Retrieval reports a cut-short scan,
-        # an unavailable or failed vector leg and a failed reranker in `degradation` while leaving
-        # `truncated` False -- it is set only by the two budget ceilings in the match loop -- so a
-        # request whose corpus scan stopped at the deadline was labelled `complete`, meaning the
-        # client was told it had the whole picture of exactly the case where it did not.
-        # `is_shortfall` excludes the entries that disclose an applied rule rather than a loss.
+            if len(evidence) >= max_evidence:
+                degradation.append("max_evidence_exceeded")
+        else:
+            next_cursor = None
+            truncated = False
+
         status = (
             "partial"
             if truncated or research_degradation or any(is_shortfall(note) for note in degradation)
@@ -642,7 +675,7 @@ def investigate(request: InvestigationRequest, deps: ServiceDeps) -> Investigati
     result = InvestigationResult(
         schema_version="1", status=status, request_id=request_id, evidence=evidence,
         claims=lineage_claims, conflicts=lineage_conflicts, gaps=list(decision.gaps) + extra_gaps, host_actions=host_actions,
-        warnings=warnings, degradation=degradation, budgets=request.budgets, next_cursor=None,
+        warnings=warnings, degradation=degradation, budgets=request.budgets, next_cursor=next_cursor,
     )
     # `max_output_chars` is enforced HERE and nowhere else on this path. Both non-`proceed`
     # outcomes return through `assemble_context`, which compacts before returning; the `proceed`

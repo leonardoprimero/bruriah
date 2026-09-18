@@ -178,12 +178,12 @@ def test_unknown_field_rejected_without_work(tmp_path) -> None:
 def test_service_error_becomes_typed_tool_error_without_crashing_session(tmp_path) -> None:
     async def body(session) -> None:
         # A client-supplied cursor is structurally valid (ShortText) but semantically
-        # unsupported by investigate() -- service.ServiceError("cursor_not_supported") must
+        # invalid -- service.ServiceError("invalid_cursor") must
         # surface as a typed tool error, not an unhandled exception that ends the session.
         result = await session.call_tool(INVESTIGATE_TOOL, {"task": _TASK, "cursor": "opaque-token"})
         assert result.isError is True
         error = json.loads(result.content[0].text)
-        assert error["error"]["code"] == "cursor_not_supported"
+        assert error["error"]["code"] == "invalid_cursor"
         # The session must still be usable afterwards -- no crash, no dropped connection.
         listed = await session.list_tools()
         assert {t.name for t in listed.tools} == {INVESTIGATE_TOOL, READ_TOOL}
