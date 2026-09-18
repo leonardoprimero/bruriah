@@ -229,11 +229,11 @@ supersedes:
 
 We migrated to DuckDB for OLAP.
 """
-    (corpus / "dec1.md").write_text(doc1)
-    (corpus / "dec2.md").write_text(doc2)
+    (corpus / "dec1.md").write_text(doc1, encoding="utf-8")
+    (corpus / "dec2.md").write_text(doc2, encoding="utf-8")
 
     policy = tmp_path / "policy.yaml"
-    policy.write_text("version: 1\ninclude: ['**']\nexclude: []\n")
+    policy.write_text("version: 1\ninclude: ['**']\nexclude: []\n", encoding="utf-8")
     argv = ["--data-dir", str(tmp_path / "data dir"), "--config-dir", str(tmp_path / "config dir")]
     parser = cli._build_cli_parser()
     index_args = parser.parse_args(["index", "--corpus-root", str(corpus), "--policy", str(policy),
