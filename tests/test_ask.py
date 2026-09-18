@@ -12,6 +12,7 @@ from __future__ import annotations
 import json
 import re
 import shlex
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -186,3 +187,76 @@ def test_it_answers_nothing_and_has_nothing_to_answer_with(indexed, capsys) -> N
     for invented in ("In summary", "The answer is", "Based on the evidence", "It appears that"):
         assert invented not in out
     assert "references" in out and "authority" in out
+
+
+def test_ask_with_code_target_and_repo(tmp_path: Path, capsys) -> None:
+    repo = tmp_path / "code_repo"
+    repo.mkdir()
+    subprocess.run(["git", "init"], cwd=repo, check=True, capture_output=True)
+    subprocess.run(["git", "config", "user.name", "Leonardo Caliva"], cwd=repo, check=True, capture_output=True)
+    subprocess.run(["git", "config", "user.email", "leo@example.com"], cwd=repo, check=True, capture_output=True)
+    (repo / "storage.py").write_text("def init_db():\n    return 'sqlite'\n", encoding="utf-8")
+    subprocess.run(["git", "add", "storage.py"], cwd=repo, check=True, capture_output=True)
+    subprocess.run(["git", "commit", "-m", "feat: initial sqlite db"], cwd=repo, check=True, capture_output=True)
+    sha1 = subprocess.run(["git", "rev-parse", "HEAD"], cwd=repo, capture_output=True, text=True, check=True).stdout.strip()
+
+    sha2 = "99999999ccccddddeeeeffff0000111122223333"
+
+    corpus = tmp_path / "corpus"
+    corpus.mkdir()
+    doc1 = f"""---
+commit: {sha1}
+verification_date: 2026-01-01
+---
+# Storage Architecture
+
+**Decided:** 2026-01-01 · **Commit:** `{sha1[:12]}` · **Author:** Leonardo Caliva
+
+We chose SQLite for durability.
+
+## Files this decision touched
+- `storage.py`
+"""
+    doc2 = f"""---
+commit: {sha2}
+verification_date: 2026-05-01
+supersedes:
+  - {sha1}
+---
+# Modern DuckDB Storage
+
+**Decided:** 2026-05-01 · **Commit:** `{sha2[:12]}` · **Author:** Leonardo Caliva
+
+We migrated to DuckDB for OLAP.
+"""
+    (corpus / "dec1.md").write_text(doc1)
+    (corpus / "dec2.md").write_text(doc2)
+
+    policy = tmp_path / "policy.yaml"
+    policy.write_text("version: 1\ninclude: ['**']\nexclude: []\n")
+    argv = ["--data-dir", str(tmp_path / "data dir"), "--config-dir", str(tmp_path / "config dir")]
+    parser = cli._build_cli_parser()
+    index_args = parser.parse_args(["index", "--corpus-root", str(corpus), "--policy", str(policy),
+                                    "--model", "test/minilm", *argv])
+    assert cli._cmd_index(index_args, embedder_factory=_fake_embedder_factory) == 0
+
+    ask_args = parser.parse_args([
+        "ask",
+        "why did we use sqlite",
+        "--code-target", "storage.py:1",
+        "--repo", str(repo),
+        *argv,
+    ])
+    exit_code = cli._cmd_ask(ask_args, embedder_factory=_fake_embedder_factory)
+    assert exit_code == 0
+    out = capsys.readouterr().out
+
+    assert "dec1.md" in out
+    assert "dec2.md" in out
+    assert "authority: primary" in out
+    assert "freshness: stale" in out
+    assert "conflict: declared" in out
+    assert "freshness: current" in out
+    assert "conflict:" in out
+    assert "governing storage.py:1 has been supersedes" in out
+

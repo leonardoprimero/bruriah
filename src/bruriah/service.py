@@ -628,35 +628,54 @@ def _resolve_code_target_causality(
     conflicting_refs: list[str] = []
     if alerts:
         for alert in alerts:
-            conflicts.append(
+            conf_msg = (
                 f"Decision in {p_path} governing {code_target} has been {alert.relation} "
                 f"by {alert.successor_commit[:8] if alert.successor_commit else alert.successor_ref}: "
                 f"{alert.successor_subject or 'successor'}"
             )
+            if alert.depth > 1 and alert.active_successor_ref:
+                act_str = (
+                    alert.active_successor_commit[:8]
+                    if alert.active_successor_commit
+                    else alert.active_successor_ref
+                )
+                conf_msg += f" (evolved to active leaf {act_str}: {alert.active_successor_subject or 'active'})"
+            conflicts.append(conf_msg)
+
             try:
-                succ_passages = snapshot.database.execute(
-                    "SELECT ref, relative_path, start_line, end_line, source_hash FROM passages "
-                    "WHERE document_ref = ? ORDER BY start_line LIMIT 1",
-                    (alert.successor_ref,),
-                ).fetchall()
-                for s_ref, s_path, s_start, s_end, s_hash in succ_passages:
-                    conflicting_refs.append(s_ref)
-                    evidence.append(
-                        EvidenceRecord(
-                            ref=s_ref,
-                            kind="local",
-                            publisher=s_path,
-                            locator=s_path,
-                            citation_locator=f"{s_path}#{s_start}-{s_end}",
-                            digest=f"sha256:{s_hash}",
-                            extraction_method="markdown_section",
-                            authority="primary",
-                            authority_rationale=f"Successor decision ({alert.relation}) for {code_target}",
-                            freshness="current",
-                            license="permitted",
-                            conflict="none",
+                target_succs = [alert.successor_ref]
+                if alert.depth > 1 and alert.active_successor_ref and alert.active_successor_ref not in target_succs:
+                    target_succs.append(alert.active_successor_ref)
+
+                for idx, succ_doc_ref in enumerate(target_succs):
+                    is_active_leaf = (idx == len(target_succs) - 1 and alert.depth > 1) or (alert.depth == 1)
+                    succ_passages = snapshot.database.execute(
+                        "SELECT ref, relative_path, start_line, end_line, source_hash FROM passages "
+                        "WHERE document_ref = ? ORDER BY start_line LIMIT 1",
+                        (succ_doc_ref,),
+                    ).fetchall()
+                    for s_ref, s_path, s_start, s_end, s_hash in succ_passages:
+                        conflicting_refs.append(s_ref)
+                        evidence.append(
+                            EvidenceRecord(
+                                ref=s_ref,
+                                kind="local",
+                                publisher=s_path,
+                                locator=s_path,
+                                citation_locator=f"{s_path}#{s_start}-{s_end}",
+                                digest=f"sha256:{s_hash}",
+                                extraction_method="markdown_section",
+                                authority="primary",
+                                authority_rationale=(
+                                    f"Active successor decision for {code_target}"
+                                    if is_active_leaf
+                                    else f"Intermediate successor decision ({alert.relation}) for {code_target}"
+                                ),
+                                freshness="current" if is_active_leaf else "stale",
+                                license="permitted",
+                                conflict="none" if is_active_leaf else "declared",
+                            )
                         )
-                    )
             except sqlite3.DatabaseError:
                 pass
 

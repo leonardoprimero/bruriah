@@ -95,6 +95,19 @@ def build_cli_parser(
     ask.add_argument("--limit", type=int, default=8, help="references to list (default 8)")
     ask.add_argument("--json", action="store_true", help="the raw investigate_work result")
     ask.add_argument(
+        "--code-target",
+        "-c",
+        default=None,
+        metavar="TARGET",
+        help="ground the investigation on a specific file and optional line (e.g. 'src/server.py:42')",
+    )
+    ask.add_argument(
+        "--repo",
+        type=Path,
+        default=Path("."),
+        help="git repository root for causal resolution (default '.')",
+    )
+    ask.add_argument(
         "--reranker",
         default=None,
         metavar="MODEL",

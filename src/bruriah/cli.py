@@ -674,15 +674,22 @@ def _cmd_ask(
     """
     paths = _resolve_paths(args)
     deps = build_serve_deps(
-        paths, embedder_factory=embedder_factory,
-        reranker_model=getattr(args, "reranker", None), reranker_factory=reranker_factory,
+        paths,
+        embedder_factory=embedder_factory,
+        reranker_model=getattr(args, "reranker", None),
+        reranker_factory=reranker_factory,
+        repo=getattr(args, "repo", Path(".")),
     )
     # The snapshot holds an open SQLite connection. `_cmd_serve` closes it in a finally and
     # `run_doctor` closes it before returning; this one never did, across five exits. On POSIX
     # that is a ResourceWarning nobody reads, and on Windows an unclosed connection is what
     # makes a generation undeletable -- the same shape that failed `index-prune` in CI.
     try:
-        result = investigate(InvestigationRequest(task=args.question, host_skills=[]), deps)
+        code_target = getattr(args, "code_target", None)
+        result = investigate(
+            InvestigationRequest(task=args.question, code_target=code_target, host_skills=[]),
+            deps,
+        )
         payload = result.model_dump(mode="json")
         if args.json:
             print(json.dumps(payload, indent=2, sort_keys=True))
@@ -694,6 +701,11 @@ def _cmd_ask(
             print(f"  disclosed: {note}")
         for gap in payload["gaps"]:
             print(f"  gap: {gap}")
+        for conflict in payload.get("conflicts", []):
+            print(f"  conflict: {conflict}")
+        for claim in payload.get("claims", []):
+            if claim.get("state") == "conflicted":
+                print(f"  claim (conflicted): {claim['text']}")
         if payload["status"] == "abstained":
             print("\n  No approved policy covers this domain, so nothing is returned rather than the\n"
                   "  nearest-looking passage. That is the designed answer, not a failure.\n")
@@ -706,6 +718,10 @@ def _cmd_ask(
         for position, item in shown:
             print(f"\n  [{position}] {item['citation_locator']}")
             print(f"      authority: {item['authority']} ({item['authority_rationale']})")
+            if item.get("freshness") and item["freshness"] != "unknown":
+                print(f"      freshness: {item['freshness']}")
+            if item.get("conflict") and item["conflict"] != "none":
+                print(f"      conflict: {item['conflict']}")
             print(f"      {item['digest']}")
         if not local:
             print("\n  Nothing in this corpus bears on that question.\n")

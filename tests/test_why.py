@@ -201,6 +201,100 @@ Supersedes the initial storage decision with memory-mapped files.
         assert "No governing architectural decision indexed" in human_no_dec
 
 
+def test_check_lineage_alerts_transitive_multi_hop(tmp_path: Path) -> None:
+    db_path = tmp_path / "index.sqlite3"
+    with contextlib.closing(sqlite3.connect(db_path)) as db:
+        db.execute("""
+            CREATE TABLE documents (
+                document_ref TEXT PRIMARY KEY, relative_path TEXT UNIQUE NOT NULL,
+                source_hash TEXT NOT NULL, metadata TEXT NOT NULL
+            )
+        """)
+        db.execute("""
+            CREATE TABLE passages (
+                ref TEXT PRIMARY KEY, document_ref TEXT NOT NULL, relative_path TEXT NOT NULL,
+                heading_path TEXT NOT NULL, start_line INTEGER NOT NULL, end_line INTEGER NOT NULL,
+                text TEXT NOT NULL, source_hash TEXT NOT NULL, metadata TEXT NOT NULL,
+                search_text TEXT NOT NULL, vector BLOB NOT NULL
+            )
+        """)
+        db.execute("""
+            CREATE TABLE lineage (
+                successor_ref TEXT NOT NULL, predecessor_target TEXT NOT NULL,
+                predecessor_ref TEXT, relation TEXT NOT NULL,
+                PRIMARY KEY (successor_ref, predecessor_target, relation)
+            )
+        """)
+
+        sha_a = "1111111122223333444455556666777788889999"
+        sha_b = "bbbbbbbbccccddddeeeeffff0000111122223333"
+        sha_c = "ccccccccddddeeeeffff00001111222233334444"
+
+        meta_a = json.dumps({"commit": sha_a, "verification_date": "2026-01-01"})
+        db.execute("INSERT INTO documents VALUES (?, ?, ?, ?)", ("doc-a", "a.md", "hash_a", meta_a))
+        text_a = "# Generation 1 Architecture\n\nInitial design.\n"
+        db.execute("INSERT INTO passages VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                   ("p_a", "doc-a", "a.md", "[]", 1, 3, text_a, "ha", meta_a, text_a, b"v"))
+
+        meta_b = json.dumps({"commit": sha_b, "verification_date": "2026-03-01"})
+        db.execute("INSERT INTO documents VALUES (?, ?, ?, ?)", ("doc-b", "b.md", "hash_b", meta_b))
+        text_b = "# Generation 2 Architecture\n\nIntermediate rewrite.\n"
+        db.execute("INSERT INTO passages VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                   ("p_b", "doc-b", "b.md", "[]", 1, 3, text_b, "hb", meta_b, text_b, b"v"))
+
+        meta_c = json.dumps({"commit": sha_c, "verification_date": "2026-06-01"})
+        db.execute("INSERT INTO documents VALUES (?, ?, ?, ?)", ("doc-c", "c.md", "hash_c", meta_c))
+        text_c = "# Generation 3 Cloud-Native\n\nActive modern architecture.\n"
+        db.execute("INSERT INTO passages VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                   ("p_c", "doc-c", "c.md", "[]", 1, 3, text_c, "hc", meta_c, text_c, b"v"))
+
+        # Link: doc-a -> doc-b -> doc-c
+        db.execute("INSERT INTO lineage VALUES (?, ?, ?, ?)",
+                   ("doc-b", sha_a[:8], "doc-a", "supersedes"))
+        db.execute("INSERT INTO lineage VALUES (?, ?, ?, ?)",
+                   ("doc-c", sha_b[:8], "doc-b", "supersedes"))
+        db.commit()
+
+        alerts = check_lineage_alerts(db, "doc-a", sha_a)
+        assert len(alerts) == 1
+        alert = alerts[0]
+        assert alert.relation == "supersedes"
+        assert alert.successor_ref == "doc-b"
+        assert alert.successor_commit == sha_b
+        assert alert.successor_subject == "Generation 2 Architecture"
+        assert alert.depth == 2
+        assert alert.active_successor_ref == "doc-c"
+        assert alert.active_successor_commit == sha_c
+        assert alert.active_successor_subject == "Generation 3 Cloud-Native"
+        assert len(alert.chain) == 2
+        assert alert.chain[0].ref == "doc-b"
+        assert alert.chain[1].ref == "doc-c"
+
+        # Check formatting
+        res = CausalResolution(
+            target="src/core.py:1",
+            file_path="src/core.py",
+            line=1,
+            line_commit=CommitInfo(sha=sha_a, author="Dev", date="2026-01-01", subject="feat: gen 1"),
+            governing_decision=find_decision_in_database(db, sha_a),
+            governing_commit=None,
+            lineage_alerts=alerts,
+        )
+        human = format_why_human(res)
+        assert "⚠️  SUPERSEDES by doc-b (sha: bbbbbbbbcccc)" in human
+        assert "↳ subsequently evolved through 2 generations to [CURRENT ACTIVE]: doc-c (sha: ccccccccdddd)" in human
+        assert '"Generation 3 Cloud-Native"' in human
+
+        json_repr = json.loads(format_why_json(res))
+        alert_json = json_repr["lineage_alerts"][0]
+        assert alert_json["depth"] == 2
+        assert alert_json["active_successor_ref"] == "doc-c"
+        assert alert_json["active_successor_commit"] == sha_c
+        assert alert_json["active_successor_subject"] == "Generation 3 Cloud-Native"
+        assert len(alert_json["chain"]) == 2
+
+
+
 def test_trace_causal_archaeology_e2e(tmp_path: Path) -> None:
     repo = tmp_path / "repo"
     repo.mkdir()

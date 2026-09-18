@@ -43,11 +43,24 @@ class DecisionInfo:
 
 
 @dataclass(frozen=True)
+class LineageHop:
+    relation: str
+    ref: str
+    commit: str | None = None
+    subject: str | None = None
+
+
+@dataclass(frozen=True)
 class LineageAlert:
     relation: str
     successor_ref: str
     successor_commit: str | None = None
     successor_subject: str | None = None
+    depth: int = 1
+    chain: tuple[LineageHop, ...] = ()
+    active_successor_ref: str | None = None
+    active_successor_commit: str | None = None
+    active_successor_subject: str | None = None
 
 
 @dataclass(frozen=True)
@@ -217,10 +230,35 @@ def find_decision_in_database(
     )
 
 
+def _doc_info(database: sqlite3.Connection, doc_ref: str) -> tuple[str | None, str | None]:
+    succ_doc = database.execute(
+        "SELECT metadata FROM documents WHERE document_ref = ?", (doc_ref,)
+    ).fetchone()
+    succ_sha: str | None = None
+    succ_subj: str | None = None
+    if succ_doc:
+        try:
+            smeta = json.loads(succ_doc[0])
+            succ_sha = smeta.get("commit")
+        except json.JSONDecodeError:
+            pass
+        first_passage = database.execute(
+            "SELECT text FROM passages WHERE document_ref = ? ORDER BY start_line LIMIT 1",
+            (doc_ref,),
+        ).fetchone()
+        if first_passage:
+            s_match = re.search(r"^#\s+(.+)$", first_passage[0], re.MULTILINE)
+            if s_match:
+                succ_subj = s_match.group(1).strip()
+    return succ_sha, succ_subj
+
+
 def check_lineage_alerts(
     database: sqlite3.Connection, decision_ref: str, commit_sha: str
 ) -> tuple[LineageAlert, ...]:
-    """Check if the given decision has been superseded, deprecated, or amended in the lineage DAG."""
+    """Check if the given decision has been superseded, deprecated, or amended in the lineage DAG,
+    tracing multi-hop successor chains transitively to find the active leaf decision.
+    """
     has_lineage = (
         database.execute(
             "SELECT count(*) FROM sqlite_master WHERE type='table' AND name='lineage'"
@@ -238,26 +276,40 @@ def check_lineage_alerts(
 
     alerts: list[LineageAlert] = []
     for successor_ref, relation, _target in rows:
-        succ_doc = database.execute(
-            "SELECT metadata FROM documents WHERE document_ref = ?", (successor_ref,)
-        ).fetchone()
-        succ_sha: str | None = None
-        succ_subj: str | None = None
-        if succ_doc:
-            try:
-                smeta = json.loads(succ_doc[0])
-                succ_sha = smeta.get("commit")
-            except json.JSONDecodeError:
-                pass
-            first_passage = database.execute(
-                "SELECT text FROM passages WHERE document_ref = ? ORDER BY start_line LIMIT 1",
-                (successor_ref,),
-            ).fetchone()
-            if first_passage:
-                s_match = re.search(r"^#\s+(.+)$", first_passage[0], re.MULTILINE)
-                if s_match:
-                    succ_subject = s_match.group(1).strip()
-                    succ_subj = succ_subject
+        succ_sha, succ_subj = _doc_info(database, successor_ref)
+
+        chain: list[LineageHop] = [
+            LineageHop(relation=relation, ref=successor_ref, commit=succ_sha, subject=succ_subj)
+        ]
+        visited = {decision_ref, successor_ref}
+        current_ref = successor_ref
+        current_sha = succ_sha
+        current_subj = succ_subj
+
+        for _ in range(50):
+            p8 = f"{current_sha[:8].lower()}%" if current_sha else "---none---"
+            next_rows = database.execute(
+                "SELECT successor_ref, relation FROM lineage WHERE predecessor_ref = ? OR (predecessor_target != '' AND predecessor_target LIKE ?)",
+                (current_ref, p8),
+            ).fetchall()
+            if not next_rows:
+                break
+            next_succ_ref, next_rel = next_rows[0]
+            if next_succ_ref in visited:
+                break
+            visited.add(next_succ_ref)
+            n_sha, n_subj = _doc_info(database, next_succ_ref)
+            chain.append(
+                LineageHop(relation=next_rel, ref=next_succ_ref, commit=n_sha, subject=n_subj)
+            )
+            current_ref = next_succ_ref
+            current_sha = n_sha
+            current_subj = n_subj
+
+        depth = len(chain)
+        active_ref = current_ref if depth > 1 else None
+        active_sha = current_sha if depth > 1 else None
+        active_subj = current_subj if depth > 1 else None
 
         alerts.append(
             LineageAlert(
@@ -265,6 +317,11 @@ def check_lineage_alerts(
                 successor_ref=successor_ref,
                 successor_commit=succ_sha,
                 successor_subject=succ_subj,
+                depth=depth,
+                chain=tuple(chain),
+                active_successor_ref=active_ref,
+                active_successor_commit=active_sha,
+                active_successor_subject=active_subj,
             )
         )
     return tuple(alerts)
@@ -374,6 +431,19 @@ def format_why_json(res: CausalResolution) -> str:
                 "successor_ref": a.successor_ref,
                 "successor_commit": a.successor_commit,
                 "successor_subject": a.successor_subject,
+                "depth": a.depth,
+                "active_successor_ref": a.active_successor_ref,
+                "active_successor_commit": a.active_successor_commit,
+                "active_successor_subject": a.active_successor_subject,
+                "chain": [
+                    {
+                        "relation": h.relation,
+                        "ref": h.ref,
+                        "commit": h.commit,
+                        "subject": h.subject,
+                    }
+                    for h in a.chain
+                ],
             }
             for a in res.lineage_alerts
         ],
@@ -422,6 +492,15 @@ def format_why_human(res: CausalResolution) -> str:
             lines.append(f"  ⚠️  {rel_upper} by {succ_str}")
             if alert.successor_subject:
                 lines.append(f'     "{alert.successor_subject}"')
+            if alert.depth > 1 and alert.active_successor_ref:
+                act_str = alert.active_successor_ref
+                if alert.active_successor_commit:
+                    act_str += f" (sha: {alert.active_successor_commit[:12]})"
+                lines.append(
+                    f"     ↳ subsequently evolved through {alert.depth} generations to [CURRENT ACTIVE]: {act_str}"
+                )
+                if alert.active_successor_subject:
+                    lines.append(f'       "{alert.active_successor_subject}"')
         lines.append("")
 
     return "\n".join(lines).rstrip()

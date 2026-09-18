@@ -5,6 +5,14 @@ and the entries here name what changed for *you* rather than which files moved.
 
 ## [Unreleased]
 
+### Added: Transitive Decision Lineage Resolution & CLI Ask Code Grounding
+
+Extends Bruriah's decision lineage and causal archaeology engine with multi-hop DAG resolution and exposes code-target grounding directly to CLI users:
+- **Transitive Lineage Resolution:** When an architectural decision has evolved through multiple generations (e.g. Decision A superseded by B, and B subsequently superseded by C), `why.py` and `service.py` trace the full transitive DAG chain to identify the active leaf successor.
+- **Evolutionary Chain Disclosures:** In both terminal human output and `--json` payloads, `bruriah why` renders the complete evolutionary chain and explicitly highlights `[CURRENT ACTIVE]` leaf decisions.
+- **Service & MCP Transitive Conflict Disclosure:** In `service.investigate` with `code_target`, intermediate superseded decisions are annotated with `freshness="stale"` and `conflict="declared"`, while active leaf decisions are annotated with `freshness="current"` and `conflict="none"`, giving agents immediate visibility into the latest governing consensus.
+- **CLI Ask Code Grounding:** Added `--code-target` (`-c`) and `--repo` flags to `bruriah ask`. Developers in the terminal can ground questions in specific files and lines (`bruriah ask "why this structure" -c src/server.py:42`), rendering primary governing decisions, freshness, and DAG conflict disclosures without launching an MCP client.
+
 ### Added: Auditable PDF Corpus Derivation (`bruriah corpus --pdf`)
 
 Closes Issue #5. Enables indexing PDF documents (design specs, papers, architecture RFCs, standards) as an auditable derivation step that preserves Bruriah's sacred byte-for-byte locator guarantee:

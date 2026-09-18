@@ -1313,5 +1313,91 @@ def test_investigate_code_target_untracked_file_degrades_gracefully(tmp_path: Pa
         assert any("code_target_unavailable:file_not_in_git" in d for d in res.degradation)
 
 
+def test_investigate_code_target_with_transitive_superseded_decision(tmp_path: Path) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    subprocess.run(["git", "init"], cwd=repo, check=True, capture_output=True)
+    subprocess.run(["git", "config", "user.name", "Leonardo Caliva"], cwd=repo, check=True, capture_output=True)
+    subprocess.run(["git", "config", "user.email", "leo@example.com"], cwd=repo, check=True, capture_output=True)
+    (repo / "code.py").write_text("def legacy():\n    pass\n", encoding="utf-8")
+    subprocess.run(["git", "add", "code.py"], cwd=repo, check=True, capture_output=True)
+    subprocess.run(["git", "commit", "-m", "feat: legacy initial"], cwd=repo, check=True, capture_output=True)
+    sha_v1 = subprocess.run(["git", "rev-parse", "HEAD"], cwd=repo, capture_output=True, text=True, check=True).stdout.strip()
+
+    sha_v2 = "22222222ccccddddeeeeffff0000111122223333"
+    sha_v3 = "33333333ccccddddeeeeffff0000111122223333"
+
+    v1_doc = f"""---
+commit: {sha_v1}
+verification_date: 2026-01-01
+---
+# feat: legacy initial
+
+**Decided:** 2026-01-01 · **Commit:** `{sha_v1[:12]}` · **Author:** Leonardo Caliva
+
+V1 architecture.
+
+## Files this decision touched
+- `code.py`
+"""
+    v2_doc = f"""---
+commit: {sha_v2}
+verification_date: 2026-04-01
+supersedes:
+  - {sha_v1}
+---
+# feat: intermediate rewrite
+
+**Decided:** 2026-04-01 · **Commit:** `{sha_v2[:12]}` · **Author:** Leonardo Caliva
+
+V2 architecture replacing V1.
+"""
+    v3_doc = f"""---
+commit: {sha_v3}
+verification_date: 2026-08-01
+supersedes:
+  - {sha_v2}
+---
+# feat: modern active leaf
+
+**Decided:** 2026-08-01 · **Commit:** `{sha_v3[:12]}` · **Author:** Leonardo Caliva
+
+V3 modern architecture replacing V2.
+"""
+    notes = {"v1.md": v1_doc, "v2.md": v2_doc, "v3.md": v3_doc}
+    with _snapshot_for(tmp_path, notes) as active:
+        deps = ServiceDeps(registry=_real_registry(), snapshot=active, repo=repo, embed_query=lambda q: _embed([q])[0])
+        req = InvestigationRequest(
+            task=f"{_TASK}, why legacy function",
+            code_target="code.py:1",
+            budgets=Budgets(max_evidence=10),
+        )
+        res = investigate(req, deps)
+        assert res.status == "complete"
+        # Check conflict note mentions active leaf
+        assert any("evolved to active leaf" in c for c in res.conflicts)
+        # Check evidence includes governing decision (v1), intermediate (v2), active leaf (v3)
+        ev_locators = [ev.locator for ev in res.evidence]
+        assert "public/v1.md" in ev_locators
+        assert "public/v2.md" in ev_locators
+        assert "public/v3.md" in ev_locators
+
+        # Check freshness and conflict annotations
+        v1_ev = next(ev for ev in res.evidence if ev.locator == "public/v1.md")
+        assert v1_ev.freshness == "stale"
+        assert v1_ev.conflict == "declared"
+
+        v2_ev = next(ev for ev in res.evidence if ev.locator == "public/v2.md")
+        assert v2_ev.freshness == "stale"
+        assert v2_ev.conflict == "declared"
+        assert "Intermediate successor" in v2_ev.authority_rationale
+
+        v3_ev = next(ev for ev in res.evidence if ev.locator == "public/v3.md")
+        assert v3_ev.freshness == "current"
+        assert v3_ev.conflict == "none"
+        assert "Active successor" in v3_ev.authority_rationale
+
+
+
 
 

@@ -60,6 +60,7 @@ Then ask it something, from the terminal, before wiring up any client:
 ```bash
 bruriah ask --data-dir "$B/data" "why did this project avoid FastMCP"   # references, no prose
 bruriah ask --data-dir "$B/data" "why did this project avoid FastMCP" --read 2   # the exact lines
+bruriah ask --data-dir "$B/data" "why this handler" --code-target src/server.py:42 # grounded in code
 bruriah why src/bruriah/mcp_server.py:42 --data-dir "$B/data"           # causal archaeology for code
 ```
 
@@ -154,7 +155,9 @@ amends:
 ---
 ```
 
-When `bruriah corpus` parses your repository, it extracts these trailers into document metadata. `bruriah index` records directed edges in a SQLite lineage DAG and verifies acyclicity via DFS (aborting with `IndexLifecycleError("lineage_cycle_detected")` if a loop is found). At query time, `investigate_work` resolves superseded decisions: older evidence is marked `stale` with `conflict: declared`, active successors are automatically injected into the evidence list, and explicit `ClaimRecord` entries with `state: "conflicted"` are emitted.
+When `bruriah corpus` parses your repository, it extracts these trailers into document metadata. `bruriah index` records directed edges in a SQLite lineage DAG and verifies acyclicity via DFS (aborting with `IndexLifecycleError("lineage_cycle_detected")` if a loop is found).
+
+At query time, `investigate_work`, `bruriah ask`, and `bruriah why` resolve superseded decisions transitively: when an architectural decision has evolved across multiple generations (e.g. A superseded by B, and B subsequently superseded by C), Bruriah traces the full DAG chain to locate the current active leaf decision. Older evidence is marked `stale` with `conflict: declared`, active successors are marked `current` with `conflict: none`, and explicit `ClaimRecord` entries with `state: "conflicted"` are emitted.
 
 ### Causal Archaeology: `bruriah why`
 
@@ -163,7 +166,7 @@ When `bruriah corpus` parses your repository, it extracts these trailers into do
 `bruriah why <file>[:line]` performs **causal archaeology** across your codebase:
 1. Resolves the commit touching the line or file.
 2. Traverses git history to link the change to the governing architectural decision indexed in Bruriah.
-3. Queries the decision lineage DAG to alert you immediately if the governing decision was superseded, deprecated, or amended.
+3. Queries the decision lineage DAG to alert you immediately if the governing decision was superseded, deprecated, or amended — tracing multi-hop successor chains to find the active leaf.
 
 ```bash
 bruriah why src/bruriah/mcp_server.py:42 --data-dir "$B/data"
@@ -194,6 +197,8 @@ Governing Architectural Decision:
 Lineage Alerts:
   ⚠️  SUPERSEDED by doc-server-v2 (sha: f6e5d4c3b2a1)
      "Modernized Async MCP Protocol"
+     ↳ subsequently evolved through 2 generations to [CURRENT ACTIVE]: doc-server-v3 (sha: 0123456789ab)
+       "Cloud-Native Distributed MCP Architecture"
 ```
 
 Pass `--json` to integrate causal archaeology directly into editor hover providers (VS Code, Neovim), CLI pipelines, or PR review bots.
