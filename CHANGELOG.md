@@ -3,6 +3,30 @@
 Notable changes, newest first. This project follows [semantic versioning](https://semver.org/),
 and the entries here name what changed for *you* rather than which files moved.
 
+## [Unreleased]
+
+### Added: Deterministic cursor-based pagination for investigate_work
+
+`investigate_work` now supports deterministic, state-verified cursor-based pagination across large evidence result sets:
+- **Snapshot Isolation & Integrity:** Cursors are URL-safe base64 tokens cryptographically bound to the query `request_id` and the snapshot `build_id`. Mismatched queries, cross-snapshot reuse, or malformed/negative offsets fail typed with `ServiceError("invalid_cursor")`.
+- **Global Rank Preservation:** `retrieval.search` accepts an `offset: int = 0` parameter and numbers results starting at `offset + 1`, preserving absolute corpus relevance ranks across paginated windows without dropped or duplicate records.
+- **Envelope Partitioning:** Respects `max_evidence` budgets by streaming prefix skills and capabilities before slicing search candidates, emitting `next_cursor` when results exceed the requested budget.
+
+### Added: SQLite precomputed lexical index for sub-millisecond BM25 retrieval
+
+`bruriah index` and `search` now precompute corpus statistics, document frequencies, and inverted postings in SQLite, replacing linear full-corpus Python regex tokenization scans with B-Tree lookups:
+- **Index Schema Extension:** Added `corpus_stats`, `term_df`, and `term_postings` tables (`WITHOUT ROWID`) to the SQLite snapshot schema.
+- **Candidate Indexing:** Token frequencies, document lengths, and corpus vocabulary frequencies are precomputed during `build_candidate` using the canonical `language.tokenize` pipeline.
+- **Accelerated BM25 Search:** `retrieval.search` checks for lexical index availability (`_has_lexical_index`) to query precomputed term postings directly, bypassing full-corpus passage tokenization while maintaining 100% mathematical ranking equivalence and seamless fallback for legacy snapshots.
+- **Deadline Enforced:** Postings iteration strictly respects `max_elapsed_ms` deadline budgets.
+
+### Added: Native asymmetric embedding model support (E5, BGE, Nomic)
+
+`bruriah index` and `init` now support asymmetric embedding models with distinct query and passage prefix templates (`query: ` vs `passage: `):
+- **Prefix Resolver & Defaults:** Added `resolve_model_prefixes` with built-in default templates for `intfloat/multilingual-e5-*`, `intfloat/e5-*`, and `BAAI/bge-*` families, with `--query-prefix` and `--passage-prefix` CLI overrides.
+- **Build Descriptor & Promotion Contract:** `BuildConfig` persists `query_prefix` and `passage_prefix` to `build-config.json` and records non-empty prefixes in `embedding_identity`. Differing prefix configurations safely invalidate candidate document reuse.
+- **Runtime Query Prefixing:** `build_serve_deps` automatically formats query vectors with `descriptor.query_prefix` at serve time, keeping the retrieval core pure and symmetric-model backward compatibility byte-identical.
+
 ## [0.8.0] — 2026-09-17
 
 ### Added: Decision lineage DAG and deterministic supersession resolution
