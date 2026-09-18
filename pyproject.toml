@@ -53,7 +53,7 @@ dependencies = [
 
 [project.optional-dependencies]
 pdf = [
-  "pypdf>=5.0.0,<6",
+  "pypdf>=5.0.0,<7",
 ]
 
 [project.urls]
@@ -76,7 +76,7 @@ module-name = "bruriah"
 dev = [
   "mypy>=1.15.0,<2",
   "pip-audit>=2.10.0,<3",
-  "pypdf>=5.0.0,<6",
+  "pypdf>=5.0.0,<7",
   "pytest>=9.0.2,<10",
   "ruff>=0.9.0",
   # Only `evals/retrieval/adapters.py` imports this, to read the legacy `cerebro.db`'s vec0 tables
