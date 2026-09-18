@@ -5,8 +5,11 @@ That is linear by construction. Linear is fine until it is not, and nobody has e
 that point is -- so the README has no scale table and a reader cannot tell whether this works for
 their repository. This produces the numbers rather than an opinion about them.
 """
-import statistics, sys, time
+import statistics
+import sys
+import time
 from pathlib import Path
+
 sys.path.insert(0, sys.argv[1] + "/src")
 from bruriah import cli
 from bruriah.retrieval import search
@@ -41,7 +44,8 @@ for documents in (100, 500, 2000, 8000):
                              "--data-dir", str(data), "--config-dir", str(config)])
     index_seconds = time.perf_counter() - started
     if code != 0:
-        print(f"{documents:>11}  INDEXING FAILED"); continue
+        print(f"{documents:>11}  INDEXING FAILED")
+        continue
     import os
     deps = cli.build_serve_deps(cli.resolve_paths(
         env=dict(os.environ, BRURIAH_DATA_DIR=str(data), BRURIAH_CONFIG_DIR=str(config))))

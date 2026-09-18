@@ -25,7 +25,7 @@ _HERE = Path(__file__).resolve().parent
 if str(_HERE) not in sys.path:
     sys.path.insert(0, str(_HERE))
 
-from metrics import _median, _percentile  # noqa: E402
+from metrics import _median  # noqa: E402
 
 DEFAULT_ROWS = _HERE.parents[0] / "project-memory" / "separation-paired.jsonl"
 
@@ -47,7 +47,7 @@ def auc(highs: list[float], lows: list[float]) -> float | None:
     """P(a random `home` scores above a random `foreign`); ties count a half."""
     if not highs or not lows:
         return None
-    wins = sum(1.0 if h > l else 0.5 if h == l else 0.0 for h in highs for l in lows)
+    wins = sum(1.0 if h > low else 0.5 if h == low else 0.0 for h in highs for low in lows)
     return wins / (len(highs) * len(lows))
 
 
