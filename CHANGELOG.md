@@ -5,6 +5,15 @@ and the entries here name what changed for *you* rather than which files moved.
 
 ## [Unreleased]
 
+### Added: `bruriah why` — Causal Archaeology for Codebases
+
+Where `git blame` tells you WHO changed code and WHEN, `bruriah why <file>[:line]` explains WHY that code was written:
+- **Git History to Architectural Intent:** Resolves target file and line via `git blame` / `git log`, then connects the commit history back to governing architectural decisions precomputed in Bruriah's SQLite index.
+- **Transitive Causal Resolution:** If a line was touched by a style, formatting, or chore commit with no indexed decision, `why` walks the commit history of the line and file to identify the governing architectural decision.
+- **DAG Lineage Alerts:** Queries the lineage DAG to warn developers immediately if the governing decision has been `superseded`, `deprecated`, or `amended` by a successor decision.
+- **Dual Presentation Formats:** Outputs human-readable terminal output and structured `--json` payload for IDE, CLI, and autonomous agent workflows.
+- **Deterministic & Local:** 100% offline, generative-model-free, and local to the developer's workstation.
+
 ### Added: Lazy passage hydration for sub-linear memory and scoring latency
 
 `retrieval.search` now separates candidate scoring from record materialization:

@@ -60,6 +60,7 @@ Then ask it something, from the terminal, before wiring up any client:
 ```bash
 bruriah ask --data-dir "$B/data" "why did this project avoid FastMCP"   # references, no prose
 bruriah ask --data-dir "$B/data" "why did this project avoid FastMCP" --read 2   # the exact lines
+bruriah why src/bruriah/mcp_server.py:42 --data-dir "$B/data"           # causal archaeology for code
 ```
 
 An MCP server that lets an agent consult your project's decisions **without letting those documents
@@ -154,6 +155,48 @@ amends:
 ```
 
 When `bruriah corpus` parses your repository, it extracts these trailers into document metadata. `bruriah index` records directed edges in a SQLite lineage DAG and verifies acyclicity via DFS (aborting with `IndexLifecycleError("lineage_cycle_detected")` if a loop is found). At query time, `investigate_work` resolves superseded decisions: older evidence is marked `stale` with `conflict: declared`, active successors are automatically injected into the evidence list, and explicit `ClaimRecord` entries with `state: "conflicted"` are emitted.
+
+### Causal Archaeology: `bruriah why`
+
+`git blame` tells you who touched a line and when. It cannot tell you the architectural reasoning that governed it, or whether that reasoning was later superseded.
+
+`bruriah why <file>[:line]` performs **causal archaeology** across your codebase:
+1. Resolves the commit touching the line or file.
+2. Traverses git history to link the change to the governing architectural decision indexed in Bruriah.
+3. Queries the decision lineage DAG to alert you immediately if the governing decision was superseded, deprecated, or amended.
+
+```bash
+bruriah why src/bruriah/mcp_server.py:42 --data-dir "$B/data"
+```
+
+Output:
+
+```text
+Target: src/bruriah/mcp_server.py:42
+
+Line Commit:
+  Commit:  a1b2c3d4 (2026-07-25)
+  Author:  Jane Doe
+  Subject: style(mcp): reformat server init
+
+Governing Architectural Decision:
+  Decision: Migrate from FastMCP to lowlevel server
+  Doc Ref:  doc-server-decision
+  Commit:   e8f3003bda26 (2026-07-23)
+  Decided:  2026-07-23 by Lead Engineer
+  Files:    src/bruriah/mcp_server.py, src/bruriah/service.py
+
+  Why this was written:
+  FastMCP derives its argument model without extra="forbid", so an unknown
+  field is silently dropped before any handler runs — defeating authoritative
+  server-side validation.
+
+Lineage Alerts:
+  ⚠️  SUPERSEDED by doc-server-v2 (sha: f6e5d4c3b2a1)
+     "Modernized Async MCP Protocol"
+```
+
+Pass `--json` to integrate causal archaeology directly into editor hover providers (VS Code, Neovim), CLI pipelines, or PR review bots.
 
 ## Use it if — and when not to
 
