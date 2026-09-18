@@ -57,6 +57,8 @@ def build_cli_parser(
     init_parser.add_argument(
         "--model", default="sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
     )
+    init_parser.add_argument("--query-prefix", default=None, help="query prefix template for asymmetric embedding models")
+    init_parser.add_argument("--passage-prefix", default=None, help="passage prefix template for asymmetric embedding models")
     corpus_parser = add("corpus", "Turn a git history's reasoning into a corpus.")
     corpus_parser.add_argument("--repo", type=Path, default=Path("."), help="repository to read")
     corpus_parser.add_argument("--out", type=Path, required=True, help="directory to write into")
@@ -92,6 +94,8 @@ def build_cli_parser(
     index_parser.add_argument(
         "--model", default="sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
     )
+    index_parser.add_argument("--query-prefix", default=None, help="query prefix template for asymmetric embedding models")
+    index_parser.add_argument("--passage-prefix", default=None, help="passage prefix template for asymmetric embedding models")
     ingest = add("skill-ingest", "Store a candidate skill pack privately.")
     ingest.add_argument("--pack", type=Path, required=True)
     analyze = add("skill-analyze", "Report structural findings for review.")

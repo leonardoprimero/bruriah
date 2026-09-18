@@ -548,3 +548,43 @@ def test_a_local_skill_cannot_silently_shadow_a_first_party_one(tmp_path: Path) 
     with pytest.raises(PlatformError) as error:
         load_active_skills(paths, today=_TODAY)
     assert error.value.code == "skills_collision:duplicate_skill_id"
+
+
+def test_build_descriptor_roundtrip_with_asymmetric_prefixes(tmp_path: Path) -> None:
+    data_dir = tmp_path / "data"
+    data_dir.mkdir()
+    paths = resolve_paths(cli_data_dir=data_dir, cli_config_dir=tmp_path / "config", env={})
+    policy_path = tmp_path / "policy.yaml"
+    policy_path.write_text("version: 1\n", encoding="utf-8")
+
+    cfg = BuildConfig(
+        root=tmp_path, policy_path=policy_path, schema_version=1, parser_version="corpus-v2",
+        service_version="0.1.0", mcp_range=">=1.28.1,<2", embedding_model="intfloat/multilingual-e5-large",
+        embedding_revision="snapshot-a", embedding_dimensions=3, embedding_fingerprint=FINGERPRINT,
+        ranking_config="rrf-v1", query_prefix="query: ", passage_prefix="passage: ",
+    )
+    write_build_descriptor(paths, cfg)
+    loaded = load_build_descriptor(paths)
+    assert loaded == cfg
+    assert loaded.query_prefix == "query: "
+    assert loaded.passage_prefix == "passage: "
+
+
+def test_build_descriptor_defaults_missing_prefixes_to_empty(tmp_path: Path) -> None:
+    data_dir = tmp_path / "data"
+    data_dir.mkdir()
+    paths = resolve_paths(cli_data_dir=data_dir, cli_config_dir=tmp_path / "config", env={})
+    policy_path = tmp_path / "policy.yaml"
+    policy_path.write_text("version: 1\n", encoding="utf-8")
+
+    # Simulate legacy build-config.json written before query_prefix/passage_prefix existed
+    legacy_payload = {
+        "root": str(tmp_path), "policy_path": str(policy_path), "schema_version": 1,
+        "parser_version": "corpus-v2", "service_version": "0.1.0", "mcp_range": ">=1.28.1,<2",
+        "embedding_model": "test/minilm", "embedding_revision": "snapshot-a",
+        "embedding_dimensions": 3, "embedding_fingerprint": FINGERPRINT, "ranking_config": "rrf-v1",
+    }
+    (data_dir / "build-config.json").write_text(json.dumps(legacy_payload), encoding="utf-8")
+    loaded = load_build_descriptor(paths)
+    assert loaded.query_prefix == ""
+    assert loaded.passage_prefix == ""

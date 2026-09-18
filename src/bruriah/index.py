@@ -43,6 +43,8 @@ class BuildConfig:
     embedding_dimensions: int
     embedding_fingerprint: str
     ranking_config: str
+    query_prefix: str = ""
+    passage_prefix: str = ""
 
     def __post_init__(self) -> None:
         try:
@@ -70,13 +72,18 @@ class BuildConfig:
 
     @property
     def embedding_identity(self) -> str:
+        identity: dict[str, object] = {
+            "dimensions": self.embedding_dimensions,
+            "fingerprint": json.loads(self.embedding_fingerprint),
+            "model": self.embedding_model,
+            "revision": self.embedding_revision,
+        }
+        if self.passage_prefix:
+            identity["passage_prefix"] = self.passage_prefix
+        if self.query_prefix:
+            identity["query_prefix"] = self.query_prefix
         return json.dumps(
-            {
-                "dimensions": self.embedding_dimensions,
-                "fingerprint": json.loads(self.embedding_fingerprint),
-                "model": self.embedding_model,
-                "revision": self.embedding_revision,
-            },
+            identity,
             sort_keys=True,
             separators=(",", ":"),
         )
@@ -769,9 +776,10 @@ def build_candidate(
                 reused += 1
                 passage_count += len(document.passages)
                 continue
-            # The ancestry-carrying string, not the bare section: the vector must describe the
-            # passage the way the query will ask for it. `text` stays what evidence is read from.
-            texts = [passage.search_text for passage in document.passages]
+            texts = [
+                f"{config.passage_prefix}{passage.search_text}"
+                for passage in document.passages
+            ]
             vectors = embedder(texts)
             if len(vectors) != len(texts) or any(
                 len(vector) != config.embedding_dimensions * 4 for vector in vectors

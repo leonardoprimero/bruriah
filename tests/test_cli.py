@@ -1102,3 +1102,78 @@ def test_an_operator_pinned_model_cache_is_respected(
     ])
     cli._resolve_paths(args)
     assert os.environ["FASTEMBED_CACHE_PATH"] == str(tmp_path / "operator-cache")
+
+
+def test_resolve_model_prefixes_known_and_overrides() -> None:
+    from bruriah._cli.common import resolve_model_prefixes
+
+    # Known e5 models default to ("query: ", "passage: ")
+    assert resolve_model_prefixes("intfloat/multilingual-e5-large") == ("query: ", "passage: ")
+    assert resolve_model_prefixes("intfloat/e5-base-v2") == ("query: ", "passage: ")
+
+    # Known BGE models default to query prompt
+    q_p, p_p = resolve_model_prefixes("BAAI/bge-base-en")
+    assert q_p == "Represent this sentence for searching relevant passages: "
+    assert p_p == ""
+
+    # Symmetric default
+    assert resolve_model_prefixes("sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2") == ("", "")
+    assert resolve_model_prefixes("custom/unknown-model") == ("", "")
+
+    # Explicit overrides take precedence
+    assert resolve_model_prefixes("intfloat/multilingual-e5-large", query_prefix="q: ") == ("q: ", "passage: ")
+    assert resolve_model_prefixes("intfloat/multilingual-e5-large", passage_prefix="doc: ") == ("query: ", "doc: ")
+    assert resolve_model_prefixes("custom/model", query_prefix="q: ", passage_prefix="p: ") == ("q: ", "p: ")
+
+
+def test_build_serve_deps_applies_query_prefix(tmp_path: Path) -> None:
+    root, policy_path = tmp_path / "root", tmp_path / "policy.yaml"
+    root.mkdir()
+    (root / "doc.md").write_text("# Title\nPassage text.\n", encoding="utf-8")
+    policy_path.write_text("version: 1\ninclude: ['**']\nexclude: []\n", encoding="utf-8")
+
+    data_dir = tmp_path / "data"
+    paths = cli.PlatformPaths(
+        config_dir=tmp_path / "cfg", data_dir=data_dir, cache_dir=tmp_path / "cache", log_dir=tmp_path / "log",
+    )
+    cli.run_index(
+        paths, root, policy_path, model_name="intfloat/multilingual-e5-large",
+        embedder_factory=_fake_embedder_factory,
+        query_prefix="query: ", passage_prefix="passage: ",
+    )
+
+    embedded_queries: list[str] = []
+
+    def recording_embedder_factory(model_name: str):
+        embed, fp, dim = _fake_embedder_factory(model_name)
+
+        def recording_embed(texts: list[str]) -> list[bytes]:
+            embedded_queries.extend(texts)
+            return embed(texts)
+
+        return recording_embed, fp, dim
+
+    deps = cli.build_serve_deps(paths, embedder_factory=recording_embedder_factory)
+    assert deps.embed_query is not None
+    deps.embed_query("why fastmcp")
+    assert embedded_queries == ["query: why fastmcp"]
+    deps.snapshot.database.close()
+
+
+def test_cli_parser_accepts_query_and_passage_prefix_flags(tmp_path: Path) -> None:
+    parser = cli._build_cli_parser()
+    args_index = parser.parse_args([
+        "index", "--corpus-root", str(tmp_path), "--policy", str(tmp_path / "policy.yaml"),
+        "--model", "intfloat/multilingual-e5-large",
+        "--query-prefix", "ask: ", "--passage-prefix", "doc: ",
+    ])
+    assert args_index.query_prefix == "ask: "
+    assert args_index.passage_prefix == "doc: "
+
+    args_init = parser.parse_args([
+        "init", "--repo", str(tmp_path),
+        "--model", "intfloat/multilingual-e5-large",
+        "--query-prefix", "q: ", "--passage-prefix", "p: ",
+    ])
+    assert args_init.query_prefix == "q: "
+    assert args_init.passage_prefix == "p: "

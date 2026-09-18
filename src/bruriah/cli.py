@@ -19,7 +19,7 @@ import yaml
 from fastembed import TextEmbedding
 
 from . import __version__, clients, gitcorpus
-from ._cli.common import CliError, resolve_cli_paths as _resolve_paths
+from ._cli.common import CliError, resolve_cli_paths as _resolve_paths, resolve_model_prefixes
 from ._cli.doctor import cmd_doctor as _cmd_doctor, run_doctor
 from ._cli.parser import build_cli_parser
 from ._cli.skills import (
@@ -61,6 +61,7 @@ __all__ = [
     "bruriah_main",
     "build_serve_deps",
     "main",
+    "resolve_model_prefixes",
     "resolve_paths",
     "run_bootstrap",
     "run_client_configs",
@@ -227,6 +228,8 @@ def _default_reranker_factory(model_name: str) -> Rerank:
 def run_index(
     paths: PlatformPaths, root: Path, policy_path: Path, *, model_name: str,
     embedder_factory: EmbedderFactory = _default_embedder_factory,
+    query_prefix: str | None = None,
+    passage_prefix: str | None = None,
 ) -> BuildResult:
     """Build+promote a candidate into the private `data_dir` (never `cerebro.db`); runs
     `ensure_private_dirs` first, closing the carried Slice 8A-1 descriptor-on-missing-dir WARNING.
@@ -241,6 +244,9 @@ def run_index(
     policy = CorpusPolicy.load(policy_path)
     embed, fingerprint, dimensions = embedder_factory(model_name)
     revision = json.loads(fingerprint)["snapshot"]
+    resolved_query_prefix, resolved_passage_prefix = resolve_model_prefixes(
+        model_name, query_prefix=query_prefix, passage_prefix=passage_prefix
+    )
     # `service_version` is NOT `bruriah.__version__` and must not be wired to it. It belongs to the
     # same family as `parser_version="corpus-v2"` and `ranking_config="rrf-v1"`: a symbolic marker of
     # the snapshot contract, carried into the `expected` metadata that `promote_candidate` validates
@@ -252,6 +258,7 @@ def run_index(
         service_version="0.1.0", mcp_range=">=1.28.1,<2", embedding_model=model_name,
         embedding_revision=revision, embedding_dimensions=dimensions,
         embedding_fingerprint=fingerprint, ranking_config="rrf-v1",
+        query_prefix=resolved_query_prefix, passage_prefix=resolved_passage_prefix,
     )
     pointer = paths.data_dir / "active.json"
     candidate_path = paths.data_dir / f"candidate-{uuid.uuid4().hex}.sqlite3"
@@ -318,6 +325,8 @@ def _suggested_question(corpus_root: Path) -> str | None:
 def run_bootstrap(
     paths: PlatformPaths, repo: Path, *, limit: int | None = None, model_name: str,
     embedder_factory: EmbedderFactory = _default_embedder_factory,
+    query_prefix: str | None = None,
+    passage_prefix: str | None = None,
 ) -> dict[str, Any]:
     """`init --repo`: from a cloned repository to an active index in one command.
 
@@ -344,6 +353,7 @@ def run_bootstrap(
         run_index(
             paths, corpus_root.resolve(), policy_path.resolve(), model_name=model_name,
             embedder_factory=embedder_factory,
+            query_prefix=query_prefix, passage_prefix=passage_prefix,
         )
         if corpus_result.written
         else None
@@ -425,7 +435,7 @@ def build_serve_deps(
             raise CliError("embedding_model_mismatch")
 
         def embed_query(text: str) -> bytes:
-            return embed([text])[0]
+            return embed([f"{descriptor.query_prefix}{text}"])[0]
 
         rerank = reranker_factory(reranker_model) if reranker_model else None
         return load_deps(paths, embed_query=embed_query, rerank=rerank)
@@ -466,6 +476,8 @@ def _cmd_init(
         bootstrap = run_bootstrap(
             paths, args.repo, limit=args.limit, model_name=args.model,
             embedder_factory=embedder_factory,
+            query_prefix=getattr(args, "query_prefix", None),
+            passage_prefix=getattr(args, "passage_prefix", None),
         )
         corpus_result = bootstrap["corpus"]
         print(
@@ -575,6 +587,8 @@ def _cmd_index(
         result = run_index(
             paths, corpus_root, policy, model_name=args.model,
             embedder_factory=embedder_factory,
+            query_prefix=getattr(args, "query_prefix", None),
+            passage_prefix=getattr(args, "passage_prefix", None),
         )
     except (CorpusPolicyError, IndexLifecycleError, FileExistsError, ValueError, OSError, yaml.YAMLError) as error:
         # yaml.YAMLError (a malformed --policy that exists) is neither ValueError nor OSError.

@@ -198,7 +198,7 @@ def ensure_private_dirs(paths: PlatformPaths) -> None:
 _BUILD_DESCRIPTOR_FIELDS = (
     "root", "policy_path", "schema_version", "parser_version", "service_version", "mcp_range",
     "embedding_model", "embedding_revision", "embedding_dimensions", "embedding_fingerprint",
-    "ranking_config",
+    "ranking_config", "query_prefix", "passage_prefix",
 )
 
 
@@ -224,6 +224,8 @@ def load_build_descriptor(paths: PlatformPaths) -> BuildConfig:
             embedding_model=payload["embedding_model"], embedding_revision=payload["embedding_revision"],
             embedding_dimensions=payload["embedding_dimensions"],
             embedding_fingerprint=payload["embedding_fingerprint"], ranking_config=payload["ranking_config"],
+            query_prefix=payload.get("query_prefix", ""),
+            passage_prefix=payload.get("passage_prefix", ""),
         )
     except (KeyError, TypeError, ValueError) as error:
         raise PlatformError("corrupt_build_descriptor") from error

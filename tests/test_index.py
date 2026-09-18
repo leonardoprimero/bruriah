@@ -915,3 +915,66 @@ def test_lineage_detects_and_rejects_cycles(tmp_path: Path) -> None:
         build_candidate(config(root, policy_path), destination, policy, fake_embeddings)
 
 
+
+
+def test_asymmetric_embedding_prefixes_in_identity_and_candidate_build(tmp_path: Path) -> None:
+    root, policy = write_corpus(tmp_path)
+    policy_path = tmp_path / "policy.yaml"
+    candidate = tmp_path / "asym.sqlite3"
+
+    asym_config = BuildConfig(
+        root=root,
+        policy_path=policy_path,
+        schema_version=1,
+        parser_version="corpus-v2",
+        service_version="0.1.0",
+        mcp_range=">=1.28.1,<2",
+        embedding_model="intfloat/multilingual-e5-large",
+        embedding_revision="snapshot-a",
+        embedding_dimensions=3,
+        embedding_fingerprint=FINGERPRINT,
+        ranking_config="rrf-v1",
+        query_prefix="query: ",
+        passage_prefix="passage: ",
+    )
+
+    embedded_texts: list[str] = []
+
+    def recording_embedder(texts: list[str]) -> list[bytes]:
+        embedded_texts.extend(texts)
+        return [hashlib.sha256(t.encode()).digest()[:12] for t in texts]
+
+    result = build_candidate(asym_config, candidate, policy, recording_embedder)
+    assert result.passages == 2
+    assert len(embedded_texts) == 2
+    assert all(t.startswith("passage: ") for t in embedded_texts)
+
+    with closing(open_candidate(candidate)) as database:
+        metadata = dict(database.execute("SELECT key, value FROM index_meta"))
+        identity = json.loads(metadata["embedding_identity"])
+        assert identity["query_prefix"] == "query: "
+        assert identity["passage_prefix"] == "passage: "
+
+
+def test_differing_embedding_prefixes_prevent_document_reuse(tmp_path: Path) -> None:
+    root, policy = write_corpus(tmp_path)
+    policy_path = tmp_path / "policy.yaml"
+    first_candidate = tmp_path / "first.sqlite3"
+    second_candidate = tmp_path / "second.sqlite3"
+
+    cfg_first = BuildConfig(
+        root=root, policy_path=policy_path, schema_version=1, parser_version="corpus-v2",
+        service_version="0.1.0", mcp_range=">=1.28.1,<2", embedding_model="test/minilm",
+        embedding_revision="snapshot-a", embedding_dimensions=3, embedding_fingerprint=FINGERPRINT,
+        ranking_config="rrf-v1", passage_prefix="passage: ", query_prefix="query: ",
+    )
+    build_candidate(cfg_first, first_candidate, policy, fake_embeddings)
+
+    cfg_second = BuildConfig(
+        root=root, policy_path=policy_path, schema_version=1, parser_version="corpus-v2",
+        service_version="0.1.0", mcp_range=">=1.28.1,<2", embedding_model="test/minilm",
+        embedding_revision="snapshot-a", embedding_dimensions=3, embedding_fingerprint=FINGERPRINT,
+        ranking_config="rrf-v1", passage_prefix="", query_prefix="",
+    )
+    result = build_candidate(cfg_second, second_candidate, policy, fake_embeddings, previous=first_candidate)
+    assert result.reused_documents == 0

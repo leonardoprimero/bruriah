@@ -38,3 +38,32 @@ def resolve_cli_paths(args: argparse.Namespace) -> PlatformPaths:
     # test fake shares.
     os.environ.setdefault("FASTEMBED_CACHE_PATH", str(paths.cache_dir / "models"))
     return paths
+
+
+KNOWN_MODEL_PREFIXES: dict[str, tuple[str, str]] = {
+    "intfloat/multilingual-e5-large": ("query: ", "passage: "),
+    "intfloat/multilingual-e5-base": ("query: ", "passage: "),
+    "intfloat/multilingual-e5-small": ("query: ", "passage: "),
+    "intfloat/e5-large-v2": ("query: ", "passage: "),
+    "intfloat/e5-base-v2": ("query: ", "passage: "),
+    "intfloat/e5-small-v2": ("query: ", "passage: "),
+    "BAAI/bge-base-en": ("Represent this sentence for searching relevant passages: ", ""),
+    "BAAI/bge-small-en": ("Represent this sentence for searching relevant passages: ", ""),
+    "BAAI/bge-large-en": ("Represent this sentence for searching relevant passages: ", ""),
+}
+
+
+def resolve_model_prefixes(
+    model_name: str,
+    query_prefix: str | None = None,
+    passage_prefix: str | None = None,
+) -> tuple[str, str]:
+    default_q, default_p = ("", "")
+    if model_name in KNOWN_MODEL_PREFIXES:
+        default_q, default_p = KNOWN_MODEL_PREFIXES[model_name]
+    elif "e5" in model_name.lower():
+        default_q, default_p = ("query: ", "passage: ")
+
+    final_q = query_prefix if query_prefix is not None else default_q
+    final_p = passage_prefix if passage_prefix is not None else default_p
+    return final_q, final_p
