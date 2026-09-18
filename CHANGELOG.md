@@ -5,6 +5,13 @@ and the entries here name what changed for *you* rather than which files moved.
 
 ## [Unreleased]
 
+### Added: Lazy passage hydration for sub-linear memory and scoring latency
+
+`retrieval.search` now separates candidate scoring from record materialization:
+- **Vector Projection Scan:** Neural scoring queries only `(ref, vector)` columns via `_scan_vectors`, bypassing full passage text, heading JSON parsing, and string allocations during scoring loops.
+- **Precomputed Corpus Language:** Language detection reads `corpus_language` directly from `corpus_stats`, eliminating corpus passage sampling on indexed snapshots.
+- **Targeted Materialization:** Full passage models and text snippets are hydrated via `_hydrate_passages` only for the top candidates that survive reciprocal-rank fusion and budget constraints (`max_candidates`), reducing memory allocation and SQLite page reads by orders of magnitude on large vaults.
+
 ### Added: Deterministic cursor-based pagination for investigate_work
 
 `investigate_work` now supports deterministic, state-verified cursor-based pagination across large evidence result sets:

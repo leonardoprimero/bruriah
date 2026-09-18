@@ -16,7 +16,7 @@ import re
 import sqlite3
 import time
 from array import array
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 
 from . import language
@@ -181,6 +181,44 @@ def _scan_passages(
     return passages, stopped
 
 
+def _scan_vectors(
+    database: sqlite3.Connection, deadline: float, clock: Callable[[], float]
+) -> tuple[list[tuple[str, bytes]], bool]:
+    rows = database.execute("SELECT ref, vector FROM passages ORDER BY ref")
+    vectors: list[tuple[str, bytes]] = []
+    stopped = False
+    for position, (ref, vector) in enumerate(rows):
+        if _expired(position, deadline, clock):
+            stopped = True
+            break
+        vectors.append((ref, vector))
+    return vectors, stopped
+
+
+def _hydrate_passages(
+    database: sqlite3.Connection, refs: Sequence[str]
+) -> dict[str, _Passage]:
+    if not refs:
+        return {}
+    placeholders = ", ".join("?" for _ in refs)
+    rows = database.execute(
+        f"SELECT ref, document_ref, relative_path, heading_path, start_line, end_line, "
+        f"text, search_text, source_hash, vector FROM passages WHERE ref IN ({placeholders})",
+        list(refs),
+    )
+    hydrated: dict[str, _Passage] = {}
+    for row in rows:
+        (
+            ref, document_ref, relative_path, heading_json, start_line, end_line, text,
+            search_text, source_hash, vector,
+        ) = row
+        hydrated[ref] = _Passage(
+            ref, document_ref, relative_path, _heading_path(heading_json),
+            start_line, end_line, text, search_text, source_hash, vector,
+        )
+    return hydrated
+
+
 def _ranked(scored: list[tuple[float, str]]) -> dict[str, int]:
     # Ties break on ascending `ref`, which is stable across processes and hash seeds.
     ordered = sorted(scored, key=lambda item: (-item[0], item[1]))
@@ -338,7 +376,10 @@ def _floats(blob: bytes) -> array | None:
 
 
 def _vector_ranks(
-    passages: list[_Passage], query_vector: bytes, deadline: float, clock: Callable[[], float]
+    passages: Sequence[_Passage | tuple[str, bytes]],
+    query_vector: bytes,
+    deadline: float,
+    clock: Callable[[], float],
 ) -> tuple[dict[str, int] | None, bool]:
     query = _floats(query_vector)
     if query is None or not len(query):
@@ -352,12 +393,17 @@ def _vector_ranks(
     dimensions = len(norm_query)
     scored: list[tuple[float, str]] = []
     stopped = False
-    for position, passage in enumerate(passages):
+    for position, item in enumerate(passages):
         if _expired(position, deadline, clock):
             stopped = True
             break
         # A single corrupt or drifted vector must cost only its own candidate, never the leg.
-        candidate = _floats(passage.vector)
+        if isinstance(item, _Passage):
+            ref = item.ref
+            vec = item.vector
+        else:
+            ref, vec = item
+        candidate = _floats(vec)
         if candidate is None or len(candidate) != dimensions:
             continue
         dot = 0.0
@@ -367,7 +413,7 @@ def _vector_ranks(
             candidate_sum_sq += c_val * c_val
         if candidate_sum_sq == 0.0:
             continue
-        scored.append((dot / math.sqrt(candidate_sum_sq), passage.ref))
+        scored.append((dot / math.sqrt(candidate_sum_sq), ref))
     return _ranked(scored), stopped
 
 
@@ -382,6 +428,23 @@ def _corpus_language(passages: list[_Passage]) -> str | None:
         passage.search_text[:_LANGUAGE_SAMPLE_CHARS]
         for passage in passages[:_LANGUAGE_SAMPLE_PASSAGES]
     )
+
+
+def _detect_corpus_language(
+    database: sqlite3.Connection, passages: list[_Passage] | None = None
+) -> str | None:
+    if _has_lexical_index(database):
+        row = database.execute(
+            "SELECT str_value FROM corpus_stats WHERE key = 'corpus_language'"
+        ).fetchone()
+        if row is not None and row[0] is not None:
+            return row[0]
+    if passages is not None:
+        return _corpus_language(passages)
+    sample_rows = database.execute(
+        f"SELECT search_text FROM passages ORDER BY ref LIMIT {_LANGUAGE_SAMPLE_PASSAGES}"
+    ).fetchall()
+    return language.dominant(text[:_LANGUAGE_SAMPLE_CHARS] for text, in sample_rows)
 
 
 def _fuse(
@@ -610,37 +673,74 @@ def search(
 
     deadline = clock() + budgets.max_elapsed_ms / 1000
     degradation: list[str] = []
-    try:
-        passages, scan_stopped = _scan_passages(snapshot.database, deadline, clock)
-    except sqlite3.DatabaseError as error:
-        raise RetrievalError("snapshot_unreadable") from error
+    has_index = _has_lexical_index(snapshot.database)
 
-    if _has_lexical_index(snapshot.database):
+    by_ref: dict[str, _Passage] = {}
+    if not has_index or rerank is not None:
+        try:
+            passages, scan_stopped = _scan_passages(snapshot.database, deadline, clock)
+        except sqlite3.DatabaseError as error:
+            raise RetrievalError("snapshot_unreadable") from error
+        candidates_scanned = len(passages)
+        by_ref = {passage.ref: passage for passage in passages}
+        corpus_language = _corpus_language(passages)
+        if has_index:
+            lexical_ranks, lexical_stopped = _bm25_indexed_ranks(
+                snapshot.database, _tokenize(query), deadline, clock
+            )
+        else:
+            lexical_ranks, lexical_stopped = _bm25_ranks(
+                passages, _tokenize(query), deadline, clock
+            )
+        _leg_state(lexical_ranks, "lexical", degradation)
+
+        vector_ranks: dict[str, int] | None = None
+        vector_stopped = False
+        if embed_query is None:
+            degradation.append("vector_leg_unavailable")
+        else:
+            try:
+                query_vector = embed_query(query)
+            except Exception as error:  # noqa: BLE001 -- embed_query is a caller-supplied untrusted
+                query_vector = None     # callable; a failing leg must degrade, never crash the request.
+                degradation.append(f"vector_leg_failed:{type(error).__name__}")
+            if query_vector is not None:
+                vector_ranks, vector_stopped = _vector_ranks(passages, query_vector, deadline, clock)
+                _leg_state(vector_ranks, "vector", degradation)
+
+        if scan_stopped or lexical_stopped or vector_stopped:
+            degradation.append("max_elapsed_ms_exceeded")
+    else:
+        # Fast path: precomputed lexical index + lazy passage hydration
+        try:
+            vectors, scan_stopped = _scan_vectors(snapshot.database, deadline, clock)
+        except sqlite3.DatabaseError as error:
+            raise RetrievalError("snapshot_unreadable") from error
+        candidates_scanned = len(vectors)
+
         lexical_ranks, lexical_stopped = _bm25_indexed_ranks(
             snapshot.database, _tokenize(query), deadline, clock
         )
-    else:
-        lexical_ranks, lexical_stopped = _bm25_ranks(
-            passages, _tokenize(query), deadline, clock
-        )
-    _leg_state(lexical_ranks, "lexical", degradation)
+        _leg_state(lexical_ranks, "lexical", degradation)
 
-    vector_ranks: dict[str, int] | None = None
-    vector_stopped = False
-    if embed_query is None:
-        degradation.append("vector_leg_unavailable")
-    else:
-        try:
-            query_vector = embed_query(query)
-        except Exception as error:  # noqa: BLE001 -- embed_query is a caller-supplied untrusted
-            query_vector = None     # callable; a failing leg must degrade, never crash the request.
-            degradation.append(f"vector_leg_failed:{type(error).__name__}")
-        if query_vector is not None:
-            vector_ranks, vector_stopped = _vector_ranks(passages, query_vector, deadline, clock)
-            _leg_state(vector_ranks, "vector", degradation)
+        vector_ranks = None
+        vector_stopped = False
+        if embed_query is None:
+            degradation.append("vector_leg_unavailable")
+        else:
+            try:
+                query_vector = embed_query(query)
+            except Exception as error:  # noqa: BLE001 -- embed_query is a caller-supplied untrusted
+                query_vector = None     # callable; a failing leg must degrade, never crash the request.
+                degradation.append(f"vector_leg_failed:{type(error).__name__}")
+            if query_vector is not None:
+                vector_ranks, vector_stopped = _vector_ranks(vectors, query_vector, deadline, clock)
+                _leg_state(vector_ranks, "vector", degradation)
 
-    if scan_stopped or lexical_stopped or vector_stopped:
-        degradation.append("max_elapsed_ms_exceeded")
+        if scan_stopped or lexical_stopped or vector_stopped:
+            degradation.append("max_elapsed_ms_exceeded")
+
+        corpus_language = _detect_corpus_language(snapshot.database)
 
     # Discount the lexical leg when the question is not in the language the corpus is written in.
     # Both legs still run and both ranks are still reported: this changes the weight of evidence,
@@ -648,13 +748,11 @@ def search(
     # a caller comparing two result sets is entitled to know the ranking rule was not the same.
     lexical_weight = 1.0
     query_language = language.detect(query)
-    corpus_language = _corpus_language(passages)
     if query_language is not None and corpus_language is not None \
             and query_language != corpus_language:
         lexical_weight = _CROSS_LINGUAL_LEXICAL_WEIGHT
         degradation.append(f"lexical_leg_discounted:{query_language}_query_{corpus_language}_corpus")
 
-    by_ref = {passage.ref: passage for passage in passages}
     ordered = _fuse(lexical_ranks, vector_ranks, lexical_weight)
     # Absence of a reranker is deliberately NOT reported the way `vector_leg_unavailable` is. The
     # vector leg is part of the shipped ranking and its absence is a shortfall; a reranker is an
@@ -669,6 +767,13 @@ def search(
     truncated = False
     extracted = 0
     ordered_slice = ordered[offset:] if offset < len(ordered) else []
+    if not by_ref and ordered_slice:
+        needed_refs = [ref for ref, _, _ in ordered_slice[: budgets.max_candidates]]
+        try:
+            by_ref = _hydrate_passages(snapshot.database, needed_refs)
+        except sqlite3.DatabaseError as error:
+            raise RetrievalError("snapshot_unreadable") from error
+
     for rank, (ref, lexical_rank, vector_rank) in enumerate(ordered_slice, start=offset + 1):
         if len(matches) >= budgets.max_candidates:
             truncated = True
@@ -695,7 +800,7 @@ def search(
         matches=tuple(matches),
         degradation=tuple(dict.fromkeys(degradation)),
         warnings=tuple(warnings),
-        candidates_scanned=len(passages),
+        candidates_scanned=candidates_scanned,
         truncated=truncated,
     )
 

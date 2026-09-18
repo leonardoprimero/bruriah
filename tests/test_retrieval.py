@@ -18,8 +18,11 @@ from bruriah.retrieval import (
     RetrievalMatch,
     _bm25_indexed_ranks,
     _bm25_ranks,
+    _detect_corpus_language,
     _has_lexical_index,
+    _hydrate_passages,
     _scan_passages,
+    _scan_vectors,
     _tokenize,
     search,
     to_evidence_records,
@@ -559,6 +562,43 @@ def test_search_negative_offset_raises_typed_error(snapshot) -> None:
     with pytest.raises(RetrievalError) as caught:
         search(snapshot, "apple", Budgets(), offset=-1)
     assert caught.value.code == "invalid_offset"
+
+
+def test_scan_vectors_enforces_deadline(snapshot) -> None:
+    vectors, stopped = _scan_vectors(snapshot.database, 0.0, lambda: 1.0)
+    assert vectors == []
+    assert stopped is True
+
+
+def test_detect_corpus_language_uses_precomputed_stats(snapshot) -> None:
+    lang = _detect_corpus_language(snapshot.database)
+    assert lang in {"en", "es"}
+
+
+def test_hydrate_passages_fetches_requested_records(snapshot) -> None:
+    first_ref = snapshot.database.execute("SELECT ref FROM passages LIMIT 1").fetchone()[0]
+    hydrated = _hydrate_passages(snapshot.database, [first_ref])
+    assert first_ref in hydrated
+    assert hydrated[first_ref].heading_path is not None
+    assert hydrated[first_ref].text is not None
+
+
+def test_lazy_hydration_matches_full_scan_results(multi_passage_snapshot) -> None:
+    # Query with default fast path
+    fast_outcome = search(multi_passage_snapshot, "apple", Budgets(max_candidates=5))
+    # Query with a dummy reranker that returns identical scores (forces the full scan path)
+    forced_scan_outcome = search(
+        multi_passage_snapshot,
+        "apple",
+        Budgets(max_candidates=5),
+        rerank=lambda query, docs: [1.0] * len(docs),
+    )
+    # Both paths must produce identical matches and candidate counts
+    assert [m.ref for m in fast_outcome.matches] == [m.ref for m in forced_scan_outcome.matches]
+    assert [m.snippet for m in fast_outcome.matches] == [m.snippet for m in forced_scan_outcome.matches]
+    assert [m.heading_path for m in fast_outcome.matches] == [m.heading_path for m in forced_scan_outcome.matches]
+    assert fast_outcome.candidates_scanned == forced_scan_outcome.candidates_scanned
+
 
 
 
