@@ -7,6 +7,7 @@ import re
 import sqlite3
 import tempfile
 import uuid
+from collections import Counter, defaultdict
 from collections.abc import Callable, Sequence
 from contextlib import closing
 from dataclasses import dataclass
@@ -14,6 +15,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from . import language
 from .corpus import CorpusPolicy, parse_document
 from .models import Document
 from .pointer import (
@@ -159,6 +161,16 @@ CREATE TABLE lineage (
 ) WITHOUT ROWID;
 CREATE INDEX idx_lineage_pred ON lineage(predecessor_target);
 CREATE INDEX idx_lineage_pred_ref ON lineage(predecessor_ref);
+CREATE TABLE corpus_stats (key TEXT PRIMARY KEY, num_value REAL, str_value TEXT) WITHOUT ROWID;
+CREATE TABLE term_df (term TEXT PRIMARY KEY, df INTEGER NOT NULL) WITHOUT ROWID;
+CREATE TABLE term_postings (
+    term TEXT NOT NULL,
+    ref TEXT NOT NULL,
+    freq INTEGER NOT NULL,
+    doc_length INTEGER NOT NULL,
+    PRIMARY KEY (term, ref),
+    FOREIGN KEY(ref) REFERENCES passages(ref)
+) WITHOUT ROWID;
 """
 
 
@@ -288,10 +300,23 @@ def _validate_candidate(
         database.execute("SELECT count(*) FROM documents").fetchone()[0],
         database.execute("SELECT count(*) FROM passages").fetchone()[0],
     )
+    has_corpus_stats = (
+        database.execute(
+            "SELECT count(*) FROM sqlite_master WHERE type='table' AND name='corpus_stats'"
+        ).fetchone()[0]
+        > 0
+    )
     if (
         database.execute("PRAGMA integrity_check").fetchone() != ("ok",)
         or database.execute("PRAGMA foreign_key_check").fetchone() is not None
         or counts != (len(manifest), len(documents), sum(len(item.passages) for item in documents))
+        or (
+            has_corpus_stats
+            and dict(database.execute("SELECT key, num_value FROM corpus_stats").fetchall()).get(
+                "total_documents"
+            )
+            != float(counts[2])
+        )
         or database.execute(
             "SELECT relative_path, source_hash FROM manifest ORDER BY relative_path"
         ).fetchall()
@@ -731,6 +756,66 @@ def _detect_lineage_cycles(lineage_records: list[tuple[str, str, str | None, str
             dfs(start_node)
 
 
+def _build_lexical_index(database: sqlite3.Connection) -> None:
+    rows = database.execute(
+        "SELECT ref, search_text FROM passages ORDER BY ref"
+    ).fetchall()
+    total_documents = len(rows)
+    if total_documents == 0:
+        database.execute(
+            "INSERT INTO corpus_stats VALUES ('total_documents', 0.0, NULL)"
+        )
+        database.execute(
+            "INSERT INTO corpus_stats VALUES ('average_length', 0.0, NULL)"
+        )
+        database.execute(
+            "INSERT INTO corpus_stats VALUES ('corpus_language', NULL, NULL)"
+        )
+        return
+
+    df: dict[str, int] = defaultdict(int)
+    postings: list[tuple[str, str, int, int]] = []
+    total_tokens = 0
+
+    for ref, search_text in rows:
+        tokens = language.tokenize(search_text)
+        doc_length = len(tokens)
+        total_tokens += doc_length
+        if not tokens:
+            continue
+        counts = Counter(tokens)
+        for term, freq in counts.items():
+            df[term] += 1
+            postings.append((term, ref, freq, doc_length))
+
+    average_length = total_tokens / total_documents
+    dominant_language = language.dominant(text for _, text in rows)
+
+    database.execute(
+        "INSERT INTO corpus_stats VALUES ('total_documents', ?, NULL)",
+        (float(total_documents),),
+    )
+    database.execute(
+        "INSERT INTO corpus_stats VALUES ('average_length', ?, NULL)",
+        (average_length,),
+    )
+    database.execute(
+        "INSERT INTO corpus_stats VALUES ('corpus_language', NULL, ?)",
+        (dominant_language,),
+    )
+    if df:
+        database.executemany(
+            "INSERT INTO term_df VALUES (?, ?)",
+            sorted(df.items()),
+        )
+    if postings:
+        postings.sort(key=lambda item: (item[0], item[1]))
+        database.executemany(
+            "INSERT INTO term_postings VALUES (?, ?, ?, ?)",
+            postings,
+        )
+
+
 def build_candidate(
     config: BuildConfig,
     destination: Path,
@@ -813,6 +898,7 @@ def build_candidate(
         lineage_records = _build_lineage_records(documents)
         _detect_lineage_cycles(lineage_records)
         database.executemany("INSERT INTO lineage VALUES (?, ?, ?, ?)", lineage_records)
+        _build_lexical_index(database)
         index_meta = _metadata(config, manifest_hash, build_id)
         database.executemany("INSERT INTO index_meta VALUES (?, ?)", index_meta.items())
         _validate_candidate(database, config, documents, manifest, index_meta)

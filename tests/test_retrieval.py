@@ -1,6 +1,7 @@
 from __future__ import annotations
 import json
 import sqlite3
+import time
 from array import array
 from contextlib import contextmanager
 from dataclasses import fields
@@ -12,7 +13,17 @@ from conftest import requires_vault
 from bruriah.contracts import Budgets, EvidenceRecord
 from bruriah.corpus import CorpusPolicy
 from bruriah.index import BuildConfig, build_candidate, promote_candidate, snapshot_active
-from bruriah.retrieval import RetrievalError, RetrievalMatch, search, to_evidence_records
+from bruriah.retrieval import (
+    RetrievalError,
+    RetrievalMatch,
+    _bm25_indexed_ranks,
+    _bm25_ranks,
+    _has_lexical_index,
+    _scan_passages,
+    _tokenize,
+    search,
+    to_evidence_records,
+)
 
 FINGERPRINT = (
     '{"artifact":"model.onnx","artifact_sha256":"' + "a" * 64
@@ -474,3 +485,46 @@ def test_equal_scores_cannot_reorder_so_two_identical_requests_agree(multi_passa
     outcome = search(multi_passage_snapshot, "apple", Budgets(),
                      rerank=lambda query, documents: [7.0] * len(documents))
     assert _documents_of(outcome) == baseline
+
+
+def test_indexed_and_unindexed_bm25_produce_identical_ranks(snapshot) -> None:
+    passages, _ = _scan_passages(snapshot.database, time.monotonic() + 10.0, time.monotonic)
+    assert _has_lexical_index(snapshot.database) is True
+
+    test_queries = [
+        "apple",
+        "apple pie",
+        "receta de tarta de manzana",
+        "zzzznotfound in corpus",
+        "apple apple apple",
+        "baking recipe passage",
+    ]
+    for query in test_queries:
+        tokens = _tokenize(query)
+        deadline = time.monotonic() + 10.0
+        indexed_ranks, indexed_stopped = _bm25_indexed_ranks(
+            snapshot.database, tokens, deadline, time.monotonic
+        )
+        unindexed_ranks, unindexed_stopped = _bm25_ranks(
+            passages, tokens, deadline, time.monotonic
+        )
+        assert indexed_stopped is False
+        assert unindexed_stopped is False
+        assert indexed_ranks == unindexed_ranks
+
+
+def test_indexed_bm25_enforces_deadline(snapshot) -> None:
+    tokens = _tokenize("apple")
+    ranks, stopped = _bm25_indexed_ranks(snapshot.database, tokens, 0.0, lambda: 1.0)
+    assert ranks == {}
+    assert stopped is True
+
+
+def test_retrieval_falls_back_when_lexical_index_absent(raw_snapshot) -> None:
+    raw = raw_snapshot([_raw_row("p1"), _raw_row("p2")])
+    assert _has_lexical_index(raw.database) is False
+    outcome = search(raw, "apple pie", Budgets())
+    assert outcome.matches
+    assert "lexical_leg_unavailable" not in outcome.degradation
+
+

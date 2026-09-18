@@ -915,8 +915,6 @@ def test_lineage_detects_and_rejects_cycles(tmp_path: Path) -> None:
         build_candidate(config(root, policy_path), destination, policy, fake_embeddings)
 
 
-
-
 def test_asymmetric_embedding_prefixes_in_identity_and_candidate_build(tmp_path: Path) -> None:
     root, policy = write_corpus(tmp_path)
     policy_path = tmp_path / "policy.yaml"
@@ -978,3 +976,41 @@ def test_differing_embedding_prefixes_prevent_document_reuse(tmp_path: Path) -> 
     )
     result = build_candidate(cfg_second, second_candidate, policy, fake_embeddings, previous=first_candidate)
     assert result.reused_documents == 0
+
+
+def test_candidate_builds_precomputed_lexical_index(tmp_path: Path) -> None:
+    root, policy = write_corpus(tmp_path)
+    policy_path = tmp_path / "policy.yaml"
+    candidate = tmp_path / "candidate.sqlite3"
+
+    result = build_candidate(config(root, policy_path), candidate, policy, fake_embeddings)
+    assert result.passages == 2
+
+    with closing(open_candidate(candidate)) as database:
+        stats = dict(
+            database.execute("SELECT key, num_value FROM corpus_stats").fetchall()
+        )
+        assert stats["total_documents"] == 2.0
+        assert stats["average_length"] == 3.0
+
+        dfs = dict(
+            database.execute("SELECT term, df FROM term_df").fetchall()
+        )
+        assert dfs["passage"] == 2
+        assert dfs["first"] == 1
+        assert dfs["second"] == 1
+        assert dfs["one"] == 1
+        assert dfs["two"] == 1
+
+        postings = database.execute(
+            "SELECT term, ref, freq, doc_length FROM term_postings ORDER BY term, ref"
+        ).fetchall()
+        # 5 distinct terms in total across the two passages (one term appears in both)
+        # Total postings: 6 (3 in one.md, 3 in two.md)
+        assert len(postings) == 6
+        assert all(row[3] == 3 for row in postings)  # all doc_length == 3
+        passage_postings = [p for p in postings if p[0] == "passage"]
+        assert len(passage_postings) == 2
+        assert {p[2] for p in passage_postings} == {1}
+
+

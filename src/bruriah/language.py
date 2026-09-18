@@ -84,3 +84,11 @@ def dominant(texts: Iterable[str]) -> str | None:
     total = sum(votes.values())
     leader, count = max(votes.items(), key=lambda item: (item[1], item[0]))
     return leader if count * 2 > total else None
+
+
+_TOKEN_PATTERN = re.compile(r"\w+", re.UNICODE)
+
+
+def tokenize(text: str) -> tuple[str, ...]:
+    """Tokenize text into lowercased unicode word tokens for lexical indexing and scoring."""
+    return tuple(_TOKEN_PATTERN.findall(text.casefold()))

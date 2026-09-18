@@ -135,7 +135,7 @@ class _Passage:
 
 
 def _tokenize(text: str) -> tuple[str, ...]:
-    return tuple(_TOKEN_PATTERN.findall(text.casefold()))
+    return language.tokenize(text)
 
 
 def _expired(position: int, deadline: float, clock: Callable[[], float]) -> bool:
@@ -247,6 +247,84 @@ def _bm25_ranks(
             total += idf * (frequency * k1_plus_1) / denominator
         if total > 0:
             scored.append((total, passage.ref))
+    return _ranked(scored), stopped
+
+
+def _has_lexical_index(database: sqlite3.Connection) -> bool:
+    try:
+        row = database.execute(
+            "SELECT count(*) FROM sqlite_master WHERE type='table' AND name IN ('corpus_stats', 'term_df', 'term_postings')"
+        ).fetchone()
+        return bool(row and row[0] == 3)
+    except sqlite3.Error:
+        return False
+
+
+def _bm25_indexed_ranks(
+    database: sqlite3.Connection,
+    query_tokens: tuple[str, ...],
+    deadline: float,
+    clock: Callable[[], float],
+) -> tuple[dict[str, int] | None, bool]:
+    if not query_tokens:
+        return None, False
+    if clock() >= deadline:
+        return {}, True
+
+    stats_rows = database.execute(
+        "SELECT key, num_value FROM corpus_stats"
+    ).fetchall()
+    stats = {key: num_val for key, num_val in stats_rows}
+    total_documents = int(stats.get("total_documents", 0.0))
+    average_length = float(stats.get("average_length", 0.0))
+
+    if total_documents == 0:
+        return None, False
+    if average_length == 0.0:
+        return {}, False
+
+    unique_terms = sorted(set(query_tokens))
+    placeholders = ", ".join("?" for _ in unique_terms)
+    df_rows = database.execute(
+        f"SELECT term, df FROM term_df WHERE term IN ({placeholders})",
+        unique_terms,
+    ).fetchall()
+    dfs = dict(df_rows)
+    if not dfs:
+        return {}, False
+
+    idfs = {
+        term: math.log(
+            1 + (total_documents - df + 0.5) / (df + 0.5)
+        )
+        for term, df in dfs.items()
+    }
+
+    k1_plus_1 = _BM25_K1 + 1
+    b_part = 1 - _BM25_B
+    b_over_avg = _BM25_B / average_length
+
+    query_terms = sorted(idfs.keys())
+    postings_placeholders = ", ".join("?" for _ in query_terms)
+    cursor = database.execute(
+        f"SELECT term, ref, freq, doc_length FROM term_postings WHERE term IN ({postings_placeholders}) ORDER BY term, ref",
+        query_terms,
+    )
+
+    scores: dict[str, float] = {}
+    stopped = False
+    for position, (term, ref, freq, doc_length) in enumerate(cursor):
+        if _expired(position, deadline, clock):
+            stopped = True
+            break
+        if doc_length == 0:
+            continue
+        idf = idfs[term]
+        len_factor = _BM25_K1 * (b_part + doc_length * b_over_avg)
+        denominator = freq + len_factor
+        scores[ref] = scores.get(ref, 0.0) + idf * (freq * k1_plus_1) / denominator
+
+    scored = [(score, ref) for ref, score in scores.items() if score > 0]
     return _ranked(scored), stopped
 
 
@@ -517,6 +595,7 @@ def search(
     query: str,
     budgets: Budgets = Budgets(),
     *,
+    offset: int = 0,
     embed_query: EmbedQuery | None = None,
     rerank: Rerank | None = None,
     clock: Callable[[], float] = time.monotonic,
@@ -534,7 +613,14 @@ def search(
     except sqlite3.DatabaseError as error:
         raise RetrievalError("snapshot_unreadable") from error
 
-    lexical_ranks, lexical_stopped = _bm25_ranks(passages, _tokenize(query), deadline, clock)
+    if _has_lexical_index(snapshot.database):
+        lexical_ranks, lexical_stopped = _bm25_indexed_ranks(
+            snapshot.database, _tokenize(query), deadline, clock
+        )
+    else:
+        lexical_ranks, lexical_stopped = _bm25_ranks(
+            passages, _tokenize(query), deadline, clock
+        )
     _leg_state(lexical_ranks, "lexical", degradation)
 
     vector_ranks: dict[str, int] | None = None
@@ -580,7 +666,8 @@ def search(
     matches: list[RetrievalMatch] = []
     truncated = False
     extracted = 0
-    for rank, (ref, lexical_rank, vector_rank) in enumerate(ordered, start=1):
+    ordered_slice = ordered[offset:] if offset < len(ordered) else []
+    for rank, (ref, lexical_rank, vector_rank) in enumerate(ordered_slice, start=offset + 1):
         if len(matches) >= budgets.max_candidates:
             truncated = True
             degradation.append("max_candidates_exceeded")
@@ -601,7 +688,7 @@ def search(
             )
         )
 
-    warnings = ["no_eligible_results"] if not matches else []
+    warnings = ["no_eligible_results"] if not matches and offset == 0 else []
     return RetrievalOutcome(
         matches=tuple(matches),
         degradation=tuple(dict.fromkeys(degradation)),
