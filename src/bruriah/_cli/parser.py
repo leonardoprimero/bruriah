@@ -59,10 +59,23 @@ def build_cli_parser(
     )
     init_parser.add_argument("--query-prefix", default=None, help="query prefix template for asymmetric embedding models")
     init_parser.add_argument("--passage-prefix", default=None, help="passage prefix template for asymmetric embedding models")
-    corpus_parser = add("corpus", "Turn a git history's reasoning into a corpus.")
-    corpus_parser.add_argument("--repo", type=Path, default=Path("."), help="repository to read")
+    corpus_parser = add("corpus", "Turn a git history's reasoning or PDF documents into a corpus.")
+    corpus_parser.add_argument(
+        "--repo",
+        type=Path,
+        default=None,
+        help="git repository to read (default '.' if --pdf not specified)",
+    )
+    corpus_parser.add_argument(
+        "--pdf",
+        type=Path,
+        default=None,
+        help="PDF file or directory of PDFs to derive corpus from",
+    )
     corpus_parser.add_argument("--out", type=Path, required=True, help="directory to write into")
-    corpus_parser.add_argument("--limit", type=int, default=None, help="most recent N commits only")
+    corpus_parser.add_argument(
+        "--limit", type=int, default=None, help="most recent N commits only (git corpus)"
+    )
     corpus_parser.add_argument(
         "--revision",
         default="HEAD",

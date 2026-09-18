@@ -237,6 +237,26 @@ bruriah ← {
 agent → read_evidence({"refs": ["chunk:v1:6d43293..."]})
 ```
 
+### Deriving a Corpus from PDFs (`bruriah corpus --pdf`)
+
+Bruriah indexes Markdown. Organizations with design documents, architecture RFCs, academic papers, and client standards frequently ask for PDF indexing.
+
+Pretending a PDF has lines breaks Bruriah's locator guarantee: a cited line would exist only in extractor memory rather than in the original file on disk. Parsing PDFs at query time would destroy byte-for-byte citation integrity.
+
+Instead, PDF ingestion is an auditable derivation step, exactly like git history derivation:
+
+```bash
+# Extract Markdown documents from a PDF or directory of PDFs (requires pip install 'bruriah[pdf]')
+bruriah corpus --pdf ./docs/standards/ --out "$B/corpus"
+bruriah index  --data-dir "$B/data" --corpus-root "$B/corpus" --policy "$B/policy.yaml"
+```
+
+What this achieves:
+1. **Zero Indexer Modifications:** Not one line changes in the indexer or retriever. It sees inspectable Markdown files on disk.
+2. **Byte-for-Byte Locator Contract:** Citation locators point to lines in physical derived Markdown files (`corpus/<stem>-p014.md`), which `read_evidence` returns byte-for-byte.
+3. **Auditable Provenance:** Every derived document has YAML frontmatter naming `source`, `page`, `extractor` (versioned), `source_sha256`, and `status: active`.
+4. **Honest Coverage:** Text-layer pages are extracted; blank separator pages and unextractable image scans are skipped and reported honestly in examination metrics.
+
 ## Use it if — and when not to
 
 **This will earn its place if:**
@@ -254,7 +274,7 @@ agent → read_evidence({"refs": ["chunk:v1:6d43293..."]})
   not why, so there is no reasoning to retrieve."* No retrieval quality compensates for that. This
   is the single biggest determinant and it is not something the tool can fix.
 - you want it to search your **code**. It indexes Markdown, not source.
-- your knowledge lives in PDFs, Slack, Notion or a database. Only Markdown is ever considered.
+- your knowledge lives in Slack, Notion or a database (though PDFs can be derived via `bruriah corpus --pdf`). Only Markdown is ever indexed.
 - you want prose answers. There is no generative model here; it returns evidence and your agent
   writes the answer.
 - you need instant search over millions of passages. See [Measured](#measured) —

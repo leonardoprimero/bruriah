@@ -5,6 +5,15 @@ and the entries here name what changed for *you* rather than which files moved.
 
 ## [Unreleased]
 
+### Added: Auditable PDF Corpus Derivation (`bruriah corpus --pdf`)
+
+Closes Issue #5. Enables indexing PDF documents (design specs, papers, architecture RFCs, standards) as an auditable derivation step that preserves Bruriah's sacred byte-for-byte locator guarantee:
+- **Zero Indexer Modifications:** Not one line changed in `corpus.py`, `index.py`, or `retrieval.py`. The indexer only sees real on-disk Markdown files.
+- **Declared Provenance Frontmatter:** Each non-empty page derives an individual Markdown document with YAML frontmatter recording `source`, `page`, `extractor` (versioned), `source_sha256`, and `status: active`.
+- **Byte-for-Byte Locator Contract:** Locators cite lines in physical derived Markdown files on disk (`<stem>-p<page:03d>.md`), and `read_evidence` returns exact on-disk bytes.
+- **Honest Text-Layer Extraction:** Pages with extractable text are written; blank separator pages and unextractable image scans are skipped and reported honestly in coverage statistics.
+- **Lightweight Optional Extra:** Uses pure-Python `pypdf>=5.0.0` as an optional dependency (`pip install 'bruriah[pdf]'`), keeping base Bruriah installation minimal with zero native C extensions.
+
 ### Added: MCP Causal Archaeology via `code_target` in `investigate_work`
 
 Autonomous coding agents can now perform causal archaeology directly through the Model Context Protocol without breaking the Two-Tool Public Contract (`investigate_work` and `read_evidence`):

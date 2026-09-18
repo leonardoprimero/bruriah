@@ -1292,3 +1292,77 @@ Decided to use raw sqlite3 connection pooling.
     assert exit_code == 1
     assert "line_out_of_range" in capsys.readouterr().err
 
+
+def test_cli_corpus_pdf_single_file(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    from test_pdfcorpus import _make_pdf
+
+    pdf_path = _make_pdf(
+        tmp_path / "paper.pdf",
+        ["Page 1 architectural reasoning.", "Page 2 benchmark evaluation."],
+    )
+    out_dir = tmp_path / "derived_corpus"
+
+    exit_code = cli.bruriah_main(["corpus", "--pdf", str(pdf_path), "--out", str(out_dir)])
+    assert exit_code == 0
+
+    captured = capsys.readouterr()
+    data = json.loads(captured.out)
+    assert data["documents"] == 2
+    assert data["pages_examined"] == 2
+    assert data["empty_pages_skipped"] == 0
+    assert data["files_examined"] == 1
+    assert data["out"] == str(out_dir)
+
+
+def test_cli_corpus_pdf_coverage_reporting_on_skipped_pages(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    from test_pdfcorpus import _make_pdf
+
+    pdf_path = _make_pdf(tmp_path / "mixed.pdf", ["Only page with text.", ""])
+    out_dir = tmp_path / "out"
+
+    exit_code = cli.bruriah_main(["corpus", "--pdf", str(pdf_path), "--out", str(out_dir)])
+    assert exit_code == 0
+
+    captured = capsys.readouterr()
+    data = json.loads(captured.out)
+    assert data["documents"] == 1
+    assert data["pages_examined"] == 2
+    assert data["empty_pages_skipped"] == 1
+    assert "1 of 2 pages across 1 PDF file(s) contained extractable text" in captured.err
+    assert "were empty or image-only and were skipped" in captured.err
+
+
+def test_cli_corpus_pdf_no_extractable_text(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    from test_pdfcorpus import _make_pdf
+
+    pdf_path = _make_pdf(tmp_path / "empty_doc.pdf", ["", "   "])
+    out_dir = tmp_path / "out"
+
+    exit_code = cli.bruriah_main(["corpus", "--pdf", str(pdf_path), "--out", str(out_dir)])
+    assert exit_code == 0
+
+    captured = capsys.readouterr()
+    data = json.loads(captured.out)
+    assert data["documents"] == 0
+    assert data["empty_pages_skipped"] == 2
+    assert "No PDF page contained extractable text." in captured.err
+
+
+def test_cli_corpus_cannot_specify_both_repo_and_pdf(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    from test_pdfcorpus import _make_pdf
+
+    pdf_path = _make_pdf(tmp_path / "doc.pdf", ["Some text"])
+    out_dir = tmp_path / "out"
+
+    exit_code = cli.bruriah_main([
+        "corpus", "--repo", ".", "--pdf", str(pdf_path), "--out", str(out_dir)
+    ])
+    assert exit_code == 1
+    assert "cannot_specify_both_repo_and_pdf" in capsys.readouterr().err
+

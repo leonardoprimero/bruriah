@@ -18,7 +18,7 @@ import mcp.server.stdio
 import yaml
 from fastembed import TextEmbedding
 
-from . import __version__, clients, gitcorpus
+from . import __version__, clients, gitcorpus, pdfcorpus
 from ._cli.common import CliError, resolve_cli_paths as _resolve_paths, resolve_model_prefixes
 from ._cli.doctor import cmd_doctor as _cmd_doctor, run_doctor
 from ._cli.parser import build_cli_parser
@@ -552,14 +552,47 @@ def _report_corpus_coverage(result: gitcorpus.CorpusResult) -> None:
         )
 
 
-def _cmd_corpus(args: argparse.Namespace) -> int:
-    """Step one of the documented workflow, and for a while the only one you could not install.
+def _report_pdf_coverage(result: pdfcorpus.PdfCorpusResult) -> None:
+    """Honest coverage reporting for derived PDF corpora."""
+    if result.written == 0:
+        print(
+            "No PDF page contained extractable text. The examined documents may be scanned images "
+            "lacking a text layer, or empty -- retrieval quality cannot compensate for that.",
+            file=sys.stderr,
+        )
+    elif result.skipped_empty_pages > 0:
+        print(
+            f"{result.written} of {result.examined} pages across {result.files_examined} PDF file(s) "
+            f"contained extractable text; the other {result.skipped_empty_pages} page(s) were empty "
+            "or image-only and were skipped.",
+            file=sys.stderr,
+        )
 
-    It lived in `scripts/git_corpus.py`, which no wheel ships, so the front page opened by telling
-    a reader to run a file that `pip install bruriah` had never put on their disk."""
-    if not (args.repo / ".git").exists():
+
+def _cmd_corpus(args: argparse.Namespace) -> int:
+    """Step one of the documented workflow: derive a Markdown corpus from git history or PDFs."""
+    if args.pdf is not None and args.repo is not None:
+        raise CliError("cannot_specify_both_repo_and_pdf")
+
+    if args.pdf is not None:
+        result_pdf = pdfcorpus.build(args.pdf, args.out)
+        print(json.dumps(
+            {
+                "documents": result_pdf.documents,
+                "empty_pages_skipped": result_pdf.skipped_empty_pages,
+                "files_examined": result_pdf.files_examined,
+                "out": str(args.out),
+                "pages_examined": result_pdf.pages_examined,
+            },
+            indent=2, sort_keys=True,
+        ))
+        _report_pdf_coverage(result_pdf)
+        return 0
+
+    repo = args.repo or Path(".")
+    if not (repo / ".git").exists():
         raise CliError("not_a_git_repository")
-    result = gitcorpus.build(args.repo, args.out, args.limit, revision=args.revision)
+    result = gitcorpus.build(repo, args.out, args.limit, revision=args.revision)
     print(json.dumps(
         {"documents": result.written, "commits_examined": result.examined, "out": str(args.out),
          "revision": args.revision},
