@@ -88,6 +88,25 @@ def build_cli_parser(
         help="rerank the top documents with a cross-encoder. Off by default; "
         "measured in evals/project-memory/README.md",
     )
+    why_parser = add(
+        "why",
+        "Trace why a line or file was written back to the governing architectural decision.",
+    )
+    why_parser.add_argument(
+        "target",
+        help="target file and optional line number, e.g. 'src/core/storage.py:42'",
+    )
+    why_parser.add_argument(
+        "--repo",
+        type=Path,
+        default=Path("."),
+        help="git repository to inspect (default '.')",
+    )
+    why_parser.add_argument(
+        "--json",
+        action="store_true",
+        help="output structured causal resolution as JSON",
+    )
     index_parser = add("index", "Build and promote a candidate index.")
     index_parser.add_argument("--corpus-root", type=Path, required=True)
     index_parser.add_argument("--policy", type=Path, required=True)

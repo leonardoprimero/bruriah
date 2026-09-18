@@ -53,6 +53,7 @@ from .platform import (
 from .contracts import InvestigationRequest, ReadRequest
 from .retrieval import Rerank
 from .service import ServiceDeps, investigate, read
+from .why import WhyError, format_why_human, format_why_json, run_why
 
 __all__ = [
     "CliError",
@@ -76,6 +77,7 @@ __all__ = [
     "run_skill_rollback",
     "run_skill_sign",
     "run_skill_status",
+    "run_why",
 ]
 
 # Slice 8A-2: `bruriah {init,serve,index,doctor}` over Slice 8A-1's `platform.py` loader.
@@ -713,7 +715,24 @@ def _cmd_ask(
         deps.snapshot.database.close()
 
 
+def _cmd_why(args: argparse.Namespace) -> int:
+    paths = _resolve_paths(args)
+    repo = args.repo.resolve()
+    if not (repo / ".git").exists():
+        raise CliError("not_a_git_repository")
 
+    try:
+        res = run_why(paths, repo, args.target)
+    except PlatformError as error:
+        raise CliError(error.code) from error
+    except WhyError as error:
+        raise CliError(error.code) from error
+
+    if args.json:
+        print(format_why_json(res))
+    else:
+        print(format_why_human(res))
+    return 0
 
 
 def _build_cli_parser() -> argparse.ArgumentParser:
@@ -723,6 +742,7 @@ def _build_cli_parser() -> argparse.ArgumentParser:
             "init": _cmd_init,
             "corpus": _cmd_corpus,
             "ask": _cmd_ask,
+            "why": _cmd_why,
             "index": _cmd_index,
             "index-prune": _cmd_index_prune,
             "serve": _cmd_serve,

@@ -1177,3 +1177,118 @@ def test_cli_parser_accepts_query_and_passage_prefix_flags(tmp_path: Path) -> No
     ])
     assert args_init.query_prefix == "q: "
     assert args_init.passage_prefix == "p: "
+
+
+def test_cli_parser_why_subcommand(tmp_path: Path) -> None:
+    parser = cli._build_cli_parser()
+    args = parser.parse_args(["why", "src/core/storage.py:42", "--repo", str(tmp_path), "--json"])
+    assert args.command == "why"
+    assert args.target == "src/core/storage.py:42"
+    assert args.repo == tmp_path
+    assert args.json is True
+
+
+def test_cli_why_not_a_git_repository(tmp_path: Path, capsys: pytest.CaptureFixture) -> None:
+    non_git = tmp_path / "plain_dir"
+    non_git.mkdir()
+    paths = _paths(tmp_path)
+    exit_code = cli.bruriah_main([
+        "why", "file.py:1",
+        "--repo", str(non_git),
+        "--config-dir", str(paths.config_dir),
+        "--data-dir", str(paths.data_dir),
+        "--cache-dir", str(paths.cache_dir),
+        "--log-dir", str(paths.log_dir),
+    ])
+    assert exit_code == 1
+    assert "not_a_git_repository" in capsys.readouterr().err
+
+
+def test_cli_why_end_to_end(tmp_path: Path, capsys: pytest.CaptureFixture) -> None:
+    # 1. Set up a real git repo with a commit
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    subprocess.run(["git", "init", "-q"], cwd=repo, check=True)
+    subprocess.run(["git", "config", "user.email", "test@example.com"], cwd=repo, check=True)
+    subprocess.run(["git", "config", "user.name", "Test Author"], cwd=repo, check=True)
+
+    (repo / "storage.py").write_text("def connect():\n    return 'db'\n", encoding="utf-8")
+    subprocess.run(["git", "add", "storage.py"], cwd=repo, check=True)
+    subprocess.run(["git", "commit", "-m", "feat: initial storage"], cwd=repo, check=True)
+    sha = subprocess.run(["git", "rev-parse", "HEAD"], cwd=repo, capture_output=True, text=True, check=True).stdout.strip()
+
+    # 2. Build corpus and index containing this decision
+    root = tmp_path / "vault"
+    root.mkdir()
+    doc_content = f"""---
+commit: {sha}
+---
+
+# SQLite Storage Implementation
+
+**Decided:** 2026-03-01 · **Commit:** `{sha[:12]}` · **Author:** Test Author
+
+Decided to use raw sqlite3 connection pooling.
+
+## Files this decision touched
+- `storage.py`
+"""
+    (root / "decisions.md").write_text(doc_content, encoding="utf-8")
+    policy_path = tmp_path / "policy.yaml"
+    policy_path.write_text("version: 1\ninclude: ['**']\nexclude: []\n", encoding="utf-8")
+
+    paths = _paths(tmp_path)
+    cli.run_init(paths)
+    cli.run_index(
+        paths, root, policy_path, model_name="test/minilm", embedder_factory=_fake_embedder_factory,
+    )
+
+    # 3. Run why command human-readable
+    capsys.readouterr()  # flush
+    exit_code = cli.bruriah_main([
+        "why", "storage.py:1",
+        "--repo", str(repo),
+        "--config-dir", str(paths.config_dir),
+        "--data-dir", str(paths.data_dir),
+        "--cache-dir", str(paths.cache_dir),
+        "--log-dir", str(paths.log_dir),
+    ])
+    assert exit_code == 0
+    captured = capsys.readouterr()
+    assert "Target: storage.py:1" in captured.out
+    assert "Line Commit:" in captured.out
+    assert "feat: initial storage" in captured.out
+    assert "Governing Architectural Decision:" in captured.out
+    assert "SQLite Storage Implementation" in captured.out
+    assert "Decided to use raw sqlite3 connection pooling" in captured.out
+
+    # 4. Run why command with --json
+    exit_code = cli.bruriah_main([
+        "why", "storage.py:1",
+        "--repo", str(repo),
+        "--json",
+        "--config-dir", str(paths.config_dir),
+        "--data-dir", str(paths.data_dir),
+        "--cache-dir", str(paths.cache_dir),
+        "--log-dir", str(paths.log_dir),
+    ])
+    assert exit_code == 0
+    captured_json = capsys.readouterr().out
+    data = json.loads(captured_json)
+    assert data["target"] == "storage.py:1"
+    assert data["line"] == 1
+    assert data["line_commit"]["subject"] == "feat: initial storage"
+    assert data["governing_decision"]["subject"] == "SQLite Storage Implementation"
+
+    # 5. Run with line out of range
+    exit_code = cli.bruriah_main([
+        "why", "storage.py:999",
+        "--repo", str(repo),
+        "--config-dir", str(paths.config_dir),
+        "--data-dir", str(paths.data_dir),
+        "--cache-dir", str(paths.cache_dir),
+        "--log-dir", str(paths.log_dir),
+    ])
+    assert exit_code == 1
+    assert "line_out_of_range" in capsys.readouterr().err
+
