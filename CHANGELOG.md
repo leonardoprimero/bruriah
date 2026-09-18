@@ -5,6 +5,8 @@ and the entries here name what changed for *you* rather than which files moved.
 
 ## [Unreleased]
 
+## [0.9.0] — 2026-09-17
+
 ### Added: `bruriah why` — Causal Archaeology for Codebases
 
 Where `git blame` tells you WHO changed code and WHEN, `bruriah why <file>[:line]` explains WHY that code was written:
