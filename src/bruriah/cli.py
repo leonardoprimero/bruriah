@@ -61,6 +61,7 @@ from .retrieval import Rerank
 from .ui import UIError, run_ui
 from .lens import LensError, format_lens_human, format_lens_json, run_lens
 from .bootstrap import BootstrapError, run_bootstrap
+from .impact import ImpactError, format_impact_human, format_impact_json, run_impact
 from .service import ServiceDeps, investigate, read
 from .why import WhyError, format_why_human, format_why_json, run_why
 
@@ -1013,6 +1014,22 @@ def _cmd_bootstrap(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_impact(args: argparse.Namespace) -> int:
+    paths = _resolve_paths(args)
+    repo = find_project_root(args.repo.resolve())
+
+    try:
+        result = run_impact(paths, repo, args.target)
+    except ImpactError as error:
+        raise CliError(error.code) from error
+
+    if args.json:
+        print(format_impact_json(result))
+    else:
+        print(format_impact_human(result))
+    return 0
+
+
 def _cmd_setup(args: argparse.Namespace) -> int:
     paths = _resolve_paths(args)
     manifest = _build_launch_manifest(paths)
@@ -1132,6 +1149,7 @@ def _build_cli_parser() -> argparse.ArgumentParser:
             "ui": _cmd_ui,
             "lens": _cmd_lens,
             "bootstrap": _cmd_bootstrap,
+            "impact": _cmd_impact,
             "index": _cmd_index,
             "index-prune": _cmd_index_prune,
             "serve": _cmd_serve,

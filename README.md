@@ -329,6 +329,42 @@ bruriah bootstrap --index               # Extract AND build the initial Bruriah 
 
 ---
 
+### Architectural Blast Radius: `bruriah impact`
+
+Architectural drift is easiest to prevent *before* touching code. `bruriah impact` performs pre-flight blast radius analysis on any file, directory, or revision range:
+
+```bash
+bruriah impact src/bruriah/auth.py              # Single file blast radius
+bruriah impact src/bruriah/core/                # Directory / module blast radius
+bruriah impact HEAD~1..HEAD                     # Revision range blast radius
+bruriah impact src/bruriah/auth.py --json       # Structured JSON for CI or pre-commit hooks
+```
+
+Output:
+
+```text
+🏛️  Bruriah Architectural Blast Radius — src/bruriah/auth.py (file)
+   Risk Level: MEDIUM · 1 governing decision(s) · 2 co-governed file(s) at risk
+
+Governing Decisions & Blast Radius:
+  • [✅ ACTIVE] Unified Token and Session Model (22222222)
+    Author: Architect · Date: 2026-02-01
+    Directly governs: src/bruriah/auth.py
+    Co-governed files (Blast Radius):
+      ⚠️  src/bruriah/tokens.py
+      ⚠️  src/bruriah/session.py
+
+Recommendations:
+  1. Blast Radius Warning: Modifying this target affects 2 co-governed file(s). Changes to the architectural contract will cause drift in these files.
+  2. Recommendation: If changing architectural contracts, declare 'Supersedes: <commit>' in your commit and update the co-governed files in the same pull request.
+```
+
+- **Pre-Flight Risk Assessment**: Classifies risk (`LOW`, `MEDIUM`, `HIGH`, `CRITICAL`) based on the number of co-governed files and whether the governing decision is already superseded.
+- **Co-Governance Mapping**: Discovers all other files that share the same architectural decision so you can update them together in the same PR.
+- **Actionable Recommendations**: Tells you exactly which trailers to declare to maintain lineage integrity.
+
+---
+
 
 ### Causal Archaeology for Coding Agents (MCP)
 

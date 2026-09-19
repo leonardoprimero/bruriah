@@ -389,6 +389,26 @@ def build_cli_parser(
         action="store_true",
         help="automatically build and promote the index after extracting decisions",
     )
+    impact_parser = add(
+        "impact",
+        "Compute architectural blast radius analysis before modifying a file, module, or revision.",
+    )
+    impact_parser.add_argument(
+        "target",
+        type=str,
+        help="file, directory, or git revision range (e.g. 'src/auth.py', 'src/auth/', 'HEAD~1..HEAD')",
+    )
+    impact_parser.add_argument(
+        "--json",
+        action="store_true",
+        help="render output as JSON",
+    )
+    impact_parser.add_argument(
+        "--repo",
+        type=Path,
+        default=Path("."),
+        help="git repository root (default '.')",
+    )
     index_parser = add("index", "Build and promote a candidate index.")
     index_parser.add_argument("--corpus-root", type=Path, required=True)
     index_parser.add_argument("--policy", type=Path, required=True)
