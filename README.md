@@ -306,6 +306,29 @@ jobs:
 
 When drift is detected, Bruriah posts an inline review comment explaining the architectural deviation and recommending corrective actions. In `--strict` mode, it requests changes (`REQUEST_CHANGES`) to block merges until architectural alignment is restored.
 
+---
+
+### Cold-Start Bootstrap: `bruriah bootstrap`
+
+Adopting an architectural decision tool on an existing codebase with years of history shouldn't require writing dozens of ADRs by hand.
+
+`bruriah bootstrap` mines your repository's existing Git history to automatically identify architectural turning points, extract them into structured markdown decisions, infer `supersedes` relations, and build an initial index snapshot in seconds:
+
+```bash
+bruriah bootstrap                       # Extract decisions to ./decisions
+bruriah bootstrap --dry-run             # Preview candidates without writing files
+bruriah bootstrap --limit 30            # Extract top 30 architectural decisions
+bruriah bootstrap --min-score 0.6       # Filter by architectural relevance score
+bruriah bootstrap --index               # Extract AND build the initial Bruriah snapshot
+```
+
+#### How Git Mining Works:
+1. **Architectural Scoring**: Evaluates each non-merge commit using heuristics (explanatory body length, keywords like *refactor*, *breaking change*, *architecture*, *redesign*, *migrate*, and cross-cutting file touches) while filtering out routine chores and version bumps.
+2. **Lineage Inference**: Detects when subsequent refactoring commits touch the same architectural domain and automatically infers `supersedes` trailers.
+3. **Instant Onboarding**: Automatically writes standard Markdown decisions into `decisions/` and optionally builds the initial index, making `bruriah ask`, `bruriah why`, `bruriah ui`, and editor extensions work immediately on day 1.
+
+---
+
 
 ### Causal Archaeology for Coding Agents (MCP)
 

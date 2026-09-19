@@ -60,6 +60,7 @@ from .review import build_review, format_review_human, format_review_json, get_c
 from .retrieval import Rerank
 from .ui import UIError, run_ui
 from .lens import LensError, format_lens_human, format_lens_json, run_lens
+from .bootstrap import BootstrapError, run_bootstrap
 from .service import ServiceDeps, investigate, read
 from .why import WhyError, format_why_human, format_why_json, run_why
 
@@ -971,6 +972,47 @@ def _cmd_lens(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_bootstrap(args: argparse.Namespace) -> int:
+    paths = _resolve_paths(args)
+    repo = find_project_root(args.repo.resolve())
+    out_dir = args.out_dir if args.out_dir.is_absolute() else repo / args.out_dir
+
+    try:
+        result = run_bootstrap(
+            repo,
+            out_dir,
+            limit=args.limit,
+            min_score=args.min_score,
+            dry_run=args.dry_run,
+            index_after=args.index,
+            paths=paths,
+        )
+    except BootstrapError as error:
+        raise CliError(error.code) from error
+
+    prefix = "[dry-run] " if result.dry_run else ""
+    print(f"🏛️  {prefix}Bruriah Bootstrap — Mined {result.total_commits_scanned} commits")
+    print(f"   Found {result.candidates_found} candidate architectural decision(s).")
+    if not result.dry_run:
+        print(f"   Written {result.decisions_written} decision document(s) to: {result.out_dir}")
+        if args.index:
+            print("   ✅ Built and promoted initial index snapshot successfully.")
+    else:
+        print(f"   Destination: {result.out_dir} (files not written)")
+
+    print()
+    for d in result.decisions[:10]:
+        supersedes_note = f" (supersedes {', '.join(d.inferred_supersedes)})" if d.inferred_supersedes else ""
+        print(f"   • [{d.score:.2f}] {d.date} {d.sha[:8]} — {d.subject}{supersedes_note}")
+        reasons_str = ", ".join(d.reasons[:3])
+        print(f"     ↳ {reasons_str}")
+
+    if len(result.decisions) > 10:
+        print(f"   ... and {len(result.decisions) - 10} more.")
+
+    return 0
+
+
 def _cmd_setup(args: argparse.Namespace) -> int:
     paths = _resolve_paths(args)
     manifest = _build_launch_manifest(paths)
@@ -1089,6 +1131,7 @@ def _build_cli_parser() -> argparse.ArgumentParser:
             "review": _cmd_review,
             "ui": _cmd_ui,
             "lens": _cmd_lens,
+            "bootstrap": _cmd_bootstrap,
             "index": _cmd_index,
             "index-prune": _cmd_index_prune,
             "serve": _cmd_serve,

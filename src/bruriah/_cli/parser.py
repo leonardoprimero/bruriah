@@ -351,6 +351,44 @@ def build_cli_parser(
         default=Path("."),
         help="git repository root (default '.')",
     )
+    bootstrap_parser = add(
+        "bootstrap",
+        "Mine existing Git history to automatically extract architectural decisions and initialize Bruriah.",
+    )
+    bootstrap_parser.add_argument(
+        "--repo",
+        type=Path,
+        default=Path("."),
+        help="git repository root to mine (default '.')",
+    )
+    bootstrap_parser.add_argument(
+        "--out-dir",
+        type=Path,
+        default=Path("decisions"),
+        help="directory to write extracted markdown decisions (default 'decisions')",
+    )
+    bootstrap_parser.add_argument(
+        "--limit",
+        type=int,
+        default=50,
+        help="maximum number of architectural decisions to extract (default: 50)",
+    )
+    bootstrap_parser.add_argument(
+        "--min-score",
+        type=float,
+        default=0.5,
+        help="minimum architectural relevance score 0.0-1.0 (default: 0.5)",
+    )
+    bootstrap_parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="preview candidate decisions without writing files",
+    )
+    bootstrap_parser.add_argument(
+        "--index",
+        action="store_true",
+        help="automatically build and promote the index after extracting decisions",
+    )
     index_parser = add("index", "Build and promote a candidate index.")
     index_parser.add_argument("--corpus-root", type=Path, required=True)
     index_parser.add_argument("--policy", type=Path, required=True)
