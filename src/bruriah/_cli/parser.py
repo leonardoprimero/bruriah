@@ -277,6 +277,45 @@ def build_cli_parser(
         default=Path("."),
         help="git repository to inspect (default '.')",
     )
+    review_parser = add(
+        "review",
+        "Analyze a pull request and post architectural review comments to GitHub.",
+    )
+    review_parser.add_argument(
+        "revision_or_range",
+        nargs="?",
+        default=None,
+        metavar="REVISION_OR_RANGE",
+        help="git revision or range to inspect (e.g. 'origin/main...HEAD'). "
+        "Auto-detected from GitHub Actions PR context if not specified.",
+    )
+    review_parser.add_argument(
+        "--post",
+        action="store_true",
+        help="post review comments to the pull request via GitHub API "
+        "(requires GITHUB_TOKEN environment variable)",
+    )
+    review_parser.add_argument(
+        "--strict",
+        action="store_true",
+        help="request changes (instead of commenting) when drift is detected",
+    )
+    review_parser.add_argument(
+        "--no-line-comments",
+        action="store_true",
+        help="skip line-level causal archaeology (faster, file-level only)",
+    )
+    review_parser.add_argument(
+        "--json",
+        action="store_true",
+        help="output structured review as JSON",
+    )
+    review_parser.add_argument(
+        "--repo",
+        type=Path,
+        default=Path("."),
+        help="git repository to inspect (default '.')",
+    )
     index_parser = add("index", "Build and promote a candidate index.")
     index_parser.add_argument("--corpus-root", type=Path, required=True)
     index_parser.add_argument("--policy", type=Path, required=True)

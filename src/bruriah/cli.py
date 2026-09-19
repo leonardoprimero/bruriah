@@ -55,6 +55,8 @@ from .hooks import HookError, install_hook, uninstall_hook
 from .setup import SetupError, detect_installed_clients, setup_client
 from .contracts import InvestigationRequest, ReadRequest
 from .drift import DriftError, format_drift_human, format_drift_json, run_drift
+from .github import GitHubError, detect_pr_context, post_review as gh_post_review
+from .review import build_review, format_review_human, format_review_json, get_changed_lines
 from .retrieval import Rerank
 from .service import ServiceDeps, investigate, read
 from .why import WhyError, format_why_human, format_why_json, run_why
@@ -852,6 +854,87 @@ def _cmd_drift(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_review(args: argparse.Namespace) -> int:
+    """Analyze PR changes and post architectural review comments.
+
+    Combines drift detection with optional line-level causal archaeology to
+    produce a structured review suitable for GitHub PRs.  When ``--post`` is
+    given, posts the review directly to the PR via the GitHub API; otherwise
+    prints it to stdout for local inspection or piping into other tools.
+    """
+    paths = _resolve_paths(args)
+    repo = args.repo.resolve()
+    if not (repo / ".git").exists():
+        raise CliError("not_a_git_repository")
+
+    # Auto-detect revision from PR context when not explicitly provided.
+    revision = args.revision_or_range
+    pr_context = detect_pr_context()
+    if revision is None and pr_context:
+        revision = f"origin/{pr_context.base_ref}...HEAD"
+
+    if revision is None:
+        raise CliError("no_revision_specified")
+
+    # Run drift analysis (reuses the same engine as `bruriah drift`).
+    try:
+        report = run_drift(paths, repo, revision)
+    except PlatformError as error:
+        raise CliError(error.code) from error
+    except DriftError as error:
+        raise CliError(error.code) from error
+
+    # Optionally enrich with line-level causal archaeology.
+    changed_lines = None
+    database = None
+    skip_line_comments = getattr(args, "no_line_comments", False)
+
+    if not skip_line_comments:
+        changed_lines = get_changed_lines(repo, revision)
+        try:
+            from .platform import open_snapshot
+            snapshot = open_snapshot(paths)
+            database = snapshot.database
+        except PlatformError:
+            database = None
+
+    try:
+        review = build_review(
+            report,
+            repo,
+            database,
+            changed_lines,
+            strict=args.strict,
+            line_comments=not skip_line_comments,
+        )
+    finally:
+        if database is not None:
+            database.close()
+
+    # Output: post to GitHub, print as JSON, or print human-readable.
+    if args.post:
+        token = os.environ.get("GITHUB_TOKEN", "")
+        if not token:
+            raise CliError("github_token_missing")
+        if pr_context is None:
+            raise CliError("not_in_pr_context")
+
+        try:
+            url = gh_post_review(token, pr_context, review)
+        except GitHubError as error:
+            raise CliError(error.code) from error
+
+        print(f"Review posted: {url}", file=sys.stderr)
+    elif args.json:
+        print(format_review_json(review))
+    else:
+        print(format_review_human(review))
+
+    if args.strict and review.has_drift:
+        return 1
+    return 0
+
+
 def _cmd_setup(args: argparse.Namespace) -> int:
     paths = _resolve_paths(args)
     manifest = _build_launch_manifest(paths)
@@ -967,6 +1050,7 @@ def _build_cli_parser() -> argparse.ArgumentParser:
             "ask": _cmd_ask,
             "why": _cmd_why,
             "drift": _cmd_drift,
+            "review": _cmd_review,
             "index": _cmd_index,
             "index-prune": _cmd_index_prune,
             "serve": _cmd_serve,
