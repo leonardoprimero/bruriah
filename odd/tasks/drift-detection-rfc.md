@@ -1,6 +1,6 @@
 # RFC: Architectural Drift Detection (`bruriah drift` / `bruriah check`)
 
-**Status:** Proposed  
+**Status:** Implemented  
 **Author:** Senior Architecture & Engineering  
 **Target Version:** 0.10.0  
 **Context:** Next frontier capability following Transitive Lineage & Causal Archaeology
