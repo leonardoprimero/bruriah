@@ -526,16 +526,17 @@ def _cmd_init(
         print(_index_summary_line(bootstrap["index"]), file=sys.stderr)
 
         # Write in-repo .bruriah/config.json pointer so subsequent commands auto-discover this project
-        dot_bruriah = repo_root / ".bruriah"
-        dot_bruriah.mkdir(parents=True, exist_ok=True)
-        config_payload: dict[str, object] = {
-            "data_dir": "data" if getattr(args, "local", False) else str(paths.data_dir),
-            "config_dir": "config" if getattr(args, "local", False) else str(paths.config_dir),
-        }
-        (dot_bruriah / "config.json").write_text(
-            json.dumps(config_payload, indent=2, sort_keys=True) + "\n",
-            encoding="utf-8",
-        )
+        if args.config_dir is None:
+            dot_bruriah = repo_root / ".bruriah"
+            dot_bruriah.mkdir(parents=True, exist_ok=True)
+            config_payload: dict[str, object] = {
+                "data_dir": "data" if getattr(args, "local", False) else str(paths.data_dir),
+                "config_dir": "config" if getattr(args, "local", False) else str(paths.config_dir),
+            }
+            (dot_bruriah / "config.json").write_text(
+                json.dumps(config_payload, indent=2, sort_keys=True) + "\n",
+                encoding="utf-8",
+            )
     config_file = run_init(paths)
     print(f"Wrote private configuration to {config_file}", file=sys.stderr)
     try:

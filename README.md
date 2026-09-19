@@ -23,7 +23,8 @@
 ```bash
 pip install bruriah          # Linux, macOS or Windows
 
-bruriah init --repo .        # zero-config: automatically scopes project data and config
+B=~/.bruriah/myproject       # one directory per project, outside the repo
+bruriah init --repo . --data-dir "$B/data" --config-dir "$B/config"
 ```
 
 Run from inside your project, that is the whole first run — default policy, corpus, index and
