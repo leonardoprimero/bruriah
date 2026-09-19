@@ -316,6 +316,21 @@ def build_cli_parser(
         default=Path("."),
         help="git repository to inspect (default '.')",
     )
+    ui_parser = add(
+        "ui",
+        "Launch an interactive web-based Decision Lineage DAG explorer.",
+    )
+    ui_parser.add_argument(
+        "--port",
+        type=int,
+        default=0,
+        help="TCP port to bind (default: auto-select ephemeral port)",
+    )
+    ui_parser.add_argument(
+        "--no-browser",
+        action="store_true",
+        help="do not open the browser automatically",
+    )
     index_parser = add("index", "Build and promote a candidate index.")
     index_parser.add_argument("--corpus-root", type=Path, required=True)
     index_parser.add_argument("--policy", type=Path, required=True)

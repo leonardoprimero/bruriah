@@ -58,6 +58,7 @@ from .drift import DriftError, format_drift_human, format_drift_json, run_drift
 from .github import GitHubError, detect_pr_context, post_review as gh_post_review
 from .review import build_review, format_review_human, format_review_json, get_changed_lines
 from .retrieval import Rerank
+from .ui import UIError, run_ui
 from .service import ServiceDeps, investigate, read
 from .why import WhyError, format_why_human, format_why_json, run_why
 
@@ -935,6 +936,19 @@ def _cmd_review(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_ui(args: argparse.Namespace) -> int:
+    paths = _resolve_paths(args)
+    try:
+        run_ui(
+            paths,
+            port=getattr(args, "port", 0),
+            open_browser=not getattr(args, "no_browser", False),
+        )
+    except UIError as error:
+        raise CliError(error.code) from error
+    return 0
+
+
 def _cmd_setup(args: argparse.Namespace) -> int:
     paths = _resolve_paths(args)
     manifest = _build_launch_manifest(paths)
@@ -1051,6 +1065,7 @@ def _build_cli_parser() -> argparse.ArgumentParser:
             "why": _cmd_why,
             "drift": _cmd_drift,
             "review": _cmd_review,
+            "ui": _cmd_ui,
             "index": _cmd_index,
             "index-prune": _cmd_index_prune,
             "serve": _cmd_serve,
