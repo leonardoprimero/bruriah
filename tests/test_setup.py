@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 
 import pytest
@@ -14,11 +15,14 @@ from bruriah.setup import (
     setup_client,
 )
 
+_WINDOWS = os.name == "nt"
+_CMD = "C:\\opt\\bruriah\\bruriah" if _WINDOWS else "/opt/homebrew/bin/bruriah"
+
 
 @pytest.fixture
 def manifest() -> LaunchManifest:
     return LaunchManifest(
-        command="/opt/homebrew/bin/bruriah",
+        command=_CMD,
         args=("serve", "--data-dir", "/tmp/bruriah/data"),
         server_name="bruriah",
     )
@@ -61,7 +65,7 @@ def test_merge_mcp_servers_creates_and_updates_without_clobbering_existing_tools
     assert status == "created"
     assert "mcpServers" in merged
     assert "bruriah" in merged["mcpServers"]
-    assert merged["mcpServers"]["bruriah"]["command"] == "/opt/homebrew/bin/bruriah"
+    assert merged["mcpServers"]["bruriah"]["command"] == _CMD
 
     # Write initial config with another server
     initial = {
@@ -87,7 +91,7 @@ def test_merge_mcp_servers_creates_and_updates_without_clobbering_existing_tools
 
     # 4. Updating manifest reports "updated"
     updated_manifest = LaunchManifest(
-        command="/opt/homebrew/bin/bruriah",
+        command=_CMD,
         args=("serve", "--data-dir", "/new/path"),
         server_name="bruriah",
     )
