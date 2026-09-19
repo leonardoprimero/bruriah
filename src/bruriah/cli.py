@@ -50,6 +50,7 @@ from .platform import (
     PlatformError, PlatformPaths, ensure_private_dirs, find_project_root, load_build_descriptor, load_deps,
     project_scoped_paths, resolve_paths, write_build_descriptor,
 )
+from .aliases import AliasError, install_aliases, uninstall_aliases
 from .hooks import HookError, install_hook, uninstall_hook
 from .setup import SetupError, detect_installed_clients, setup_client
 from .contracts import InvestigationRequest, ReadRequest
@@ -924,6 +925,35 @@ def _cmd_hook(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_alias(args: argparse.Namespace) -> int:
+    scope = "local" if getattr(args, "local", False) else "global"
+    repo = args.repo.resolve() if getattr(args, "repo", None) else None
+    action = getattr(args, "alias_action", None)
+    try:
+        if action == "install":
+            install_results = install_aliases(scope=scope, repo=repo)
+            for name, cmd, status in install_results:
+                label = {
+                    "created": "Configured",
+                    "updated": "Updated",
+                    "unchanged": "Already configured",
+                }.get(status, status)
+                print(f"git {name} -> {cmd} ({label}, {scope})", file=sys.stderr)
+        elif action == "uninstall":
+            uninstall_results = uninstall_aliases(scope=scope, repo=repo)
+            for name, status in uninstall_results:
+                label = {
+                    "removed": "Removed",
+                    "not_found": "Not configured",
+                }.get(status, status)
+                print(f"git {name} ({label}, {scope})", file=sys.stderr)
+        else:
+            raise CliError("unknown_alias_action")
+    except AliasError as error:
+        raise CliError(f"alias_failed:{error.code}") from error
+    return 0
+
+
 def _build_cli_parser() -> argparse.ArgumentParser:
     return build_cli_parser(
         version=__version__,
@@ -931,6 +961,7 @@ def _build_cli_parser() -> argparse.ArgumentParser:
             "init": _cmd_init,
             "setup": _cmd_setup,
             "hook": _cmd_hook,
+            "alias": _cmd_alias,
             "corpus": _cmd_corpus,
             "ask": _cmd_ask,
             "why": _cmd_why,

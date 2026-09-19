@@ -125,6 +125,51 @@ def build_cli_parser(
         default=Path("."),
         help="git repository to configure (default '.')",
     )
+    alias_parser = add(
+        "alias",
+        "Configure native Git aliases ('git why', 'git drift') for seamless terminal integration.",
+    )
+    alias_subparsers = alias_parser.add_subparsers(dest="alias_action", required=True)
+
+    alias_install_sub = alias_subparsers.add_parser("install", help="configure git aliases")
+    add_platform_arguments(alias_install_sub)
+    alias_install_sub.add_argument(
+        "--global",
+        dest="global_scope",
+        action="store_true",
+        help="configure global user git aliases (default)",
+    )
+    alias_install_sub.add_argument(
+        "--local",
+        action="store_true",
+        help="configure repository-local git aliases",
+    )
+    alias_install_sub.add_argument(
+        "--repo",
+        type=Path,
+        default=Path("."),
+        help="git repository for local scope (default '.')",
+    )
+
+    alias_uninstall_sub = alias_subparsers.add_parser("uninstall", help="remove configured git aliases")
+    add_platform_arguments(alias_uninstall_sub)
+    alias_uninstall_sub.add_argument(
+        "--global",
+        dest="global_scope",
+        action="store_true",
+        help="remove global user git aliases (default)",
+    )
+    alias_uninstall_sub.add_argument(
+        "--local",
+        action="store_true",
+        help="remove repository-local git aliases",
+    )
+    alias_uninstall_sub.add_argument(
+        "--repo",
+        type=Path,
+        default=Path("."),
+        help="git repository for local scope (default '.')",
+    )
     corpus_parser = add("corpus", "Turn a git history's reasoning or PDF documents into a corpus.")
     corpus_parser.add_argument(
         "--repo",

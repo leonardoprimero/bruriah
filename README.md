@@ -333,6 +333,18 @@ bruriah hook install        # installs pre-commit hook into .git/hooks/pre-commi
 bruriah hook uninstall      # cleanly removes the hook
 ```
 
+##### 4. Native Git Aliases (`git why` & `git drift`)
+Make causal archaeology and drift detection feel like native Git subcommands:
+
+```bash
+bruriah alias install       # registers 'git why' and 'git drift' globally (or --local)
+bruriah alias uninstall     # cleanly unregisters aliases
+
+# Now use them anywhere in your workflow:
+git why src/bruriah/mcp_server.py:42
+git drift --staged
+```
+
 Pass `--json` to `bruriah drift` to integrate structured diagnostics into PR review bots or dashboards.
 
 ## Use it if — and when not to

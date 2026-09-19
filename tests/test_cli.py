@@ -1483,3 +1483,29 @@ def test_cmd_hook_refuses_non_git_repo(tmp_path: Path, capsys: pytest.CaptureFix
     assert exit_code == 1
     assert "hook_failed:not_a_git_repository" in capsys.readouterr().err
 
+
+def test_cmd_alias_install_and_uninstall_local(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    repo = tmp_path / "my-repo"
+    repo.mkdir()
+    subprocess.run(["git", "init", "-q"], cwd=repo, check=True)
+
+    # Install local git aliases
+    exit_code = cli.bruriah_main(["alias", "install", "--local", "--repo", str(repo)])
+    assert exit_code == 0
+    captured = capsys.readouterr()
+    assert "git why -> !bruriah why (Configured, local)" in captured.err
+    assert "git drift -> !bruriah drift (Configured, local)" in captured.err
+
+    # Install again: unchanged
+    exit_code = cli.bruriah_main(["alias", "install", "--local", "--repo", str(repo)])
+    assert exit_code == 0
+    captured = capsys.readouterr()
+    assert "git why -> !bruriah why (Already configured, local)" in captured.err
+
+    # Uninstall
+    exit_code = cli.bruriah_main(["alias", "uninstall", "--local", "--repo", str(repo)])
+    assert exit_code == 0
+    captured = capsys.readouterr()
+    assert "git why (Removed, local)" in captured.err
+    assert "git drift (Removed, local)" in captured.err
+
