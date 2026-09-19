@@ -7,6 +7,10 @@ import json
 import subprocess
 from dataclasses import asdict, dataclass
 from pathlib import Path
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from .platform import PlatformPaths
 
 from .repository import SnapshotRepository
 from .why import WhyError, trace_causal_archaeology
@@ -258,7 +262,7 @@ def format_drift_json(report: DriftReport) -> str:
 
 
 def run_drift(
-    paths: any,
+    paths: PlatformPaths,
     repo: Path,
     revision_or_range: str | None = None,
     staged: bool = False,
