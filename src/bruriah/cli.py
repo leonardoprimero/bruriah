@@ -51,6 +51,7 @@ from .platform import (
     resolve_paths, write_build_descriptor,
 )
 from .contracts import InvestigationRequest, ReadRequest
+from .drift import DriftError, format_drift_human, format_drift_json, run_drift
 from .retrieval import Rerank
 from .service import ServiceDeps, investigate, read
 from .why import WhyError, format_why_human, format_why_json, run_why
@@ -67,6 +68,7 @@ __all__ = [
     "run_bootstrap",
     "run_client_configs",
     "run_doctor",
+    "run_drift",
     "run_index",
     "run_init",
     "run_skill_activate",
@@ -787,6 +789,29 @@ def _cmd_why(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_drift(args: argparse.Namespace) -> int:
+    paths = _resolve_paths(args)
+    repo = args.repo.resolve()
+    if not (repo / ".git").exists():
+        raise CliError("not_a_git_repository")
+
+    try:
+        report = run_drift(paths, repo, args.revision_or_range, args.staged)
+    except PlatformError as error:
+        raise CliError(error.code) from error
+    except DriftError as error:
+        raise CliError(error.code) from error
+
+    if args.json:
+        print(format_drift_json(report))
+    else:
+        print(format_drift_human(report))
+
+    if args.strict and report.has_drift:
+        return 1
+    return 0
+
+
 def _build_cli_parser() -> argparse.ArgumentParser:
     return build_cli_parser(
         version=__version__,
@@ -795,6 +820,7 @@ def _build_cli_parser() -> argparse.ArgumentParser:
             "corpus": _cmd_corpus,
             "ask": _cmd_ask,
             "why": _cmd_why,
+            "drift": _cmd_drift,
             "index": _cmd_index,
             "index-prune": _cmd_index_prune,
             "serve": _cmd_serve,

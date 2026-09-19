@@ -133,6 +133,39 @@ def build_cli_parser(
         action="store_true",
         help="output structured causal resolution as JSON",
     )
+    drift_parser = add(
+        "drift",
+        "Inspect Git changes against the decision lineage DAG to detect architectural regressions.",
+    )
+    drift_parser.add_argument(
+        "revision_or_range",
+        nargs="?",
+        default=None,
+        metavar="REVISION_OR_RANGE",
+        help="git revision or range to inspect (e.g. 'HEAD~1', 'origin/main...HEAD'). "
+        "Defaults to inspecting uncommitted working tree changes against HEAD.",
+    )
+    drift_parser.add_argument(
+        "--staged",
+        action="store_true",
+        help="inspect staged git changes (ideal for pre-commit hooks)",
+    )
+    drift_parser.add_argument(
+        "--strict",
+        action="store_true",
+        help="exit with code 1 if architectural drift or stale governance is detected",
+    )
+    drift_parser.add_argument(
+        "--json",
+        action="store_true",
+        help="output structured drift inspection report as JSON",
+    )
+    drift_parser.add_argument(
+        "--repo",
+        type=Path,
+        default=Path("."),
+        help="git repository to inspect (default '.')",
+    )
     index_parser = add("index", "Build and promote a candidate index.")
     index_parser.add_argument("--corpus-root", type=Path, required=True)
     index_parser.add_argument("--policy", type=Path, required=True)
