@@ -5,8 +5,10 @@
 # VALIDATED on this Darwin host -- index.py's activation is POSIX-only (fcntl, O_NOFOLLOW, /dev/fd).
 from __future__ import annotations
 
+import hashlib
 import json
 import os
+import re
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from datetime import date
@@ -128,6 +130,52 @@ def _load_config_file(path: Path) -> dict[str, object]:
     return value
 
 
+def find_project_root(start: Path | None = None) -> Path | None:
+    """Locate the root of the containing project or git repository.
+
+    Walks up from `start` (defaulting to current working directory) looking for a `.bruriah`
+    directory or file, `.bruriah.json`, or a `.git` directory or file. Returns the containing
+    directory, or `None` if the root of the filesystem was reached without finding any marker.
+    """
+    current = (start or Path.cwd()).resolve()
+    for parent in (current, *current.parents):
+        if (
+            (parent / ".bruriah").exists()
+            or (parent / ".bruriah.json").is_file()
+            or (parent / ".git").exists()
+        ):
+            return parent
+    return None
+
+
+def project_id_for_repo(repo_root: Path) -> str:
+    """Deterministic, collision-free project identifier for a repository path.
+
+    Combines the sanitized directory name with a short 8-char SHA-256 hash of the canonical
+    filesystem path, ensuring two repositories with the same folder name (e.g. `api`)
+    never collide in user-space data directories.
+    """
+    canonical = repo_root.resolve()
+    raw_name = canonical.name
+    slug = re.sub(r"[^a-zA-Z0-9_-]", "-", raw_name).strip("-") or "project"
+    digest = hashlib.sha256(str(canonical).encode("utf-8")).hexdigest()[:8]
+    return f"{slug}-{digest}"
+
+
+def project_scoped_paths(repo_root: Path, defaults: PlatformPaths | None = None) -> PlatformPaths:
+    """Compute the isolated project-scoped platform paths for a repository."""
+    base_defaults = defaults or _private_defaults()
+    project_id = project_id_for_repo(repo_root)
+    return PlatformPaths(
+        config_dir=base_defaults.config_dir / "projects" / project_id / "config",
+        data_dir=base_defaults.data_dir / "projects" / project_id / "data",
+        cache_dir=base_defaults.cache_dir / "projects" / project_id / "cache",
+        log_dir=base_defaults.log_dir / "projects" / project_id / "log",
+        network_enabled=base_defaults.network_enabled,
+        skill_ceiling=base_defaults.skill_ceiling,
+    )
+
+
 def resolve_paths(
     *,
     cli_config_dir: Path | None = None,
@@ -138,16 +186,51 @@ def resolve_paths(
     cli_skill_ceiling: str | None = None,
     env: Mapping[str, str] | None = None,
     config_path: Path | None = None,
+    cwd: Path | None = None,
 ) -> PlatformPaths:
     """Resolve private dirs, network policy and the skill-dispatch ceiling. Precedence: CLI arg >
-    env var > config file > private `platformdirs` default; network defaults off unless explicitly
-    enabled at any level."""
+    env var > in-repo config > project-scoped data (when active) > global config file >
+    private `platformdirs` default; network defaults off unless explicitly enabled at any level."""
     environment = os.environ if env is None else env
     defaults = _private_defaults()
-    config_dir = cli_config_dir or _env_path(environment, "CONFIG_DIR") or defaults.config_dir
+
+    project_root = find_project_root(cwd) if cwd is not None else None
+    local_config_file: Path | None = None
+    scoped_paths: PlatformPaths | None = None
+
+    if project_root is not None:
+        cand_bruriah_dir = project_root / ".bruriah"
+        if cand_bruriah_dir.is_dir() and (cand_bruriah_dir / "config.json").is_file():
+            local_config_file = cand_bruriah_dir / "config.json"
+        elif (project_root / ".bruriah.json").is_file():
+            local_config_file = project_root / ".bruriah.json"
+
+        candidate_scoped = project_scoped_paths(project_root, defaults)
+        if (candidate_scoped.data_dir / "active.json").is_file():
+            scoped_paths = candidate_scoped
+        elif (cand_bruriah_dir / "data" / "active.json").is_file():
+            scoped_paths = PlatformPaths(
+                config_dir=cand_bruriah_dir / "config",
+                data_dir=cand_bruriah_dir / "data",
+                cache_dir=defaults.cache_dir,
+                log_dir=defaults.log_dir,
+            )
+
+    default_config_dir = (
+        scoped_paths.config_dir
+        if scoped_paths is not None
+        else (local_config_file.parent if local_config_file is not None else defaults.config_dir)
+    )
+    config_dir = cli_config_dir or _env_path(environment, "CONFIG_DIR") or default_config_dir
 
     file_values: dict[str, object] = {}
-    file_path = config_path or _env_path(environment, "CONFIG_FILE") or (config_dir / "config.json")
+    file_path = (
+        config_path
+        or _env_path(environment, "CONFIG_FILE")
+        or (cli_config_dir / "config.json" if cli_config_dir else None)
+        or local_config_file
+        or (config_dir / "config.json")
+    )
     if file_path.is_file():
         file_values = _load_config_file(file_path)
 
@@ -157,11 +240,20 @@ def resolve_paths(
         env_value = _env_path(environment, suffix)
         if env_value is not None:
             return env_value
-        return Path(str(file_values[key])) if key in file_values else default
+        if key in file_values:
+            val = Path(str(file_values[key]))
+            if not val.is_absolute() and local_config_file is not None:
+                return (local_config_file.parent / val).resolve()
+            return val
+        return default
 
-    data_dir = resolve(cli_data_dir, "DATA_DIR", "data_dir", defaults.data_dir)
-    cache_dir = resolve(cli_cache_dir, "CACHE_DIR", "cache_dir", defaults.cache_dir)
-    log_dir = resolve(cli_log_dir, "LOG_DIR", "log_dir", defaults.log_dir)
+    default_data_dir = scoped_paths.data_dir if scoped_paths is not None else defaults.data_dir
+    default_cache_dir = scoped_paths.cache_dir if scoped_paths is not None else defaults.cache_dir
+    default_log_dir = scoped_paths.log_dir if scoped_paths is not None else defaults.log_dir
+
+    data_dir = resolve(cli_data_dir, "DATA_DIR", "data_dir", default_data_dir)
+    cache_dir = resolve(cli_cache_dir, "CACHE_DIR", "cache_dir", default_cache_dir)
+    log_dir = resolve(cli_log_dir, "LOG_DIR", "log_dir", default_log_dir)
 
     env_network = _env_bool(environment, "NETWORK_ENABLED")
     if cli_network_enabled is not None:
@@ -171,9 +263,6 @@ def resolve_paths(
     else:
         network_enabled = bool(file_values.get("network_enabled", False))
 
-    # Same precedence as everything above it, validated at every level rather than only in the
-    # config file: a bad `--skill-ceiling` and a bad `BRURIAH_SKILL_CEILING` are the same mistake
-    # and deserve the same typed refusal, not a traceback from one and silence from the other.
     env_ceiling = _env_ceiling(environment, "SKILL_CEILING")
     if cli_skill_ceiling is not None:
         skill_ceiling = _parse_ceiling(str(cli_skill_ceiling))
@@ -363,6 +452,8 @@ def load_deps(
 
 
 __all__ = [
-    "PlatformError", "PlatformPaths", "ensure_private_dirs", "load_build_descriptor",
-    "load_active_skills", "load_bundled_skills", "load_deps", "load_registry", "load_trust_roots", "open_snapshot", "resolve_paths", "write_build_descriptor",
+    "PlatformError", "PlatformPaths", "ensure_private_dirs", "find_project_root",
+    "load_active_skills", "load_bundled_skills", "load_build_descriptor", "load_deps",
+    "load_registry", "load_trust_roots", "open_snapshot", "project_id_for_repo",
+    "project_scoped_paths", "resolve_paths", "write_build_descriptor",
 ]

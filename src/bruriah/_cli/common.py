@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import os
+from pathlib import Path
 
 from ..platform import PlatformError, PlatformPaths, resolve_paths
 
@@ -14,7 +15,8 @@ class CliError(ValueError):
         super().__init__(code)
 
 
-def resolve_cli_paths(args: argparse.Namespace) -> PlatformPaths:
+def resolve_cli_paths(args: argparse.Namespace, *, cwd: Path | None = None) -> PlatformPaths:
+    effective_cwd = cwd or getattr(args, "repo", None) or Path.cwd()
     try:
         paths = resolve_paths(
             cli_config_dir=args.config_dir,
@@ -23,6 +25,7 @@ def resolve_cli_paths(args: argparse.Namespace) -> PlatformPaths:
             cli_log_dir=args.log_dir,
             cli_network_enabled=args.network_enabled,
             cli_skill_ceiling=getattr(args, "skill_ceiling", None),
+            cwd=effective_cwd,
         )
     except PlatformError as error:
         raise CliError(error.code) from error

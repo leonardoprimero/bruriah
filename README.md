@@ -23,18 +23,17 @@
 ```bash
 pip install bruriah          # Linux, macOS or Windows
 
-B=~/.bruriah/myproject       # one directory per project, outside the repo
-bruriah init --repo . --data-dir "$B/data" --config-dir "$B/config"
+bruriah init --repo .        # zero-config: automatically scopes project data and config
 ```
 
 Run from inside your project, that is the whole first run — default policy, corpus, index and
 client configs, in one command, measured at 62 seconds on a 4,429-commit history with the model
 download included. It ends by suggesting a first question your index is *known* to answer: the
 newest decision's own subject, from your own history, so the first `ask` cannot come back empty.
-The same steps spelled out, for a policy of your own:
+The same steps spelled out, for a policy or custom paths of your own:
 
 ```bash
-B=~/.bruriah/myproject                              # one directory per project, outside the repo
+B=~/.bruriah/myproject                              # optional custom directory outside the repo
 mkdir -p "$B" && printf "version: 1\ninclude: ['**']\nexclude: ['private/**']\n" > "$B/policy.yaml"
 
 bruriah corpus --repo . --out "$B/corpus"           # your git history, as documents
@@ -42,14 +41,16 @@ bruriah index --data-dir "$B/data" --corpus-root "$B/corpus" --policy "$B/policy
 bruriah init  --data-dir "$B/data"                  # writes your MCP client config
 ```
 
-**One directory per project.** Bruriah keeps one active index, and `--data-dir` is what tells each
-command which one — `index`, `ask`, `serve` and `doctor` all take it, and `bruriah init` bakes the
-path into the MCP snippet so the client you paste it into is already pointed at the right project.
-Omit it and everything lands in one shared directory, which is fine until the second project.
-`BRURIAH_DATA_DIR` sets the same thing from the environment, as do `BRURIAH_CONFIG_DIR`,
-`BRURIAH_CACHE_DIR` and `BRURIAH_LOG_DIR`. Each directory resolves in one order: the flag, then the
-variable, then a `data_dir` / `cache_dir` / `log_dir` key in `config.json`, then your platform's
-default. `bruriah init` writes whichever won into the snippet, so either route reaches your client.
+**Zero-config auto-discovery.** When run inside any subdirectory of your repository, Bruriah
+automatically discovers the project root and its active index — no flags or environment variables
+required. `bruriah init --repo .` automatically isolates project data under your user-data directory
+(`projects/<repo-id>/data`) and creates a local `.bruriah/config.json` pointer (or use `--local` to keep
+everything in `.bruriah/` inside the repo).
+
+Explicit `--data-dir` and `BRURIAH_DATA_DIR` remain fully supported and always take precedence when
+manual path overrides are needed. Each directory resolves in one order: the CLI flag, then the
+environment variable, then `.bruriah/config.json`, then project-scoped user data, then global config,
+then your platform's default.
 
 Then ask it something, from the terminal, before wiring up any client:
 
@@ -58,10 +59,11 @@ Then ask it something, from the terminal, before wiring up any client:
 </p>
 
 ```bash
-bruriah ask --data-dir "$B/data" "why did this project avoid FastMCP"   # references, no prose
-bruriah ask --data-dir "$B/data" "why did this project avoid FastMCP" --read 2   # the exact lines
-bruriah ask --data-dir "$B/data" "why this handler" --code-target src/server.py:42 # grounded in code
-bruriah why src/bruriah/mcp_server.py:42 --data-dir "$B/data"           # causal archaeology for code
+bruriah ask "why did this project avoid FastMCP"             # references, no prose (auto-discovered)
+bruriah ask "why did this project avoid FastMCP" --read 2    # the exact lines
+bruriah ask "why this handler" --code-target src/server.py:42 # grounded in code
+bruriah why src/bruriah/mcp_server.py:42                    # causal archaeology for code
+bruriah drift                                               # architectural drift detection in CI or terminal
 ```
 
 An MCP server that lets an agent consult your project's decisions **without letting those documents

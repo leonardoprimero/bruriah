@@ -59,6 +59,11 @@ def build_cli_parser(
     )
     init_parser.add_argument("--query-prefix", default=None, help="query prefix template for asymmetric embedding models")
     init_parser.add_argument("--passage-prefix", default=None, help="passage prefix template for asymmetric embedding models")
+    init_parser.add_argument(
+        "--local",
+        action="store_true",
+        help="store corpus and index locally inside .bruriah/ in the repository instead of user data directory",
+    )
     corpus_parser = add("corpus", "Turn a git history's reasoning or PDF documents into a corpus.")
     corpus_parser.add_argument(
         "--repo",

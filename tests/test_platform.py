@@ -19,8 +19,9 @@ from bruriah.index import BuildConfig, build_candidate, promote_candidate
 from bruriah.mcp_server import build_server
 from bruriah.dispatch import DEFAULT_SKILL_CEILING
 from bruriah.platform import (
-    PlatformError, ensure_private_dirs, load_build_descriptor, load_deps, load_registry,
-    open_snapshot, resolve_paths, write_build_descriptor,
+    PlatformError, ensure_private_dirs, find_project_root, load_build_descriptor, load_deps,
+    load_registry, open_snapshot, project_id_for_repo, project_scoped_paths,
+    resolve_paths, write_build_descriptor,
 )
 from mcp.shared.memory import create_connected_server_and_client_session
 
@@ -588,3 +589,74 @@ def test_build_descriptor_defaults_missing_prefixes_to_empty(tmp_path: Path) -> 
     loaded = load_build_descriptor(paths)
     assert loaded.query_prefix == ""
     assert loaded.passage_prefix == ""
+
+
+def test_find_project_root_locates_git_and_bruriah(tmp_path: Path) -> None:
+    repo = tmp_path / "my-repo"
+    (repo / ".git").mkdir(parents=True)
+    deep_dir = repo / "src" / "pkg" / "nested"
+    deep_dir.mkdir(parents=True)
+
+    assert find_project_root(deep_dir) == repo.resolve()
+    assert find_project_root(repo) == repo.resolve()
+
+    # .bruriah takes precedence if nested or standalone
+    project_with_bruriah = tmp_path / "standalone-proj"
+    (project_with_bruriah / ".bruriah").mkdir(parents=True)
+    sub = project_with_bruriah / "deep"
+    sub.mkdir()
+    assert find_project_root(sub) == project_with_bruriah.resolve()
+
+    # Plain directory without .git or .bruriah
+    plain = tmp_path / "plain"
+    plain.mkdir()
+    assert find_project_root(plain) is None
+
+
+def test_project_id_for_repo_is_deterministic_and_collision_free(tmp_path: Path) -> None:
+    repo1 = tmp_path / "alpha" / "my-service"
+    repo2 = tmp_path / "beta" / "my-service"
+    repo1.mkdir(parents=True)
+    repo2.mkdir(parents=True)
+
+    id1 = project_id_for_repo(repo1)
+    id1_again = project_id_for_repo(repo1)
+    id2 = project_id_for_repo(repo2)
+
+    assert id1 == id1_again
+    assert id1.startswith("my-service-")
+    assert id2.startswith("my-service-")
+    assert id1 != id2  # Different paths must never collide
+
+
+def test_resolve_paths_auto_discovery_precedence(tmp_path: Path) -> None:
+    repo = tmp_path / "test-repo"
+    (repo / ".git").mkdir(parents=True)
+    sub_dir = repo / "sub"
+    sub_dir.mkdir()
+
+    # 1. When .bruriah/config.json exists in repo root
+    bruriah_dir = repo / ".bruriah"
+    bruriah_dir.mkdir()
+    custom_data = tmp_path / "custom-data"
+    (bruriah_dir / "config.json").write_text(json.dumps({"data_dir": str(custom_data)}), encoding="utf-8")
+
+    paths = resolve_paths(cwd=sub_dir, env={})
+    assert paths.data_dir == custom_data
+    assert paths.config_dir == bruriah_dir
+
+    # 2. CLI arguments still take precedence over in-repo config
+    override_dir = tmp_path / "cli-override"
+    paths_override = resolve_paths(cwd=sub_dir, cli_data_dir=override_dir, env={})
+    assert paths_override.data_dir == override_dir
+
+    # 3. Project-scoped data discovery when active.json exists
+    repo2 = tmp_path / "scoped-repo"
+    (repo2 / ".git").mkdir(parents=True)
+    scoped = project_scoped_paths(repo2)
+    scoped.data_dir.mkdir(parents=True)
+    (scoped.data_dir / "active.json").write_text("{}", encoding="utf-8")
+
+    paths_scoped = resolve_paths(cwd=repo2, env={})
+    assert paths_scoped.data_dir == scoped.data_dir
+    assert paths_scoped.config_dir == scoped.config_dir

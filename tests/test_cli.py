@@ -1366,3 +1366,49 @@ def test_cli_corpus_cannot_specify_both_repo_and_pdf(
     assert exit_code == 1
     assert "cannot_specify_both_repo_and_pdf" in capsys.readouterr().err
 
+
+def test_init_repo_zero_config_scopes_to_user_data_and_writes_pointer(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    user_data = tmp_path / "user_data"
+    user_config = tmp_path / "user_config"
+    monkeypatch.delenv("BRURIAH_DATA_DIR", raising=False)
+    monkeypatch.delenv("BRURIAH_CONFIG_DIR", raising=False)
+    monkeypatch.setattr("platformdirs.user_data_dir", lambda _: str(user_data))
+    monkeypatch.setattr("platformdirs.user_config_dir", lambda _: str(user_config))
+
+    repo = _decision_repo(tmp_path)
+    args = cli._build_cli_parser().parse_args(["init", "--repo", str(repo)])
+    assert cli._cmd_init(args, embedder_factory=_fake_embedder_factory) == 0
+
+    config_file = repo / ".bruriah" / "config.json"
+    assert config_file.is_file()
+    cfg = json.loads(config_file.read_text(encoding="utf-8"))
+    assert "data_dir" in cfg
+    assert "config_dir" in cfg
+
+    scoped_data = Path(cfg["data_dir"])
+    assert (scoped_data / "active.json").is_file()
+
+    ask_args = cli._build_cli_parser().parse_args(["ask", "why feat add the thing", "--repo", str(repo)])
+    assert cli._cmd_ask(ask_args, embedder_factory=_fake_embedder_factory) == 0
+
+
+def test_init_repo_local_stores_in_dot_bruriah(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str],
+) -> None:
+    repo = _decision_repo(tmp_path)
+    args = cli._build_cli_parser().parse_args(["init", "--repo", str(repo), "--local"])
+    assert cli._cmd_init(args, embedder_factory=_fake_embedder_factory) == 0
+
+    config_file = repo / ".bruriah" / "config.json"
+    assert config_file.is_file()
+    cfg = json.loads(config_file.read_text(encoding="utf-8"))
+    assert cfg["data_dir"] == "data"
+    assert cfg["config_dir"] == "config"
+
+    assert (repo / ".bruriah" / "data" / "active.json").is_file()
+
+    ask_args = cli._build_cli_parser().parse_args(["ask", "why feat add the thing", "--repo", str(repo)])
+    assert cli._cmd_ask(ask_args, embedder_factory=_fake_embedder_factory) == 0
+

@@ -48,7 +48,7 @@ from .index import (
 from .mcp_server import build_server
 from .platform import (
     PlatformError, PlatformPaths, ensure_private_dirs, load_build_descriptor, load_deps,
-    resolve_paths, write_build_descriptor,
+    project_scoped_paths, resolve_paths, write_build_descriptor,
 )
 from .contracts import InvestigationRequest, ReadRequest
 from .drift import DriftError, format_drift_human, format_drift_json, run_drift
@@ -475,8 +475,32 @@ def _cmd_init(
     args: argparse.Namespace, *, embedder_factory: EmbedderFactory = _default_embedder_factory,
 ) -> int:
     paths = _resolve_paths(args)
+    repo_root = args.repo.resolve() if args.repo is not None else None
+    if repo_root is not None and args.data_dir is None and args.config_dir is None:
+        if getattr(args, "local", False):
+            bruriah_dir = repo_root / ".bruriah"
+            paths = PlatformPaths(
+                config_dir=bruriah_dir / "config",
+                data_dir=bruriah_dir / "data",
+                cache_dir=paths.cache_dir,
+                log_dir=paths.log_dir,
+                network_enabled=paths.network_enabled,
+                skill_ceiling=paths.skill_ceiling,
+            )
+        else:
+            scoped = project_scoped_paths(repo_root)
+            paths = PlatformPaths(
+                config_dir=scoped.config_dir,
+                data_dir=scoped.data_dir,
+                cache_dir=scoped.cache_dir,
+                log_dir=scoped.log_dir,
+                network_enabled=paths.network_enabled,
+                skill_ceiling=paths.skill_ceiling,
+            )
+
     bootstrap: dict[str, Any] | None = None
     if args.repo is not None:
+        assert repo_root is not None
         print(f"Reading the history of {args.repo}...", file=sys.stderr)
         bootstrap = run_bootstrap(
             paths, args.repo, limit=args.limit, model_name=args.model,
@@ -497,6 +521,18 @@ def _cmd_init(
             # point a client at an index that does not exist.
             raise CliError("corpus_has_no_reasoning")
         print(_index_summary_line(bootstrap["index"]), file=sys.stderr)
+
+        # Write in-repo .bruriah/config.json pointer so subsequent commands auto-discover this project
+        dot_bruriah = repo_root / ".bruriah"
+        dot_bruriah.mkdir(parents=True, exist_ok=True)
+        config_payload: dict[str, object] = {
+            "data_dir": "data" if getattr(args, "local", False) else str(paths.data_dir),
+            "config_dir": "config" if getattr(args, "local", False) else str(paths.config_dir),
+        }
+        (dot_bruriah / "config.json").write_text(
+            json.dumps(config_payload, indent=2, sort_keys=True) + "\n",
+            encoding="utf-8",
+        )
     config_file = run_init(paths)
     print(f"Wrote private configuration to {config_file}", file=sys.stderr)
     try:
