@@ -262,6 +262,56 @@ What this achieves:
 3. **Auditable Provenance:** Every derived document has YAML frontmatter naming `source`, `page`, `extractor` (versioned), `source_sha256`, and `status: active`.
 4. **Honest Coverage:** Text-layer pages are extracted; blank separator pages and unextractable image scans are skipped and reported honestly in examination metrics.
 
+### Architectural Drift Detection: `bruriah drift`
+
+Codebases naturally drift away from architectural intent. Developers or autonomous coding agents touch files governed by architectural decisions without realizing those decisions were superseded, or introduce regressions against active lineage constraints.
+
+`bruriah drift [REVISION_OR_RANGE]` analyzes git diffs against Bruriah's decision lineage DAG to detect architectural drift before it is merged:
+
+```bash
+# Check working tree (staged and unstaged changes)
+bruriah drift --data-dir "$B/data"
+
+# Check only staged changes before committing (pre-commit hook)
+bruriah drift --staged --data-dir "$B/data"
+
+# Check a commit range or pull request branch in CI
+bruriah drift origin/main..HEAD --strict --data-dir "$B/data"
+```
+
+Output:
+
+```text
+Inspecting 3 changed file(s)...
+
+Found 2 architectural drift issue(s):
+
+⚠️  DRIFT: src/bruriah/mcp_server.py
+   Modified lines are governed by an outdated decision:
+   Decision: Migrate from FastMCP to lowlevel server (e8f3003b)
+   Status:   SUPERSEDED by f6e5d4c3b2a1
+             ↳ subsequently evolved through 2 generations to [CURRENT ACTIVE]: 0123456789ab
+   Action:   Review active successor decision before modifying this component.
+
+ℹ️  GOVERNED: src/bruriah/service.py
+   Governed by active decision: Extracted SnapshotRepository (38f9304a)
+   Status:   CURRENT (no conflicts declared)
+
+Exit status: 1 (drift detected in strict mode)
+```
+
+#### Enforcing Architectural Governance in CI
+
+Add `bruriah drift` as a pull request check in GitHub Actions to block PRs that violate architectural lineage:
+
+```yaml
+- name: Check Architectural Drift
+  run: |
+    bruriah drift origin/main..HEAD --strict --data-dir "$B/data"
+```
+
+Pass `--json` to integrate structured drift diagnostics into PR review bots or developer dashboards.
+
 ## Use it if — and when not to
 
 **This will earn its place if:**
