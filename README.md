@@ -206,6 +206,107 @@ Lineage Alerts:
 
 Pass `--json` to integrate causal archaeology directly into editor hover providers (VS Code, Neovim), CLI pipelines, or PR review bots.
 
+### In-Editor Inline Archaeology (VS Code, Cursor & Neovim)
+
+Causal archaeology belongs where developers think and write code — not just in the terminal.
+
+#### 1. VS Code & Cursor Extension (`editors/vscode`)
+
+Provides native **CodeLens** and **Hover** annotations directly above your code:
+
+```text
+│ 🏛️ Decisión: Migración a Async MCP (e8f3003b) · ⚠️ SUPERSEDED por f6e5d4c3 · [Ver por qué se decidió]
+```
+
+- **CodeLens**: Displays the governing architectural decision, commit SHA, and drift alerts above functions and code blocks.
+- **Hover**: Hover over any line to inspect the author, date, drift status, and original reasoning text.
+- **Side Panel Webview**: Click `[Ver por qué se decidió]` to open a split panel with full decision notes, context, and multi-generation DAG lineage.
+- **Commands**:
+  - `Bruriah: Explain Why This Line Exists` (`bruriah.whyLine`)
+  - `Bruriah: Open Visual DAG Explorer` (`bruriah.openUI`)
+
+#### 2. Neovim Plugin (`editors/neovim`)
+
+Native Lua plugin providing virtual text and floating windows:
+
+- **Virtual Text**: Line-by-line annotations showing governing decisions in comments (`Comment`) or drift alerts (`DiagnosticWarn`).
+- **Commands**:
+  - `:BruriahWhy`: Opens a floating window with syntax-highlighted decision reasoning.
+  - `:BruriahLens`: Refreshes inline virtual text for the current buffer.
+  - `:BruriahUI`: Launches the Visual DAG Explorer in the background.
+
+#### 3. Bulk File Archaeology: `bruriah lens`
+
+To keep editor extensions instantaneous (<50ms for thousands of lines), `bruriah lens` performs bulk archaeology in a single fast pass:
+
+```bash
+bruriah lens src/bruriah/cli.py           # Human-readable line ranges
+bruriah lens src/bruriah/cli.py --json    # Structured JSON for editor plugins
+```
+
+---
+
+### Visual DAG Explorer: `bruriah ui`
+
+Visualize your project's entire architectural decision graph in an interactive, local web dashboard:
+
+```bash
+bruriah ui
+bruriah ui --port 8080 --no-browser
+```
+
+- **Force-Directed Lineage Graph**: Powered by embedded D3.js and Python's stdlib `http.server` (zero extra dependencies).
+- **Status Color-Coding**: Active (🟢 green), Superseded (🔴 red), Deprecated (🟡 yellow), and Amended (🔵 blue).
+- **Interactive Detail Panel**: Click any decision node to view its source file, commit metadata, touched files, and reasoning excerpt.
+- **Connected-Node Highlighting**: Focus on a decision to highlight its upstream and downstream lineage chain.
+- **Real-Time Search**: Instant filtering across decision titles, touched files, and authors.
+- **Timeline Scrubber**: Interactive slider to inspect how the architecture evolved over time.
+- **REST API**: `GET /api/dag` for programmatic access to the graph data.
+
+---
+
+### PR Review Bot: `bruriah review` & GitHub Actions
+
+Turn Bruriah into a silent, senior architect reviewing your pull requests:
+
+```bash
+bruriah review origin/main...HEAD
+bruriah review origin/main...HEAD --json
+bruriah review origin/main...HEAD --post --strict
+```
+
+- **Surgical Inline Comments**: Posts comments directly on the exact lines touching code governed by superseded or deprecated decisions.
+- **Multi-Generation Tracing**: Explains how many generations of decisions the code skipped and points to the current active decision.
+- **Review Summary**: Generates a GitHub PR review summary with a clean metrics breakdown (inspected files, drift warnings, clean governance, unindexed files).
+- **GitHub Actions Integration**:
+  Add Bruriah to `.github/workflows/bruriah.yml`:
+
+```yaml
+name: Architectural Review
+
+on:
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  review:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Bruriah Architectural Review
+        uses: leonardoprimero/bruriah@main
+        with:
+          command: review
+          strict: false
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+```
+
+When drift is detected, Bruriah posts an inline review comment explaining the architectural deviation and recommending corrective actions. In `--strict` mode, it requests changes (`REQUEST_CHANGES`) to block merges until architectural alignment is restored.
+
+
 ### Causal Archaeology for Coding Agents (MCP)
 
 Coding agents (Claude Code, Cursor, Antigravity) can perform causal archaeology directly through the MCP protocol without breaking the Two-Tool Public Contract, using the optional `code_target` parameter in `investigate_work`:
