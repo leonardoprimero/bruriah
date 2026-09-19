@@ -148,6 +148,42 @@ jobs:
           grep -q '"healthy": true' /tmp/doctor.json
           test -z "$(git status --porcelain)"  # the quickstart must not write into the repo it reads
 
+  # Architectural drift detection gates PRs and commits against Bruriah's own decision lineage DAG.
+  # If a change touches a file governed by a decision that was superseded, deprecated, or amended,
+  # or introduces unlinked modifications to governed components, strict mode fails CI before merge.
+  #
+  # This dogfoods `bruriah drift` on the very repository that authors it, proving the governance
+  # gate works under real CI conditions without external dependencies or generative models.
+  drift:
+    name: architectural drift inspection
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803  # v6.1.0
+        with:
+          fetch-depth: 0
+      - uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78  # v7.6.0
+        with:
+          enable-cache: true
+      - name: cache the embedding model
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830  # v4.3.0
+        with:
+          path: ${{ runner.temp }}/fastembed_cache
+          key: fastembed-${{ runner.os }}-${{ hashFiles('src/bruriah/cli.py') }}
+      - run: uv sync --locked
+      - name: build active index from repository history
+        env:
+          FASTEMBED_CACHE_PATH: ${{ runner.temp }}/fastembed_cache
+        run: |
+          uv run --no-sync bruriah init --repo . --data-dir "${{ runner.temp }}/bruriah/data" --config-dir "${{ runner.temp }}/bruriah/config"
+      - name: inspect architectural drift
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            RANGE="origin/${{ github.base_ref }}...HEAD"
+          else
+            RANGE="HEAD~1..HEAD"
+          fi
+          uv run --no-sync bruriah drift "$RANGE" --strict --data-dir "${{ runner.temp }}/bruriah/data"
+
   # An action referenced by tag or branch (`@v4`, `@release/v1`) is a MUTABLE pointer: the action's
   # maintainers, or anyone who compromises them, can move it under us between one run and the next.
   # Pinning every step to a commit SHA closes that path, but pinning decays -- the next step anyone
