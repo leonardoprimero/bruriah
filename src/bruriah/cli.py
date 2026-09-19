@@ -50,6 +50,7 @@ from .platform import (
     PlatformError, PlatformPaths, ensure_private_dirs, find_project_root, load_build_descriptor, load_deps,
     project_scoped_paths, resolve_paths, write_build_descriptor,
 )
+from .hooks import HookError, install_hook, uninstall_hook
 from .setup import SetupError, detect_installed_clients, setup_client
 from .contracts import InvestigationRequest, ReadRequest
 from .drift import DriftError, format_drift_human, format_drift_json, run_drift
@@ -896,12 +897,40 @@ def _cmd_setup(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_hook(args: argparse.Namespace) -> int:
+    repo = args.repo.resolve()
+    action = getattr(args, "hook_action", None)
+    try:
+        if action == "install":
+            target, status = install_hook(repo, force=getattr(args, "force", False))
+            label = {
+                "created": "Installed pre-commit hook to",
+                "updated": "Updated pre-commit hook in",
+                "unchanged": "Pre-commit hook is already up to date in",
+            }.get(status, status)
+            print(f"{label} {target}", file=sys.stderr)
+        elif action == "uninstall":
+            target, status = uninstall_hook(repo)
+            label = {
+                "removed": "Removed pre-commit hook from",
+                "not_installed": "No Bruriah hook was installed in",
+                "not_found": "No pre-commit hook found at",
+            }.get(status, status)
+            print(f"{label} {target}", file=sys.stderr)
+        else:
+            raise CliError("unknown_hook_action")
+    except HookError as error:
+        raise CliError(f"hook_failed:{error.code}") from error
+    return 0
+
+
 def _build_cli_parser() -> argparse.ArgumentParser:
     return build_cli_parser(
         version=__version__,
         handlers={
             "init": _cmd_init,
             "setup": _cmd_setup,
+            "hook": _cmd_hook,
             "corpus": _cmd_corpus,
             "ask": _cmd_ask,
             "why": _cmd_why,

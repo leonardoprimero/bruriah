@@ -302,17 +302,38 @@ Found 2 architectural drift issue(s):
 Exit status: 1 (drift detected in strict mode)
 ```
 
-#### Enforcing Architectural Governance in CI
+#### Enforcing Architectural Governance
 
-Add `bruriah drift` as a pull request check in GitHub Actions to block PRs that violate architectural lineage:
+##### 1. Official GitHub Action
+Add Bruriah as a zero-setup pull request check in GitHub Actions:
 
 ```yaml
 - name: Check Architectural Drift
-  run: |
-    bruriah drift origin/main..HEAD --strict --data-dir "$B/data"
+  uses: leonardoprimero/bruriah@main
+  with:
+    strict: true
 ```
 
-Pass `--json` to integrate structured drift diagnostics into PR review bots or developer dashboards.
+##### 2. Pre-commit Framework
+Add Bruriah to your `.pre-commit-config.yaml`:
+
+```yaml
+repos:
+  - repo: https://github.com/leonardoprimero/bruriah
+    rev: v0.10.0
+    hooks:
+      - id: bruriah-drift
+```
+
+##### 3. Native Git Hook
+If you don't use the Python pre-commit framework, install the native Git hook directly:
+
+```bash
+bruriah hook install        # installs pre-commit hook into .git/hooks/pre-commit
+bruriah hook uninstall      # cleanly removes the hook
+```
+
+Pass `--json` to `bruriah drift` to integrate structured diagnostics into PR review bots or dashboards.
 
 ## Use it if — and when not to
 

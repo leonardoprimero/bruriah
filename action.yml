@@ -1,0 +1,65 @@
+name: "Bruriah Architectural Gatekeeper"
+description: "Detect architectural regressions and drift against your decision lineage DAG in CI"
+author: "Leonardo Caliva"
+branding:
+  icon: "git-commit"
+  color: "green"
+
+inputs:
+  command:
+    description: "Command to execute ('drift' or 'doctor')"
+    required: false
+    default: "drift"
+  revision:
+    description: "Git revision or range to inspect (e.g. 'origin/main...HEAD'). Defaults to inspecting PR changes against target branch."
+    required: false
+    default: ""
+  strict:
+    description: "Fail the job if architectural drift is detected"
+    required: false
+    default: "true"
+  version:
+    description: "Bruriah version to install (defaults to latest published release)"
+    required: false
+    default: ""
+
+runs:
+  using: "composite"
+  steps:
+    - name: Set up uv
+      uses: astral-sh/setup-uv@v5
+      with:
+        enable-cache: true
+
+    - name: Install Bruriah
+      shell: bash
+      run: |
+        if [ -n "${{ inputs.version }}" ]; then
+          uv tool install "bruriah==${{ inputs.version }}"
+        else
+          uv tool install bruriah
+        fi
+
+    - name: Run Bruriah Gatekeeper
+      shell: bash
+      run: |
+        CMD="${{ inputs.command }}"
+        STRICT_FLAG=""
+        if [ "${{ inputs.strict }}" = "true" ]; then
+          STRICT_FLAG="--strict"
+        fi
+
+        if [ "$CMD" = "drift" ]; then
+          REV="${{ inputs.revision }}"
+          if [ -z "$REV" ] && [ -n "${{ github.base_ref }}" ]; then
+            REV="origin/${{ github.base_ref }}...HEAD"
+          fi
+          echo "Running: bruriah drift $REV $STRICT_FLAG"
+          bruriah drift $REV $STRICT_FLAG
+        elif [ "$CMD" = "doctor" ]; then
+          echo "Running: bruriah doctor"
+          bruriah doctor
+        else
+          echo "Running: bruriah $CMD $STRICT_FLAG"
+          bruriah $CMD $STRICT_FLAG
+        fi

@@ -97,6 +97,34 @@ def build_cli_parser(
         default=Path("."),
         help="git repository root for project-scoped configuration (default '.')",
     )
+    hook_parser = add(
+        "hook",
+        "Manage native Git hooks for architectural lineage enforcement.",
+    )
+    hook_subparsers = hook_parser.add_subparsers(dest="hook_action", required=True)
+
+    install_sub = hook_subparsers.add_parser("install", help="install pre-commit hook in .git/hooks")
+    add_platform_arguments(install_sub)
+    install_sub.add_argument(
+        "--repo",
+        type=Path,
+        default=Path("."),
+        help="git repository to configure (default '.')",
+    )
+    install_sub.add_argument(
+        "--force",
+        action="store_true",
+        help="force update existing bruriah hook block",
+    )
+
+    uninstall_sub = hook_subparsers.add_parser("uninstall", help="uninstall pre-commit hook from .git/hooks")
+    add_platform_arguments(uninstall_sub)
+    uninstall_sub.add_argument(
+        "--repo",
+        type=Path,
+        default=Path("."),
+        help="git repository to configure (default '.')",
+    )
     corpus_parser = add("corpus", "Turn a git history's reasoning or PDF documents into a corpus.")
     corpus_parser.add_argument(
         "--repo",

@@ -1447,3 +1447,39 @@ def test_cmd_setup_dry_run_prints_preview(tmp_path: Path, capsys: pytest.Capture
     assert "[cursor] Would create:" in captured.err
     assert not (repo / ".cursor" / "mcp.json").exists()
 
+
+def test_cmd_hook_install_and_uninstall(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    repo = tmp_path / "my-repo"
+    repo.mkdir()
+    (repo / ".git").mkdir()
+
+    # Install hook
+    exit_code = cli.bruriah_main(["hook", "install", "--repo", str(repo)])
+    assert exit_code == 0
+    captured = capsys.readouterr()
+    assert "Installed pre-commit hook to" in captured.err
+    hook_file = repo / ".git" / "hooks" / "pre-commit"
+    assert hook_file.is_file()
+
+    # Install again: unchanged
+    exit_code = cli.bruriah_main(["hook", "install", "--repo", str(repo)])
+    assert exit_code == 0
+    captured = capsys.readouterr()
+    assert "Pre-commit hook is already up to date" in captured.err
+
+    # Uninstall hook
+    exit_code = cli.bruriah_main(["hook", "uninstall", "--repo", str(repo)])
+    assert exit_code == 0
+    captured = capsys.readouterr()
+    assert "Removed pre-commit hook from" in captured.err
+    assert not hook_file.exists()
+
+
+def test_cmd_hook_refuses_non_git_repo(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    plain = tmp_path / "plain"
+    plain.mkdir()
+
+    exit_code = cli.bruriah_main(["hook", "install", "--repo", str(plain)])
+    assert exit_code == 1
+    assert "hook_failed:not_a_git_repository" in capsys.readouterr().err
+
