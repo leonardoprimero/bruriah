@@ -3,6 +3,17 @@
 Notable changes, newest first. This project follows [semantic versioning](https://semver.org/),
 and the entries here name what changed for *you* rather than which files moved.
 
+## [0.9.2] — 2026-09-19
+
+### Added: Architectural Drift Detection (`bruriah drift`) & CI Enforcement
+
+Closes the feedback loop between architectural decisions and daily code changes by detecting architectural drift before it reaches production:
+- **Architectural Drift Engine:** Created `src/bruriah/drift.py` to inspect git diffs (working tree, staged changes, or arbitrary commit ranges like `origin/main..HEAD`) against Bruriah's decision lineage DAG and snapshot repository.
+- **Lineage Governance Alerts:** Detects when modified files are governed by decisions that were superseded, deprecated, or amended, or when active architectural constraints apply.
+- **CI Gate (`--strict`):** Exits with status code 1 when architectural drift or superseded governance violations are detected, enabling strict architectural gating in PR workflows.
+- **Machine-Readable Reports (`--json`):** Emits structured JSON diagnostics for integration into PR review bots, editor diagnostics, and compliance reporting.
+- **CLI Subcommand:** Added `bruriah drift [REVISION_OR_RANGE]` with `--staged`, `--strict`, `--json`, and `--repo` flags.
+
 ## [0.9.1] — 2026-09-19
 
 ### Refactored: Extracted SnapshotRepository & Decoupled Service Persistence
