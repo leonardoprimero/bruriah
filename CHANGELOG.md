@@ -3,6 +3,27 @@
 Notable changes, newest first. This project follows [semantic versioning](https://semver.org/),
 and the entries here name what changed for *you* rather than which files moved.
 
+## [0.9.4] — 2026-09-19
+
+### Added: Zero-Config Context Auto-Discovery
+- **Repository Auto-Discovery:** `find_project_root` automatically detects Git repository root from current working directory or ancestors.
+- **Hierarchical Precedence:** Project data directory resolves via strict precedence: CLI arguments > Environment variables > `.bruriah/config.json` > `~/.local/share/bruriah/projects/<repo-id>/data` > default system directories.
+- **Zero-Flag Invocations:** Developers can run `bruriah why`, `bruriah drift`, `bruriah ask`, and `bruriah doctor` directly within a project tree without passing `--data-dir` or `--repo`.
+
+### Added: Non-Destructive MCP Client Configuration (`bruriah setup`)
+- **Automated Client Wiring:** Installs and configures Bruriah in Cursor, Claude Desktop, Claude Code, Gemini CLI, and OpenCode with zero manual JSON editing.
+- **Safe Merging & Backups:** Preserves existing tool and server configurations while creating atomic timestamped `.bak` backups before modifying any configuration file.
+- **Dry-Run & Inspection:** Supports `--dry-run` and `--client [name]` flags for preview and targeted setups.
+
+### Added: Architectural Gatekeeper CI/CD & Hooks
+- **Official GitHub Action:** Added composite action in `action.yml` (`uses: leonardoprimero/bruriah@v0.9.4`) with `--strict` gating on pull requests.
+- **Pre-Commit Integration:** Added `.pre-commit-hooks.yaml` defining `bruriah-drift` for standard pre-commit framework workflows.
+- **Native Hook CLI:** Added `bruriah hook install` and `bruriah hook uninstall` to install Git pre-commit hooks directly without third-party framework dependencies.
+
+### Added: Native Git Aliases (`bruriah alias`)
+- **First-Class Git Subcommands:** Added `bruriah alias install` and `bruriah alias uninstall` configuring `git why` and `git drift`.
+- **Flexible Scope:** Supports both `--global` (default) and `--local` repository configuration.
+
 ## [0.9.3] — 2026-09-19
 
 ### Added: CI Dogfooding for Architectural Drift Detection & Type Annotation Fix
