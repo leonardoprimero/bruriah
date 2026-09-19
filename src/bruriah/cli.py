@@ -59,6 +59,7 @@ from .github import GitHubError, detect_pr_context, post_review as gh_post_revie
 from .review import build_review, format_review_human, format_review_json, get_changed_lines
 from .retrieval import Rerank
 from .ui import UIError, run_ui
+from .lens import LensError, format_lens_human, format_lens_json, run_lens
 from .service import ServiceDeps, investigate, read
 from .why import WhyError, format_why_human, format_why_json, run_why
 
@@ -949,6 +950,27 @@ def _cmd_ui(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_lens(args: argparse.Namespace) -> int:
+    paths = _resolve_paths(args)
+    repo = find_project_root(args.repo.resolve())
+    target_path = Path(args.file)
+    rel_path = (
+        str(target_path.relative_to(repo))
+        if target_path.is_absolute()
+        else str(target_path)
+    )
+    try:
+        result = run_lens(paths, repo, rel_path)
+    except LensError as error:
+        raise CliError(error.code) from error
+
+    if args.json:
+        print(format_lens_json(result))
+    else:
+        print(format_lens_human(result))
+    return 0
+
+
 def _cmd_setup(args: argparse.Namespace) -> int:
     paths = _resolve_paths(args)
     manifest = _build_launch_manifest(paths)
@@ -1066,6 +1088,7 @@ def _build_cli_parser() -> argparse.ArgumentParser:
             "drift": _cmd_drift,
             "review": _cmd_review,
             "ui": _cmd_ui,
+            "lens": _cmd_lens,
             "index": _cmd_index,
             "index-prune": _cmd_index_prune,
             "serve": _cmd_serve,

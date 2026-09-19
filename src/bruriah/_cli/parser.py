@@ -331,6 +331,26 @@ def build_cli_parser(
         action="store_true",
         help="do not open the browser automatically",
     )
+    lens_parser = add(
+        "lens",
+        "Compute inline archaeology annotations for an entire file (for editor CodeLens/blame).",
+    )
+    lens_parser.add_argument(
+        "file",
+        type=str,
+        help="relative or absolute path to the file",
+    )
+    lens_parser.add_argument(
+        "--json",
+        action="store_true",
+        help="render output as JSON for editor integration",
+    )
+    lens_parser.add_argument(
+        "--repo",
+        type=Path,
+        default=Path("."),
+        help="git repository root (default '.')",
+    )
     index_parser = add("index", "Build and promote a candidate index.")
     index_parser.add_argument("--corpus-root", type=Path, required=True)
     index_parser.add_argument("--policy", type=Path, required=True)

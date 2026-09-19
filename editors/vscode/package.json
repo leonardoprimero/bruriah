@@ -1,0 +1,80 @@
+{
+  "name": "bruriah-archaeology",
+  "displayName": "Bruriah Architectural Archaeology",
+  "description": "Inline CodeLens and Hover showing architectural decision lineage and drift warnings directly in VS Code and Cursor.",
+  "version": "0.1.0",
+  "publisher": "leonardoprimero",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/leonardoprimero/bruriah.git"
+  },
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "Programming Languages",
+    "Linters",
+    "Other"
+  ],
+  "keywords": [
+    "architecture",
+    "codelens",
+    "lineage",
+    "governance",
+    "causal-archaeology",
+    "git-blame"
+  ],
+  "main": "./dist/extension.js",
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "contributes": {
+    "commands": [
+      {
+        "command": "bruriah.whyLine",
+        "title": "Bruriah: Explain Why This Line Exists"
+      },
+      {
+        "command": "bruriah.openUI",
+        "title": "Bruriah: Open Visual DAG Explorer"
+      },
+      {
+        "command": "bruriah.showDecision",
+        "title": "Bruriah: Show Decision Details"
+      }
+    ],
+    "menus": {
+      "editor/context": [
+        {
+          "command": "bruriah.whyLine",
+          "group": "7_modification@1"
+        },
+        {
+          "command": "bruriah.openUI",
+          "group": "7_modification@2"
+        }
+      ]
+    },
+    "configuration": {
+      "title": "Bruriah",
+      "properties": {
+        "bruriah.executablePath": {
+          "type": "string",
+          "default": "bruriah",
+          "description": "Path to the bruriah executable (or 'uv run bruriah')."
+        },
+        "bruriah.enableCodeLens": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show architectural decision CodeLens above governed code blocks."
+        },
+        "bruriah.enableHover": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show decision details and drift warnings on hover."
+        }
+      }
+    }
+  }
+}
