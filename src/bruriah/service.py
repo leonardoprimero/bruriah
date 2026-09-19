@@ -55,6 +55,7 @@ from .lookup import LookupResult, SkillMatch, discover, resolve_capability
 from .packs import CapabilityPolicy
 from .skills import PermissionEnvelope, SkillSet
 from .registries import Registry
+from .repository import RepositoryError, SnapshotRepository
 from .research import NetworkLedger, ResearchDeps, ResearchOutcome, research
 from .retrieval import EmbedQuery, Rerank, is_shortfall, search, to_evidence_records
 from .route import route
@@ -403,31 +404,19 @@ def _fold_research(
 
 def _apply_lineage(
     local_evidence: list[EvidenceRecord],
-    snapshot: ActiveSnapshot,
+    repo: SnapshotRepository,
 ) -> tuple[list[EvidenceRecord], list[ClaimRecord], list[str]]:
     if not local_evidence:
         return local_evidence, [], []
 
-    try:
-        has_table = snapshot.database.execute(
-            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='lineage'"
-        ).fetchone()
-        if not has_table:
-            return local_evidence, [], []
-    except sqlite3.DatabaseError:
+    if not repo.has_lineage_table():
         return local_evidence, [], []
 
     ref_keys = [rec.ref for rec in local_evidence]
-    placeholders = ",".join("?" for _ in ref_keys)
-    try:
-        rows = snapshot.database.execute(
-            f"SELECT ref, document_ref, relative_path FROM passages WHERE ref IN ({placeholders})",
-            ref_keys,
-        ).fetchall()
-    except sqlite3.DatabaseError:
+    ref_to_doc = repo.get_passages_meta_by_refs(ref_keys)
+    if not ref_to_doc:
         return local_evidence, [], []
 
-    ref_to_doc = {r[0]: (r[1], r[2]) for r in rows}
     doc_to_refs: dict[str, list[str]] = {}
     for ref, (doc_ref, _) in ref_to_doc.items():
         doc_to_refs.setdefault(doc_ref, []).append(ref)
@@ -436,16 +425,7 @@ def _apply_lineage(
     if not doc_refs:
         return local_evidence, [], []
 
-    doc_placeholders = ",".join("?" for _ in doc_refs)
-    try:
-        lineage_rows = snapshot.database.execute(
-            f"SELECT successor_ref, predecessor_target, predecessor_ref, relation FROM lineage "
-            f"WHERE predecessor_ref IN ({doc_placeholders}) OR successor_ref IN ({doc_placeholders})",
-            [*doc_refs, *doc_refs],
-        ).fetchall()
-    except sqlite3.DatabaseError:
-        return local_evidence, [], []
-
+    lineage_rows = repo.get_lineage_relations(doc_refs)
     if not lineage_rows:
         return local_evidence, [], []
 
@@ -456,12 +436,14 @@ def _apply_lineage(
     existing_refs = {rec.ref for rec in local_evidence}
     ref_overrides: dict[str, dict[str, Any]] = {}
 
-    for succ_ref, pred_target, pred_ref, rel in lineage_rows:
+    for rel_item in lineage_rows:
+        succ_ref = rel_item.successor_ref
+        pred_target = rel_item.predecessor_target
+        pred_ref = rel_item.predecessor_ref
+        rel = rel_item.relation
+
         if pred_ref and pred_ref in doc_to_refs:
-            succ_row = snapshot.database.execute(
-                "SELECT relative_path FROM documents WHERE document_ref = ?", (succ_ref,)
-            ).fetchone()
-            succ_path = succ_row[0] if succ_row else succ_ref
+            succ_path = repo.get_document_path(succ_ref) or succ_ref
 
             for target_ref in doc_to_refs[pred_ref]:
                 overrides = ref_overrides.setdefault(target_ref, {})
@@ -477,24 +459,20 @@ def _apply_lineage(
                 pred_path = ref_to_doc[doc_to_refs[pred_ref][0]][1]
                 conflicts.append(f"Decision in {pred_path} was superseded by {succ_path}")
 
-                succ_passages = snapshot.database.execute(
-                    "SELECT ref, relative_path, start_line, end_line, source_hash FROM passages "
-                    "WHERE document_ref = ? ORDER BY start_line LIMIT 1",
-                    (succ_ref,),
-                ).fetchall()
+                succ_passages = repo.get_passages_by_document(succ_ref, limit=1)
                 supporting_refs: list[str] = []
-                for p_ref, p_path, p_start, p_end, p_hash in succ_passages:
-                    supporting_refs.append(p_ref)
-                    if p_ref not in existing_refs:
-                        existing_refs.add(p_ref)
+                for p in succ_passages:
+                    supporting_refs.append(p.ref)
+                    if p.ref not in existing_refs:
+                        existing_refs.add(p.ref)
                         additional_evidence.append(
                             EvidenceRecord(
-                                ref=p_ref,
+                                ref=p.ref,
                                 kind="local",
-                                publisher=p_path,
-                                locator=p_path,
-                                citation_locator=f"{p_path}#{p_start}-{p_end}",
-                                digest=f"sha256:{p_hash}",
+                                publisher=p.relative_path,
+                                locator=p.relative_path,
+                                citation_locator=f"{p.relative_path}#{p.start_line}-{p.end_line}",
+                                digest=f"sha256:{p.source_hash}",
                                 extraction_method="markdown_section",
                                 authority="unknown",
                                 authority_rationale="not_assessed_by_retrieval",
@@ -547,8 +525,8 @@ def _apply_lineage(
 
 def _resolve_code_target_causality(
     code_target: str,
-    repo: Path,
-    snapshot: ActiveSnapshot,
+    repo_path: Path,
+    snapshot_repo: SnapshotRepository,
 ) -> tuple[list[EvidenceRecord], list[ClaimRecord], list[str], list[str], list[str]]:
     """Trace the governing architectural decision for a code target in Git + SQLite."""
     evidence: list[EvidenceRecord] = []
@@ -558,7 +536,7 @@ def _resolve_code_target_causality(
     degradation: list[str] = []
 
     try:
-        res = trace_causal_archaeology(repo, snapshot.database, code_target)
+        res = trace_causal_archaeology(repo_path, snapshot_repo.database, code_target)
     except WhyError as error:
         degradation.append(f"code_target_unavailable:{error.code}")
         return evidence, claims, conflicts, warnings, degradation
@@ -573,12 +551,8 @@ def _resolve_code_target_causality(
 
     gov = res.governing_decision
     try:
-        passages_rows = snapshot.database.execute(
-            "SELECT ref, relative_path, start_line, end_line, source_hash "
-            "FROM passages WHERE document_ref = ? ORDER BY start_line",
-            (gov.document_ref,),
-        ).fetchall()
-    except sqlite3.DatabaseError:
+        passages_rows = snapshot_repo.get_passages_by_document(gov.document_ref)
+    except RepositoryError:
         degradation.append("code_target_passages_unreadable")
         return evidence, claims, conflicts, warnings, degradation
 
@@ -586,7 +560,12 @@ def _resolve_code_target_causality(
         warnings.append(f"code_target_passages_missing:{gov.document_ref}")
         return evidence, claims, conflicts, warnings, degradation
 
-    p_ref, p_path, p_start, p_end, p_hash = passages_rows[0]
+    p_first = passages_rows[0]
+    p_ref = p_first.ref
+    p_path = p_first.relative_path
+    p_start = p_first.start_line
+    p_end = p_first.end_line
+    p_hash = p_first.source_hash
 
     alerts = res.lineage_alerts
     freshness: Literal["current", "stale", "expired", "unknown"] = "stale" if alerts else "current"
@@ -649,21 +628,17 @@ def _resolve_code_target_causality(
 
                 for idx, succ_doc_ref in enumerate(target_succs):
                     is_active_leaf = (idx == len(target_succs) - 1 and alert.depth > 1) or (alert.depth == 1)
-                    succ_passages = snapshot.database.execute(
-                        "SELECT ref, relative_path, start_line, end_line, source_hash FROM passages "
-                        "WHERE document_ref = ? ORDER BY start_line LIMIT 1",
-                        (succ_doc_ref,),
-                    ).fetchall()
-                    for s_ref, s_path, s_start, s_end, s_hash in succ_passages:
-                        conflicting_refs.append(s_ref)
+                    succ_passages = snapshot_repo.get_passages_by_document(succ_doc_ref, limit=1)
+                    for s in succ_passages:
+                        conflicting_refs.append(s.ref)
                         evidence.append(
                             EvidenceRecord(
-                                ref=s_ref,
+                                ref=s.ref,
                                 kind="local",
-                                publisher=s_path,
-                                locator=s_path,
-                                citation_locator=f"{s_path}#{s_start}-{s_end}",
-                                digest=f"sha256:{s_hash}",
+                                publisher=s.relative_path,
+                                locator=s.relative_path,
+                                citation_locator=f"{s.relative_path}#{s.start_line}-{s.end_line}",
+                                digest=f"sha256:{s.source_hash}",
                                 extraction_method="markdown_section",
                                 authority="primary",
                                 authority_rationale=(
@@ -676,7 +651,7 @@ def _resolve_code_target_causality(
                                 conflict="none" if is_active_leaf else "declared",
                             )
                         )
-            except sqlite3.DatabaseError:
+            except RepositoryError:
                 pass
 
         claims.append(
@@ -765,10 +740,11 @@ def investigate(request: InvestigationRequest, deps: ServiceDeps) -> Investigati
         )
         skill_evidence = [_skill_evidence_record(item) for item in skill_dispatch.skills] if skill_dispatch else []
 
+        snapshot_repo = SnapshotRepository(deps.snapshot.database)
         causal_evidence: list[EvidenceRecord] = []
         if request.code_target:
             c_ev, c_claims, c_conflicts, c_warn, c_deg = _resolve_code_target_causality(
-                request.code_target, deps.repo, deps.snapshot
+                request.code_target, deps.repo, snapshot_repo
             )
             causal_evidence = c_ev
             lineage_claims = lineage_claims + c_claims
@@ -795,7 +771,7 @@ def investigate(request: InvestigationRequest, deps: ServiceDeps) -> Investigati
             embed_query=deps.embed_query, rerank=deps.rerank, clock=deps.clock,
         )
         raw_local_evidence = to_evidence_records(outcome)
-        local_evidence, search_claims, search_conflicts = _apply_lineage(raw_local_evidence, deps.snapshot)
+        local_evidence, search_claims, search_conflicts = _apply_lineage(raw_local_evidence, snapshot_repo)
         lineage_claims = lineage_claims + search_claims
         lineage_conflicts = lineage_conflicts + search_conflicts
 
@@ -873,18 +849,14 @@ def investigate(request: InvestigationRequest, deps: ServiceDeps) -> Investigati
 
 
 def _read_one(
-    database: sqlite3.Connection, ref: str, requested_range: ReadRange | None, cursor_start: int | None,
+    repo: SnapshotRepository, ref: str, requested_range: ReadRange | None, cursor_start: int | None,
     item_cap: int, remaining_total: int, request_id: str,
 ) -> tuple[ReadItem, int]:
-    row = database.execute(
-        "SELECT relative_path, start_line, end_line, text, source_hash FROM passages WHERE ref = ?",
-        (ref,),
-    ).fetchone()
-    if row is None:
+    content = repo.get_passage_content(ref)
+    if content is None:
         return ReadItem(ref=ref, status="missing_ref"), remaining_total
-    relative_path, start_line, end_line, text, source_hash = row
 
-    windowed = _window_text(text, requested_range, cursor_start, item_cap, remaining_total)
+    windowed = _window_text(content.text, requested_range, cursor_start, item_cap, remaining_total)
     if windowed is None:
         return ReadItem(ref=ref, status="invalid_range"), remaining_total
     window, start, actual_end, truncated = windowed
@@ -892,9 +864,9 @@ def _read_one(
 
     item = ReadItem(
         ref=ref, status="ok", content=window, start=start, end=actual_end,
-        digest=f"sha256:{source_hash}", truncated=truncated, next_cursor=next_cursor,
-        evidence_kind="local", locator=relative_path,
-        citation_locator=f"{relative_path}#{start_line}-{end_line}",
+        digest=f"sha256:{content.source_hash}", truncated=truncated, next_cursor=next_cursor,
+        evidence_kind="local", locator=content.relative_path,
+        citation_locator=f"{content.relative_path}#{content.start_line}-{content.end_line}",
         authority="unknown", freshness="unknown", license="unknown", conflict="unknown",
     )
     return item, remaining_total - len(window)
@@ -1060,6 +1032,7 @@ def read(request: ReadRequest, deps: ServiceDeps) -> ReadResult:
     ranges_by_ref = {item.ref: item for item in request.ranges}
     remaining = request.budgets.max_output_chars
     items: list[ReadItem] = []
+    repo = SnapshotRepository(deps.snapshot.database)
     try:
         for ref in request.refs:
             rng = ranges_by_ref.get(ref)
@@ -1072,9 +1045,9 @@ def read(request: ReadRequest, deps: ServiceDeps) -> ReadResult:
             elif ref.startswith(_LIVE_REF_PREFIX):
                 item, remaining = _read_live_one(deps.research, ref, rng, pos, cap, remaining, request_id)
             else:
-                item, remaining = _read_one(deps.snapshot.database, ref, rng, pos, cap, remaining, request_id)
+                item, remaining = _read_one(repo, ref, rng, pos, cap, remaining, request_id)
             items.append(item)
-    except sqlite3.DatabaseError as error:
+    except (RepositoryError, sqlite3.DatabaseError) as error:
         raise ServiceError("snapshot_unreadable") from error
 
     warnings = ["output_budget_exhausted"] if remaining <= 0 and any(item.truncated for item in items) else []

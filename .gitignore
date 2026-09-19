@@ -36,3 +36,5 @@ recovery/
 
 # OS
 .DS_Store
+# Local Pi runtime state
+.atl/
