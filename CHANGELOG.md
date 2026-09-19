@@ -3,6 +3,12 @@
 Notable changes, newest first. This project follows [semantic versioning](https://semver.org/),
 and the entries here name what changed for *you* rather than which files moved.
 
+## [0.9.3] — 2026-09-19
+
+### Added: CI Dogfooding for Architectural Drift Detection & Type Annotation Fix
+- **CI Governance Gate:** Added `drift` inspection job to `.github/workflows/ci.yml` that checks git diff ranges (`origin/${{ github.base_ref }}...HEAD` on PRs, `HEAD~1..HEAD` on pushes) against Bruriah's own lineage DAG in strict mode.
+- **Fixed:** Corrected `mypy` type annotation in `src/bruriah/drift.py` (`paths: PlatformPaths`).
+
 ## [0.9.2] — 2026-09-19
 
 ### Added: Architectural Drift Detection (`bruriah drift`) & CI Enforcement
