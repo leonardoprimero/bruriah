@@ -3,7 +3,13 @@
 Notable changes, newest first. This project follows [semantic versioning](https://semver.org/),
 and the entries here name what changed for *you* rather than which files moved.
 
-## [Unreleased]
+## [0.9.1] — 2026-09-19
+
+### Refactored: Extracted SnapshotRepository & Decoupled Service Persistence
+
+Eliminates raw SQLite persistence leakage from `service.py` into a dedicated repository abstraction:
+- **Dedicated Repository Layer:** Created `SnapshotRepository` in `src/bruriah/repository.py` encapsulating passages, documents, and lineage queries with typed domain models (`PassageSummary`, `PassageContent`, `LineageRelation`).
+- **Zero SQL in Service Orchestrator:** Eradicated all direct SQLite queries from `src/bruriah/service.py`, reinforcing Clean Architecture boundaries and Single Responsibility Principle (SRP).
 
 ### Added: Transitive Decision Lineage Resolution & CLI Ask Code Grounding
 
