@@ -1412,3 +1412,38 @@ def test_init_repo_local_stores_in_dot_bruriah(
     ask_args = cli._build_cli_parser().parse_args(["ask", "why feat add the thing", "--repo", str(repo)])
     assert cli._cmd_ask(ask_args, embedder_factory=_fake_embedder_factory) == 0
 
+
+def test_cmd_setup_writes_client_config(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    repo = tmp_path / "my-repo"
+    repo.mkdir()
+    (repo / ".git").mkdir()
+
+    exit_code = cli.bruriah_main(["setup", "cursor", "--repo", str(repo), "--data-dir", str(tmp_path / "data")])
+    assert exit_code == 0
+    captured = capsys.readouterr()
+    assert "[cursor] Created and registered" in captured.err
+
+    cursor_mcp = repo / ".cursor" / "mcp.json"
+    assert cursor_mcp.is_file()
+    cfg = json.loads(cursor_mcp.read_text(encoding="utf-8"))
+    assert "mcpServers" in cfg
+    assert "bruriah" in cfg["mcpServers"]
+
+    exit_code = cli.bruriah_main(["setup", "cursor", "--repo", str(repo), "--data-dir", str(tmp_path / "data")])
+    assert exit_code == 0
+    captured = capsys.readouterr()
+    assert "[cursor] Up to date" in captured.err
+
+
+def test_cmd_setup_dry_run_prints_preview(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    repo = tmp_path / "my-repo"
+    repo.mkdir()
+    (repo / ".git").mkdir()
+
+    exit_code = cli.bruriah_main(["setup", "cursor", "--repo", str(repo), "--dry-run"])
+    assert exit_code == 0
+    captured = capsys.readouterr()
+    assert "[dry-run] MCP Client Configuration Preview:" in captured.err
+    assert "[cursor] Would create:" in captured.err
+    assert not (repo / ".cursor" / "mcp.json").exists()
+

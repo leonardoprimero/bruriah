@@ -47,9 +47,10 @@ from .index import (
 )
 from .mcp_server import build_server
 from .platform import (
-    PlatformError, PlatformPaths, ensure_private_dirs, load_build_descriptor, load_deps,
+    PlatformError, PlatformPaths, ensure_private_dirs, find_project_root, load_build_descriptor, load_deps,
     project_scoped_paths, resolve_paths, write_build_descriptor,
 )
+from .setup import SetupError, detect_installed_clients, setup_client
 from .contracts import InvestigationRequest, ReadRequest
 from .drift import DriftError, format_drift_human, format_drift_json, run_drift
 from .retrieval import Rerank
@@ -848,11 +849,59 @@ def _cmd_drift(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_setup(args: argparse.Namespace) -> int:
+    paths = _resolve_paths(args)
+    manifest = _build_launch_manifest(paths)
+    repo_root = find_project_root(args.repo.resolve())
+
+    scope = "auto"
+    if getattr(args, "global_scope", False):
+        scope = "global"
+    elif getattr(args, "project", False):
+        scope = "project"
+
+    client_arg = getattr(args, "client", None)
+    if client_arg is None or client_arg == "all":
+        clients_to_configure = detect_installed_clients(repo_root)
+        if not clients_to_configure:
+            clients_to_configure = ["cursor", "claude"]
+    else:
+        clients_to_configure = [client_arg]
+
+    dry_run = getattr(args, "dry_run", False)
+    if dry_run:
+        print("[dry-run] MCP Client Configuration Preview:", file=sys.stderr)
+
+    for client in clients_to_configure:
+        try:
+            res = setup_client(
+                client,
+                manifest,
+                project_root=repo_root,
+                scope=scope,
+                dry_run=dry_run,
+            )
+            prefix = f"[{client}]"
+            action_label = {
+                "created": "Created and registered" if not dry_run else "Would create",
+                "updated": "Updated" if not dry_run else "Would update",
+                "unchanged": "Up to date",
+            }.get(res.status, res.status)
+            print(f"{prefix} {action_label}: {res.target_path}", file=sys.stderr)
+            if dry_run:
+                print(res.content)
+        except SetupError as error:
+            raise CliError(f"setup_failed:{error.code}") from error
+
+    return 0
+
+
 def _build_cli_parser() -> argparse.ArgumentParser:
     return build_cli_parser(
         version=__version__,
         handlers={
             "init": _cmd_init,
+            "setup": _cmd_setup,
             "corpus": _cmd_corpus,
             "ask": _cmd_ask,
             "why": _cmd_why,

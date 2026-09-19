@@ -64,6 +64,39 @@ def build_cli_parser(
         action="store_true",
         help="store corpus and index locally inside .bruriah/ in the repository instead of user data directory",
     )
+    setup_parser = add(
+        "setup",
+        "Non-destructively configure the bruriah MCP server into an editor or client (Cursor, Claude, Claude Desktop, Gemini, OpenCode).",
+    )
+    setup_parser.add_argument(
+        "client",
+        nargs="?",
+        default=None,
+        choices=["cursor", "claude", "claude-desktop", "gemini", "opencode", "all"],
+        help="client to configure (default: auto-detect installed clients, or 'all')",
+    )
+    setup_parser.add_argument(
+        "--project",
+        action="store_true",
+        help="force project-scoped configuration (e.g. .cursor/mcp.json or .mcp.json)",
+    )
+    setup_parser.add_argument(
+        "--global",
+        dest="global_scope",
+        action="store_true",
+        help="force user-scoped configuration (e.g. ~/.cursor/mcp.json or Claude Desktop)",
+    )
+    setup_parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="print the merged configuration and target path without writing to disk",
+    )
+    setup_parser.add_argument(
+        "--repo",
+        type=Path,
+        default=Path("."),
+        help="git repository root for project-scoped configuration (default '.')",
+    )
     corpus_parser = add("corpus", "Turn a git history's reasoning or PDF documents into a corpus.")
     corpus_parser.add_argument(
         "--repo",

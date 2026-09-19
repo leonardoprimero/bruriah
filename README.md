@@ -652,12 +652,21 @@ Every substitution was measured on Windows 11 / NTFS before it was written, and 
 
 WSL still works and needs no changes, if that is where you already are.
 
-`bruriah init` writes a ready-to-paste `mcpServers` entry — absolute paths already filled in,
-including the `--data-dir` you gave it — for **Claude Code, Cursor, Gemini CLI, OpenCode,
-Antigravity** and a generic stdio client, into `clients/` under your config directory. Copy the one
-you use; the rest cost nothing by existing. The snippet carries whichever `--data-dir` you passed,
-so run it per project and paste each one into that project's own client config — the files under
-`clients/` are a template to consume, not a per-project registry, and the next run rewrites them.
+`bruriah init` writes ready-to-paste configurations into `clients/` under your config directory.
+
+### Automatic MCP client configuration (`bruriah setup`)
+
+Instead of copying and pasting JSON snippets manually, `bruriah setup` configures your editor or agent non-destructively:
+
+```bash
+bruriah setup cursor          # registers bruriah into .cursor/mcp.json (project) or ~/.cursor/mcp.json
+bruriah setup claude          # registers into .mcp.json (Claude Code)
+bruriah setup claude-desktop  # registers into Claude Desktop application settings
+bruriah setup                 # auto-detects installed editors and configures them
+bruriah setup --dry-run       # previews JSON changes without writing to disk
+```
+
+It merges `bruriah` into existing `mcpServers` without clobbering your other MCP tools, creates an automatic `.bak` backup, and uses atomic writes.
 
 The minimal `policy.yaml` the quickstart writes for you:
 
