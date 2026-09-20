@@ -13,6 +13,7 @@ from collections.abc import Callable
 from pathlib import Path
 
 from . import gitcorpus
+from ._cli.common import DEFAULT_EMBEDDING_MODEL
 from .corpus import CorpusPolicyError
 from .index import BuildResult, IndexLifecycleError
 from .index_runner import EmbedderFactory, _default_embedder_factory, run_index
@@ -80,7 +81,7 @@ class RepoWatcher:
         repo: Path,
         paths: PlatformPaths,
         *,
-        model_name: str = "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2",
+        model_name: str = DEFAULT_EMBEDDING_MODEL,
         embedder_factory: EmbedderFactory = _default_embedder_factory,
         query_prefix: str | None = None,
         passage_prefix: str | None = None,

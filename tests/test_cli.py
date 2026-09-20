@@ -1560,3 +1560,62 @@ def test_known_model_prefixes_jina_v3_no_prefix() -> None:
     from bruriah._cli.common import resolve_model_prefixes
 
     assert resolve_model_prefixes("jinaai/jina-embeddings-v3") == ("", "")
+
+
+# --- default embedding model: one constant, complete bge/jina registry entries ------------------
+# The 2026-09-20 embedder ablation (evals/project-memory/README.md) showed
+# `jinaai/jina-embeddings-v2-base-es` improving recall@3 on both external corpora and on this
+# project's own bilingual history, while the bge candidates regressed Spanish below the old
+# default. It also exposed a registry gap: `KNOWN_MODEL_PREFIXES` listed `BAAI/bge-*-en` but not
+# the `-v1.5` names actually used in the ablation, so bge ran without its instruction prefix
+# unless one was passed explicitly.
+
+
+def test_default_embedding_model_is_the_ablation_winner() -> None:
+    from bruriah._cli.common import DEFAULT_EMBEDDING_MODEL
+
+    assert DEFAULT_EMBEDDING_MODEL == "jinaai/jina-embeddings-v2-base-es"
+
+
+def test_is_symmetric_model_false_for_the_new_default() -> None:
+    """The new default is an asymmetric retrieval model, not a symmetric-similarity one, so it
+    must never trigger `bruriah index`'s symmetric-model warning."""
+    from bruriah._cli.common import DEFAULT_EMBEDDING_MODEL, is_symmetric_model
+
+    assert is_symmetric_model(DEFAULT_EMBEDDING_MODEL) is False
+
+
+def test_init_index_watch_parsers_share_the_default_embedding_model_constant() -> None:
+    """`init`, `index` and `watch` must all read their `--model` default from the SAME
+    `DEFAULT_EMBEDDING_MODEL` constant, so the three cannot silently drift apart again."""
+    from bruriah._cli.common import DEFAULT_EMBEDDING_MODEL
+
+    parser = cli._build_cli_parser()
+    init_args = parser.parse_args(["init"])
+    index_args = parser.parse_args(["index", "--corpus-root", "x", "--policy", "y"])
+    watch_args = parser.parse_args(["watch"])
+    assert init_args.model == DEFAULT_EMBEDDING_MODEL
+    assert index_args.model == DEFAULT_EMBEDDING_MODEL
+    assert watch_args.model == DEFAULT_EMBEDDING_MODEL
+
+
+def test_resolve_model_prefixes_bge_v1_5_variants_get_the_instruction_prefix() -> None:
+    """`BAAI/bge-*-en-v1.5` -- the actual model names the ablation indexed with -- must resolve
+    the same instruction prefix as the unversioned `BAAI/bge-*-en` entries already did."""
+    from bruriah._cli.common import resolve_model_prefixes
+
+    prefix = "Represent this sentence for searching relevant passages: "
+    assert resolve_model_prefixes("BAAI/bge-small-en-v1.5") == (prefix, "")
+    assert resolve_model_prefixes("BAAI/bge-base-en-v1.5") == (prefix, "")
+    assert resolve_model_prefixes("BAAI/bge-large-en-v1.5") == (prefix, "")
+
+
+def test_resolve_model_prefixes_jina_v2_base_es_no_prefix() -> None:
+    """The new default and its sibling v2 models use no prefix, same as jina v3 above -- and must
+    not be caught by the `elif "e5" in model_name` fallback (they aren't, but the registry entry
+    makes the "no prefix" choice explicit rather than an accident of that heuristic)."""
+    from bruriah._cli.common import resolve_model_prefixes
+
+    assert resolve_model_prefixes("jinaai/jina-embeddings-v2-base-es") == ("", "")
+    assert resolve_model_prefixes("jinaai/jina-embeddings-v2-base-en") == ("", "")
+    assert resolve_model_prefixes("jinaai/jina-embeddings-v2-small-en") == ("", "")

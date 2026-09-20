@@ -10,6 +10,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Sequence
 
+from ._cli.common import DEFAULT_EMBEDDING_MODEL
 from .index_runner import run_index
 
 if TYPE_CHECKING:
@@ -354,7 +355,7 @@ def run_bootstrap(
             paths,
             out_dir,
             policy_path,
-            model_name="sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2",
+            model_name=DEFAULT_EMBEDDING_MODEL,
         )
 
     return BootstrapResult(
