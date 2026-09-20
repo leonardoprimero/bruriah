@@ -11,13 +11,21 @@ from collections.abc import Callable, Iterable, Sequence
 
 BM25_K1: float = 1.5
 BM25_B: float = 0.75
-# Tuned from the literature default of 60. Lower K gives stronger rank advantage to top positions;
-# at 60, a document at rank 1 scores 0.0164 vs 0.0156 at rank 2 -- nearly indistinguishable.
-# At K=20, rank 1 scores 0.0476 vs 0.0455 at rank 2 -- a 4.6% gap per leg, doubled in fusion.
-# This matters when the vector leg already places the correct document at rank 1-5 but RRF
-# fails to elevate it into the top-3 window.
-# Measured: run evals/retrieval/run_ablation.py --rrf-k 20 to verify against your corpus.
-RRF_K: int = 20
+# Literature default. At K=60, a document at rank 1 scores 1/61=0.0164 vs 1/62=0.0161 at rank 2 --
+# a 1.6% gap, nearly indistinguishable. At K=20, rank 1 scores 1/21=0.0476 vs 1/22=0.0455 at rank 2
+# -- a 4.6% gap per leg, doubled in fusion -- which in principle helps when the vector leg already
+# places the correct document at rank 1-5 but RRF fails to elevate it into the top-3 window.
+#
+# K=20 was tried on 2026-09-20 (commit 63eeddd) and measured on this project's own twelve-question,
+# 178-document own-history corpus: recall@3 did not improve (English 0.750, Spanish 0.500, same as
+# at K=60). The external corpora this project also evaluates against (leakcanary, egui -- see
+# README.md and evals/project-memory/README.md) were never measured at K=20, so every published
+# recall/MRR number in this repository was measured at K=60, and the constant stays there.
+#
+# Restore 20 (or any other value) only after evals/retrieval/run_ablation.py --rrf-k shows a
+# measured gain on the external corpora, not the twelve-question set alone -- one question there
+# is eight points, and a change that only moves that set is not evidence of a general improvement.
+RRF_K: int = 60
 CROSS_LINGUAL_LEXICAL_WEIGHT: float = 0.1
 RERANK_DEPTH: int = 40
 RERANK_MAX_CHARS: int = 4000
@@ -201,9 +209,10 @@ def fuse_ranks(
 ) -> list[tuple[str, int | None, int | None]]:
     """Reciprocal-rank fusion, with the lexical leg's contribution scalable.
 
-    `rrf_k` controls rank-decay strength and defaults to the module constant `RRF_K` (currently 20,
-    tuned down from the literature default of 60). Pass an explicit `rrf_k` to override per-call
-    without changing the global default -- useful in ablation sweeps (e.g. run_ablation.py)."""
+    `rrf_k` controls rank-decay strength and defaults to the module constant `RRF_K` (currently 60,
+    the literature default and the value every published recall/MRR number was measured with).
+    Pass an explicit `rrf_k` to override per-call without changing the global default -- useful in
+    ablation sweeps (e.g. run_ablation.py)."""
     lexical_ranks = lexical_ranks or {}
     vector_ranks = vector_ranks or {}
     fused: list[tuple[float, str, int | None, int | None]] = []

@@ -139,19 +139,42 @@ def test_fuse_ranks_rrf() -> None:
 
 
 def test_rrf_lower_k_amplifies_rank_advantage() -> None:
-    """At K=20, rank 1 receives a meaningfully larger RRF score than rank 3.
+    """At K=20, rank 1 would receive a meaningfully larger RRF score than rank 3.
 
     The literature default of K=60 makes rank-1 and rank-2 nearly indistinguishable
-    (0.0164 vs 0.0156). At K=20 the gap widens to 4.6% per leg, which is enough to
+    (0.0164 vs 0.0161). At K=20 the gap widens to 4.6% per leg, which would be enough to
     push the correct document into the top-3 window when the vector leg already places
-    it at rank 1-2.
+    it at rank 1-2. This test asserts the arithmetic property with an explicit `rrf_k=20`
+    argument to `fuse_ranks`, independent of the module default `ranking.RRF_K` (which
+    stays 60 -- see `test_rrf_k_matches_published_measurements`).
     """
-    score_rank1 = 1.0 / (ranking.RRF_K + 1)
-    score_rank3 = 1.0 / (ranking.RRF_K + 3)
+    demo_k = 20
+    # Exercise the explicit per-call override through the public API, confirming it never
+    # reads the module default: `doc1` (rank 1) must out-score `doc3` (rank 3) under `demo_k`.
+    fused = ranking.fuse_ranks({"doc1": 1, "doc3": 3}, None, rrf_k=demo_k)
+    ranked_refs = [ref for ref, _, _ in fused]
+    assert ranked_refs == ["doc1", "doc3"]
+
+    score_rank1 = 1.0 / (demo_k + 1)
+    score_rank3 = 1.0 / (demo_k + 3)
     gap_fraction = (score_rank1 - score_rank3) / score_rank1
     # At K=20: (1/21 - 1/23) / (1/21) ≈ 8.7 %. Requires >5% so the test still passes
     # even if K is bumped modestly but still well below 60.
     assert gap_fraction > 0.05, (
         f"Expected rank-1 vs rank-3 gap > 5% of rank-1 score, got {gap_fraction:.1%} "
-        f"(RRF_K={ranking.RRF_K}). Increase K tuning or relax the threshold."
+        f"(demo_k={demo_k}). Increase K tuning or relax the threshold."
     )
+
+
+def test_rrf_k_matches_published_measurements() -> None:
+    """`RRF_K` stays 60: every published recall/MRR number in README.md and
+    evals/project-memory/README.md was measured with K=60.
+
+    K=20 was tried on 2026-09-20 (commit 63eeddd) and did not change this project's own
+    twelve-question own-history recall@3 (English 0.750, Spanish 0.500 either way). The
+    external corpora (leakcanary, egui) were never measured at K=20, so the change had no
+    supporting evidence outside a sample too small to move on its own. Restore 20 only
+    after `evals/retrieval/run_ablation.py --rrf-k 20` shows a measured gain on those
+    external corpora.
+    """
+    assert ranking.RRF_K == 60

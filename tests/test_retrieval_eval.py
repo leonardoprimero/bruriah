@@ -23,10 +23,12 @@ import pytest
 REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
 EVALS_RETRIEVAL = REPOSITORY_ROOT / "evals" / "retrieval"
 LEGACY_DATABASE = REPOSITORY_ROOT / "cerebro.db"
+ADAPTERS_PATH = EVALS_RETRIEVAL / "adapters.py"
 
 if str(EVALS_RETRIEVAL) not in sys.path:
     sys.path.insert(0, str(EVALS_RETRIEVAL))
 
+from bruriah import ranking  # noqa: E402
 from adapters import ChunkHit, LegacyAdapter, RouterAdapter, SearchResult, dedup_to_notes  # noqa: E402
 from metrics import (  # noqa: E402
     abstention_score_separation,
@@ -372,6 +374,23 @@ def test_router_adapter_returns_note_level_results() -> None:
     assert len(paths) == len(set(paths)), "note-level results must be deduped"
     ranks = [result.rank for result in results]
     assert ranks == sorted(ranks), "results must be rank-ordered"
+
+
+def test_router_adapter_rrf_k_reads_the_ranking_constant() -> None:
+    """`RouterAdapter._RRF_K` must be sourced from `bruriah.ranking.RRF_K`, never a duplicated
+    literal, so the eval harness cannot silently drift from the production default the way it
+    did when `ranking.RRF_K` moved 60 -> 20 while this adapter stayed a hardcoded 60.
+
+    Checks both the value (equal to the production constant right now) and the source (an
+    explicit import, not a coincidence) so a future edit that re-hardcodes a matching literal
+    is still caught.
+    """
+    assert RouterAdapter._RRF_K == ranking.RRF_K
+    adapters_source = ADAPTERS_PATH.read_text(encoding="utf-8")
+    assert "from bruriah.ranking import RRF_K" in adapters_source, (
+        "evals/retrieval/adapters.py must import RRF_K from bruriah.ranking instead of "
+        "hardcoding its own copy of the constant"
+    )
 
 
 def test_router_adapter_wires_a_real_query_embedder_post_bugfix() -> None:

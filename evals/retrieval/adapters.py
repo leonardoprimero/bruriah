@@ -41,8 +41,9 @@ Because `EvidenceRecord` (the router's public evidence contract) carries no
 numeric score by design (`retrieval.py`: "this slice's conservative
 'unknown' -- never inferred from rank"), the router adapter reconstructs a
 comparable RRF score itself from the public `RetrievalMatch.lexical_rank`/
-`vector_rank` fields, using the identical RRF formula and `k=60` constant
-`retrieval.py` uses internally (also legacy's own default `rrf_k`), so
+`vector_rank` fields, using the identical RRF formula and the same `RRF_K`
+constant `retrieval.py` reads from `bruriah.ranking` internally (also
+legacy's own default `rrf_k`), imported here rather than duplicated, so
 scores are on the same footing across both engines for the abstention
 separation metric.
 """
@@ -66,6 +67,7 @@ if str(_SRC) not in sys.path:
 from bruriah.cli import build_serve_deps  # noqa: E402
 from bruriah.contracts import Budgets  # noqa: E402
 from bruriah.platform import PlatformPaths, resolve_paths  # noqa: E402
+from bruriah.ranking import RRF_K  # noqa: E402
 from bruriah.retrieval import search as router_search  # noqa: E402
 from bruriah.retrieval import to_evidence_records  # noqa: E402
 from bruriah.service import ServiceDeps  # noqa: E402
@@ -168,7 +170,9 @@ class RouterAdapter:
     clock=deps.clock)`.
     """
 
-    _RRF_K = 60  # Matches retrieval.py's internal `_RRF_K` and legacy's default `rrf_k`.
+    _RRF_K = RRF_K  # Reads `bruriah.ranking`'s own constant; never a duplicated literal that can
+    # silently drift from production (it did once: `ranking.RRF_K` moved 60 -> 20 -> 60 on
+    # 2026-09-20 while this line stayed a hardcoded 60 the whole time).
 
     def __init__(self, paths: PlatformPaths | None = None, raw_pool: int = DEFAULT_RAW_POOL) -> None:
         self._deps: ServiceDeps = build_serve_deps(paths if paths is not None else resolve_paths())
