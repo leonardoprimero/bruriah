@@ -15,7 +15,13 @@ import yaml
 from fastembed import TextEmbedding
 
 from . import __version__, clients, gitcorpus, pdfcorpus
-from ._cli.common import CliError, resolve_cli_paths as _resolve_paths, resolve_model_prefixes, is_symmetric_model
+from ._cli.common import (
+    DEFAULT_EMBEDDING_MODEL,
+    CliError,
+    resolve_cli_paths as _resolve_paths,
+    resolve_model_prefixes,
+    is_symmetric_model,
+)
 from ._cli.doctor import cmd_doctor as _cmd_doctor, run_doctor
 from ._cli.parser import build_cli_parser
 from ._cli.skills import (
@@ -122,9 +128,7 @@ def main() -> None:
     parser.add_argument("policy", type=Path)
     parser.add_argument("candidate", type=Path)
     parser.add_argument("--previous", type=Path)
-    parser.add_argument(
-        "--model", default="sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
-    )
+    parser.add_argument("--model", default=DEFAULT_EMBEDDING_MODEL)
     parser.add_argument("--model-revision")
     parser.add_argument("--dimensions", type=int)
     arguments = parser.parse_args()

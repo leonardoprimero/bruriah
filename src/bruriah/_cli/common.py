@@ -43,6 +43,15 @@ def resolve_cli_paths(args: argparse.Namespace, *, cwd: Path | None = None) -> P
     return paths
 
 
+# The default embedding model for every `bruriah` command that builds or queries an index
+# (`init`, `index`, `watch`). Chosen by the 2026-09-20 embedder ablation
+# (evals/project-memory/README.md, "The embedder was the bottleneck") as the only candidate that
+# improved recall@3 on both external corpora AND this project's own bilingual history without
+# regressing either language -- the bge candidates scored higher on English-only corpora but cost
+# Spanish recall below the old default. Read this constant, never hardcode the model name: three
+# argparse defaults and two module-level call sites all point here so they cannot drift apart.
+DEFAULT_EMBEDDING_MODEL = "jinaai/jina-embeddings-v2-base-es"
+
 KNOWN_MODEL_PREFIXES: dict[str, tuple[str, str]] = {
     "intfloat/multilingual-e5-large": ("query: ", "passage: "),
     "intfloat/multilingual-e5-base": ("query: ", "passage: "),
@@ -53,6 +62,12 @@ KNOWN_MODEL_PREFIXES: dict[str, tuple[str, str]] = {
     "BAAI/bge-base-en": ("Represent this sentence for searching relevant passages: ", ""),
     "BAAI/bge-small-en": ("Represent this sentence for searching relevant passages: ", ""),
     "BAAI/bge-large-en": ("Represent this sentence for searching relevant passages: ", ""),
+    # The `-v1.5` names are the actual current bge release names (and what the 2026-09-20 ablation
+    # indexed with); without these entries they fell through to the unprefixed default, so bge ran
+    # without its recommended asymmetric instruction prefix unless one was passed explicitly.
+    "BAAI/bge-small-en-v1.5": ("Represent this sentence for searching relevant passages: ", ""),
+    "BAAI/bge-base-en-v1.5": ("Represent this sentence for searching relevant passages: ", ""),
+    "BAAI/bge-large-en-v1.5": ("Represent this sentence for searching relevant passages: ", ""),
     # BGE-M3 is language-agnostic and uses no prefix -- it handles asymmetric retrieval
     # internally via multi-functionality training. Listed explicitly so it is not mistakenly
     # given E5 prefixes by the `elif "e5" in model_name` fallback.
@@ -62,6 +77,12 @@ KNOWN_MODEL_PREFIXES: dict[str, tuple[str, str]] = {
     "nomic-ai/nomic-embed-text-v1": ("search_query: ", "search_document: "),
     # Jina v3 uses no prefix but is included so it is not caught by the e5 heuristic.
     "jinaai/jina-embeddings-v3": ("", ""),
+    # Jina v2 uses no prefix either. `-base-es` is DEFAULT_EMBEDDING_MODEL above; the sibling
+    # English-only v2 models are listed for the same reason v3 is -- explicit, not an accident of
+    # the e5 fallback.
+    "jinaai/jina-embeddings-v2-base-es": ("", ""),
+    "jinaai/jina-embeddings-v2-base-en": ("", ""),
+    "jinaai/jina-embeddings-v2-small-en": ("", ""),
 }
 
 # Model name substrings that indicate a symmetric-similarity model -- trained for paraphrase
