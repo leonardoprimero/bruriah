@@ -1,6 +1,6 @@
 # Bruriah Architecture
 
-Bruriah implements a **Clean / Hexagonal Architecture (Ports and Adapters)**, strictly decoupling pure domain algorithms, persistence gateways, application use cases, and protocol adapters.
+Bruriah implements a **Modular Architecture inspired by Hexagonal / Ports and Adapters principles**, decoupling pure domain algorithms, persistence gateways, application use cases, and protocol adapters. While application services currently inject concrete repositories (such as `SnapshotRepository`) rather than formal abstract interfaces to avoid premature over-abstraction, dependencies consistently flow inward toward the domain.
 
 ```
 ┌─────────────────────────────────────────────────────────────┐

@@ -31,17 +31,9 @@ _BM25_K1 = ranking.BM25_K1
 _BM25_B = ranking.BM25_B
 _RRF_K = ranking.RRF_K
 
-# How much the lexical leg still counts when the query language does not match the corpus.
-#
-# Not zero: a cross-language question can still carry an identifier, a file name or a proper noun
-# that BM25 matches exactly and embeddings blur. At this weight a lexical rank-1 hit contributes
-# 0.1/61 against a vector rank-1 hit's 1/61, so the leg can only separate candidates the vector
-# leg already ranked together -- a tiebreaker, not a voter. That is the role the measurement says
-# it should have when it cannot read the query's language: 17% recall@3 on its own, against 58%.
-#
-# The sweep (evals/project-memory) reads 1.0 -> 33%, 0.5 -> 50%, 0.25 -> 50%, 0.1 -> 58%, 0 -> 58%.
-# Anything at or below 0.25 recovers most of the loss, and the gap between 0.25 and 0.1 is a SINGLE
-# question out of twelve -- noise at this sample size, and not the reason for the choice.
+# Lexical discount weight for cross-lingual queries (when query lang != corpus lang).
+# Keeps lexical leg as a tiebreaker for exact symbols/paths (1/10th of vector weight).
+# See evals/project-memory for weight sweep: 1.0 -> 33%, 0.1 -> 58% recall@3.
 _CROSS_LINGUAL_LEXICAL_WEIGHT = ranking.CROSS_LINGUAL_LEXICAL_WEIGHT
 
 # Corpus language is decided from a bounded, deterministic sample: passages arrive ordered by ref,
@@ -49,33 +41,10 @@ _CROSS_LINGUAL_LEXICAL_WEIGHT = ranking.CROSS_LINGUAL_LEXICAL_WEIGHT
 _LANGUAGE_SAMPLE_PASSAGES = 64
 _LANGUAGE_SAMPLE_CHARS = 400
 
-# How many DOCUMENTS a supplied reranker is asked to score, and how much of each it reads.
-#
-# Measured on the two foreign corpora, not guessed. On `square/leakcanary` the correct document is
-# somewhere in the returned pool 75.8% of the time while recall@3 is 0.340 -- almost everything
-# that is lost is lost ORDERING, not retrieving, and recall@10 understates that headroom by half.
-# Reranking the top 40 documents reads 0.431 recall@3 and 0.516 recall@10; the top 20 reads 0.412
-# and 0.464. Depth is the whole cost of the stage: one cross-encoder pass per extra document.
-#
-# 40 is NOT the depth that maximises every corpus, and this constant should not be read as tuned.
-#
-# This note used to say reranking LOSES on `emilk/egui` (0.494 against 0.530) and loses deeper.
-# That was measured before d767aab, and d767aab fixed the exact mechanism it observed: the
-# cross-encoder reading a 14,071-character egui commit's pull-request-template header instead of
-# the passage that matched. Re-measured on the same jina configuration afterwards, both depths
-# now BEAT the baseline -- 0.518 no-reranker, 0.542 at depth 40, 0.566 at depth 20. The loss was
-# a property of the bug, not of the corpus.
-#
-# What remains is the ordinary version: depth 20 wins on egui, depth 40 wins on leakcanary
-# (0.431 against 0.412), so the best depth depends on the corpus while no measured corpus is hurt
-# by the stage. That is still the whole reason 40 is a default rather than a tuned value, and the
-# reason the stage is opt-in: which depth suits a corpus is not predictable from anything measured
-# here, so measure it on yours with `evals/retrieval/run_ablation.py --depth`.
-#
-# DOCUMENTS, not passages, and that is the larger of the two findings. A passage here is ~250
-# characters of a commit body whose median length is 445, and scoring passages directly reaches
-# only 0.373 with a 1.11 GB model -- the same figure an 0.08 GB model reaches when it is handed
-# whole documents. The unit fed to the cross-encoder matters more than the size of the model.
+# Number of documents scored by the optional reranker and character budget per document.
+# Documents (not raw passages) are passed to maximize cross-encoder context (evals/project-memory).
+# Optimal depth varies by corpus (depth 20 on egui, depth 40 on leakcanary); default is 40.
+# See evals/retrieval/run_ablation.py --depth to benchmark on your corpus.
 _RERANK_DEPTH = 40
 _RERANK_MAX_CHARS = 4000
 _SNIPPET_CHARS = 500
