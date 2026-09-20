@@ -1,6 +1,6 @@
 [project]
 name = "bruriah"
-version = "1.2.0"
+version = "1.3.0"
 description = "Evidence-backed project memory for coding agents"
 requires-python = ">=3.12,<3.15"
 license = "Apache-2.0"
