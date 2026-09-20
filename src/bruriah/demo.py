@@ -156,16 +156,16 @@ We evaluated FastMCP and rejected it. Supporting premise: fastmcp-no-forbid.
                 out.write(f"  Matched Alternative: {cf1.matched_alternative}\n")
                 out.write(f"  Rationale: {cf1.rationale}\n")
                 out.write(f"  Conflicts: {res1.conflicts}\n\n")
-                out.write(_format_green("RESULT: Agent is blocked from repeating the rejected decision!", use_color) + "\n")
+                out.write(_format_green("RESULT: Agent is warned and flagged with an architectural conflict!", use_color) + "\n")
             else:
                 out.write("  No counterfactual assessment generated.\n")
 
-        _pause("Step 2 complete. Press Enter to simulate premise drift...")
+        _pause("Step 2 complete. Press Enter to simulate premise invalidation...")
 
         # -------------------------------------------------------------------
-        # Step 3: Premise Drift & Reevaluation
+        # Step 3: Premise Invalidation & Re-evaluation
         # -------------------------------------------------------------------
-        out.write("\n" + _format_bold("Step 3: Premise Drift & Automated Re-evaluation", use_color) + "\n")
+        out.write("\n" + _format_bold("Step 3: Premise Invalidation & Re-evaluation", use_color) + "\n")
         out.write("-" * 60 + "\n")
         out.write("Now, FastMCP releases v2.0 which officially adds extra='forbid'.\n")
         out.write("A new decision or update invalidates the premise 'fastmcp-no-forbid'.\n\n")
@@ -200,7 +200,7 @@ FastMCP v2.0 added strict extra='forbid' validation. Premise fastmcp-no-forbid i
                 out.write(f"  Matched Alternative: {cf2.matched_alternative}\n")
                 out.write(f"  Rationale: {cf2.rationale}\n")
                 out.write(f"  Conflicts: {res2.conflicts}\n\n")
-                out.write(_format_green("RESULT: Bruriah detects drift and alerts that FastMCP is now viable!", use_color) + "\n")
+                out.write(_format_green("RESULT: Bruriah tracks premise invalidation and signals that FastMCP now requires reevaluation!", use_color) + "\n")
             else:
                 out.write("  No counterfactual assessment generated.\n")
 

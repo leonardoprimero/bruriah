@@ -168,6 +168,7 @@ CREATE TABLE premises (
     invalidated_by TEXT,
     rationale TEXT,
     document_ref TEXT NOT NULL,
+    invalidation_document_ref TEXT,
     FOREIGN KEY(document_ref) REFERENCES documents(document_ref)
 ) WITHOUT ROWID;
 CREATE INDEX idx_premises_doc ON premises(document_ref);
@@ -778,7 +779,7 @@ def _detect_lineage_cycles(lineage_records: list[tuple[str, str, str | None, str
 
 def _build_premise_and_alternative_records(
     documents: Sequence[Document],
-) -> tuple[list[tuple[str, str, str, str | None, str | None, str]], list[tuple[str, str, str, str, str]]]:
+) -> tuple[list[tuple[str, str, str, str | None, str | None, str, str | None]], list[tuple[str, str, str, str, str]]]:
     premises_map: dict[str, dict[str, Any]] = {}
     for doc in documents:
         for p in doc.metadata.premises:
@@ -792,6 +793,7 @@ def _build_premise_and_alternative_records(
                 "invalidated_by": p.get("invalidated_by"),
                 "rationale": p.get("rationale"),
                 "document_ref": doc.document_ref,
+                "invalidation_document_ref": None,
             }
 
     for doc in documents:
@@ -801,6 +803,7 @@ def _build_premise_and_alternative_records(
             if inv_id_clean in premises_map:
                 premises_map[inv_id_clean]["status"] = "invalidated"
                 premises_map[inv_id_clean]["invalidated_by"] = inv_by
+                premises_map[inv_id_clean]["invalidation_document_ref"] = doc.document_ref
             else:
                 premises_map[inv_id_clean] = {
                     "premise_id": inv_id_clean,
@@ -809,6 +812,7 @@ def _build_premise_and_alternative_records(
                     "invalidated_by": inv_by,
                     "rationale": "Invalidated by subsequent decision",
                     "document_ref": doc.document_ref,
+                    "invalidation_document_ref": doc.document_ref,
                 }
 
     premise_rows = [
@@ -819,6 +823,7 @@ def _build_premise_and_alternative_records(
             p["invalidated_by"],
             p["rationale"],
             p["document_ref"],
+            p.get("invalidation_document_ref"),
         )
         for p in premises_map.values()
     ]
@@ -987,7 +992,7 @@ def build_candidate(
         database.executemany("INSERT INTO lineage VALUES (?, ?, ?, ?)", lineage_records)
         premise_records, alternative_records = _build_premise_and_alternative_records(documents)
         if premise_records:
-            database.executemany("INSERT INTO premises VALUES (?, ?, ?, ?, ?, ?)", premise_records)
+            database.executemany("INSERT INTO premises VALUES (?, ?, ?, ?, ?, ?, ?)", premise_records)
         if alternative_records:
             database.executemany("INSERT INTO alternatives VALUES (?, ?, ?, ?, ?)", alternative_records)
         _build_lexical_index(database)

@@ -3,7 +3,7 @@
 **Author:** Leonardo Primero  
 **Project:** Bruriah (Evidence-Backed Project Memory for Coding Agents)  
 **Status:** Technical Report & Conference Whitepaper  
-**Reproducibility:** `evals/counterfactual/runner.py` (100% Verified)
+**Reproducibility:** `evals/counterfactual/runner.py` (Deterministic Correctness Suite)
 
 ---
 
@@ -13,7 +13,7 @@ Autonomous coding agents increasingly perform multi-file refactorings, dependenc
 
 We present **Counterfactual Architectural Memory & Premise Tracking**, an evidence-backed framework integrated into Git lineage graphs and local SQLite indices. By formalizing architectural rejections and contextual constraints as a premise calculus ($P \implies \text{disposition}(A)$), Bruriah dynamically determines whether a proposed task or code target matches a rejected alternative and verifies the validity of its supporting premises (`active`, `invalidated`, `uncertain`). 
 
-We evaluate this system against a 20-scenario benchmark spanning schema integrity, dependency bloat, security, concurrency, and performance. Standard agent retrieval achieves **0.0% regression detection**, treating rejected architectures as valid proposals. Bruriah achieves **100.0% precision and recall** in regression prevention and premise invalidation detection, with zero generative hallucination and zero expansion of its minimal two-tool Model Context Protocol (MCP) contract.
+We evaluate this system against a 20-scenario deterministic correctness suite spanning schema integrity, dependency bloat, security, concurrency, and performance. In this fixture suite, Bruriah deterministically identifies rejected architectural alternatives and invalidation states according to its relational rules, with zero generative hallucination and zero expansion of its minimal two-tool Model Context Protocol (MCP) contract.
 
 ---
 
@@ -61,7 +61,7 @@ Software architecture is inherently **counterfactual**: every concrete architect
                │ VERDICT:            │ │ VERDICT:            │
                │ Premise changed     │ │ Repeat of rejected  │
                │ Requires reeval     │ │ architecture        │
-               │ (Adoption allowed)  │ │ (REGRESSION BLOCKED)│
+               │ (Adoption allowed)  │ │ (REGRESSION FLAGGED)│
                └─────────────────────┘ └─────────────────────┘
 ```
 
@@ -169,16 +169,16 @@ When `investigate_work` runs, it executes counterfactual evaluation in sub-milli
 
 ---
 
-## 5. Empirical Evaluation: 20-Scenario Benchmark
+## 5. Evaluation: 20-Scenario Correctness Suite
 
-To measure the effectiveness of counterfactual memory, we developed an empirical benchmark suite (`evals/counterfactual/scenarios.jsonl`) comprising 20 real-world architectural regression challenges across five categories:
+To verify the deterministic correctness of counterfactual memory, we developed a fixture test suite (`evals/counterfactual/scenarios.jsonl`) comprising 20 architectural regression challenges across five categories:
 1. **Schema Integrity**: Enforcing closed contracts and strict serialization.
 2. **Dependency Bloat**: Preventing unnecessary third-party daemons or heavy transitive wheels.
 3. **Security & Privacy**: Enforcing zero-telemetry, offline sandboxing, and token protection.
 4. **Concurrency & Storage**: Multi-process SQLite locks and database durability.
 5. **Protocol Standards**: Adherence to MCP JSON-RPC standards over ad-hoc REST/GraphQL.
 
-### 5.1 Benchmark Results
+### 5.1 Correctness Suite Verification
 
 | Scenario ID | Category | Expected Verdict | Bruriah Verdict | Verification |
 |---|---|---|---|:---:|
@@ -203,15 +203,16 @@ To measure the effectiveness of counterfactual memory, we developed an empirical
 | `opentelemetry-collector-active` | Privacy & Offline | `repeat_of_rejected_architecture` | `repeat_of_rejected_architecture` | **PASS** |
 | `unassessed-redis-cache` | Simplicity | `unassessed_premise` | `unassessed_premise` | **PASS** |
 
-### 5.2 Comparative Analysis
+### 5.2 Structural Analysis & Limitations
 
-| Metric | Standard Agent Memory (Naive / RAG) | Bruriah Counterfactual Memory |
-|---|:---:|:---:|
-| **Regression Detection Rate** | 0.0% (0/20) | **100.0%** (20/20) |
-| **Premise Invalidation Awareness** | 0.0% (0/6) | **100.0%** (6/6) |
-| **Provenance Verification** | 0.0% (Text summaries without hash) | **100.0%** (SHA-256 + commit refs) |
-| **False Positive Rate** | N/A | **0.0%** |
-| **Tool Surface Overhead** | 5 to 55 MCP Tools | **0 New Tools** (Strict 2-Tool MCP) |
+Standard codebase RAG relies on lexical or embedding similarity against existing repository files. Because rejected architectural alternatives are deliberately absent from the main branch codebase, standard retrieval lacks any representation of discarded alternatives unless an ADR happens to match the embedding query. Even when an ADR text is retrieved, standard RAG cannot evaluate whether the premises justifying that rejection have since been invalidated by subsequent commits.
+
+Bruriah addresses this by representing alternatives and premises as first-class relational entities linked to Git lineage.
+
+#### Documented Limitations
+1. **Name-Based Alternative Matching**: The current matching engine performs case-insensitive substring search on alternative names (e.g., matching `"FastMCP"` in `"Migrate server to FastMCP"`). Queries that describe an alternative without naming it (e.g., *"use an in-memory cache"*) require future integration with semantic or synonym mapping.
+2. **Authoring Precondition**: Counterfactual tracking requires explicit authoring of rejected alternatives and premises in ADR frontmatter or Git commit trailers. Unrecorded historical discussions remain inaccessible.
+3. **Advisory Semantics**: Bruriah provides structured assessments and conflict flags inside `investigate_work`. It does not forcefully terminate or block external LLM client execution unless wrapped by an external host-level gate.
 
 ---
 
@@ -225,6 +226,7 @@ To measure the effectiveness of counterfactual memory, we developed an empirical
 
 ## 7. Conclusion
 
-Autonomous coding agents cannot be trusted with architectural leadership if they suffer from Architectural Amnesia. By anchoring memory in Git lineage and evaluating decisions as dynamic functions of their supporting premises, **Bruriah provides the first evidence-backed counterfactual memory system for AI coding agents**.
+Autonomous coding agents cannot be trusted with architectural leadership if they suffer from Architectural Amnesia. By anchoring memory in Git lineage and evaluating decisions as dynamic functions of their supporting premises, **Bruriah provides evidence-backed counterfactual memory for AI coding agents**.
 
-With 100% benchmark accuracy across 20 diverse architectural regression scenarios, Bruriah demonstrates that high-rigor memory does not require bloated vector infrastructure or chatty MCP interfaces—only formal discipline, immutable hashes, and respect for developer provenance.
+By verifying deterministic correctness across 20 diverse architectural regression scenarios, Bruriah demonstrates that high-rigor memory does not require bloated vector infrastructure or chatty MCP interfaces—only formal discipline, immutable hashes, and respect for developer provenance.
+

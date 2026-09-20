@@ -175,10 +175,19 @@ def build_dag_from_database(database: sqlite3.Connection) -> DAGData:
 
     if has_cf:
         try:
-            p_rows = database.execute(
-                "SELECT premise_id, statement, status, invalidated_by, rationale, document_ref FROM premises"
-            ).fetchall()
-            for pid, stmt, p_status, inv_by, rationale, d_ref in p_rows:
+            try:
+                p_rows = database.execute(
+                    "SELECT premise_id, statement, status, invalidated_by, rationale, document_ref, invalidation_document_ref FROM premises"
+                ).fetchall()
+            except sqlite3.OperationalError:
+                p_rows = [
+                    (*r, None)
+                    for r in database.execute(
+                        "SELECT premise_id, statement, status, invalidated_by, rationale, document_ref FROM premises"
+                    ).fetchall()
+                ]
+            for pid, stmt, p_status, inv_by, rationale, d_ref, _inv_d_ref in p_rows:
+
                 if d_ref not in doc_premises:
                     doc_premises[d_ref] = []
                 doc_premises[d_ref].append({

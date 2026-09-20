@@ -17,9 +17,10 @@ def test_run_demo_non_interactive():
     assert "Step 1: Storing Initial Architectural Decision" in output
     assert "Step 2: Agent Proposes Discarded Architecture" in output
     assert "🛑 VERDICT: repeat_of_rejected_architecture" in output
-    assert "Step 3: Premise Drift & Automated Re-evaluation" in output
+    assert "Step 3: Premise Invalidation & Re-evaluation" in output
     assert "🔄 VERDICT: premise_changed_requires_reevaluation" in output
     assert "Demo completed successfully!" in output
+
 
 
 def test_demo_cli_dispatch():

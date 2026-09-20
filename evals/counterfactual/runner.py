@@ -163,22 +163,16 @@ def print_summary(results: list[ScenarioResult]) -> None:
     passed = sum(1 for r in results if r.success)
     accuracy = (passed / total) * 100.0 if total else 0.0
 
-    print("\n# Counterfactual Architectural Memory Evaluation\n")
-    print(f"**Total Scenarios:** {total} | **Passed:** {passed} | **Accuracy:** {accuracy:.1f}%\n")
+    print("\n# Counterfactual Architectural Memory Correctness Suite\n")
+    print(f"**Total Fixture Scenarios:** {total} | **Passed:** {passed} | **Suite Status:** {'VERIFIED' if passed == total else 'FAILURES DETECTED'} ({accuracy:.1f}%)\n")
     print("| Scenario ID | Category | Expected Verdict | Actual Verdict | Result |")
     print("|---|---|---|---|:---:|")
     for r in results:
         status_icon = "PASS" if r.success else "FAIL"
         print(f"| `{r.scenario_id}` | {r.category} | `{r.expected_verdict}` | `{r.actual_verdict}` | {status_icon} |")
 
-    # Baseline comparison
-    print("\n## Comparative Analysis: Traditional Agent vs. Bruriah Counterfactual Memory\n")
-    print("| Metric | Standard Agent Memory (Naive / RAG) | Bruriah Counterfactual Memory |")
-    print("|---|:---:|:---:|")
-    print("| **Regression Detection Rate** | 0.0% (No rejected alternative tracking) | **100.0%** (20/20 detected) |")
-    print("| **Premise Invalidation Awareness** | 0.0% (Static or absent reasoning) | **100.0%** (Dynamic status check) |")
-    print("| **Provenance Verification** | 0.0% (Text summaries without hash) | **100.0%** (SHA-256 + commit refs) |")
-    print("| **False Positive Rate** | N/A | **0.0%** |")
+    print(f"\n{passed}/{total} deterministic fixture scenarios verified as expected.")
+
 
 
 if __name__ == "__main__":

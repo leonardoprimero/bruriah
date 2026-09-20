@@ -791,9 +791,10 @@ def _evaluate_counterfactual(
             f"Historical rejection of '{matched_alt.name}' questioned: premise '{inv_p.premise_id}' was invalidated by {inv_by}"
         )
 
-        if inv_p.document_ref and inv_p.document_ref != matched_alt.document_ref:
+        inv_doc = inv_p.invalidation_document_ref or inv_p.document_ref
+        if inv_doc and inv_doc != matched_alt.document_ref:
             try:
-                inv_passages = snapshot_repo.get_passages_by_document(inv_p.document_ref, limit=1)
+                inv_passages = snapshot_repo.get_passages_by_document(inv_doc, limit=1)
                 for p in inv_passages:
                     if p.ref not in supporting_refs:
                         supporting_refs.append(p.ref)

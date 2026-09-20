@@ -60,23 +60,19 @@ Standard retrieval pipelines fail here in three ways:
 
 ---
 
-## Counterfactual Memory & Professional Decision Records (PDR)
+## Counterfactual Architectural Memory & Premise Tracking
 
-Beyond code, critical professions (medicine, law, engineering, finance) suffer from **decision amnesia**: repeating discarded options without knowing why they were rejected, or persisting with outdated strategies after their foundational premises have collapsed.
+Autonomous coding agents systematically suffer from **Architectural Amnesia**: they can see what code currently exists, but cannot retrieve *why* specific alternative architectures were previously rejected, nor whether the empirical premises that justified those rejections remain valid. When prompted to modernize or refactor, agents frequently resurrect discarded patterns or reintroduce historical bugs.
 
-Bruriah's counterfactual engine tracks falsifiable premises and evaluated alternatives with 100% local, zero-cloud guarantees:
+Bruriah tracks evaluated alternatives and falsifiable premises directly in Git commit history and ADR frontmatter with 100% local, deterministic verification:
 
-- **Repeat Protection (`repeat_of_rejected_architecture`)**: Blocks agents from re-proposing previously rejected alternatives when premises remain active.
-- **Premise Drift Detection (`premise_changed_requires_reevaluation`)**: Flags when real-world conditions invalidate an underlying assumption, prompting timely reevaluation.
-- **Alternative Reactivation**: Surfaces discarded alternatives as viable as soon as their enabling conditions are met.
+- **Regression Prevention (`repeat_of_rejected_architecture`)**: Flags when an agent's task or proposed target matches a previously rejected alternative whose justifying premises remain active.
+- **Premise Invalidation Tracking (`premise_changed_requires_reevaluation`)**: Detects when subsequent commits invalidate a foundational premise, alerting the agent that a previously discarded alternative now requires re-evaluation.
+- **Contract Purity**: Evaluates counterfactuals in sub-millisecond relational queries without adding a third MCP tool or expanding the minimal two-tool contract.
 
-### Generic Template & Domain Examples
+👉 **Read the technical whitepaper**: [**Counterfactual Architectural Memory (`docs/counterfactual-paper.md`)**](docs/counterfactual-paper.md).  
+👉 **Domain examples & templates**: See [`templates/decision-record.template.md`](templates/decision-record.template.md) and [`examples/`](examples/).
 
-- 📄 **Generic Template**: [`templates/decision-record.template.md`](templates/decision-record.template.md) — Base schema for any decision-making discipline.
-- 🩺 **Clinical / Medical Example**: [`examples/clinical/`](examples/clinical/) — Treatment plan with renal clearance premises and acute impairment drift detection.
-- ⚖️ **Legal / Judicial Example**: [`examples/legal/`](examples/legal/) — Procedural nullity motion and settlement alternatives conditioned on expert standing.
-
-👉 **Read the technical whitepaper**: [**Counterfactual Architectural Memory (`docs/counterfactual-paper.md`)**](docs/counterfactual-paper.md).
 
 ---
 

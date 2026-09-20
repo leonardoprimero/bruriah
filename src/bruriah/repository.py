@@ -77,6 +77,7 @@ class PremiseRow:
     invalidated_by: str | None
     rationale: str | None
     document_ref: str
+    invalidation_document_ref: str | None = None
 
 
 def parse_heading_path(raw: str) -> tuple[str, ...]:
@@ -409,7 +410,7 @@ class SnapshotRepository:
             return {}
         try:
             rows = self._db.execute(
-                "SELECT premise_id, statement, status, invalidated_by, rationale, document_ref FROM premises"
+                "SELECT premise_id, statement, status, invalidated_by, rationale, document_ref, invalidation_document_ref FROM premises"
             ).fetchall()
             return {
                 r[0]: PremiseRow(
@@ -419,6 +420,7 @@ class SnapshotRepository:
                     invalidated_by=r[3],
                     rationale=r[4],
                     document_ref=r[5],
+                    invalidation_document_ref=r[6],
                 )
                 for r in rows
             }
