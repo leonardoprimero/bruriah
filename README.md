@@ -60,6 +60,26 @@ Standard retrieval pipelines fail here in three ways:
 
 ---
 
+## Counterfactual Memory & Professional Decision Records (PDR)
+
+Beyond code, critical professions (medicine, law, engineering, finance) suffer from **decision amnesia**: repeating discarded options without knowing why they were rejected, or persisting with outdated strategies after their foundational premises have collapsed.
+
+Bruriah's counterfactual engine tracks falsifiable premises and evaluated alternatives with 100% local, zero-cloud guarantees:
+
+- **Repeat Protection (`repeat_of_rejected_architecture`)**: Blocks agents from re-proposing previously rejected alternatives when premises remain active.
+- **Premise Drift Detection (`premise_changed_requires_reevaluation`)**: Flags when real-world conditions invalidate an underlying assumption, prompting timely reevaluation.
+- **Alternative Reactivation**: Surfaces discarded alternatives as viable as soon as their enabling conditions are met.
+
+### Generic Template & Domain Examples
+
+- 📄 **Generic Template**: [`templates/decision-record.template.md`](templates/decision-record.template.md) — Base schema for any decision-making discipline.
+- 🩺 **Clinical / Medical Example**: [`examples/clinical/`](examples/clinical/) — Treatment plan with renal clearance premises and acute impairment drift detection.
+- ⚖️ **Legal / Judicial Example**: [`examples/legal/`](examples/legal/) — Procedural nullity motion and settlement alternatives conditioned on expert standing.
+
+👉 **Read the technical whitepaper**: [**Counterfactual Architectural Memory (`docs/counterfactual-paper.md`)**](docs/counterfactual-paper.md).
+
+---
+
 ## 2. How It Works: The Two-Tool Contract
 
 Bruriah exposes **exactly two read-only MCP tools**, enforcing a clean boundary between finding evidence and trusting it:
