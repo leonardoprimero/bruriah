@@ -365,6 +365,41 @@ Recommendations:
 
 ---
 
+### Architectural Guard & Compliance Receipts: `bruriah guard`
+
+Whether code is written by human engineers or AI agents (Claude Code, Cursor, Gentle-AI, Antigravity), `bruriah guard` acts as the authoritative gatekeeper enforcing architectural governance:
+
+```bash
+bruriah guard src/bruriah/auth.py               # Inspect compliance of target
+bruriah guard origin/main...HEAD --strict       # Block on any drift (exit 1)
+bruriah guard src/bruriah/auth.py --agent       # Emit prompt context for AI agents
+bruriah guard origin/main...HEAD --receipt      # Generate cryptographic compliance receipt (RDD)
+bruriah guard origin/main...HEAD --receipt --engram  # Optionally sync receipt to .engram/ memory
+```
+
+Output:
+
+```text
+🏛️  Bruriah Architectural Guard — src/bruriah/auth.py
+   Status: ✅ PASSED · 1 file(s) · 1 contract(s) · 0 violation(s)
+
+Active Architectural Contracts:
+  • Unified Token and Session Model (22222222)
+    ↳ Maintain alignment with decision 'Unified Token and Session Model' (22222222).
+    ↳ Co-governs 2 other file(s): src/bruriah/tokens.py, src/bruriah/session.py.
+
+Compliance Receipt (RDD):
+  • Status: COMPLIANT
+  • Digest: 3a7f89b1c0d4e5f6...
+```
+
+#### Key Capabilities:
+1. **AI Agent Context Injection (`--agent`)**: Outputs a clean, structured Markdown prompt listing active directives and prohibitions for the files under modification, grounding coding agents in architectural truth *before* they write code.
+2. **Deterministic Compliance Receipts (RDD)**: Emits a verifiable, SHA-256 hashed `receipt` linking inspected files, governing decision SHAs, and timestamp to prove that changes comply with project architecture.
+3. **Optional Engram Bridge (`--engram`)**: When explicitly passed, syncs the compliance receipt into `.engram/compliance-receipt.json` for teams using Gentle-AI/Engram workflows (disabled by default; 100% standalone otherwise).
+
+---
+
 
 ### Causal Archaeology for Coding Agents (MCP)
 

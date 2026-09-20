@@ -409,6 +409,46 @@ def build_cli_parser(
         default=Path("."),
         help="git repository root (default '.')",
     )
+    guard_parser = add(
+        "guard",
+        "Enforce architectural governance on code targets or diffs, generate compliance receipts, and guide AI agents.",
+    )
+    guard_parser.add_argument(
+        "target",
+        type=str,
+        help="file, directory, or git revision range (e.g. 'src/auth.py', 'src/core/', 'origin/main...HEAD')",
+    )
+    guard_parser.add_argument(
+        "--strict",
+        action="store_true",
+        help="treat all architectural drift warnings as blocking vetos (exit 1)",
+    )
+    guard_parser.add_argument(
+        "--receipt",
+        action="store_true",
+        help="generate a deterministic compliance receipt (RDD)",
+    )
+    guard_parser.add_argument(
+        "--engram",
+        action="store_true",
+        help="sync compliance receipt to .engram/ memory (strictly optional, disabled by default)",
+    )
+    guard_parser.add_argument(
+        "--json",
+        action="store_true",
+        help="render output as JSON",
+    )
+    guard_parser.add_argument(
+        "--agent",
+        action="store_true",
+        help="print only the prompt context snippet formatted for AI agent injection",
+    )
+    guard_parser.add_argument(
+        "--repo",
+        type=Path,
+        default=Path("."),
+        help="git repository root (default '.')",
+    )
     index_parser = add("index", "Build and promote a candidate index.")
     index_parser.add_argument("--corpus-root", type=Path, required=True)
     index_parser.add_argument("--policy", type=Path, required=True)

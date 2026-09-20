@@ -62,6 +62,7 @@ from .ui import UIError, run_ui
 from .lens import LensError, format_lens_human, format_lens_json, run_lens
 from .bootstrap import BootstrapError, run_bootstrap
 from .impact import ImpactError, format_impact_human, format_impact_json, run_impact
+from .guard import GuardError, format_guard_human, format_guard_json, run_guard
 from .service import ServiceDeps, investigate, read
 from .why import WhyError, format_why_human, format_why_json, run_why
 
@@ -1030,6 +1031,34 @@ def _cmd_impact(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_guard(args: argparse.Namespace) -> int:
+    paths = _resolve_paths(args)
+    repo = find_project_root(args.repo.resolve())
+
+    try:
+        result = run_guard(
+            paths,
+            repo,
+            args.target,
+            strict=args.strict,
+            receipt=args.receipt,
+            engram=getattr(args, "engram", False),
+        )
+    except GuardError as error:
+        raise CliError(error.code) from error
+
+    if args.agent:
+        print(result.agent_context)
+    elif args.json:
+        print(format_guard_json(result))
+    else:
+        print(format_guard_human(result))
+
+    if result.status == "VETOED" or (args.strict and result.status == "WARNING"):
+        return 1
+    return 0
+
+
 def _cmd_setup(args: argparse.Namespace) -> int:
     paths = _resolve_paths(args)
     manifest = _build_launch_manifest(paths)
@@ -1150,6 +1179,7 @@ def _build_cli_parser() -> argparse.ArgumentParser:
             "lens": _cmd_lens,
             "bootstrap": _cmd_bootstrap,
             "impact": _cmd_impact,
+            "guard": _cmd_guard,
             "index": _cmd_index,
             "index-prune": _cmd_index_prune,
             "serve": _cmd_serve,
