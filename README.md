@@ -55,6 +55,8 @@ Standard retrieval pipelines fail here in three ways:
 
 **Bruriah provides causal memory for your codebase:** it tracks the *why* behind code, traverses supersession lineage, and gives agents immutable, verified evidence without letting unvetted text instruct the model.
 
+👉 **See a concrete scenario:** [**Real-World Case Study: Preventing Architectural Regressions (`docs/case-study.md`)**](docs/case-study.md).
+
 ---
 
 ## 2. How It Works: The Two-Tool Contract
