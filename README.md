@@ -25,10 +25,11 @@
 ## Quickstart in 60 Seconds
 
 ```bash
-pip install bruriah          # Linux, macOS, or Windows
+pip install bruriah          # Linux, macOS or Windows
 
 # Inside your git repository:
-bruriah init --repo .        # auto-indexes git history & writes MCP config
+B=~/.bruriah/myproject       # one directory per project, outside the repo
+bruriah init --repo . --data-dir "$B/data" --config-dir "$B/config"
 ```
 
 Ask it something from your terminal before wiring up any client:
