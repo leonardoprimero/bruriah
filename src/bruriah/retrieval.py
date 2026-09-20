@@ -11,15 +11,13 @@
 from __future__ import annotations
 
 import json
-import math
 import re
 import sqlite3
 import time
-from array import array
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 
-from . import language
+from . import language, ranking
 from .contracts import Budgets, EvidenceRecord
 from .index import ActiveSnapshot
 
@@ -29,9 +27,9 @@ EmbedQuery = Callable[[str], bytes]
 # and its licence are the operator's choice, and retrieval must stay importable without either.
 Rerank = Callable[[str, list[str]], list[float]]
 _TOKEN_PATTERN = re.compile(r"\w+", re.UNICODE)
-_BM25_K1 = 1.5
-_BM25_B = 0.75
-_RRF_K = 60
+_BM25_K1 = ranking.BM25_K1
+_BM25_B = ranking.BM25_B
+_RRF_K = ranking.RRF_K
 
 # How much the lexical leg still counts when the query language does not match the corpus.
 #
@@ -44,7 +42,7 @@ _RRF_K = 60
 # The sweep (evals/project-memory) reads 1.0 -> 33%, 0.5 -> 50%, 0.25 -> 50%, 0.1 -> 58%, 0 -> 58%.
 # Anything at or below 0.25 recovers most of the loss, and the gap between 0.25 and 0.1 is a SINGLE
 # question out of twelve -- noise at this sample size, and not the reason for the choice.
-_CROSS_LINGUAL_LEXICAL_WEIGHT = 0.1
+_CROSS_LINGUAL_LEXICAL_WEIGHT = ranking.CROSS_LINGUAL_LEXICAL_WEIGHT
 
 # Corpus language is decided from a bounded, deterministic sample: passages arrive ordered by ref,
 # so the same snapshot yields the same verdict without scanning every byte on every query.
@@ -219,10 +217,7 @@ def _hydrate_passages(
     return hydrated
 
 
-def _ranked(scored: list[tuple[float, str]]) -> dict[str, int]:
-    # Ties break on ascending `ref`, which is stable across processes and hash seeds.
-    ordered = sorted(scored, key=lambda item: (-item[0], item[1]))
-    return {ref: rank for rank, (_, ref) in enumerate(ordered, start=1)}
+_ranked = ranking.ranked
 
 
 def _bm25_ranks(
@@ -241,51 +236,18 @@ def _bm25_ranks(
         # score terms it was handed, and a child section does not contain its parents' words.
         tokenized.append(_tokenize(passage.search_text))
 
-    lengths = [len(tokens) for tokens in tokenized]
-    if not lengths:
-        return {}, stopped
-    average_length = sum(lengths) / len(lengths)
-
-    document_frequency: dict[str, int] = {}
-    for tokens in tokenized:
-        for term in set(tokens):
-            document_frequency[term] = document_frequency.get(term, 0) + 1
-
-    total_documents = len(tokenized)
-    terms = set(query_tokens)
-    idfs = {
-        term: math.log(1 + (total_documents - document_frequency[term] + 0.5) / (document_frequency[term] + 0.5))
-        for term in terms
-        if term in document_frequency
-    }
-    k1_plus_1 = _BM25_K1 + 1
-    b_part = 1 - _BM25_B
-    b_over_avg = _BM25_B / average_length if average_length > 0 else 0.0
-    scored: list[tuple[float, str]] = []
-    # The deadline can truncate `tokenized` independently of `passages`, so score only the prefix
-    # that was actually tokenized. Zipping the full `passages` under strict= would raise a bare
-    # ValueError from the iterator advance, before this loop's own deadline check could run.
-    scorable = passages[: len(tokenized)]
-    for position, (passage, tokens, length) in enumerate(zip(scorable, tokenized, lengths, strict=True)):
-        if _expired(position, deadline, clock):
-            stopped = True
-            break
-        if length == 0 or average_length == 0:
-            continue
-        counts: dict[str, int] = {}
-        for token in tokens:
-            counts[token] = counts.get(token, 0) + 1
-        total = 0.0
-        len_factor = _BM25_K1 * (b_part + length * b_over_avg)
-        for term, idf in idfs.items():
-            frequency = counts.get(term, 0)
-            if frequency == 0:
-                continue
-            denominator = frequency + len_factor
-            total += idf * (frequency * k1_plus_1) / denominator
-        if total > 0:
-            scored.append((total, passage.ref))
-    return _ranked(scored), stopped
+    refs = [passage.ref for passage in passages[: len(tokenized)]]
+    ranks, score_stopped = ranking.bm25_scores_from_tokens(
+        tokenized=tokenized,
+        refs=refs,
+        query_tokens=query_tokens,
+        deadline=deadline,
+        clock=clock,
+        is_expired=_expired,
+        k1=_BM25_K1,
+        b=_BM25_B,
+    )
+    return ranks, stopped or score_stopped
 
 
 def _has_lexical_index(database: sqlite3.Connection) -> bool:
@@ -331,48 +293,27 @@ def _bm25_indexed_ranks(
     if not dfs:
         return {}, False
 
-    idfs = {
-        term: math.log(
-            1 + (total_documents - df + 0.5) / (df + 0.5)
-        )
-        for term, df in dfs.items()
-    }
-
-    k1_plus_1 = _BM25_K1 + 1
-    b_part = 1 - _BM25_B
-    b_over_avg = _BM25_B / average_length
-
-    query_terms = sorted(idfs.keys())
+    query_terms = sorted(dfs.keys())
     postings_placeholders = ", ".join("?" for _ in query_terms)
     cursor = database.execute(
         f"SELECT term, ref, freq, doc_length FROM term_postings WHERE term IN ({postings_placeholders}) ORDER BY term, ref",
         query_terms,
     )
 
-    scores: dict[str, float] = {}
-    stopped = False
-    for position, (term, ref, freq, doc_length) in enumerate(cursor):
-        if _expired(position, deadline, clock):
-            stopped = True
-            break
-        if doc_length == 0:
-            continue
-        idf = idfs[term]
-        len_factor = _BM25_K1 * (b_part + doc_length * b_over_avg)
-        denominator = freq + len_factor
-        scores[ref] = scores.get(ref, 0.0) + idf * (freq * k1_plus_1) / denominator
-
-    scored = [(score, ref) for ref, score in scores.items() if score > 0]
-    return _ranked(scored), stopped
+    return ranking.bm25_scores_from_postings(
+        total_documents=total_documents,
+        average_length=average_length,
+        dfs=dfs,
+        postings=cursor,
+        deadline=deadline,
+        clock=clock,
+        is_expired=_expired,
+        k1=_BM25_K1,
+        b=_BM25_B,
+    )
 
 
-def _floats(blob: bytes) -> array | None:
-    values = array("f")
-    try:
-        values.frombytes(blob)
-    except (ValueError, TypeError):
-        return None
-    return values
+_floats = ranking.floats
 
 
 def _vector_ranks(
@@ -381,40 +322,17 @@ def _vector_ranks(
     deadline: float,
     clock: Callable[[], float],
 ) -> tuple[dict[str, int] | None, bool]:
-    query = _floats(query_vector)
-    if query is None or not len(query):
-        return None, False
-    query_norm = math.sqrt(sum(value * value for value in query))
-    if query_norm == 0:
-        return None, False
-
-    inv_query_norm = 1.0 / query_norm
-    norm_query = tuple(value * inv_query_norm for value in query)
-    dimensions = len(norm_query)
-    scored: list[tuple[float, str]] = []
-    stopped = False
-    for position, item in enumerate(passages):
-        if _expired(position, deadline, clock):
-            stopped = True
-            break
-        # A single corrupt or drifted vector must cost only its own candidate, never the leg.
-        if isinstance(item, _Passage):
-            ref = item.ref
-            vec = item.vector
-        else:
-            ref, vec = item
-        candidate = _floats(vec)
-        if candidate is None or len(candidate) != dimensions:
-            continue
-        dot = 0.0
-        candidate_sum_sq = 0.0
-        for q_val, c_val in zip(norm_query, candidate, strict=True):
-            dot += q_val * c_val
-            candidate_sum_sq += c_val * c_val
-        if candidate_sum_sq == 0.0:
-            continue
-        scored.append((dot / math.sqrt(candidate_sum_sq), ref))
-    return _ranked(scored), stopped
+    items: list[tuple[str, bytes]] = [
+        (item.ref, item.vector) if isinstance(item, _Passage) else item
+        for item in passages
+    ]
+    return ranking.vector_ranks(
+        items=items,
+        query_vector=query_vector,
+        deadline=deadline,
+        clock=clock,
+        is_expired=_expired,
+    )
 
 
 def _corpus_language(passages: list[_Passage]) -> str | None:
@@ -447,29 +365,7 @@ def _detect_corpus_language(
     return language.dominant(text[:_LANGUAGE_SAMPLE_CHARS] for text, in sample_rows)
 
 
-def _fuse(
-    lexical_ranks: dict[str, int] | None, vector_ranks: dict[str, int] | None,
-    lexical_weight: float = 1.0,
-) -> list[tuple[str, int | None, int | None]]:
-    """Reciprocal-rank fusion, with the lexical leg's contribution scalable.
-
-    `lexical_weight` exists for one measured reason. Asked in Spanish against an English corpus,
-    the vector leg alone reaches 58% recall@3 and the equal-weight fusion reaches 33%: BM25 cannot
-    match across languages, so it contributes rank noise that drags correct documents out of the
-    top three. Asked in English the same leg is the STRONGER one (83% against 58%), so it cannot
-    simply be removed -- only discounted where it is known not to apply.
-    """
-    lexical_ranks = lexical_ranks or {}
-    vector_ranks = vector_ranks or {}
-    fused: list[tuple[float, str, int | None, int | None]] = []
-    for ref in set(lexical_ranks) | set(vector_ranks):
-        lexical_rank, vector_rank = lexical_ranks.get(ref), vector_ranks.get(ref)
-        score = (lexical_weight / (_RRF_K + lexical_rank) if lexical_rank is not None else 0.0) + (
-            1.0 / (_RRF_K + vector_rank) if vector_rank is not None else 0.0
-        )
-        fused.append((score, ref, lexical_rank, vector_rank))
-    fused.sort(key=lambda item: (-item[0], item[1]))
-    return [(ref, lexical_rank, vector_rank) for _, ref, lexical_rank, vector_rank in fused]
+_fuse = ranking.fuse_ranks
 
 
 def _document_text(passages: list[_Passage], fused_position: dict[str, int]) -> str:
