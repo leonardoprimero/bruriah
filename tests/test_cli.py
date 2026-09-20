@@ -586,6 +586,42 @@ def test_build_serve_deps_dimension_mismatch_is_a_typed_fail_closed_error(tmp_pa
     assert error.value.code == "embedding_model_mismatch"
 
 
+def test_build_serve_deps_queries_with_the_snapshots_own_model_not_the_current_default(
+    tmp_path: Path,
+) -> None:
+    """An index built under model A keeps working after the CLI's default embedding model
+    changes to B: `build_serve_deps` must construct its query embedder from the model recorded
+    in the active snapshot's own build descriptor (`load_build_descriptor`), never from
+    `DEFAULT_EMBEDDING_MODEL`. This is what makes the 2026-09-20 default swap
+    (`sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2` -> `jinaai/jina-embeddings-v2-
+    base-es`) safe for every index built before it: existing snapshots keep the model they were
+    built with, they do not silently start being queried with the new default."""
+    from bruriah._cli.common import DEFAULT_EMBEDDING_MODEL
+
+    root, policy_path = _corpus(tmp_path)
+    paths = _paths(tmp_path)
+    built_with_model = "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
+    assert built_with_model != DEFAULT_EMBEDDING_MODEL  # the whole point of this test
+
+    cli.run_index(
+        paths, root, policy_path, model_name=built_with_model,
+        embedder_factory=_fake_embedder_factory,
+    )
+
+    requested_models: list[str] = []
+
+    def recording_embedder_factory(model_name: str) -> tuple[cli.Embedder, str, int]:
+        requested_models.append(model_name)
+        return _fake_embedder_factory(model_name)
+
+    deps = cli.build_serve_deps(paths, embedder_factory=recording_embedder_factory)
+    try:
+        assert requested_models == [built_with_model]
+        assert DEFAULT_EMBEDDING_MODEL not in requested_models
+    finally:
+        deps.snapshot.database.close()
+
+
 def test_load_deps_default_embed_query_stays_none_doctor_path_light(tmp_path: Path) -> None:
     """`platform.load_deps`'s own default (no `embed_query` argument) must stay `None` -- doctor
     (and any caller that doesn't opt in) never triggers a model load."""
