@@ -516,7 +516,7 @@ Add Bruriah to your `.pre-commit-config.yaml`:
 ```yaml
 repos:
   - repo: https://github.com/leonardoprimero/bruriah
-    rev: v0.9.4
+    rev: v1.0.0
     hooks:
       - id: bruriah-drift
 ```
