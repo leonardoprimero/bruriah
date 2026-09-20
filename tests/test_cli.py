@@ -1635,6 +1635,24 @@ def test_init_index_watch_parsers_share_the_default_embedding_model_constant() -
     assert watch_args.model == DEFAULT_EMBEDDING_MODEL
 
 
+@pytest.mark.parametrize("subcommand", ["init", "index", "watch"])
+def test_help_text_shows_the_default_embedding_model(
+    subcommand: str, capsys: pytest.CaptureFixture,
+) -> None:
+    """`bruriah <subcommand> --help` must show `DEFAULT_EMBEDDING_MODEL` in its `--model` help
+    text, not just as an invisible argparse default -- an operator reading `--help` should not
+    have to read the source to find out what model `bruriah` will actually use."""
+    from bruriah._cli.common import DEFAULT_EMBEDDING_MODEL
+
+    parser = cli._build_cli_parser()
+    with pytest.raises(SystemExit):
+        parser.parse_args([subcommand, "--help"])
+    # argparse wraps long help lines -- including mid-word, e.g. "jina-\nembeddings-v2-base-es" --
+    # so compare with ALL whitespace stripped rather than a raw substring match.
+    normalized = "".join(capsys.readouterr().out.split())
+    assert DEFAULT_EMBEDDING_MODEL in normalized
+
+
 def test_resolve_model_prefixes_bge_v1_5_variants_get_the_instruction_prefix() -> None:
     """`BAAI/bge-*-en-v1.5` -- the actual model names the ablation indexed with -- must resolve
     the same instruction prefix as the unversioned `BAAI/bge-*-en` entries already did."""

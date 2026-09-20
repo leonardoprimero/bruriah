@@ -3,7 +3,35 @@
 Notable changes, newest first. This project follows [semantic versioning](https://semver.org/),
 and the entries here name what changed for *you* rather than which files moved.
 
-## [Unreleased]
+## [1.4.0] — 2026-09-20
+
+### Changed: Default embedding model is now `jina-embeddings-v2-base-es`
+- The 2026-09-20 embedder ablation (`evals/project-memory/README.md`, "The embedder was the
+  bottleneck") measured four candidates on two external corpora (`square/leakcanary`, `emilk/egui`,
+  236 questions) and this project's own bilingual history (204 documents, 24 questions):
+  `jinaai/jina-embeddings-v2-base-es` is the only one that improves recall@3 in BOTH languages.
+  Combined external recall@3 goes 0.373 -> 0.436 (McNemar p=0.0081); own-history Spanish recall@3
+  goes 0.500 -> 0.750. Two English-only `bge-v1.5` candidates scored higher on the external
+  corpora but regressed own-history Spanish recall@3 below the old default (0.333 and 0.417
+  against 0.500), even with bge's recommended instruction prefix applied -- not a safe default
+  swap for a bilingual tool, so they stay available via `--model` but are not the default.
+- **Existing indexes are unaffected.** The embedding model is pinned per snapshot
+  (`embedding_model` in the build descriptor) and query-time embedding is always built from that
+  recorded model, fail-closed against a mismatch, never from the CLI's current default -- pinned
+  by a new regression test (`test_build_serve_deps_queries_with_the_snapshots_own_model_not_the_
+  current_default` in `tests/test_cli.py`). Nothing needs to be re-indexed to keep working; a
+  fresh `bruriah init`/`bruriah index` picks up the new default.
+- **Stated plainly:** the new default downloads a larger model on first use (~614 MB measured, up
+  from ~0.22 GB) and indexing is roughly 6-7x slower (measured: an `emilk/egui`-sized corpus went
+  from 33s to 242s). Query latency and index size on disk are within a few percent of before. See
+  the evals report for the full measurement, including index-time and index-size tables.
+- Fixed the registry gap the ablation exposed: `KNOWN_MODEL_PREFIXES` (`_cli/common.py`) listed
+  `BAAI/bge-base-en`/`bge-small-en` but not the `-v1.5` names these models are actually released
+  as, so `bge-*-v1.5` ran without its recommended instruction prefix unless passed explicitly.
+  Also adds the `jina-embeddings-v2-*` entries.
+- Every argparse `--model` default (`init`, `index`, `watch`) and the two internal call sites that
+  used to hardcode the model name now read one `DEFAULT_EMBEDDING_MODEL` constant, so they cannot
+  drift apart again.
 
 ### Fixed: Ranking calibrated back to its measured default
 - `RRF_K` is back to 60, the literature default and the value every published recall/MRR number
