@@ -9,7 +9,7 @@ import sqlite3
 import webbrowser
 from dataclasses import asdict, dataclass, field
 from http.server import HTTPServer, BaseHTTPRequestHandler
-from typing import TYPE_CHECKING
+from typing import Any, TYPE_CHECKING
 
 if TYPE_CHECKING:
     from .platform import PlatformPaths

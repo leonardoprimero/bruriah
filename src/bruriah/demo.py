@@ -1,13 +1,13 @@
 """Interactive terminal demonstration of Bruriah's Counterfactual Memory engine."""
 from __future__ import annotations
 
-import argparse
 import json
 import sys
 import tempfile
 from array import array
 from datetime import date
 from pathlib import Path
+from typing import Any
 
 from .contracts import InvestigationRequest
 from .corpus import CorpusPolicy
