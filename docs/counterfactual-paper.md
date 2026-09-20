@@ -2,7 +2,7 @@
 
 **Author:** Leonardo Primero  
 **Project:** Bruriah (Evidence-Backed Project Memory for Coding Agents)  
-**Status:** Technical Report & Conference Whitepaper  
+**Status:** Technical Report — single-author, self-evaluated on the fixture suite in `evals/counterfactual/`; not peer reviewed  
 **Reproducibility:** `evals/counterfactual/runner.py` (Deterministic Correctness Suite)
 
 ---

@@ -70,7 +70,7 @@ Bruriah tracks evaluated alternatives and falsifiable premises directly in Git c
 - **Premise Invalidation Tracking (`premise_changed_requires_reevaluation`)**: Detects when subsequent commits invalidate a foundational premise, alerting the agent that a previously discarded alternative now requires re-evaluation.
 - **Contract Purity**: Evaluates counterfactuals in sub-millisecond relational queries without adding a third MCP tool or expanding the minimal two-tool contract.
 
-👉 **Read the technical whitepaper**: [**Counterfactual Architectural Memory (`docs/counterfactual-paper.md`)**](docs/counterfactual-paper.md).  
+👉 **Read the technical report**: [**Counterfactual Architectural Memory (`docs/counterfactual-paper.md`)**](docs/counterfactual-paper.md).  
 👉 **Domain examples & templates**: See [`templates/decision-record.template.md`](templates/decision-record.template.md) and [`examples/`](examples/).
 
 
@@ -179,7 +179,7 @@ We evaluate Bruriah against real codebases and publish negative results alongsid
 | **Own-History Retrieval (24 questions)** | English recall@3 **0.750** · recall@10 0.917 | 178-document corpus of Bruriah's own git history |
 | **Query Latency** | **≈46µs per passage** (linear) | 1,000 passages in 45ms, 16,000 in 734ms on M4 Pro |
 | **Index Size** | **≈5 KB per passage** | 16k passages ≈ 79 MB SQLite database |
-| **Test Suite** | **1,087 passed** (0 failures) | Full matrix on Python 3.12, 3.13, 3.14 across Linux, macOS, and Windows |
+| **Test Suite** | **1,369 tests** · 0 failures · skips only when an environment prerequisite is absent | Full matrix on Python 3.12, 3.13, 3.14 across Linux, macOS, and Windows |
 
 > **Want the full methodology and ablations?**  
 > Read our in-depth evaluation report: [**Evaluation Methodology & Benchmarks (`evals/project-memory/README.md`)**](evals/project-memory/README.md).
