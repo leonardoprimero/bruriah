@@ -2,9 +2,13 @@
 # snapshot database (passages, documents, lineage).
 from __future__ import annotations
 
+import json
 import sqlite3
+from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass
 from typing import Any
+
+from . import language, ranking
 
 
 class RepositoryError(Exception):
@@ -35,11 +39,36 @@ class PassageContent:
 
 
 @dataclass(frozen=True)
+class PassageRecord:
+    ref: str
+    document_ref: str
+    relative_path: str
+    heading_path: tuple[str, ...]
+    start_line: int
+    end_line: int
+    text: str
+    search_text: str
+    source_hash: str
+    vector: bytes
+
+
+@dataclass(frozen=True)
 class LineageRelation:
     successor_ref: str
     predecessor_target: str
     predecessor_ref: str
     relation: str
+
+
+def parse_heading_path(raw: str) -> tuple[str, ...]:
+    """Parse JSON heading path array from database into a tuple of strings."""
+    try:
+        parsed = json.loads(raw)
+    except json.JSONDecodeError as error:
+        raise RepositoryError("corrupt_snapshot_metadata") from error
+    if not isinstance(parsed, list) or any(not isinstance(item, str) for item in parsed):
+        raise RepositoryError("corrupt_snapshot_metadata")
+    return tuple(parsed)
 
 
 class SnapshotRepository:
@@ -51,6 +80,170 @@ class SnapshotRepository:
     @property
     def database(self) -> sqlite3.Connection:
         return self._db
+
+    def has_lexical_index(self) -> bool:
+        """Check whether precomputed lexical index tables exist."""
+        try:
+            row = self._db.execute(
+                "SELECT count(*) FROM sqlite_master WHERE type='table' AND name IN ('corpus_stats', 'term_df', 'term_postings')"
+            ).fetchone()
+            return bool(row and row[0] == 3)
+        except sqlite3.Error:
+            return False
+
+    def scan_passages(
+        self,
+        deadline: float,
+        clock: Callable[[], float],
+        is_expired: Callable[[int, float, Callable[[], float]], bool] = ranking.default_expired,
+    ) -> tuple[list[PassageRecord], bool]:
+        """Scan all passages ordered by ref, bounded by deadline."""
+        try:
+            rows = self._db.execute(
+                "SELECT ref, document_ref, relative_path, heading_path, start_line, end_line, "
+                "text, search_text, source_hash, vector FROM passages ORDER BY ref"
+            )
+            passages: list[PassageRecord] = []
+            stopped = False
+            for position, row in enumerate(rows):
+                if is_expired(position, deadline, clock):
+                    stopped = True
+                    break
+                (
+                    ref, document_ref, relative_path, heading_json, start_line, end_line, text,
+                    search_text, source_hash, vector,
+                ) = row
+                passages.append(
+                    PassageRecord(
+                        ref=ref,
+                        document_ref=document_ref,
+                        relative_path=relative_path,
+                        heading_path=parse_heading_path(heading_json),
+                        start_line=start_line,
+                        end_line=end_line,
+                        text=text,
+                        search_text=search_text,
+                        source_hash=source_hash,
+                        vector=vector,
+                    )
+                )
+            return passages, stopped
+        except sqlite3.DatabaseError as error:
+            raise RepositoryError("snapshot_unreadable") from error
+
+    def scan_vectors(
+        self,
+        deadline: float,
+        clock: Callable[[], float],
+        is_expired: Callable[[int, float, Callable[[], float]], bool] = ranking.default_expired,
+    ) -> tuple[list[tuple[str, bytes]], bool]:
+        """Scan candidate vectors (ref, vector) ordered by ref, bounded by deadline."""
+        try:
+            rows = self._db.execute("SELECT ref, vector FROM passages ORDER BY ref")
+            vectors: list[tuple[str, bytes]] = []
+            stopped = False
+            for position, (ref, vector) in enumerate(rows):
+                if is_expired(position, deadline, clock):
+                    stopped = True
+                    break
+                vectors.append((ref, vector))
+            return vectors, stopped
+        except sqlite3.DatabaseError as error:
+            raise RepositoryError("snapshot_unreadable") from error
+
+    def hydrate_passages(self, refs: Sequence[str]) -> dict[str, PassageRecord]:
+        """Hydrate full PassageRecord for specific refs."""
+        if not refs:
+            return {}
+        placeholders = ", ".join("?" for _ in refs)
+        try:
+            rows = self._db.execute(
+                f"SELECT ref, document_ref, relative_path, heading_path, start_line, end_line, "
+                f"text, search_text, source_hash, vector FROM passages WHERE ref IN ({placeholders})",
+                list(refs),
+            )
+            hydrated: dict[str, PassageRecord] = {}
+            for row in rows:
+                (
+                    ref, document_ref, relative_path, heading_json, start_line, end_line, text,
+                    search_text, source_hash, vector,
+                ) = row
+                hydrated[ref] = PassageRecord(
+                    ref=ref,
+                    document_ref=document_ref,
+                    relative_path=relative_path,
+                    heading_path=parse_heading_path(heading_json),
+                    start_line=start_line,
+                    end_line=end_line,
+                    text=text,
+                    search_text=search_text,
+                    source_hash=source_hash,
+                    vector=vector,
+                )
+            return hydrated
+        except sqlite3.DatabaseError as error:
+            raise RepositoryError("snapshot_unreadable") from error
+
+    def get_corpus_stats(self) -> tuple[int, float]:
+        """Fetch total_documents and average_length from corpus_stats."""
+        try:
+            stats_rows = self._db.execute("SELECT key, num_value FROM corpus_stats").fetchall()
+            stats = {key: num_val for key, num_val in stats_rows}
+            total_documents = int(stats.get("total_documents", 0.0))
+            average_length = float(stats.get("average_length", 0.0))
+            return total_documents, average_length
+        except sqlite3.DatabaseError as error:
+            raise RepositoryError("snapshot_unreadable") from error
+
+    def get_term_dfs(self, terms: Iterable[str]) -> dict[str, int]:
+        """Fetch document frequencies for terms."""
+        if not terms:
+            return {}
+        unique_terms = sorted(set(terms))
+        placeholders = ", ".join("?" for _ in unique_terms)
+        try:
+            rows = self._db.execute(
+                f"SELECT term, df FROM term_df WHERE term IN ({placeholders})",
+                unique_terms,
+            ).fetchall()
+            return dict(rows)
+        except sqlite3.DatabaseError as error:
+            raise RepositoryError("snapshot_unreadable") from error
+
+    def iter_term_postings(self, terms: Iterable[str]) -> Iterable[tuple[str, str, int, int]]:
+        """Fetch postings (term, ref, freq, doc_length) ordered by term, ref."""
+        if not terms:
+            return []
+        query_terms = sorted(set(terms))
+        placeholders = ", ".join("?" for _ in query_terms)
+        try:
+            return self._db.execute(
+                f"SELECT term, ref, freq, doc_length FROM term_postings WHERE term IN ({placeholders}) ORDER BY term, ref",
+                query_terms,
+            )
+        except sqlite3.DatabaseError as error:
+            raise RepositoryError("snapshot_unreadable") from error
+
+    def detect_corpus_language(self, passages: Sequence[PassageRecord] | None = None) -> str | None:
+        """Detect dominant language of the corpus from precomputed stats or sample passages."""
+        try:
+            if self.has_lexical_index():
+                row = self._db.execute(
+                    "SELECT str_value FROM corpus_stats WHERE key = 'corpus_language'"
+                ).fetchone()
+                if row is not None and row[0] is not None:
+                    return row[0]
+            if passages is not None:
+                return language.dominant(
+                    passage.search_text[:400]
+                    for passage in passages[:64]
+                )
+            sample_rows = self._db.execute(
+                "SELECT search_text FROM passages ORDER BY ref LIMIT 64"
+            ).fetchall()
+            return language.dominant(text[:400] for text, in sample_rows)
+        except sqlite3.DatabaseError as error:
+            raise RepositoryError("snapshot_unreadable") from error
 
     def has_lineage_table(self) -> bool:
         try:

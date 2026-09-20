@@ -10,7 +10,6 @@
 # reading is ~0.1 ms of a ~330 ms request, so guarding it alone bounded nothing.
 from __future__ import annotations
 
-import json
 import re
 import sqlite3
 import time
@@ -20,6 +19,7 @@ from dataclasses import dataclass
 from . import language, ranking
 from .contracts import Budgets, EvidenceRecord
 from .index import ActiveSnapshot
+from .repository import PassageRecord, RepositoryError, SnapshotRepository, parse_heading_path
 
 EmbedQuery = Callable[[str], bytes]
 # A reranker scores whole documents against the query and returns one number each, higher first.
@@ -115,21 +115,7 @@ class RetrievalOutcome:
     truncated: bool
 
 
-@dataclass(frozen=True)
-class _Passage:
-    ref: str
-    document_ref: str
-    relative_path: str
-    heading_path: tuple[str, ...]
-    start_line: int
-    end_line: int
-    text: str
-    # `text` is the section's own bytes and `search_text` is that section under its heading
-    # ancestry. Only the second is scored: see `corpus._search_text`. Everything a human or a
-    # caller is shown -- snippets, rerank input, evidence -- comes from `text`.
-    search_text: str
-    source_hash: str
-    vector: bytes
+_Passage = PassageRecord
 
 
 def _tokenize(text: str) -> tuple[str, ...]:
@@ -141,80 +127,37 @@ def _expired(position: int, deadline: float, clock: Callable[[], float]) -> bool
 
 
 def _heading_path(raw: str) -> tuple[str, ...]:
-    # A wrong-shaped value must fail typed, never crash and never yield a plausible-looking
-    # heading path: heading_path feeds the citation locator, so silent corruption is provenance
-    # corruption. `"5"` used to become `("5",)` and `{"a": 1}` used to become `("a",)`.
     try:
-        parsed = json.loads(raw)
-    except json.JSONDecodeError as error:
-        raise RetrievalError("corrupt_snapshot_metadata") from error
-    if not isinstance(parsed, list) or any(not isinstance(item, str) for item in parsed):
-        raise RetrievalError("corrupt_snapshot_metadata")
-    return tuple(parsed)
+        return parse_heading_path(raw)
+    except RepositoryError as error:
+        raise RetrievalError(error.code) from error
 
 
 def _scan_passages(
     database: sqlite3.Connection, deadline: float, clock: Callable[[], float]
 ) -> tuple[list[_Passage], bool]:
-    rows = database.execute(
-        "SELECT ref, document_ref, relative_path, heading_path, start_line, end_line, "
-        "text, search_text, source_hash, vector FROM passages ORDER BY ref"
-    )
-    passages: list[_Passage] = []
-    stopped = False
-    for position, row in enumerate(rows):
-        if _expired(position, deadline, clock):
-            stopped = True
-            break
-        (
-            ref, document_ref, relative_path, heading_json, start_line, end_line, text,
-            search_text, source_hash, vector,
-        ) = row
-        passages.append(
-            _Passage(
-                ref, document_ref, relative_path, _heading_path(heading_json),
-                start_line, end_line, text, search_text, source_hash, vector,
-            )
-        )
-    return passages, stopped
+    try:
+        return SnapshotRepository(database).scan_passages(deadline, clock, _expired)
+    except RepositoryError as error:
+        raise RetrievalError(error.code) from error
 
 
 def _scan_vectors(
     database: sqlite3.Connection, deadline: float, clock: Callable[[], float]
 ) -> tuple[list[tuple[str, bytes]], bool]:
-    rows = database.execute("SELECT ref, vector FROM passages ORDER BY ref")
-    vectors: list[tuple[str, bytes]] = []
-    stopped = False
-    for position, (ref, vector) in enumerate(rows):
-        if _expired(position, deadline, clock):
-            stopped = True
-            break
-        vectors.append((ref, vector))
-    return vectors, stopped
+    try:
+        return SnapshotRepository(database).scan_vectors(deadline, clock, _expired)
+    except RepositoryError as error:
+        raise RetrievalError(error.code) from error
 
 
 def _hydrate_passages(
     database: sqlite3.Connection, refs: Sequence[str]
 ) -> dict[str, _Passage]:
-    if not refs:
-        return {}
-    placeholders = ", ".join("?" for _ in refs)
-    rows = database.execute(
-        f"SELECT ref, document_ref, relative_path, heading_path, start_line, end_line, "
-        f"text, search_text, source_hash, vector FROM passages WHERE ref IN ({placeholders})",
-        list(refs),
-    )
-    hydrated: dict[str, _Passage] = {}
-    for row in rows:
-        (
-            ref, document_ref, relative_path, heading_json, start_line, end_line, text,
-            search_text, source_hash, vector,
-        ) = row
-        hydrated[ref] = _Passage(
-            ref, document_ref, relative_path, _heading_path(heading_json),
-            start_line, end_line, text, search_text, source_hash, vector,
-        )
-    return hydrated
+    try:
+        return SnapshotRepository(database).hydrate_passages(refs)
+    except RepositoryError as error:
+        raise RetrievalError(error.code) from error
 
 
 _ranked = ranking.ranked
@@ -251,13 +194,7 @@ def _bm25_ranks(
 
 
 def _has_lexical_index(database: sqlite3.Connection) -> bool:
-    try:
-        row = database.execute(
-            "SELECT count(*) FROM sqlite_master WHERE type='table' AND name IN ('corpus_stats', 'term_df', 'term_postings')"
-        ).fetchone()
-        return bool(row and row[0] == 3)
-    except sqlite3.Error:
-        return False
+    return SnapshotRepository(database).has_lexical_index()
 
 
 def _bm25_indexed_ranks(
@@ -271,46 +208,32 @@ def _bm25_indexed_ranks(
     if clock() >= deadline:
         return {}, True
 
-    stats_rows = database.execute(
-        "SELECT key, num_value FROM corpus_stats"
-    ).fetchall()
-    stats = {key: num_val for key, num_val in stats_rows}
-    total_documents = int(stats.get("total_documents", 0.0))
-    average_length = float(stats.get("average_length", 0.0))
+    repo = SnapshotRepository(database)
+    try:
+        total_documents, average_length = repo.get_corpus_stats()
+        if total_documents == 0:
+            return None, False
+        if average_length == 0.0:
+            return {}, False
 
-    if total_documents == 0:
-        return None, False
-    if average_length == 0.0:
-        return {}, False
+        dfs = repo.get_term_dfs(query_tokens)
+        if not dfs:
+            return {}, False
 
-    unique_terms = sorted(set(query_tokens))
-    placeholders = ", ".join("?" for _ in unique_terms)
-    df_rows = database.execute(
-        f"SELECT term, df FROM term_df WHERE term IN ({placeholders})",
-        unique_terms,
-    ).fetchall()
-    dfs = dict(df_rows)
-    if not dfs:
-        return {}, False
-
-    query_terms = sorted(dfs.keys())
-    postings_placeholders = ", ".join("?" for _ in query_terms)
-    cursor = database.execute(
-        f"SELECT term, ref, freq, doc_length FROM term_postings WHERE term IN ({postings_placeholders}) ORDER BY term, ref",
-        query_terms,
-    )
-
-    return ranking.bm25_scores_from_postings(
-        total_documents=total_documents,
-        average_length=average_length,
-        dfs=dfs,
-        postings=cursor,
-        deadline=deadline,
-        clock=clock,
-        is_expired=_expired,
-        k1=_BM25_K1,
-        b=_BM25_B,
-    )
+        postings = repo.iter_term_postings(dfs.keys())
+        return ranking.bm25_scores_from_postings(
+            total_documents=total_documents,
+            average_length=average_length,
+            dfs=dfs,
+            postings=postings,
+            deadline=deadline,
+            clock=clock,
+            is_expired=_expired,
+            k1=_BM25_K1,
+            b=_BM25_B,
+        )
+    except RepositoryError as error:
+        raise RetrievalError(error.code) from error
 
 
 _floats = ranking.floats
@@ -351,18 +274,10 @@ def _corpus_language(passages: list[_Passage]) -> str | None:
 def _detect_corpus_language(
     database: sqlite3.Connection, passages: list[_Passage] | None = None
 ) -> str | None:
-    if _has_lexical_index(database):
-        row = database.execute(
-            "SELECT str_value FROM corpus_stats WHERE key = 'corpus_language'"
-        ).fetchone()
-        if row is not None and row[0] is not None:
-            return row[0]
-    if passages is not None:
-        return _corpus_language(passages)
-    sample_rows = database.execute(
-        f"SELECT search_text FROM passages ORDER BY ref LIMIT {_LANGUAGE_SAMPLE_PASSAGES}"
-    ).fetchall()
-    return language.dominant(text[:_LANGUAGE_SAMPLE_CHARS] for text, in sample_rows)
+    try:
+        return SnapshotRepository(database).detect_corpus_language(passages)
+    except RepositoryError as error:
+        raise RetrievalError(error.code) from error
 
 
 _fuse = ranking.fuse_ranks
@@ -569,12 +484,15 @@ def search(
 
     deadline = clock() + budgets.max_elapsed_ms / 1000
     degradation: list[str] = []
-    has_index = _has_lexical_index(snapshot.database)
+    repo = SnapshotRepository(snapshot.database)
+    has_index = repo.has_lexical_index()
 
     by_ref: dict[str, _Passage] = {}
     if not has_index or rerank is not None:
         try:
-            passages, scan_stopped = _scan_passages(snapshot.database, deadline, clock)
+            passages, scan_stopped = repo.scan_passages(deadline, clock, _expired)
+        except RepositoryError as error:
+            raise RetrievalError(error.code) from error
         except sqlite3.DatabaseError as error:
             raise RetrievalError("snapshot_unreadable") from error
         candidates_scanned = len(passages)
@@ -609,7 +527,9 @@ def search(
     else:
         # Fast path: precomputed lexical index + lazy passage hydration
         try:
-            vectors, scan_stopped = _scan_vectors(snapshot.database, deadline, clock)
+            vectors, scan_stopped = repo.scan_vectors(deadline, clock, _expired)
+        except RepositoryError as error:
+            raise RetrievalError(error.code) from error
         except sqlite3.DatabaseError as error:
             raise RetrievalError("snapshot_unreadable") from error
         candidates_scanned = len(vectors)
@@ -636,7 +556,7 @@ def search(
         if scan_stopped or lexical_stopped or vector_stopped:
             degradation.append("max_elapsed_ms_exceeded")
 
-        corpus_language = _detect_corpus_language(snapshot.database)
+        corpus_language = repo.detect_corpus_language()
 
     # Discount the lexical leg when the question is not in the language the corpus is written in.
     # Both legs still run and both ranks are still reported: this changes the weight of evidence,
@@ -666,7 +586,9 @@ def search(
     if not by_ref and ordered_slice:
         needed_refs = [ref for ref, _, _ in ordered_slice[: budgets.max_candidates]]
         try:
-            by_ref = _hydrate_passages(snapshot.database, needed_refs)
+            by_ref = repo.hydrate_passages(needed_refs)
+        except RepositoryError as error:
+            raise RetrievalError(error.code) from error
         except sqlite3.DatabaseError as error:
             raise RetrievalError("snapshot_unreadable") from error
 
