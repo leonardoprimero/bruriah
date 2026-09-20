@@ -464,8 +464,243 @@ def _leg_state(ranks: dict[str, int] | None, leg: str, degradation: list[str]) -
         degradation.append(f"{leg}_leg_no_matches")
 
 
+class SearchService:
+    """Application use case for hybrid lexical and vector search across a snapshot repository."""
+
+    def __init__(
+        self,
+        repository: SnapshotRepository,
+        *,
+        embed_query: EmbedQuery | None = None,
+        rerank: Rerank | None = None,
+        clock: Callable[[], float] = time.monotonic,
+    ) -> None:
+        self._repo = repository
+        self._embed_query = embed_query
+        self._rerank = rerank
+        self._clock = clock
+
+    @property
+    def repository(self) -> SnapshotRepository:
+        return self._repo
+
+    def search(
+        self,
+        query: str,
+        budgets: Budgets = Budgets(),
+        *,
+        offset: int = 0,
+    ) -> RetrievalOutcome:
+        """Search across the repository. Never writes, never raises on a budget ceiling."""
+        if not isinstance(query, str) or not query.strip():
+            raise RetrievalError("empty_query")
+        if len(query) > _MAX_QUERY_CHARS:
+            raise RetrievalError("query_too_long")
+        if offset < 0:
+            raise RetrievalError("invalid_offset")
+
+        deadline = self._clock() + budgets.max_elapsed_ms / 1000
+        degradation: list[str] = []
+
+        if not self._repo.has_lexical_index() or self._rerank is not None:
+            lexical_ranks, vector_ranks, corpus_language, candidates_scanned, passages, by_ref = (
+                self._search_full_scan(query, deadline, degradation)
+            )
+        else:
+            lexical_ranks, vector_ranks, corpus_language, candidates_scanned, passages, by_ref = (
+                self._search_fast_path(query, deadline, degradation)
+            )
+
+        lexical_weight = self._compute_lexical_weight(query, corpus_language, degradation)
+        ordered = _fuse(lexical_ranks, vector_ranks, lexical_weight)
+
+        if self._rerank is not None:
+            ordered = _rerank_fused(
+                ordered, passages, by_ref, query, self._rerank, deadline, self._clock, degradation
+            )
+
+        return self._paginate_and_hydrate(
+            ordered, by_ref, budgets, offset, candidates_scanned, degradation
+        )
+
+    def _search_full_scan(
+        self,
+        query: str,
+        deadline: float,
+        degradation: list[str],
+    ) -> tuple[
+        dict[str, int] | None,
+        dict[str, int] | None,
+        str | None,
+        int,
+        list[_Passage],
+        dict[str, _Passage],
+    ]:
+        try:
+            passages, scan_stopped = self._repo.scan_passages(deadline, self._clock, _expired)
+        except RepositoryError as error:
+            raise RetrievalError(error.code) from error
+        except sqlite3.DatabaseError as error:
+            raise RetrievalError("snapshot_unreadable") from error
+
+        candidates_scanned = len(passages)
+        by_ref = {passage.ref: passage for passage in passages}
+        corpus_language = _corpus_language(passages)
+
+        if self._repo.has_lexical_index():
+            lexical_ranks, lexical_stopped = _bm25_indexed_ranks(
+                self._repo.database, _tokenize(query), deadline, self._clock
+            )
+        else:
+            lexical_ranks, lexical_stopped = _bm25_ranks(
+                passages, _tokenize(query), deadline, self._clock
+            )
+        _leg_state(lexical_ranks, "lexical", degradation)
+
+        vector_ranks, vector_stopped = self._compute_vector_ranks(passages, query, deadline, degradation)
+
+        if scan_stopped or lexical_stopped or vector_stopped:
+            degradation.append("max_elapsed_ms_exceeded")
+
+        return lexical_ranks, vector_ranks, corpus_language, candidates_scanned, passages, by_ref
+
+    def _search_fast_path(
+        self,
+        query: str,
+        deadline: float,
+        degradation: list[str],
+    ) -> tuple[
+        dict[str, int] | None,
+        dict[str, int] | None,
+        str | None,
+        int,
+        list[_Passage],
+        dict[str, _Passage],
+    ]:
+        try:
+            vectors, scan_stopped = self._repo.scan_vectors(deadline, self._clock, _expired)
+        except RepositoryError as error:
+            raise RetrievalError(error.code) from error
+        except sqlite3.DatabaseError as error:
+            raise RetrievalError("snapshot_unreadable") from error
+
+        candidates_scanned = len(vectors)
+        lexical_ranks, lexical_stopped = _bm25_indexed_ranks(
+            self._repo.database, _tokenize(query), deadline, self._clock
+        )
+        _leg_state(lexical_ranks, "lexical", degradation)
+
+        vector_ranks, vector_stopped = self._compute_vector_ranks(vectors, query, deadline, degradation)
+
+        if scan_stopped or lexical_stopped or vector_stopped:
+            degradation.append("max_elapsed_ms_exceeded")
+
+        corpus_language = self._repo.detect_corpus_language()
+        return lexical_ranks, vector_ranks, corpus_language, candidates_scanned, [], {}
+
+    def _compute_vector_ranks(
+        self,
+        candidates: Sequence[_Passage] | Sequence[tuple[str, bytes]],
+        query: str,
+        deadline: float,
+        degradation: list[str],
+    ) -> tuple[dict[str, int] | None, bool]:
+        if self._embed_query is None:
+            degradation.append("vector_leg_unavailable")
+            return None, False
+
+        try:
+            query_vector = self._embed_query(query)
+        except Exception as error:  # noqa: BLE001 -- embed_query is a caller-supplied untrusted callable
+            query_vector = None
+            degradation.append(f"vector_leg_failed:{type(error).__name__}")
+
+        if query_vector is None:
+            return None, False
+
+        vector_ranks, vector_stopped = _vector_ranks(candidates, query_vector, deadline, self._clock)
+        _leg_state(vector_ranks, "vector", degradation)
+        return vector_ranks, vector_stopped
+
+    def _compute_lexical_weight(
+        self,
+        query: str,
+        corpus_language: str | None,
+        degradation: list[str],
+    ) -> float:
+        lexical_weight = 1.0
+        query_language = language.detect(query)
+        if (
+            query_language is not None
+            and corpus_language is not None
+            and query_language != corpus_language
+        ):
+            lexical_weight = _CROSS_LINGUAL_LEXICAL_WEIGHT
+            degradation.append(f"lexical_leg_discounted:{query_language}_query_{corpus_language}_corpus")
+        return lexical_weight
+
+    def _paginate_and_hydrate(
+        self,
+        ordered: list[tuple[str, int | None, int | None]],
+        by_ref: dict[str, _Passage],
+        budgets: Budgets,
+        offset: int,
+        candidates_scanned: int,
+        degradation: list[str],
+    ) -> RetrievalOutcome:
+        matches: list[RetrievalMatch] = []
+        truncated = False
+        extracted = 0
+        ordered_slice = ordered[offset:] if offset < len(ordered) else []
+        if not by_ref and ordered_slice:
+            needed_refs = [ref for ref, _, _ in ordered_slice[: budgets.max_candidates]]
+            try:
+                by_ref = self._repo.hydrate_passages(needed_refs)
+            except RepositoryError as error:
+                raise RetrievalError(error.code) from error
+            except sqlite3.DatabaseError as error:
+                raise RetrievalError("snapshot_unreadable") from error
+
+        for rank, (ref, lexical_rank, vector_rank) in enumerate(ordered_slice, start=offset + 1):
+            if len(matches) >= budgets.max_candidates:
+                truncated = True
+                degradation.append("max_candidates_exceeded")
+                break
+            if extracted >= budgets.max_extracted_chars:
+                truncated = True
+                degradation.append("max_extracted_chars_exceeded")
+                break
+            passage = by_ref[ref]
+            snippet = passage.text[: min(_SNIPPET_CHARS, budgets.max_extracted_chars - extracted)]
+            extracted += len(snippet)
+            matches.append(
+                RetrievalMatch(
+                    ref=passage.ref,
+                    document_ref=passage.document_ref,
+                    relative_path=passage.relative_path,
+                    heading_path=passage.heading_path,
+                    start_line=passage.start_line,
+                    end_line=passage.end_line,
+                    snippet=snippet,
+                    source_hash=passage.source_hash,
+                    rank=rank,
+                    lexical_rank=lexical_rank,
+                    vector_rank=vector_rank,
+                )
+            )
+
+        warnings = ["no_eligible_results"] if not matches and offset == 0 else []
+        return RetrievalOutcome(
+            matches=tuple(matches),
+            degradation=tuple(dict.fromkeys(degradation)),
+            warnings=tuple(warnings),
+            candidates_scanned=candidates_scanned,
+            truncated=truncated,
+        )
+
+
 def search(
-    snapshot: ActiveSnapshot,
+    snapshot: ActiveSnapshot | SnapshotRepository,
     query: str,
     budgets: Budgets = Budgets(),
     *,
@@ -474,153 +709,10 @@ def search(
     rerank: Rerank | None = None,
     clock: Callable[[], float] = time.monotonic,
 ) -> RetrievalOutcome:
-    """Search the given open, read-only snapshot. Never writes, never raises on a budget ceiling."""
-    if not isinstance(query, str) or not query.strip():
-        raise RetrievalError("empty_query")
-    if len(query) > _MAX_QUERY_CHARS:
-        raise RetrievalError("query_too_long")
-    if offset < 0:
-        raise RetrievalError("invalid_offset")
-
-    deadline = clock() + budgets.max_elapsed_ms / 1000
-    degradation: list[str] = []
-    repo = SnapshotRepository(snapshot.database)
-    has_index = repo.has_lexical_index()
-
-    by_ref: dict[str, _Passage] = {}
-    if not has_index or rerank is not None:
-        try:
-            passages, scan_stopped = repo.scan_passages(deadline, clock, _expired)
-        except RepositoryError as error:
-            raise RetrievalError(error.code) from error
-        except sqlite3.DatabaseError as error:
-            raise RetrievalError("snapshot_unreadable") from error
-        candidates_scanned = len(passages)
-        by_ref = {passage.ref: passage for passage in passages}
-        corpus_language = _corpus_language(passages)
-        if has_index:
-            lexical_ranks, lexical_stopped = _bm25_indexed_ranks(
-                snapshot.database, _tokenize(query), deadline, clock
-            )
-        else:
-            lexical_ranks, lexical_stopped = _bm25_ranks(
-                passages, _tokenize(query), deadline, clock
-            )
-        _leg_state(lexical_ranks, "lexical", degradation)
-
-        vector_ranks: dict[str, int] | None = None
-        vector_stopped = False
-        if embed_query is None:
-            degradation.append("vector_leg_unavailable")
-        else:
-            try:
-                query_vector = embed_query(query)
-            except Exception as error:  # noqa: BLE001 -- embed_query is a caller-supplied untrusted
-                query_vector = None     # callable; a failing leg must degrade, never crash the request.
-                degradation.append(f"vector_leg_failed:{type(error).__name__}")
-            if query_vector is not None:
-                vector_ranks, vector_stopped = _vector_ranks(passages, query_vector, deadline, clock)
-                _leg_state(vector_ranks, "vector", degradation)
-
-        if scan_stopped or lexical_stopped or vector_stopped:
-            degradation.append("max_elapsed_ms_exceeded")
-    else:
-        # Fast path: precomputed lexical index + lazy passage hydration
-        try:
-            vectors, scan_stopped = repo.scan_vectors(deadline, clock, _expired)
-        except RepositoryError as error:
-            raise RetrievalError(error.code) from error
-        except sqlite3.DatabaseError as error:
-            raise RetrievalError("snapshot_unreadable") from error
-        candidates_scanned = len(vectors)
-
-        lexical_ranks, lexical_stopped = _bm25_indexed_ranks(
-            snapshot.database, _tokenize(query), deadline, clock
-        )
-        _leg_state(lexical_ranks, "lexical", degradation)
-
-        vector_ranks = None
-        vector_stopped = False
-        if embed_query is None:
-            degradation.append("vector_leg_unavailable")
-        else:
-            try:
-                query_vector = embed_query(query)
-            except Exception as error:  # noqa: BLE001 -- embed_query is a caller-supplied untrusted
-                query_vector = None     # callable; a failing leg must degrade, never crash the request.
-                degradation.append(f"vector_leg_failed:{type(error).__name__}")
-            if query_vector is not None:
-                vector_ranks, vector_stopped = _vector_ranks(vectors, query_vector, deadline, clock)
-                _leg_state(vector_ranks, "vector", degradation)
-
-        if scan_stopped or lexical_stopped or vector_stopped:
-            degradation.append("max_elapsed_ms_exceeded")
-
-        corpus_language = repo.detect_corpus_language()
-
-    # Discount the lexical leg when the question is not in the language the corpus is written in.
-    # Both legs still run and both ranks are still reported: this changes the weight of evidence,
-    # never which evidence exists. Disclosed in `degradation` rather than applied silently, because
-    # a caller comparing two result sets is entitled to know the ranking rule was not the same.
-    lexical_weight = 1.0
-    query_language = language.detect(query)
-    if query_language is not None and corpus_language is not None \
-            and query_language != corpus_language:
-        lexical_weight = _CROSS_LINGUAL_LEXICAL_WEIGHT
-        degradation.append(f"lexical_leg_discounted:{query_language}_query_{corpus_language}_corpus")
-
-    ordered = _fuse(lexical_ranks, vector_ranks, lexical_weight)
-    # Absence of a reranker is deliberately NOT reported the way `vector_leg_unavailable` is. The
-    # vector leg is part of the shipped ranking and its absence is a shortfall; a reranker is an
-    # opt-in stage that is off by default, so announcing it on every request would add a line to
-    # every existing response to say that nothing happened.
-    if rerank is not None:
-        ordered = _rerank_fused(
-            ordered, passages, by_ref, query, rerank, deadline, clock, degradation
-        )
-
-    matches: list[RetrievalMatch] = []
-    truncated = False
-    extracted = 0
-    ordered_slice = ordered[offset:] if offset < len(ordered) else []
-    if not by_ref and ordered_slice:
-        needed_refs = [ref for ref, _, _ in ordered_slice[: budgets.max_candidates]]
-        try:
-            by_ref = repo.hydrate_passages(needed_refs)
-        except RepositoryError as error:
-            raise RetrievalError(error.code) from error
-        except sqlite3.DatabaseError as error:
-            raise RetrievalError("snapshot_unreadable") from error
-
-    for rank, (ref, lexical_rank, vector_rank) in enumerate(ordered_slice, start=offset + 1):
-        if len(matches) >= budgets.max_candidates:
-            truncated = True
-            degradation.append("max_candidates_exceeded")
-            break
-        if extracted >= budgets.max_extracted_chars:
-            truncated = True
-            degradation.append("max_extracted_chars_exceeded")
-            break
-        passage = by_ref[ref]
-        snippet = passage.text[: min(_SNIPPET_CHARS, budgets.max_extracted_chars - extracted)]
-        extracted += len(snippet)
-        matches.append(
-            RetrievalMatch(
-                ref=passage.ref, document_ref=passage.document_ref, relative_path=passage.relative_path,
-                heading_path=passage.heading_path, start_line=passage.start_line, end_line=passage.end_line,
-                snippet=snippet, source_hash=passage.source_hash,
-                rank=rank, lexical_rank=lexical_rank, vector_rank=vector_rank,
-            )
-        )
-
-    warnings = ["no_eligible_results"] if not matches and offset == 0 else []
-    return RetrievalOutcome(
-        matches=tuple(matches),
-        degradation=tuple(dict.fromkeys(degradation)),
-        warnings=tuple(warnings),
-        candidates_scanned=candidates_scanned,
-        truncated=truncated,
-    )
+    """Search the given open snapshot or repository. Never writes, never raises on a budget ceiling."""
+    repo = snapshot if isinstance(snapshot, SnapshotRepository) else SnapshotRepository(snapshot.database)
+    service = SearchService(repo, embed_query=embed_query, rerank=rerank, clock=clock)
+    return service.search(query, budgets, offset=offset)
 
 
 def to_evidence_records(outcome: RetrievalOutcome) -> list[EvidenceRecord]:

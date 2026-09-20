@@ -13,9 +13,11 @@ from conftest import requires_vault
 from bruriah.contracts import Budgets, EvidenceRecord
 from bruriah.corpus import CorpusPolicy
 from bruriah.index import BuildConfig, build_candidate, promote_candidate, snapshot_active
+from bruriah.repository import SnapshotRepository
 from bruriah.retrieval import (
     RetrievalError,
     RetrievalMatch,
+    SearchService,
     _bm25_indexed_ranks,
     _bm25_ranks,
     _detect_corpus_language,
@@ -600,5 +602,10 @@ def test_lazy_hydration_matches_full_scan_results(multi_passage_snapshot) -> Non
     assert fast_outcome.candidates_scanned == forced_scan_outcome.candidates_scanned
 
 
-
-
+def test_search_service_direct_instantiation(snapshot) -> None:
+    repo = SnapshotRepository(snapshot.database)
+    service = SearchService(repo)
+    assert service.repository is repo
+    outcome = service.search("apple", Budgets(max_candidates=5))
+    assert outcome.matches
+    assert outcome.matches[0].ref

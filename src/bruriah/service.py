@@ -57,7 +57,7 @@ from .skills import PermissionEnvelope, SkillSet
 from .registries import Registry
 from .repository import RepositoryError, SnapshotRepository
 from .research import NetworkLedger, ResearchDeps, ResearchOutcome, research
-from .retrieval import EmbedQuery, Rerank, is_shortfall, search, to_evidence_records
+from .retrieval import EmbedQuery, Rerank, SearchService, is_shortfall, to_evidence_records
 from .route import route
 from .why import WhyError, trace_causal_archaeology
 
@@ -765,10 +765,16 @@ def investigate(request: InvestigationRequest, deps: ServiceDeps) -> Investigati
             remaining_slots = max_evidence
             local_offset = cursor_offset - prefix_count
 
-        outcome = search(
-            deps.snapshot, request.task, request.budgets,
+        search_service = SearchService(
+            snapshot_repo,
+            embed_query=deps.embed_query,
+            rerank=deps.rerank,
+            clock=deps.clock,
+        )
+        outcome = search_service.search(
+            request.task,
+            request.budgets,
             offset=local_offset,
-            embed_query=deps.embed_query, rerank=deps.rerank, clock=deps.clock,
         )
         raw_local_evidence = to_evidence_records(outcome)
         local_evidence, search_claims, search_conflicts = _apply_lineage(raw_local_evidence, snapshot_repo)
