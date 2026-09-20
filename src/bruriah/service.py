@@ -1006,6 +1006,126 @@ def _read_live_one(
     return item, remaining_total - len(window)
 
 
+class ReadService:
+    """Application use case for resolving immutable evidence references across sources.
+
+    Polymorphically resolves:
+    - `skill:<id>@<version>` via SkillSet
+    - `capability:<id>` via Registry
+    - `live:sha256:<hash>` via ResearchDeps cache
+    - `<passage_ref>` via SnapshotRepository
+    """
+
+    def __init__(
+        self,
+        repository: SnapshotRepository,
+        registry: Registry,
+        *,
+        skill_set: SkillSet | None = None,
+        research_deps: ResearchDeps | None = None,
+    ) -> None:
+        self._repo = repository
+        self._registry = registry
+        self._skill_set = skill_set
+        self._research_deps = research_deps
+
+    @property
+    def repository(self) -> SnapshotRepository:
+        return self._repo
+
+    @property
+    def registry(self) -> Registry:
+        return self._registry
+
+    def read(self, request: ReadRequest) -> ReadResult:
+        """Resolve each `refs` entry to immutable evidence and return exact, budget-bounded content."""
+        if not isinstance(request, ReadRequest):
+            raise ServiceError("invalid_request_type")
+
+        request_id = _content_hash(request)
+        cursor_ref: str | None = None
+        cursor_start: int | None = None
+        if request.cursor is not None:
+            decoded = _decode_cursor(request.cursor)
+            if (
+                not decoded or decoded.get("request_id") != request_id
+                or decoded.get("ref") not in request.refs or not isinstance(decoded.get("start"), int)
+            ):
+                raise ServiceError("invalid_cursor")
+            cursor_ref, cursor_start = str(decoded["ref"]), int(decoded["start"])
+
+        ranges_by_ref = {item.ref: item for item in request.ranges}
+        remaining = request.budgets.max_output_chars
+        items: list[ReadItem] = []
+        try:
+            for ref in request.refs:
+                rng = ranges_by_ref.get(ref)
+                pos = cursor_start if ref == cursor_ref else None
+                cap = request.budgets.max_extracted_chars
+                if ref.startswith(_SKILL_REF_PREFIX):
+                    item, remaining = self._read_skill(ref, rng, pos, cap, remaining, request_id)
+                elif ref.startswith(_CAPABILITY_REF_PREFIX):
+                    item, remaining = self._read_capability(ref, rng, pos, cap, remaining, request_id)
+                elif ref.startswith(_LIVE_REF_PREFIX):
+                    item, remaining = self._read_live(ref, rng, pos, cap, remaining, request_id)
+                else:
+                    item, remaining = self._read_passage(ref, rng, pos, cap, remaining, request_id)
+                items.append(item)
+        except (RepositoryError, sqlite3.DatabaseError) as error:
+            raise ServiceError("snapshot_unreadable") from error
+
+        warnings = ["output_budget_exhausted"] if remaining <= 0 and any(item.truncated for item in items) else []
+        next_cursor = next((item.next_cursor for item in items if item.next_cursor), None)
+        return ReadResult(
+            schema_version="1", request_id=request_id, items=items,
+            warnings=warnings, budgets=request.budgets, next_cursor=next_cursor,
+        )
+
+    def _read_passage(
+        self,
+        ref: str,
+        requested_range: ReadRange | None,
+        cursor_start: int | None,
+        item_cap: int,
+        remaining_total: int,
+        request_id: str,
+    ) -> tuple[ReadItem, int]:
+        return _read_one(self._repo, ref, requested_range, cursor_start, item_cap, remaining_total, request_id)
+
+    def _read_capability(
+        self,
+        ref: str,
+        requested_range: ReadRange | None,
+        cursor_start: int | None,
+        item_cap: int,
+        remaining_total: int,
+        request_id: str,
+    ) -> tuple[ReadItem, int]:
+        return _read_capability_one(self._registry, ref, requested_range, cursor_start, item_cap, remaining_total, request_id)
+
+    def _read_skill(
+        self,
+        ref: str,
+        requested_range: ReadRange | None,
+        cursor_start: int | None,
+        item_cap: int,
+        remaining_total: int,
+        request_id: str,
+    ) -> tuple[ReadItem, int]:
+        return _read_skill_one(self._skill_set, ref, requested_range, cursor_start, item_cap, remaining_total, request_id)
+
+    def _read_live(
+        self,
+        ref: str,
+        requested_range: ReadRange | None,
+        cursor_start: int | None,
+        item_cap: int,
+        remaining_total: int,
+        request_id: str,
+    ) -> tuple[ReadItem, int]:
+        return _read_live_one(self._research_deps, ref, requested_range, cursor_start, item_cap, remaining_total, request_id)
+
+
 def read(request: ReadRequest, deps: ServiceDeps) -> ReadResult:
     """Resolve each `refs` entry to immutable local or capability evidence and return exact,
     budget-bounded content. Missing or out-of-range refs get typed per-ref failures -- never
@@ -1022,46 +1142,13 @@ def read(request: ReadRequest, deps: ServiceDeps) -> ReadResult:
     if not isinstance(request, ReadRequest):
         raise ServiceError("invalid_request_type")
     deps = _validate_deps(deps)
-
-    request_id = _content_hash(request)
-    cursor_ref: str | None = None
-    cursor_start: int | None = None
-    if request.cursor is not None:
-        decoded = _decode_cursor(request.cursor)
-        if (
-            not decoded or decoded.get("request_id") != request_id
-            or decoded.get("ref") not in request.refs or not isinstance(decoded.get("start"), int)
-        ):
-            raise ServiceError("invalid_cursor")
-        cursor_ref, cursor_start = str(decoded["ref"]), int(decoded["start"])
-
-    ranges_by_ref = {item.ref: item for item in request.ranges}
-    remaining = request.budgets.max_output_chars
-    items: list[ReadItem] = []
-    repo = SnapshotRepository(deps.snapshot.database)
-    try:
-        for ref in request.refs:
-            rng = ranges_by_ref.get(ref)
-            pos = cursor_start if ref == cursor_ref else None
-            cap = request.budgets.max_extracted_chars
-            if ref.startswith(_SKILL_REF_PREFIX):
-                item, remaining = _read_skill_one(deps.skill_set, ref, rng, pos, cap, remaining, request_id)
-            elif ref.startswith(_CAPABILITY_REF_PREFIX):
-                item, remaining = _read_capability_one(deps.registry, ref, rng, pos, cap, remaining, request_id)
-            elif ref.startswith(_LIVE_REF_PREFIX):
-                item, remaining = _read_live_one(deps.research, ref, rng, pos, cap, remaining, request_id)
-            else:
-                item, remaining = _read_one(repo, ref, rng, pos, cap, remaining, request_id)
-            items.append(item)
-    except (RepositoryError, sqlite3.DatabaseError) as error:
-        raise ServiceError("snapshot_unreadable") from error
-
-    warnings = ["output_budget_exhausted"] if remaining <= 0 and any(item.truncated for item in items) else []
-    next_cursor = next((item.next_cursor for item in items if item.next_cursor), None)
-    return ReadResult(
-        schema_version="1", request_id=request_id, items=items,
-        warnings=warnings, budgets=request.budgets, next_cursor=next_cursor,
+    service = ReadService(
+        repository=SnapshotRepository(deps.snapshot.database),
+        registry=deps.registry,
+        skill_set=deps.skill_set,
+        research_deps=deps.research,
     )
+    return service.read(request)
 
 
-__all__ = ["ServiceDeps", "ServiceError", "investigate", "read"]
+__all__ = ["ReadService", "ServiceDeps", "ServiceError", "investigate", "read"]

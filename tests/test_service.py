@@ -19,8 +19,10 @@ from bruriah.index import BuildConfig, build_candidate, promote_candidate, snaps
 from bruriah.packs import load_pack
 from bruriah.platform import load_registry
 from bruriah.registries import Registry
+from bruriah.repository import SnapshotRepository
 from bruriah.retrieval import RetrievalError, is_shortfall
 from bruriah.service import (
+    ReadService,
     ServiceDeps, ServiceError, _candidate_urls, _encode_cursor, _encode_investigate_cursor,
     investigate, read,
 )
@@ -1398,6 +1400,14 @@ V3 modern architecture replacing V2.
         assert "Active successor" in v3_ev.authority_rationale
 
 
+def test_read_service_direct_instantiation(deps) -> None:
+    repo = SnapshotRepository(deps.snapshot.database)
+    service = ReadService(repository=repo, registry=deps.registry)
+    assert service.repository is repo
+    assert service.registry is deps.registry
 
-
+    res = service.read(ReadRequest(refs=["capability:python.schema-validation"]))
+    assert len(res.items) == 1
+    assert res.items[0].status == "ok"
+    assert res.items[0].evidence_kind == "capability"
 
