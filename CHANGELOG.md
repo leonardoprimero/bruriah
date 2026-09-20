@@ -3,6 +3,79 @@
 Notable changes, newest first. This project follows [semantic versioning](https://semver.org/),
 and the entries here name what changed for *you* rather than which files moved.
 
+## [Unreleased]
+
+### Fixed: Ranking calibrated back to its measured default
+- `RRF_K` is back to 60, the literature default and the value every published recall/MRR number
+  in this repository was measured with. A brief drop to 20 did not change this project's own
+  recall on its twelve-question set and was never measured against the external corpora, so it
+  had no evidence behind it. The evaluation harness (`evals/retrieval/adapters.py`) now reads the
+  constant from `bruriah.ranking` instead of keeping its own copy, so the two cannot drift apart
+  silently again.
+- The `bruriah index` warning for symmetric-similarity models now cites only measured numbers
+  (comparing two models on this project's own history) instead of one measured figure next to one
+  estimate.
+
+### Changed: Index runner moved out of the CLI adapter (no behavior change)
+- `run_index` and the real embedding-model factory it uses by default moved from `cli.py` into a
+  new `index_runner.py`. `bruriah.cli.run_index` and the other moved names still work exactly as
+  before for every existing caller; what changed is that `watch.py` and `bootstrap.py` no longer
+  need to depend on the CLI adapter just to reindex.
+
+### Fixed: README and the counterfactual paper calibrated to reality
+- The test-suite count in README.md is now self-verifying: a test compares it against what the
+  suite actually collects and fails if the two drift apart, instead of a hand-typed number that
+  had gone stale.
+- `docs/counterfactual-paper.md` now describes itself as a technical report rather than a
+  "Conference Whitepaper" -- it is single-author and self-evaluated on its own fixture suite, not
+  peer reviewed.
+
+## [1.3.1] — 2026-09-20
+
+### Fixed
+- Corrected a stale invalidation evidence reference in the counterfactual-memory engine, and
+  calibrated that feature's benchmark claims and terminology to match what is actually measured.
+- Synced the packaged `__version__` in `__init__.py` to 1.3.1, so `bruriah --version` and the
+  published wheel agree.
+
+## [1.3.0] — 2026-09-20
+
+### Added: Interactive Demo (`bruriah demo`)
+- **Guided Walkthrough:** A local interactive demo for exploring Bruriah's behavior, including
+  counterfactual premise drift rendered directly in the visual DAG UI, without needing a real
+  corpus first.
+
+### Added: Decision Record Templates & Domain Examples
+- Professional templates and worked examples for `bruriah decide`, so a new project has a
+  concrete starting shape for its own decision records instead of a blank page.
+
+### Fixed
+- Resolved a lint failure (an unused import and an undefined `Any`) in `demo.py` and `ui.py`.
+
+## [1.2.0] — 2026-09-20
+
+### Added: Continuous Auto-Indexing (`bruriah watch`)
+- **Background Reindexing:** Watches a Git repository for new commits, branch switches, or
+  merges, and updates the corpus and index automatically using incremental snapshot reuse --
+  no manual `bruriah index` after every commit.
+
+### Added: Counterfactual Architectural Memory & Premise Tracking
+- **Rejection & Invalidation Tracking:** Flags when a proposed change matches a previously
+  rejected alternative, and detects when a later commit invalidates the premise that justified a
+  past rejection, so a stale rejection does not block a change that is fine again.
+- **Benchmark Suite & Technical Report:** A deterministic fixture suite
+  (`evals/counterfactual/`) and the accompanying report on preventing architectural amnesia in
+  autonomous coding agents.
+
+### Changed
+- Streamlined the README and aligned product positioning; refined technical precision and
+  case-study framing; condensed `retrieval.py`'s internal comments and clarified the architecture
+  documentation.
+- Added a real-world case study on preventing agent regressions.
+
+### Fixed
+- Fixed the README quickstart so it satisfies CI's automated command extraction.
+
 ## [1.1.0] — 2026-09-20
 
 ### Added: Proactive Architectural Pre-Flight & Supersede Protocol (`bruriah brief`)
@@ -21,6 +94,37 @@ and the entries here name what changed for *you* rather than which files moved.
 - **Pedagogical Remediation Engine:** Added `bruriah heal [target]` to bridge the gap between violation detection and resolution, extracting canonical design patterns from historical decision commits.
 - **Actionable Refactoring Blueprints:** Synthesizes step-by-step recipes (isolation, canonical pattern application, verification) to resolve drift and guard vetos cleanly.
 - **AI Agent Context Injection (`--agent`):** Injects structured pedagogical refactoring instructions into LLM prompts, preventing agents from hallucinating quick hacks or monkey-patches.
+
+## [1.0.0] — 2026-09-19
+
+Marks the stable feature set this project has built on since: architectural guard, blast-radius
+analysis, cold-start bootstrap, editor integration, a visual explorer, and PR review, all governed
+by the same lineage DAG.
+
+### Added: Architectural Guard & Compliance Receipts (`bruriah guard`)
+- **Gatekeeper Engine:** Audits code against the lineage DAG, injects active architectural
+  contracts into agent prompts, and generates deterministic compliance receipts (RDD), optionally
+  bridged to Engram.
+
+### Added: Blast Radius Analysis (`bruriah impact`)
+- **Pre-Flight Impact Evaluation:** Evaluates architectural impact, co-governed files, and drift
+  risk before a change is made, rather than after.
+
+### Added: Automatic Git History Mining (`bruriah bootstrap`)
+- **Cold-Start Elimination:** Mines existing Git history to extract architectural decisions,
+  infer lineage, and build an initial index in seconds, so a new project does not start empty.
+
+### Added: In-Editor Inline Archaeology (`bruriah lens`)
+- **Editor Integration:** Inline decision-lineage annotations and hover/CodeLens support for
+  VS Code and Neovim.
+
+### Added: Interactive Visual DAG Explorer (`bruriah ui`)
+- **Local Explorer:** A lightweight local web server serving an interactive decision-lineage
+  graph, with no external service required.
+
+### Added: PR Review Bot (`bruriah review`)
+- **Inline Architectural Comments:** A GitHub Action integration that posts surgical
+  architectural review comments directly on pull requests.
 
 ## [0.9.4] — 2026-09-19
 
