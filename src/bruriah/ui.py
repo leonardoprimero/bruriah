@@ -7,7 +7,7 @@ from __future__ import annotations
 import json
 import sqlite3
 import webbrowser
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from typing import TYPE_CHECKING
 
@@ -33,6 +33,9 @@ class DecisionNode:
     status: str  # "active", "superseded", "deprecated", "amended"
     files: list[str]  # files this decision touches
     body_preview: str  # first ~200 chars of reasoning
+    premises: list[dict[str, str]] = field(default_factory=list)
+    alternatives: list[dict[str, Any]] = field(default_factory=list)
+    has_drift: bool = False
 
 
 @dataclass(frozen=True)
@@ -156,7 +159,59 @@ def build_dag_from_database(database: sqlite3.Connection) -> DAGData:
         except sqlite3.DatabaseError:
             pass
 
-    # 2. Read all documents and their first passage (for subject + body)
+    # 2. Read premises and alternatives if counterfactual tables exist
+    doc_premises: dict[str, list[dict[str, str]]] = {}
+    doc_alts: dict[str, list[dict[str, Any]]] = {}
+    doc_has_drift: dict[str, bool] = {}
+
+    has_cf = False
+    try:
+        row = database.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='premises'"
+        ).fetchone()
+        has_cf = row is not None
+    except sqlite3.DatabaseError:
+        pass
+
+    if has_cf:
+        try:
+            p_rows = database.execute(
+                "SELECT premise_id, statement, status, invalidated_by, rationale, document_ref FROM premises"
+            ).fetchall()
+            for pid, stmt, p_status, inv_by, rationale, d_ref in p_rows:
+                if d_ref not in doc_premises:
+                    doc_premises[d_ref] = []
+                doc_premises[d_ref].append({
+                    "id": pid,
+                    "statement": stmt,
+                    "status": p_status,
+                    "invalidated_by": inv_by or "",
+                    "rationale": rationale or "",
+                })
+                if p_status == "invalidated":
+                    doc_has_drift[d_ref] = True
+
+            a_rows = database.execute(
+                "SELECT name, disposition, reason, premises, document_ref FROM alternatives"
+            ).fetchall()
+            for name, disp, reason, premises_json, d_ref in a_rows:
+                if d_ref not in doc_alts:
+                    doc_alts[d_ref] = []
+                p_list = []
+                try:
+                    p_list = json.loads(premises_json)
+                except (json.JSONDecodeError, TypeError):
+                    pass
+                doc_alts[d_ref].append({
+                    "name": name,
+                    "disposition": disp,
+                    "reason": reason,
+                    "premises": p_list,
+                })
+        except sqlite3.DatabaseError:
+            pass
+
+    # 3. Read all documents and their first passage (for subject + body)
     try:
         doc_rows = database.execute(
             "SELECT document_ref, relative_path, metadata FROM documents"
@@ -213,6 +268,9 @@ def build_dag_from_database(database: sqlite3.Connection) -> DAGData:
             status=status,
             files=files,
             body_preview=body_preview,
+            premises=doc_premises.get(doc_ref, []),
+            alternatives=doc_alts.get(doc_ref, []),
+            has_drift=doc_has_drift.get(doc_ref, False),
         ))
 
     return DAGData(nodes=nodes, edges=edges)
@@ -281,6 +339,14 @@ _HTML_TEMPLATE = r"""<!DOCTYPE html>
   .node circle { stroke-width: 2; transition: r 0.15s ease; }
   .node:hover circle { r: 14; }
   .node text { font-size: 11px; fill: #c9d1d9; pointer-events: none; }
+  .node.drift circle { stroke: #e3b341 !important; stroke-width: 3.5px !important; stroke-dasharray: 4 2; }
+
+  .legend-drift { width: 12px; height: 12px; border-radius: 50%; border: 2px dashed #e3b341; background: #e3b34133; }
+  .premise-card { background: #21262d; border-radius: 6px; padding: 8px 10px; margin-bottom: 8px; font-size: 12px; }
+  .premise-active { border-left: 3px solid #238636; }
+  .premise-invalidated { border-left: 3px solid #da3633; }
+  .alt-card { background: #21262d; border-radius: 6px; padding: 8px 10px; margin-bottom: 8px; font-size: 12px; border-left: 3px solid #8b949e; }
+  .alert-drift { background: #e3b3411a; border: 1px solid #e3b341; border-radius: 6px; padding: 10px; margin-bottom: 14px; color: #e3b341; font-size: 12px; line-height: 1.4; }
 
   .link { stroke-opacity: 0.5; fill: none; }
   .link-supersedes { stroke: #da3633; }
@@ -313,6 +379,7 @@ _HTML_TEMPLATE = r"""<!DOCTYPE html>
 </div>
 <div id="legend">
   <div class="legend-item"><div class="legend-dot" style="background:#238636"></div> Active</div>
+  <div class="legend-item"><div class="legend-dot legend-drift"></div> Premise Drift</div>
   <div class="legend-item"><div class="legend-dot" style="background:#da3633"></div> Superseded</div>
   <div class="legend-item"><div class="legend-dot" style="background:#d29922"></div> Deprecated</div>
   <div class="legend-item"><div class="legend-dot" style="background:#58a6ff"></div> Amended</div>
@@ -397,7 +464,7 @@ const linkLabel = g.selectAll('.link-label')
 // Nodes
 const node = g.selectAll('.node')
   .data(DATA.nodes).join('g')
-  .attr('class', 'node')
+  .attr('class', d => 'node' + (d.has_drift ? ' drift' : ''))
   .call(d3.drag()
     .on('start', (e, d) => { if (!e.active) simulation.alphaTarget(0.3).restart(); d.fx = d.x; d.fy = d.y; })
     .on('drag', (e, d) => { d.fx = e.x; d.fy = e.y; })
@@ -407,7 +474,7 @@ const node = g.selectAll('.node')
 node.append('circle')
   .attr('r', d => d.status === 'active' ? 10 : 8)
   .attr('fill', d => statusColor[d.status] || '#8b949e')
-  .attr('stroke', d => d3.color(statusColor[d.status] || '#8b949e').brighter(0.5));
+  .attr('stroke', d => d.has_drift ? '#e3b341' : d3.color(statusColor[d.status] || '#8b949e').brighter(0.5));
 
 node.append('text')
   .attr('dx', 16).attr('dy', 4)
@@ -431,10 +498,45 @@ function showDetail(d) {
   const filesHtml = d.files.length > 0
     ? `<ul class="files-list">${d.files.map(f => `<li>${f}</li>`).join('')}</ul>`
     : '<p style="color:#484f58;font-size:13px">No files recorded</p>';
+
+  const driftBanner = d.has_drift
+    ? `<div class="alert-drift"><strong>⚠️ Premise Drift Warning:</strong> One or more foundational premises governing this decision have been invalidated downstream.</div>`
+    : '';
+
+  let premisesHtml = '<p style="color:#484f58;font-size:13px">No premises recorded</p>';
+  if (d.premises && d.premises.length > 0) {
+    premisesHtml = d.premises.map(p => `
+      <div class="premise-card ${p.status === 'invalidated' ? 'premise-invalidated' : 'premise-active'}">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px">
+          <strong>${p.id}</strong>
+          <span class="status-badge ${p.status === 'invalidated' ? 'status-superseded' : 'status-active'}">${p.status}</span>
+        </div>
+        <div style="color:#c9d1d9">${p.statement}</div>
+        ${p.invalidated_by ? `<div style="color:#f85149;margin-top:4px;font-size:11px">Invalidated by: ${p.invalidated_by}</div>` : ''}
+      </div>
+    `).join('');
+  }
+
+  let altsHtml = '<p style="color:#484f58;font-size:13px">No evaluated alternatives</p>';
+  if (d.alternatives && d.alternatives.length > 0) {
+    altsHtml = d.alternatives.map(a => `
+      <div class="alt-card">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px">
+          <strong>${a.name}</strong>
+          <span class="status-badge status-deprecated">${a.disposition}</span>
+        </div>
+        <div style="color:#8b949e;margin-bottom:4px">${a.reason}</div>
+        ${a.premises && a.premises.length > 0 ? `<div style="color:#58a6ff;font-size:11px">Conditioned on: ${a.premises.join(', ')}</div>` : ''}
+      </div>
+    `).join('');
+  }
+
   content.innerHTML = `
     <h2>${d.label}</h2>
+    ${driftBanner}
     <div class="meta">
       <span class="status-badge status-${d.status}">${d.status}</span>
+      ${d.has_drift ? '<span class="status-badge" style="background:#e3b341;color:#0d1117">drift</span>' : ''}
       <span>📝 ${d.commit || 'unknown'}</span>
       <span>👤 ${d.author || 'unknown'}</span>
       <span>📅 ${d.date || 'unknown'}</span>
@@ -442,6 +544,14 @@ function showDetail(d) {
     <div class="section">
       <h3>Source</h3>
       <p style="font-size:13px;font-family:monospace;color:#79c0ff">${d.path}</p>
+    </div>
+    <div class="section">
+      <h3>Premises (${d.premises ? d.premises.length : 0})</h3>
+      ${premisesHtml}
+    </div>
+    <div class="section">
+      <h3>Evaluated Alternatives (${d.alternatives ? d.alternatives.length : 0})</h3>
+      ${altsHtml}
     </div>
     <div class="section">
       <h3>Governed Files</h3>

@@ -292,3 +292,42 @@ class TestUICli:
             assert code == 1
             captured = capsys.readouterr()
             assert "bruriah: error: snapshot_unreadable" in captured.err
+
+    def test_build_dag_with_premises_and_drift(self):
+        conn = _setup_test_db()
+        conn.executescript("""
+            CREATE TABLE premises (
+                premise_id TEXT PRIMARY KEY,
+                statement TEXT NOT NULL,
+                status TEXT NOT NULL,
+                invalidated_by TEXT,
+                rationale TEXT,
+                document_ref TEXT NOT NULL
+            ) WITHOUT ROWID;
+
+            CREATE TABLE alternatives (
+                name TEXT NOT NULL,
+                disposition TEXT NOT NULL,
+                reason TEXT NOT NULL,
+                premises TEXT NOT NULL,
+                document_ref TEXT NOT NULL,
+                PRIMARY KEY (name, document_ref)
+            ) WITHOUT ROWID;
+        """)
+        conn.execute(
+            "INSERT INTO premises VALUES (?, ?, ?, ?, ?, ?)",
+            ("single-tenant", "System runs single tenant", "invalidated", "doc:2", "Moved to multi-tenant", "doc:1"),
+        )
+        conn.execute(
+            "INSERT INTO alternatives VALUES (?, ?, ?, ?, ?)",
+            ("BasicAuth", "rejected", "Insecure over plain HTTP", json.dumps(["single-tenant"]), "doc:1"),
+        )
+        dag = build_dag_from_database(conn)
+        node1 = next(n for n in dag.nodes if n.id == "doc:1")
+        assert node1.has_drift is True
+        assert len(node1.premises) == 1
+        assert node1.premises[0]["id"] == "single-tenant"
+        assert node1.premises[0]["status"] == "invalidated"
+        assert len(node1.alternatives) == 1
+        assert node1.alternatives[0]["name"] == "BasicAuth"
+        conn.close()

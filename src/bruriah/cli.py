@@ -1310,10 +1310,20 @@ def _cmd_watch(
         raise CliError(error.code) from error
 
 
+def _cmd_demo(args: argparse.Namespace) -> int:
+    from .demo import run_demo
+
+    return run_demo(
+        interactive=not getattr(args, "non_interactive", False),
+        use_color=not getattr(args, "no_color", False),
+    )
+
+
 def _build_cli_parser() -> argparse.ArgumentParser:
     return build_cli_parser(
         version=__version__,
         handlers={
+            "demo": _cmd_demo,
             "init": _cmd_init,
             "setup": _cmd_setup,
             "hook": _cmd_hook,

@@ -674,4 +674,18 @@ def build_cli_parser(
         default=None,
         help="passage prefix template for asymmetric embedding models",
     )
+    demo_parser = add(
+        "demo",
+        "Run an interactive counterfactual memory demonstration in the terminal.",
+    )
+    demo_parser.add_argument(
+        "--non-interactive",
+        action="store_true",
+        help="run through all steps without pausing for user input",
+    )
+    demo_parser.add_argument(
+        "--no-color",
+        action="store_true",
+        help="disable ANSI color output",
+    )
     return parser
