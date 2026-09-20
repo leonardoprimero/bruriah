@@ -185,7 +185,7 @@ We evaluate Bruriah against real codebases and publish negative results alongsid
 | **Own-History Retrieval (24 questions)** | English recall@3 **0.750** · recall@10 0.917 · Spanish recall@3 **0.750** · recall@10 0.917 (before: Spanish 0.500) | 204-document corpus of Bruriah's own git history as of the measurement date (no `--revision` pinned -- see the evals report) |
 | **Query Latency** | **≈46µs per passage** (linear) | 1,000 passages in 45ms, 16,000 in 734ms on M4 Pro |
 | **Index Size** | **≈5 KB per passage** | 16k passages ≈ 79 MB SQLite database |
-| **Test Suite** | **1,374 tests** · 0 failures · skips only when an environment prerequisite is absent | Full matrix on Python 3.12, 3.13, 3.14 across Linux, macOS, and Windows |
+| **Test Suite** | **1,383 tests** · 0 failures · skips only when an environment prerequisite is absent | Full matrix on Python 3.12, 3.13, 3.14 across Linux, macOS, and Windows |
 
 > **Want the full methodology and ablations?**  
 > Read our in-depth evaluation report: [**Evaluation Methodology & Benchmarks (`evals/project-memory/README.md`)**](evals/project-memory/README.md).

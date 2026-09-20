@@ -56,7 +56,10 @@ def build_cli_parser(
         "index and client configs, ending with a first question the index can answer",
     )
     init_parser.add_argument("--limit", type=int, default=None, help="most recent N commits only")
-    init_parser.add_argument("--model", default=DEFAULT_EMBEDDING_MODEL)
+    init_parser.add_argument(
+        "--model", default=DEFAULT_EMBEDDING_MODEL,
+        help=f"embedding model name (default: {DEFAULT_EMBEDDING_MODEL})",
+    )
     init_parser.add_argument("--query-prefix", default=None, help="query prefix template for asymmetric embedding models")
     init_parser.add_argument("--passage-prefix", default=None, help="passage prefix template for asymmetric embedding models")
     init_parser.add_argument(
@@ -583,7 +586,10 @@ def build_cli_parser(
     index_parser = add("index", "Build and promote a candidate index.")
     index_parser.add_argument("--corpus-root", type=Path, required=True)
     index_parser.add_argument("--policy", type=Path, required=True)
-    index_parser.add_argument("--model", default=DEFAULT_EMBEDDING_MODEL)
+    index_parser.add_argument(
+        "--model", default=DEFAULT_EMBEDDING_MODEL,
+        help=f"embedding model name (default: {DEFAULT_EMBEDDING_MODEL})",
+    )
     index_parser.add_argument("--query-prefix", default=None, help="query prefix template for asymmetric embedding models")
     index_parser.add_argument("--passage-prefix", default=None, help="passage prefix template for asymmetric embedding models")
     ingest = add("skill-ingest", "Store a candidate skill pack privately.")
@@ -660,7 +666,7 @@ def build_cli_parser(
     watch_parser.add_argument(
         "--model",
         default=DEFAULT_EMBEDDING_MODEL,
-        help="embedding model name",
+        help=f"embedding model name (default: {DEFAULT_EMBEDDING_MODEL})",
     )
     watch_parser.add_argument(
         "--query-prefix",
