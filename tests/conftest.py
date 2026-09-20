@@ -106,3 +106,33 @@ def no_connection_outlives_its_test(monkeypatch):
         "Use `contextlib.closing`; a bare `with connection:` commits or rolls back and leaves the "
         "handle open, which is undetectable on POSIX and fatal to unlink on Windows."
     )
+
+
+# README.md's test-count claim (section 4) is self-verifying: `test_readme_claims.py` compares it
+# against the number actually collected in THIS run, so the two cannot drift apart the way the
+# hand-typed "1,087 passed" once did (1,358 were collected by the time it was caught). That
+# comparison is only meaningful on a full run -- a narrowed invocation collects fewer tests by
+# design and would fail the claim for a reason that has nothing to do with the README being wrong.
+#
+# "Narrowed" is approximated rather than exhaustively detected: explicit file/dir arguments that
+# differ from the configured `testpaths` fallback, or `-k`/`--deselect`/`--lf` selecting a subset.
+# `session.config.args` is `[]` (falls back to `testpaths`) on a bare `pytest` invocation and
+# non-empty when paths were named on the command line -- the one case this cannot tell apart from
+# "the user named `testpaths` explicitly and it still means everything" is accepted as a known
+# gap, not silently claimed as detected.
+def pytest_collection_finish(session: pytest.Session) -> None:
+    config = session.config
+    testpaths = list(config.getini("testpaths") or [])
+    narrowed = (
+        list(config.args) != testpaths
+        or bool(config.getoption("keyword", default=""))
+        or bool(config.getoption("deselect", default=None))
+        or bool(config.getoption("lf", default=False))
+    )
+    # NOT `session.testscollected`: pytest only assigns that attribute AFTER this hook returns
+    # (see `Session.perform_collect`'s `finally: hook.pytest_collection_finish(...)` running
+    # before the trailing `self.testscollected = len(items)`), so reading it here would always
+    # see its zero-initialized default. `session.items`, the collected item list, is already
+    # populated by this point.
+    config._bruriah_collected = len(session.items)  # type: ignore[attr-defined]
+    config._bruriah_full_run = not narrowed  # type: ignore[attr-defined]
