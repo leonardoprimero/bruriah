@@ -1288,6 +1288,28 @@ def _cmd_alias(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_watch(
+    args: argparse.Namespace, *, embedder_factory: EmbedderFactory = _default_embedder_factory,
+) -> int:
+    from . import watch
+
+    paths = _resolve_paths(args)
+    repo = args.repo.resolve() if args.repo is not None else Path(".").resolve()
+    try:
+        watcher = watch.RepoWatcher(
+            repo,
+            paths,
+            model_name=args.model,
+            embedder_factory=embedder_factory,
+            query_prefix=getattr(args, "query_prefix", None),
+            passage_prefix=getattr(args, "passage_prefix", None),
+            interval=args.interval,
+        )
+        return watcher.watch(once=args.once)
+    except watch.WatchError as error:
+        raise CliError(error.code) from error
+
+
 def _build_cli_parser() -> argparse.ArgumentParser:
     return build_cli_parser(
         version=__version__,
@@ -1313,6 +1335,7 @@ def _build_cli_parser() -> argparse.ArgumentParser:
             "index-prune": _cmd_index_prune,
             "serve": _cmd_serve,
             "doctor": _cmd_doctor,
+            "watch": _cmd_watch,
             "skill-ingest": _cmd_skill_ingest,
             "skill-analyze": _cmd_skill_analyze,
             "skill-approve": _cmd_skill_approve,

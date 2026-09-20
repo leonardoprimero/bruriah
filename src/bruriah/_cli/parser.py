@@ -638,4 +638,40 @@ def build_cli_parser(
         "measured in evals/project-memory/README.md",
     )
     add("doctor", "Read-only health check.")
+    watch_parser = add(
+        "watch",
+        "Continuously monitor git repository and incrementally update index on new commits.",
+    )
+    watch_parser.add_argument(
+        "--repo",
+        type=Path,
+        default=Path("."),
+        help="git repository to watch (default '.')",
+    )
+    watch_parser.add_argument(
+        "--interval",
+        type=float,
+        default=2.0,
+        help="polling interval in seconds (default: 2.0)",
+    )
+    watch_parser.add_argument(
+        "--once",
+        action="store_true",
+        help="check and sync once, then exit",
+    )
+    watch_parser.add_argument(
+        "--model",
+        default="sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2",
+        help="embedding model name",
+    )
+    watch_parser.add_argument(
+        "--query-prefix",
+        default=None,
+        help="query prefix template for asymmetric embedding models",
+    )
+    watch_parser.add_argument(
+        "--passage-prefix",
+        default=None,
+        help="passage prefix template for asymmetric embedding models",
+    )
     return parser

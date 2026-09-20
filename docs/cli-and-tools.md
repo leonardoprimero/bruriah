@@ -511,3 +511,19 @@ git drift --staged
 ```
 
 Pass `--json` to `bruriah drift` to integrate structured diagnostics into PR review bots or dashboards.
+
+---
+
+## 15. Continuous Auto-Indexing: `bruriah watch`
+
+Instead of manually running `bruriah index` after making commits or pulling changes, `bruriah watch` monitors your Git repository state in the background and automatically updates the active index incrementally:
+
+```bash
+bruriah watch                   # Watch current repository with default 2s polling
+bruriah watch --interval 5.0    # Custom polling interval
+bruriah watch --once            # Check for changes, sync if needed, and exit
+```
+
+- **Zero Heavy Dependencies:** Uses lightweight, pure-Python stat polling over Git HEAD and ref pointers (<0.1ms CPU per poll).
+- **Incremental Reuse:** Leverages Bruriah's snapshot reuse to re-embed only new or modified decision documents, completing updates in fractions of a second.
+- **Graceful Shutdown:** Handles `Ctrl+C` cleanly without corrupting active index pointers.
