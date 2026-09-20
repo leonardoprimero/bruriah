@@ -66,7 +66,7 @@ def test_signed_pack_tampering_fails_closed(tmp_path: Path, mutate, code: str) -
 def test_manifest_and_semantic_gates_have_stable_errors(tmp_path: Path) -> None:
     assert _code(tmp_path, lambda p, m: m.update({"signature": "AA=="})) == "invalid_signature"
     assert _code(tmp_path, None, minimum_versions={"research.minimal": "2.0.0"}) == "version_rollback"
-    assert _code(tmp_path, None, router_version="1.0.0") == "incompatible_pack"
+    assert _code(tmp_path, None, router_version="2.0.0") == "incompatible_pack"
     assert _code(tmp_path, None, domain="law") == "unsupported_domain"
     assert _code(tmp_path, None, jurisdiction="AR") == "unsupported_jurisdiction"
 def test_version_validation_rejects_malformed_router_and_minimum_versions(tmp_path: Path) -> None:
@@ -219,7 +219,7 @@ def test_enforce_currency_false_survives_aging_but_nothing_else(tmp_path: Path) 
     digest = lambda pack, manifest: pack.update({"maintainer": "tampered"})
     assert _code(tmp_path, digest, today=aged, enforce_currency=False) == "digest_mismatch"
     assert _code(
-        tmp_path, None, today=aged, enforce_currency=False, router_version="1.0.0"
+        tmp_path, None, today=aged, enforce_currency=False, router_version="2.0.0"
     ) == "incompatible_pack"
 
 
@@ -235,9 +235,9 @@ def test_precedence_expired_beats_stale(tmp_path: Path) -> None:
     # A date far past expiry also exceeds the freshness window; expiry is checked first.
     assert _code(tmp_path, None, today=date(2030, 1, 1)) == "expired_pack"
 def test_precedence_dates_beat_router_compatibility(tmp_path: Path) -> None:
-    assert _code(tmp_path, None, today=date(2030, 1, 1), router_version="1.0.0") == "expired_pack"
+    assert _code(tmp_path, None, today=date(2030, 1, 1), router_version="2.0.0") == "expired_pack"
 def test_precedence_router_compatibility_beats_version_floor(tmp_path: Path) -> None:
-    kwargs = {"router_version": "1.0.0", "minimum_versions": {"research.minimal": "2.0.0"}}
+    kwargs = {"router_version": "2.0.0", "minimum_versions": {"research.minimal": "2.0.0"}}
     assert _code(tmp_path, None, **kwargs) == "incompatible_pack"
 def test_precedence_version_floor_beats_unsupported_domain(tmp_path: Path) -> None:
     kwargs = {"minimum_versions": {"research.minimal": "2.0.0"}, "domain": "law"}

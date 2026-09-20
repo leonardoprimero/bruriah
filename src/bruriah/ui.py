@@ -4,14 +4,11 @@
 # and the D3.js library loaded from CDN.
 from __future__ import annotations
 
-import contextlib
 import json
 import sqlite3
 import webbrowser
 from dataclasses import asdict, dataclass
-from functools import partial
 from http.server import HTTPServer, BaseHTTPRequestHandler
-from pathlib import Path
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -630,13 +627,13 @@ def run_ui(
     # Inject DAG data into the handler class
     handler = type("Handler", (_UIHandler,), {"dag_json": dag_json})
 
-    with contextlib.closing(HTTPServer(("127.0.0.1", port), handler)) as server:
+    with HTTPServer(("127.0.0.1", port), handler) as server:
         actual_port = server.server_address[1]
         url = f"http://127.0.0.1:{actual_port}"
-        print(f"🏛️  Bruriah Decision Lineage Explorer")
+        print("🏛️  Bruriah Decision Lineage Explorer")
         print(f"   {url}")
         print(f"   {len(dag.nodes)} decisions · {len(dag.edges)} lineage edges")
-        print(f"   Press Ctrl+C to stop\n")
+        print("   Press Ctrl+C to stop\n")
 
         if open_browser:
             webbrowser.open(url)

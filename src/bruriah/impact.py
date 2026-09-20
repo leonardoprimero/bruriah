@@ -8,12 +8,11 @@ import sqlite3
 import subprocess
 from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from .why import (
     WhyError,
     check_lineage_alerts,
-    find_decision_in_database,
     trace_causal_archaeology,
 )
 
@@ -32,14 +31,14 @@ class ImpactError(ValueError):
 
 @dataclass(frozen=True)
 class DecisionImpact:
-    """Impact profile of a single governing architectural decision."""
+    """Impact of an architectural decision on the codebase."""
 
     decision_ref: str
     commit_sha: str
     subject: str
     author: str
     date: str
-    status: str  # "active", "superseded", "deprecated", "amended"
+    status: str  # "active", "superseded", "deprecates", "amends"
     direct_files: tuple[str, ...]
     blast_radius_files: tuple[str, ...]
     active_successor_title: str | None = None
@@ -48,7 +47,7 @@ class DecisionImpact:
 
 @dataclass(frozen=True)
 class ImpactAnalysis:
-    """Complete architectural blast radius analysis for a target."""
+    """Complete blast radius analysis result."""
 
     target: str
     target_type: str  # "file", "directory", "revision"
@@ -59,7 +58,7 @@ class ImpactAnalysis:
     recommendations: tuple[str, ...]
 
 
-def _get_git_files(repo: Path, target: str) -> tuple[str, str]:
+def _get_git_files(repo: Path, target: str) -> tuple[str, tuple[str, ...]]:
     """Determine target type and list of files to inspect.
 
     Returns:
@@ -138,7 +137,7 @@ def analyze_impact(
 
     # Group inspected files by governing decision
     doc_to_direct_files: dict[str, list[str]] = {}
-    doc_to_decision: dict[str, any] = {}
+    doc_to_decision: dict[str, Any] = {}
 
     for file_path in files_to_inspect:
         try:

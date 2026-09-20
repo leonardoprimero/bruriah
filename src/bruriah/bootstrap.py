@@ -98,7 +98,7 @@ def score_commit(
             reasons.append(reason)
 
     # 2. Body analysis
-    body_lines = [l.strip() for l in body.splitlines() if l.strip()]
+    body_lines = [line.strip() for line in body.splitlines() if line.strip()]
     if len(body_lines) >= 5:
         score += 0.25
         reasons.append(f"detailed body ({len(body_lines)} lines)")
@@ -200,19 +200,19 @@ def mine_git_history(
         in_body = False
         in_files = False
 
-        for l in lines[4:]:
-            if l == "BODY_START":
+        for line in lines[4:]:
+            if line == "BODY_START":
                 in_body = True
                 continue
-            if l == "BODY_END":
+            if line == "BODY_END":
                 in_body = False
                 in_files = True
                 continue
             if in_body:
-                body_lines.append(l)
+                body_lines.append(line)
             elif in_files:
-                if l.strip():
-                    file_lines.append(l.strip())
+                if line.strip():
+                    file_lines.append(line.strip())
 
         body_text = "\n".join(body_lines).strip()
         score, reasons = score_commit(subject, body_text, file_lines)

@@ -4,7 +4,6 @@
 from __future__ import annotations
 
 import json
-import re
 import sqlite3
 import subprocess
 from dataclasses import asdict, dataclass
@@ -193,9 +192,9 @@ def compute_file_lens(
                             ).fetchone()
                             subj = "(untitled)"
                             if p_row:
-                                for l in p_row[0].splitlines():
-                                    if l.strip().startswith("# "):
-                                        subj = l.strip()[2:].strip()
+                                for line in p_row[0].splitlines():
+                                    if line.strip().startswith("# "):
+                                        subj = line.strip()[2:].strip()
                                         break
                             sha_to_doc[u_sha] = (doc_ref, subj)
             except (json.JSONDecodeError, TypeError):
@@ -241,9 +240,9 @@ def compute_file_lens(
                 ).fetchone()
                 s_subj = "(untitled)"
                 if p_row:
-                    for l in p_row[0].splitlines():
-                        if l.strip().startswith("# "):
-                            s_subj = l.strip()[2:].strip()
+                    for line in p_row[0].splitlines():
+                        if line.strip().startswith("# "):
+                            s_subj = line.strip()[2:].strip()
                             break
 
                 doc_alerts[pred_ref] = (relation, s_subj, s_sha, 1)
@@ -315,7 +314,7 @@ def format_lens_json(result: FileLensResult) -> str:
             "total_lines": result.total_lines,
             "indexed_decisions_count": result.indexed_decisions_count,
             "stale_decisions_count": result.stale_decisions_count,
-            "lenses": [asdict(l) for l in result.lenses],
+            "lenses": [asdict(lens) for lens in result.lenses],
         },
         indent=2,
     )

@@ -17,7 +17,6 @@ from typing import TYPE_CHECKING, Sequence
 from .drift import analyze_architectural_drift, get_git_diff_files
 from .impact import analyze_impact
 from .repository import SnapshotRepository
-from .why import WhyError, trace_causal_archaeology
 
 if TYPE_CHECKING:
     from .platform import PlatformPaths

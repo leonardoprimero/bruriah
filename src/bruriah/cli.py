@@ -336,7 +336,7 @@ def _suggested_question(corpus_root: Path) -> str | None:
     return f"why {words}" if words else None
 
 
-def run_bootstrap(
+def _run_init_repo_bootstrap(
     paths: PlatformPaths, repo: Path, *, limit: int | None = None, model_name: str,
     embedder_factory: EmbedderFactory = _default_embedder_factory,
     query_prefix: str | None = None,
@@ -512,7 +512,7 @@ def _cmd_init(
     if args.repo is not None:
         assert repo_root is not None
         print(f"Reading the history of {args.repo}...", file=sys.stderr)
-        bootstrap = run_bootstrap(
+        bootstrap = _run_init_repo_bootstrap(
             paths, args.repo, limit=args.limit, model_name=args.model,
             embedder_factory=embedder_factory,
             query_prefix=getattr(args, "query_prefix", None),
@@ -956,6 +956,8 @@ def _cmd_ui(args: argparse.Namespace) -> int:
 def _cmd_lens(args: argparse.Namespace) -> int:
     paths = _resolve_paths(args)
     repo = find_project_root(args.repo.resolve())
+    if repo is None:
+        raise CliError("not_a_git_repository")
     target_path = Path(args.file)
     rel_path = (
         str(target_path.relative_to(repo))
@@ -977,6 +979,8 @@ def _cmd_lens(args: argparse.Namespace) -> int:
 def _cmd_bootstrap(args: argparse.Namespace) -> int:
     paths = _resolve_paths(args)
     repo = find_project_root(args.repo.resolve())
+    if repo is None:
+        raise CliError("not_a_git_repository")
     out_dir = args.out_dir if args.out_dir.is_absolute() else repo / args.out_dir
 
     try:
@@ -1018,6 +1022,8 @@ def _cmd_bootstrap(args: argparse.Namespace) -> int:
 def _cmd_impact(args: argparse.Namespace) -> int:
     paths = _resolve_paths(args)
     repo = find_project_root(args.repo.resolve())
+    if repo is None:
+        raise CliError("not_a_git_repository")
 
     try:
         result = run_impact(paths, repo, args.target)
@@ -1034,6 +1040,8 @@ def _cmd_impact(args: argparse.Namespace) -> int:
 def _cmd_guard(args: argparse.Namespace) -> int:
     paths = _resolve_paths(args)
     repo = find_project_root(args.repo.resolve())
+    if repo is None:
+        raise CliError("not_a_git_repository")
 
     try:
         result = run_guard(

@@ -482,7 +482,7 @@ def _local_pack(tmp_path: Path, skill_id: str = "leo.deploy") -> Path:
     body.write_text("# Deploy\nNever on a Friday.\n")
     pack = {
         "schema_version": "1", "pack_id": f"{skill_id}.pack", "version": "1.0.0",
-        "maintainer": "Leo", "min_router_version": "0.1.0", "max_router_version": "0.9.9",
+        "maintainer": "Leo", "min_router_version": "0.1.0", "max_router_version": "1.9.9",
         "reviewed_at": "2026-07-25", "expires_at": "2027-07-25", "freshness_days": 365,
         "license": "private", "provenance": "internal conventions",
         "skills": [{

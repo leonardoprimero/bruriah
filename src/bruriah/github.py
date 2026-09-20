@@ -35,7 +35,7 @@ class PRContext:
 def detect_pr_context() -> PRContext | None:
     """
     Detects if the code is running in a GitHub Actions PR context.
-    
+
     Returns:
         PRContext if in a PR environment, otherwise None.
     """
@@ -47,7 +47,7 @@ def detect_pr_context() -> PRContext | None:
 
     if "/" not in repo_env:
         return None
-    
+
     owner, repo = repo_env.split("/", 1)
 
     try:
@@ -65,7 +65,7 @@ def detect_pr_context() -> PRContext | None:
         pr_number = pr_data["number"]
         base_ref = pr_data["base"]["ref"]
         head_sha = pr_data["head"]["sha"]
-        
+
         return PRContext(
             owner=owner,
             repo=repo,
@@ -80,16 +80,16 @@ def detect_pr_context() -> PRContext | None:
 def _github_api(method: str, url: str, token: str, body: dict[str, Any] | None = None) -> Any:
     """
     Internal helper to make GitHub API calls using only the standard library.
-    
+
     Args:
         method: HTTP method (GET, POST, PUT, etc.)
         url: The full API URL.
         token: GitHub personal access token or GITHUB_TOKEN.
         body: Optional dictionary payload for POST/PUT requests.
-        
+
     Returns:
         Parsed JSON response from the API.
-        
+
     Raises:
         GitHubError: On network or HTTP errors.
     """
@@ -99,7 +99,7 @@ def _github_api(method: str, url: str, token: str, body: dict[str, Any] | None =
         "X-GitHub-Api-Version": "2022-11-28",
         "User-Agent": "bruriah-bot",
     }
-    
+
     data = None
     if body is not None:
         try:
@@ -129,20 +129,20 @@ def _github_api(method: str, url: str, token: str, body: dict[str, Any] | None =
 def post_review(token: str, context: PRContext, review: ReviewResult) -> str:
     """
     Posts a review to the pull request.
-    
+
     Args:
         token: GitHub token.
         context: PRContext containing owner, repo, etc.
         review: ReviewResult containing the overall review and file comments.
-        
+
     Returns:
         The URL of the created review.
     """
     url = f"https://api.github.com/repos/{context.owner}/{context.repo}/pulls/{context.pr_number}/reviews"
-    
+
     comments = []
     for comment in review.comments:
-        c = {
+        c: dict[str, Any] = {
             "path": comment.path,
             "body": comment.body,
         }
@@ -168,17 +168,17 @@ def post_review(token: str, context: PRContext, review: ReviewResult) -> str:
 def dismiss_previous_reviews(token: str, context: PRContext, bot_login: str = "github-actions[bot]") -> int:
     """
     Dismisses previous Bruriah architectural reviews on the PR.
-    
+
     Args:
         token: GitHub token.
         context: PRContext.
         bot_login: The login name of the bot user to look for.
-        
+
     Returns:
         Number of dismissed reviews.
     """
     url = f"https://api.github.com/repos/{context.owner}/{context.repo}/pulls/{context.pr_number}/reviews"
-    
+
     try:
         reviews = _github_api("GET", url, token)
     except GitHubError:
@@ -191,18 +191,18 @@ def dismiss_previous_reviews(token: str, context: PRContext, bot_login: str = "g
     for review in reviews:
         if not isinstance(review, dict):
             continue
-            
+
         user = review.get("user", {})
         login = user.get("login") if isinstance(user, dict) else None
-        
+
         body = review.get("body", "")
         state = review.get("state", "")
-        
+
         if login == bot_login and "Bruriah Architectural Review" in body and state != "DISMISSED":
             review_id = review.get("id")
             if not review_id:
                 continue
-                
+
             dismiss_url = f"{url}/{review_id}/dismissals"
             dismiss_payload = {
                 "message": "Dismissing previous architectural review.",

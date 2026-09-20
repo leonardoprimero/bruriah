@@ -753,7 +753,7 @@ Cloud storage.
         _create_commit(repo, "src/core/storage.py", "# edited after supersession\n", "feat: edit old storage")
 
         capsys.readouterr()
-        code = cli.bruriah_main([
+        _ = cli.bruriah_main([
             "review",
             "HEAD~1..HEAD",
             "--repo", str(repo),
