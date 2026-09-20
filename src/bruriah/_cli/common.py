@@ -53,7 +53,40 @@ KNOWN_MODEL_PREFIXES: dict[str, tuple[str, str]] = {
     "BAAI/bge-base-en": ("Represent this sentence for searching relevant passages: ", ""),
     "BAAI/bge-small-en": ("Represent this sentence for searching relevant passages: ", ""),
     "BAAI/bge-large-en": ("Represent this sentence for searching relevant passages: ", ""),
+    # BGE-M3 is language-agnostic and uses no prefix -- it handles asymmetric retrieval
+    # internally via multi-functionality training. Listed explicitly so it is not mistakenly
+    # given E5 prefixes by the `elif "e5" in model_name` fallback.
+    "BAAI/bge-m3": ("", ""),
+    # Nomic embed-text v1.5 uses task-type prefixes. search_query/search_document for retrieval.
+    "nomic-ai/nomic-embed-text-v1.5": ("search_query: ", "search_document: "),
+    "nomic-ai/nomic-embed-text-v1": ("search_query: ", "search_document: "),
+    # Jina v3 uses no prefix but is included so it is not caught by the e5 heuristic.
+    "jinaai/jina-embeddings-v3": ("", ""),
 }
+
+# Model name substrings that indicate a symmetric-similarity model -- trained for paraphrase
+# detection or sentence similarity, not for asymmetric query-document retrieval.
+# `bruriah index` emits a warning when the chosen model matches any of these patterns,
+# because the recall gap between symmetric and asymmetric models on this task is large
+# (measured: leakcanary recall@3 0.340 with MiniLM vs estimated 0.50+ with E5-large).
+_SYMMETRIC_MODEL_PATTERNS: frozenset[str] = frozenset({
+    "paraphrase-",
+    "all-minilm",
+    "all-mpnet",
+    "distiluse",
+    "msmarco-distilbert",  # fine-tuned on MS MARCO, but symmetric
+})
+
+
+def is_symmetric_model(model_name: str) -> bool:
+    """Return True if the model name matches a known symmetric-similarity pattern.
+
+    Symmetric models are trained for paraphrase detection or semantic similarity,
+    not for asymmetric query-document retrieval. They tend to underperform on recall@3
+    when a short query must match a long architectural decision document.
+    """
+    lower = model_name.lower()
+    return any(pattern in lower for pattern in _SYMMETRIC_MODEL_PATTERNS)
 
 
 def resolve_model_prefixes(

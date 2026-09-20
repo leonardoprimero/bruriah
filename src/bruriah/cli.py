@@ -19,7 +19,7 @@ import yaml
 from fastembed import TextEmbedding
 
 from . import __version__, clients, gitcorpus, pdfcorpus
-from ._cli.common import CliError, resolve_cli_paths as _resolve_paths, resolve_model_prefixes
+from ._cli.common import CliError, resolve_cli_paths as _resolve_paths, resolve_model_prefixes, is_symmetric_model
 from ._cli.doctor import cmd_doctor as _cmd_doctor, run_doctor
 from ._cli.parser import build_cli_parser
 from ._cli.skills import (
@@ -366,15 +366,24 @@ def _run_init_repo_bootstrap(
         policy_path.write_text(_DEFAULT_BOOTSTRAP_POLICY, encoding="utf-8", newline="\n")
     corpus_root = paths.data_dir / "corpus"
     corpus_result = gitcorpus.build(repo, corpus_root, limit)
-    index_result = (
-        run_index(
+    if corpus_result.written:
+        if is_symmetric_model(model_name):
+            print(
+                f"Note: {model_name!r} is a symmetric-similarity model trained for paraphrase "
+                "detection. For query-document retrieval (short question → long commit), "
+                "asymmetric models like 'intfloat/multilingual-e5-large' with "
+                "--query-prefix 'query: ' --passage-prefix 'passage: ' give higher recall@3. "
+                "Measured gap: leakcanary recall@3 0.340 (MiniLM) vs 0.431+ (E5 + reranker). "
+                "Rebuilding with a different model requires a full re-index.",
+                file=sys.stderr,
+            )
+        index_result = run_index(
             paths, corpus_root.resolve(), policy_path.resolve(), model_name=model_name,
             embedder_factory=embedder_factory,
             query_prefix=query_prefix, passage_prefix=passage_prefix,
         )
-        if corpus_result.written
-        else None
-    )
+    else:
+        index_result = None
     return {
         "policy": policy_path, "corpus_root": corpus_root, "corpus": corpus_result,
         "index": index_result, "question": _suggested_question(corpus_root),
@@ -671,6 +680,16 @@ def _cmd_index(
     # working directory never changes, and for a server that is never.
     corpus_root = args.corpus_root.resolve()
     policy = args.policy.resolve()
+    if is_symmetric_model(args.model):
+        print(
+            f"Note: {args.model!r} is a symmetric-similarity model trained for paraphrase "
+            "detection. For query-document retrieval (short question → long commit), "
+            "asymmetric models like 'intfloat/multilingual-e5-large' with "
+            "--query-prefix 'query: ' --passage-prefix 'passage: ' give higher recall@3. "
+            "Measured gap: leakcanary recall@3 0.340 (MiniLM) vs 0.431+ (E5 + reranker). "
+            "Rebuilding with a different model requires a full re-index.",
+            file=sys.stderr,
+        )
     try:
         result = run_index(
             paths, corpus_root, policy, model_name=args.model,
