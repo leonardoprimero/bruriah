@@ -449,6 +449,137 @@ def build_cli_parser(
         default=Path("."),
         help="git repository root (default '.')",
     )
+    brief_parser = add(
+        "brief",
+        "Generate pre-flight architectural brief and supersede protocol for a task or target files.",
+    )
+    brief_parser.add_argument(
+        "intent",
+        nargs="?",
+        default="",
+        help="task intent or description (e.g. 'Refactor auth service to OAuth2')",
+    )
+    brief_parser.add_argument(
+        "--targets",
+        nargs="*",
+        default=None,
+        help="target file(s) or directories planned for modification",
+    )
+    brief_parser.add_argument(
+        "--json",
+        action="store_true",
+        help="render output as JSON",
+    )
+    brief_parser.add_argument(
+        "--agent",
+        action="store_true",
+        help="print only the prompt context snippet formatted for AI agent injection",
+    )
+    brief_parser.add_argument(
+        "--repo",
+        type=Path,
+        default=Path("."),
+        help="git repository root (default '.')",
+    )
+    decide_parser = add(
+        "decide",
+        "Capture and formalize an architectural decision with validated lineage trailers.",
+    )
+    decide_parser.add_argument(
+        "--title",
+        type=str,
+        default=None,
+        help="decision title / subject line",
+    )
+    decide_parser.add_argument(
+        "--problem",
+        type=str,
+        default=None,
+        help="context and problem description",
+    )
+    decide_parser.add_argument(
+        "--solution",
+        type=str,
+        default=None,
+        help="chosen solution and architecture",
+    )
+    decide_parser.add_argument(
+        "--invariants",
+        nargs="*",
+        default=None,
+        help="architectural invariants established by this decision",
+    )
+    decide_parser.add_argument(
+        "--alternative",
+        action="append",
+        default=None,
+        help="considered alternative in 'Name:Tradeoff:WhyRejected' format",
+    )
+    decide_parser.add_argument(
+        "--supersedes",
+        action="append",
+        default=None,
+        help="predecessor commit SHA or decision ref to supersede",
+    )
+    decide_parser.add_argument(
+        "--amends",
+        action="append",
+        default=None,
+        help="predecessor commit SHA or decision ref to amend",
+    )
+    decide_parser.add_argument(
+        "--deprecates",
+        action="append",
+        default=None,
+        help="predecessor commit SHA or decision ref to deprecate",
+    )
+    decide_parser.add_argument(
+        "--commit",
+        action="store_true",
+        help="commit staged changes with the formatted decision message",
+    )
+    decide_parser.add_argument(
+        "--adr",
+        action="store_true",
+        help="render as Architecture Decision Record (ADR) markdown",
+    )
+    decide_parser.add_argument(
+        "--json",
+        action="store_true",
+        help="render output as JSON",
+    )
+    decide_parser.add_argument(
+        "--repo",
+        type=Path,
+        default=Path("."),
+        help="git repository root (default '.')",
+    )
+    heal_parser = add(
+        "heal",
+        "Synthesize pedagogical remediation blueprints for architectural violations.",
+    )
+    heal_parser.add_argument(
+        "target",
+        nargs="?",
+        default=None,
+        help="file, directory, or revision range to heal (default: working tree diff or '.')",
+    )
+    heal_parser.add_argument(
+        "--agent",
+        action="store_true",
+        help="print only the prompt context snippet formatted for AI agent injection",
+    )
+    heal_parser.add_argument(
+        "--json",
+        action="store_true",
+        help="render output as JSON",
+    )
+    heal_parser.add_argument(
+        "--repo",
+        type=Path,
+        default=Path("."),
+        help="git repository root (default '.')",
+    )
     index_parser = add("index", "Build and promote a candidate index.")
     index_parser.add_argument("--corpus-root", type=Path, required=True)
     index_parser.add_argument("--policy", type=Path, required=True)

@@ -60,6 +60,9 @@ Then ask it something, from the terminal, before wiring up any client:
 </p>
 
 ```bash
+bruriah brief "migrate auth to OAuth2" --targets src/auth.py # proactive architectural pre-flight
+bruriah decide --title "feat(auth): adopt OAuth2" ...        # formalize architectural decision
+bruriah heal src/auth.py --agent                             # pedagogical remediation blueprint for AI
 bruriah ask "why did this project avoid FastMCP"             # references, no prose (auto-discovered)
 bruriah ask "why did this project avoid FastMCP" --read 2    # the exact lines
 bruriah ask "why this handler" --code-target src/server.py:42 # grounded in code
@@ -365,6 +368,75 @@ Recommendations:
 
 ---
 
+### Architectural Pre-Flight & Supersede Protocol: `bruriah brief`
+
+Before writing a single line of code, developers and AI agents need to know: *what architectural invariants and historical decisions govern this task?* 
+
+`bruriah brief` provides proactive pre-flight dossiers. Instead of catching broken rules after hundreds of lines are written, it synthesizes active invariants, blast-radius risks, and introduces the formal **Supersede Protocol**:
+
+```bash
+bruriah brief "migrate auth to OAuth2" --targets src/auth.py  # Terminal pre-flight dossier
+bruriah brief "migrate auth to OAuth2" --agent               # Context prompt for AI agent injection
+bruriah brief "migrate auth to OAuth2" --json                # Structured JSON for pipelines
+```
+
+Terminal Output:
+
+```text
+🏛️  Bruriah Architectural Brief — Pre-flight Dossier
+   Intent: "migrate auth to OAuth2"
+   Risk Level: 🟢 LOW · 1 target(s) · 1 constraint(s)
+
+Target Files:
+  • src/auth.py
+
+Active Architectural Invariants:
+  • Unified Token and Session Model (22222222) — Leonardo Caliva, 2026-07-23
+    ↳ Maintain alignment with 'Unified Token and Session Model' (22222222).
+    ↳ Must never store plain tokens in cookies.
+
+Blast Radius (Co-governed files):
+  • src/tokens.py
+  • src/session.py
+
+⚠️  Supersede Protocol:
+   If historical premises have changed and an invariant must be updated:
+   Do NOT violate it silently. Declare a Supersede Proposal:
+   - Target: Unified Token and Session Model (22222222)
+   - Changed Premise: <why the past premise no longer applies>
+   - Proposed Invariant: <new replacement rule>
+   - Rationale: <technical justification>
+```
+
+#### The Supersede Protocol
+Decisions in Bruriah are not dogmas; they are solutions chosen under specific premises. When a library update, runtime upgrade, or new requirement invalidates an old decision, **the agent or developer does not silently break it**. The protocol instructs the agent to explicitly propose an architectural supersede, detailing what premise changed and why, keeping the human lead firmly in control.
+
+---
+
+### Architectural Decision Scribe: `bruriah decide`
+
+A project's memory is only as good as the reasoning recorded in its commits. If engineers or AI agents commit with superficial messages like *"update auth"*, the lineage graph degrades. 
+
+`bruriah decide` captures architectural choices at the moment of creation, formalizing the problem, alternatives evaluated, technical tradeoffs, established invariants, and automatically validating lineage trailers against the SQLite DAG:
+
+```bash
+bruriah decide                                      # Interactive terminal interview
+bruriah decide --title "feat(auth): adopt OAuth2" \
+               --problem "Session cookies vulnerable to CSRF across subdomains" \
+               --solution "Migrate to OAuth2 authorization code with PKCE" \
+               --invariants "Tokens must not exceed 15m TTL" \
+               --alternative "JWT in localStorage:Zero server state:Vulnerable to XSS" \
+               --supersedes e8f3003bda26 \
+               --commit                             # Directly commit staged changes
+```
+
+#### Key Capabilities:
+1. **Interactive Senior Architect Interview**: When run without arguments in a terminal, prompts the developer through the core architectural dimensions (Context, Solution, Invariants, Lineage).
+2. **Validated Predecessor Trailers**: Validates `--supersedes`, `--amends`, and `--deprecates` against the local SQLite index snapshot to ensure the referenced decision exists.
+3. **Commit & ADR Publishing**: Emits standard Git commit messages with valid Git trailers or publishes ADR markdown (`--adr`).
+
+---
+
 ### Architectural Guard & Compliance Receipts: `bruriah guard`
 
 Whether code is written by human engineers or AI agents (Claude Code, Cursor, Gentle-AI, Antigravity), `bruriah guard` acts as the authoritative gatekeeper enforcing architectural governance:
@@ -397,6 +469,25 @@ Compliance Receipt (RDD):
 1. **AI Agent Context Injection (`--agent`)**: Outputs a clean, structured Markdown prompt listing active directives and prohibitions for the files under modification, grounding coding agents in architectural truth *before* they write code.
 2. **Deterministic Compliance Receipts (RDD)**: Emits a verifiable, SHA-256 hashed `receipt` linking inspected files, governing decision SHAs, and timestamp to prove that changes comply with project architecture.
 3. **Optional Engram Bridge (`--engram`)**: When explicitly passed, syncs the compliance receipt into `.engram/compliance-receipt.json` for teams using Gentle-AI/Engram workflows (disabled by default; 100% standalone otherwise).
+
+---
+
+### Architectural Auto-Healing & Pedagogical Remediation: `bruriah heal`
+
+When an architectural violation or drift occurs, blocking the build (`guard --strict`) is only half the battle. If developers or AI agents do not understand *how* to solve the violation properly, agents hallucinate ad-hoc hacks and developers get frustrated.
+
+`bruriah heal` transforms Bruriah from a punitive gatekeeper into a pedagogical mentor. It analyzes violations against historical decision documents, extracts the canonical implementation pattern, and synthesizes step-by-step refactoring recipes:
+
+```bash
+bruriah heal src/bruriah/auth.py              # Human-readable remediation guide
+bruriah heal src/bruriah/auth.py --agent      # Pedagogical prompt injection for AI agents
+bruriah heal origin/main...HEAD --json        # Structured JSON for automated CI/CD
+```
+
+#### Key Capabilities:
+1. **Pedagogical Agent Prompting (`--agent`)**: Instead of a dry failure message, inyects the exact canonical pattern and step-by-step recipe into the LLM context so the agent refactors the code cleanly on its next turn.
+2. **Canonical Pattern Synthesis**: Extracts the authoritative design pattern directly from the commit that established the rule, ensuring consistency across generations of developers.
+3. **Graceful Verification**: Generates sequential steps that culminate in running `bruriah guard` to confirm that compliance is restored.
 
 ---
 

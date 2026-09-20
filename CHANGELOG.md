@@ -3,6 +3,25 @@
 Notable changes, newest first. This project follows [semantic versioning](https://semver.org/),
 and the entries here name what changed for *you* rather than which files moved.
 
+## [1.1.0] — 2026-09-20
+
+### Added: Proactive Architectural Pre-Flight & Supersede Protocol (`bruriah brief`)
+- **Proactive Governance Briefing:** Added `bruriah brief <intent> [--targets ...]` generating pre-flight dossiers before code is written, shifting Bruriah from purely forensic/reactive analysis to proactive architectural guidance.
+- **Dynamic Invariant & Blast Radius Synthesis:** Combines semantic search across the SQLite index snapshot with blast-radius impact analysis to identify active governing decisions, co-governed files, and risk levels.
+- **Formal Supersede Protocol:** Instructs AI agents and developers to never silently violate historical invariants. When past premises change (e.g. library updates, new requirements), agents emit a structured Supersede Proposal (`target_sha`, `changed_premise`, `proposed_invariant`, `rationale`), keeping human leads in control.
+- **Dual Consumer Interface:** Terminal formatter with ANSI risk indicators for developers, and `--agent` / `--json` modes for direct LLM prompt injection and automated pipelines.
+- **MCP 2-Tool Invariant Preserved:** Preserves the core Slice 7B invariant of exactly two MCP tools (`investigate_work` and `read_evidence`).
+
+### Added: Architectural Decision Scribe (`bruriah decide`)
+- **Decision Formalization Engine:** Added `bruriah decide` to structure architectural decisions at the moment of creation, prompting for context, evaluated alternatives, tradeoffs, and invariants.
+- **Validated Lineage Trailers:** Automatically validates `--supersedes`, `--amends`, and `--deprecates` against the active SQLite DAG, ensuring project memory never breaks lineage continuity.
+- **Git Commit & ADR Generation:** Directly creates formatted Git commits with standard trailers (`--commit`) or generates Architecture Decision Record documents (`--adr`).
+
+### Added: Architectural Auto-Healing & Pedagogical Remediation (`bruriah heal`)
+- **Pedagogical Remediation Engine:** Added `bruriah heal [target]` to bridge the gap between violation detection and resolution, extracting canonical design patterns from historical decision commits.
+- **Actionable Refactoring Blueprints:** Synthesizes step-by-step recipes (isolation, canonical pattern application, verification) to resolve drift and guard vetos cleanly.
+- **AI Agent Context Injection (`--agent`):** Injects structured pedagogical refactoring instructions into LLM prompts, preventing agents from hallucinating quick hacks or monkey-patches.
+
 ## [0.9.4] — 2026-09-19
 
 ### Added: Zero-Config Context Auto-Discovery

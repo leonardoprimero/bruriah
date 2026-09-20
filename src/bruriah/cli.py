@@ -63,6 +63,9 @@ from .lens import LensError, format_lens_human, format_lens_json, run_lens
 from .bootstrap import BootstrapError, run_bootstrap
 from .impact import ImpactError, format_impact_human, format_impact_json, run_impact
 from .guard import GuardError, format_guard_human, format_guard_json, run_guard
+from .brief import BriefError, format_brief_human, format_brief_json, run_brief
+from .decide import Alternative, DecideError, run_decide
+from .heal import HealError, format_heal_agent, format_heal_human, format_heal_json, run_heal
 from .service import ServiceDeps, investigate, read
 from .why import WhyError, format_why_human, format_why_json, run_why
 
@@ -1067,6 +1070,121 @@ def _cmd_guard(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_brief(args: argparse.Namespace) -> int:
+    paths = _resolve_paths(args)
+    repo = find_project_root(args.repo.resolve())
+    if repo is None:
+        raise CliError("not_a_git_repository")
+
+    try:
+        result = run_brief(
+            paths,
+            repo,
+            intent=args.intent or "",
+            targets=args.targets,
+        )
+    except BriefError as error:
+        raise CliError(error.code) from error
+
+    if args.agent:
+        print(result.agent_context)
+    elif args.json:
+        print(format_brief_json(result))
+    else:
+        print(format_brief_human(result))
+    return 0
+
+
+def _cmd_decide(args: argparse.Namespace) -> int:
+    paths = _resolve_paths(args)
+    repo = find_project_root(args.repo.resolve())
+    if repo is None:
+        raise CliError("not_a_git_repository")
+
+    title = args.title
+    problem = args.problem
+    solution = args.solution
+
+    # If required fields are missing, check if interactive prompt is possible
+    if not title or not problem or not solution:
+        if sys.stdin.isatty():
+            print("🏛️  Bruriah Architectural Decision Scribe\n")
+            if not title:
+                title = input("Decision title (e.g. feat(auth): adopt OAuth2): ").strip()
+            if not problem:
+                problem = input("Problem & Context: ").strip()
+            if not solution:
+                solution = input("Decision & Solution: ").strip()
+        else:
+            raise CliError("missing_required_fields: --title, --problem, and --solution are required in non-interactive mode.")
+
+    # Parse alternatives from Name:Tradeoff:Reason
+    alternatives: list[Alternative] = []
+    if args.alternative:
+        for alt_str in args.alternative:
+            parts = alt_str.split(":", 2)
+            if len(parts) == 3:
+                alternatives.append(Alternative(parts[0], parts[1], parts[2]))
+            elif len(parts) == 2:
+                alternatives.append(Alternative(parts[0], parts[1], "Suboptimal tradeoff"))
+            else:
+                alternatives.append(Alternative(parts[0], "Evaluated option", "Rejected"))
+
+    try:
+        record, new_sha = run_decide(
+            paths=paths,
+            repo=repo,
+            title=title,
+            problem=problem,
+            solution=solution,
+            invariants=args.invariants or [],
+            alternatives=alternatives,
+            supersedes=args.supersedes or [],
+            amends=args.amends or [],
+            deprecates=args.deprecates or [],
+            commit=args.commit,
+        )
+    except DecideError as error:
+        raise CliError(error.code) from error
+
+    if args.json:
+        print(record.to_json())
+    elif args.adr:
+        print(record.format_adr_markdown())
+    elif args.commit:
+        print(f"✅ Architectural commit created: {new_sha[:8] if new_sha else 'OK'}")
+        print(record.format_commit_message())
+    else:
+        print(record.format_commit_message())
+
+    return 0
+
+
+def _cmd_heal(args: argparse.Namespace) -> int:
+    paths = _resolve_paths(args)
+    repo = find_project_root(args.repo.resolve())
+    if repo is None:
+        raise CliError("not_a_git_repository")
+
+    try:
+        result = run_heal(
+            paths=paths,
+            repo=repo,
+            target=args.target,
+        )
+    except HealError as error:
+        raise CliError(error.code) from error
+
+    if args.agent:
+        print(format_heal_agent(result))
+    elif args.json:
+        print(format_heal_json(result))
+    else:
+        print(format_heal_human(result))
+
+    return 0
+
+
 def _cmd_setup(args: argparse.Namespace) -> int:
     paths = _resolve_paths(args)
     manifest = _build_launch_manifest(paths)
@@ -1188,6 +1306,9 @@ def _build_cli_parser() -> argparse.ArgumentParser:
             "bootstrap": _cmd_bootstrap,
             "impact": _cmd_impact,
             "guard": _cmd_guard,
+            "brief": _cmd_brief,
+            "decide": _cmd_decide,
+            "heal": _cmd_heal,
             "index": _cmd_index,
             "index-prune": _cmd_index_prune,
             "serve": _cmd_serve,

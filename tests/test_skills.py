@@ -52,7 +52,7 @@ def _pack(**overrides: Any) -> dict:
         "version": "1.0.0",
         "maintainer": "Bruriah",
         "min_router_version": "0.1.0",
-        "max_router_version": "1.0.0",
+        "max_router_version": "1.9.9",
         "reviewed_at": "2026-07-20",
         "expires_at": "2027-07-20",
         "freshness_days": 365,
