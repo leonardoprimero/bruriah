@@ -1509,3 +1509,54 @@ def test_cmd_alias_install_and_uninstall_local(tmp_path: Path, capsys: pytest.Ca
     assert "git why (Removed, local)" in captured.err
     assert "git drift (Removed, local)" in captured.err
 
+
+# --- is_symmetric_model and expanded model registry -------------------------------------------
+
+
+def test_is_symmetric_model_true_for_minilm() -> None:
+    """The default MiniLM model is symmetric-similarity-oriented and must be flagged."""
+    from bruriah._cli.common import is_symmetric_model
+
+    assert is_symmetric_model("sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2") is True
+
+
+def test_is_symmetric_model_false_for_e5_large() -> None:
+    """E5-large is an asymmetric retrieval model and must not trigger the warning."""
+    from bruriah._cli.common import is_symmetric_model
+
+    assert is_symmetric_model("intfloat/multilingual-e5-large") is False
+
+
+def test_is_symmetric_model_case_insensitive() -> None:
+    """Pattern matching is lowercased so capitalisation variants don't escape detection."""
+    from bruriah._cli.common import is_symmetric_model
+
+    assert is_symmetric_model("sentence-transformers/all-MiniLM-L6-v2") is True
+    assert is_symmetric_model("sentence-transformers/all-mpnet-base-v2") is True
+    assert is_symmetric_model("sentence-transformers/distiluse-base-multilingual") is True
+
+
+def test_known_model_prefixes_nomic_embed_text() -> None:
+    """Nomic embed-text uses search_query/search_document task-type prefixes."""
+    from bruriah._cli.common import resolve_model_prefixes
+
+    assert resolve_model_prefixes("nomic-ai/nomic-embed-text-v1.5") == (
+        "search_query: ", "search_document: "
+    )
+    assert resolve_model_prefixes("nomic-ai/nomic-embed-text-v1") == (
+        "search_query: ", "search_document: "
+    )
+
+
+def test_known_model_prefixes_bge_m3_no_prefix() -> None:
+    """BGE-M3 handles asymmetric retrieval internally and must not receive E5-style prefixes."""
+    from bruriah._cli.common import resolve_model_prefixes
+
+    assert resolve_model_prefixes("BAAI/bge-m3") == ("", "")
+
+
+def test_known_model_prefixes_jina_v3_no_prefix() -> None:
+    """Jina v3 uses no prefix and must not be caught by the e5 heuristic fallback."""
+    from bruriah._cli.common import resolve_model_prefixes
+
+    assert resolve_model_prefixes("jinaai/jina-embeddings-v3") == ("", "")

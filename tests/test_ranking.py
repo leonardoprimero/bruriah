@@ -129,10 +129,29 @@ def test_fuse_ranks_rrf() -> None:
     lexical = {"doc1": 1, "doc2": 2}
     vector = {"doc2": 1, "doc1": 2}
 
-    # Equal weight: doc1 and doc2 tie on score (1/61 + 1/62), tie broken by ref ("doc1" < "doc2")
+    # Equal weight: doc1 and doc2 tie on score (1/21 + 1/22), tie broken by ref ("doc1" < "doc2")
     fused = ranking.fuse_ranks(lexical, vector, lexical_weight=1.0)
     assert [ref for ref, _, _ in fused] == ["doc1", "doc2"]
 
     # Heavily discount lexical leg: doc2 wins because vector_rank 1 dominates
     fused_discounted = ranking.fuse_ranks(lexical, vector, lexical_weight=0.1)
     assert [ref for ref, _, _ in fused_discounted] == ["doc2", "doc1"]
+
+
+def test_rrf_lower_k_amplifies_rank_advantage() -> None:
+    """At K=20, rank 1 receives a meaningfully larger RRF score than rank 3.
+
+    The literature default of K=60 makes rank-1 and rank-2 nearly indistinguishable
+    (0.0164 vs 0.0156). At K=20 the gap widens to 4.6% per leg, which is enough to
+    push the correct document into the top-3 window when the vector leg already places
+    it at rank 1-2.
+    """
+    score_rank1 = 1.0 / (ranking.RRF_K + 1)
+    score_rank3 = 1.0 / (ranking.RRF_K + 3)
+    gap_fraction = (score_rank1 - score_rank3) / score_rank1
+    # At K=20: (1/21 - 1/23) / (1/21) ≈ 8.7 %. Requires >5% so the test still passes
+    # even if K is bumped modestly but still well below 60.
+    assert gap_fraction > 0.05, (
+        f"Expected rank-1 vs rank-3 gap > 5% of rank-1 score, got {gap_fraction:.1%} "
+        f"(RRF_K={ranking.RRF_K}). Increase K tuning or relax the threshold."
+    )
