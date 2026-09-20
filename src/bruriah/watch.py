@@ -13,13 +13,9 @@ from collections.abc import Callable
 from pathlib import Path
 
 from . import gitcorpus
-from .cli import (
-    EmbedderFactory,
-    _default_embedder_factory,
-    run_index,
-)
 from .corpus import CorpusPolicyError
 from .index import BuildResult, IndexLifecycleError
+from .index_runner import EmbedderFactory, _default_embedder_factory, run_index
 from .platform import PlatformPaths, ensure_private_dirs
 
 

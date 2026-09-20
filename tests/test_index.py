@@ -18,6 +18,7 @@ import pytest
 from conftest import requires_vault
 
 import bruriah.index as index_module
+import bruriah.index_runner as index_runner_module
 from bruriah.corpus import CorpusPolicy
 import bruriah.cli as cli_module
 from bruriah.cli import _embedding_fingerprint
@@ -392,7 +393,9 @@ def test_only_the_pooling_notice_is_swallowed_on_model_construction(
         warnings.warn("a different fastembed problem, with no backstop", UserWarning)
         return SimpleNamespace(model=backend, embed=lambda texts: [], embedding_size=3)
 
-    monkeypatch.setattr(cli_module, "TextEmbedding", _noisy)
+    # `_default_embedder_factory` lives in `index_runner.py` (moved out of `cli.py` in the
+    # index-runner refactor); patch its own module-level `TextEmbedding`, not `cli_module`'s.
+    monkeypatch.setattr(index_runner_module, "TextEmbedding", _noisy)
     cli_module._default_embedder_factory("qdrant/model")
 
     raised = [str(item.message) for item in recwarn]

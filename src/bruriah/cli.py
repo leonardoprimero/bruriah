@@ -1,13 +1,9 @@
 from __future__ import annotations
 
 import argparse
-import hashlib
-import importlib.metadata
 import json
 import os
 import sys
-import uuid
-import warnings
 from array import array
 from collections.abc import Callable
 from pathlib import Path
@@ -41,14 +37,12 @@ from ._cli.skills import (
     run_skill_status,
 )
 from .corpus import CorpusPolicy, CorpusPolicyError
-from .index import (
-    BuildConfig, BuildResult, Embedder, IndexLifecycleError, active_database, build_candidate,
-    promote_candidate, prune_generations,
-)
+from .index import BuildConfig, BuildResult, Embedder, IndexLifecycleError, build_candidate, prune_generations
+from .index_runner import EmbedderFactory, _default_embedder_factory, _embedding_fingerprint, run_index
 from .mcp_server import build_server
 from .platform import (
     PlatformError, PlatformPaths, ensure_private_dirs, find_project_root, load_build_descriptor, load_deps,
-    project_scoped_paths, resolve_paths, write_build_descriptor,
+    project_scoped_paths, resolve_paths,
 )
 from .aliases import AliasError, install_aliases, uninstall_aliases
 from .hooks import HookError, install_hook, uninstall_hook
@@ -71,6 +65,7 @@ from .why import WhyError, format_why_human, format_why_json, run_why
 
 __all__ = [
     "CliError",
+    "Embedder",
     "EmbedderFactory",
     "RerankerFactory",
     "bruriah_main",
@@ -109,47 +104,16 @@ __all__ = [
 # the active snapshot's own build descriptor, verifies that embedder's fingerprint/dimensions
 # fail-closed against the descriptor before ever using it, and threads it into `load_deps`.
 # `doctor`/`platform.load_deps` stay untouched: `embed_query` still defaults to `None` there.
-EmbedderFactory = Callable[[str], tuple[Embedder, str, int]]
+# `EmbedderFactory`, `_default_embedder_factory` and `_embedding_fingerprint` live in
+# `.index_runner` (imported above) and are re-exported here so existing callers of
+# `bruriah.cli.run_index`/`EmbedderFactory` keep working unchanged; see that module's docstring
+# for why the runner cannot live inside `index.py` or `platform.py` themselves.
 # Same shape as `EmbedderFactory`, for the same testing reason: the suite injects a fake so it
 # never downloads or runs a real cross-encoder, and `--reranker` stays a documented operator
 # choice rather than a silent default. Unlike the embedder there is NOTHING to fail closed
 # against here -- a reranker touches no stored vector, so it cannot be mismatched with the
 # snapshot and needs no fingerprint pinned in the build descriptor.
 RerankerFactory = Callable[[str], Rerank]
-
-
-def _embedding_fingerprint(model: TextEmbedding) -> str:
-    backend: Any = model.model
-    description = backend.model_description
-    pooling = {
-        "OnnxTextEmbedding": "cls-normalized",
-        "PooledEmbedding": "mean",
-        "PooledNormalizedEmbedding": "mean-normalized",
-    }.get(type(backend).__name__)
-    source = description.sources.hf or description.sources.url
-    model_dir = Path(backend._model_dir).resolve()
-    relative_artifact = Path(description.model_file)
-    artifact = model_dir / relative_artifact
-    if (
-        not pooling
-        or not source
-        or relative_artifact.is_absolute()
-        or ".." in relative_artifact.parts
-        or not artifact.is_file()
-    ):
-        raise ValueError("unsupported_embedding_runtime")
-    return json.dumps(
-        {
-            "artifact": description.model_file,
-            "artifact_sha256": hashlib.sha256(artifact.read_bytes()).hexdigest(),
-            "pooling": pooling,
-            "runtime": f"fastembed=={importlib.metadata.version('fastembed')}",
-            "snapshot": model_dir.name,
-            "source": source,
-        },
-        sort_keys=True,
-        separators=(",", ":"),
-    )
 
 
 def main() -> None:
@@ -198,33 +162,6 @@ def main() -> None:
     print(result.path)
 
 
-def _default_embedder_factory(model_name: str) -> tuple[Embedder, str, int]:
-    """Real fastembed model; tests inject a fake factory so the suite never loads real ONNX."""
-    with warnings.catch_warnings():
-        # fastembed announces on every construction that this model now pools by mean rather than
-        # CLS, which lands in the middle of `index` and `ask --read` and reads, to someone running
-        # the quickstart, like something went wrong. The change it reports is real and is already
-        # handled harder than a printed line can manage: `_embedding_fingerprint` reads the
-        # pooling off the backend class, REFUSES a runtime it cannot name, and writes the answer
-        # into `embedding_fingerprint` -- which is part of what an index is validated against, so
-        # a pooling change invalidates the index rather than scrolling past. That is pinned by
-        # test_fastembed_fingerprint_binds_pooling_source_snapshot_and_artifact and by the pooling
-        # case in the activation-metadata table.
-        #
-        # Matched by message, never by category: any OTHER warning fastembed raises has no such
-        # backstop and must still reach the user.
-        warnings.filterwarnings(
-            "ignore", message=".*mean pooling instead of CLS.*", category=UserWarning
-        )
-        model = TextEmbedding(model_name=model_name)
-    fingerprint = _embedding_fingerprint(model)
-
-    def embed(texts: list[str]) -> list[bytes]:
-        return [array("f", vector).tobytes() for vector in model.embed(texts)]
-
-    return embed, fingerprint, model.embedding_size
-
-
 def _default_reranker_factory(model_name: str) -> Rerank:
     """Real fastembed cross-encoder; tests inject a fake so the suite never loads real ONNX.
 
@@ -242,59 +179,6 @@ def _default_reranker_factory(model_name: str) -> Rerank:
     return rerank
 
 
-def run_index(
-    paths: PlatformPaths, root: Path, policy_path: Path, *, model_name: str,
-    embedder_factory: EmbedderFactory = _default_embedder_factory,
-    query_prefix: str | None = None,
-    passage_prefix: str | None = None,
-) -> BuildResult:
-    """Build+promote a candidate into the private `data_dir` (never `cerebro.db`); runs
-    `ensure_private_dirs` first, closing the carried Slice 8A-1 descriptor-on-missing-dir WARNING.
-
-    The build reuses the active snapshot's rows wherever the corpus has not moved. `build_candidate`
-    has been able to do that since it was written, but nothing ever handed it a `previous`, so every
-    reindex re-embedded the whole corpus to arrive at the same vectors -- the cost of a one-document
-    edit was the cost of a first build. What makes reuse safe is not this call: `_compatible`
-    refuses a snapshot built under a different model, parser or schema, and `_validate_candidate`
-    re-verifies every reused row before the candidate is promoted."""
-    ensure_private_dirs(paths)
-    policy = CorpusPolicy.load(policy_path)
-    embed, fingerprint, dimensions = embedder_factory(model_name)
-    revision = json.loads(fingerprint)["snapshot"]
-    resolved_query_prefix, resolved_passage_prefix = resolve_model_prefixes(
-        model_name, query_prefix=query_prefix, passage_prefix=passage_prefix
-    )
-    # `service_version` is NOT `bruriah.__version__` and must not be wired to it. It belongs to the
-    # same family as `parser_version="corpus-v2"` and `ranking_config="rrf-v1"`: a symbolic marker of
-    # the snapshot contract, carried into the `expected` metadata that `promote_candidate` validates
-    # (`index.py`). Binding it to the package version would put every release into the index
-    # identity, so a patch bump would refuse the user's existing snapshot and force a full re-embed
-    # of their corpus. It moves when the snapshot contract moves, and it has not moved.
-    config = BuildConfig(
-        root=root, policy_path=policy_path, schema_version=1, parser_version="corpus-v2",
-        service_version="0.1.0", mcp_range=">=1.28.1,<2", embedding_model=model_name,
-        embedding_revision=revision, embedding_dimensions=dimensions,
-        embedding_fingerprint=fingerprint, ranking_config="rrf-v1",
-        query_prefix=resolved_query_prefix, passage_prefix=resolved_passage_prefix,
-    )
-    pointer = paths.data_dir / "active.json"
-    candidate_path = paths.data_dir / f"candidate-{uuid.uuid4().hex}.sqlite3"
-    result = build_candidate(
-        config, candidate_path, policy, embed, previous=active_database(pointer)
-    )
-    activation = promote_candidate(candidate_path, pointer, config, policy)
-    if activation.retention_discarded:
-        print(
-            "Note: the previous index in this data directory was built under a different "
-            "configuration -- an edited policy, or another project -- so it was not kept as a "
-            "rollback target. The new index is active. Give each project its own --data-dir to "
-            "keep their generations separate.",
-            file=sys.stderr,
-        )
-    write_build_descriptor(paths, config)
-    return result
-
-
 def _index_summary_line(result: BuildResult) -> str:
     """The one line `index` and `init --repo` both print, so the two cannot drift apart.
 
@@ -306,8 +190,6 @@ def _index_summary_line(result: BuildResult) -> str:
         f"({result.reused_documents} reused, {result.documents - result.reused_documents} embedded)"
         f", build {result.build_id[:8]} is active"
     )
-
-
 
 
 

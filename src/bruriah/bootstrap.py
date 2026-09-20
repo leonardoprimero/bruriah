@@ -10,6 +10,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Sequence
 
+from .index_runner import run_index
+
 if TYPE_CHECKING:
     from .platform import PlatformPaths
 
@@ -348,7 +350,6 @@ def run_bootstrap(
             )
             policy_path.write_text(policy_content, encoding="utf-8")
 
-        from .cli import run_index
         run_index(
             paths,
             out_dir,
