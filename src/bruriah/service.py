@@ -675,76 +675,96 @@ def _resolve_code_target_causality(
     return evidence, claims, conflicts, warnings, degradation
 
 
-def investigate(request: InvestigationRequest, deps: ServiceDeps) -> InvestigationResult:
-    """Compose classify -> discover -> route, then, only on `proceed`, retrieve over the
-    snapshot AND run bounded live research (Slice 12A-2) over any `http`/`https` candidate-
-    material locators. `route_only`/`abstained` delegate to `context.assemble_context` (Slice
-    12A-1), which carries the route decision's gaps, escalation `host_actions`, and safety
-    `warnings`, and never retrieves or fabricates evidence -- design.md "Routing/retrieval":
-    "Generic discovery only routes or abstains." Deterministic: identical `request`/`deps` state
-    always yields an identical result (`deps.research is None` -> research stays dormant ->
-    result is byte-identical to a build with no research wired in at all). Errors raised by the
-    frozen stages (`ClassificationError`/`LookupError`/`RouteError`/`RetrievalError`) are already
-    typed `ValueError` subclasses with a `.code` and propagate unwrapped; `ServiceError` is
-    reserved for this module's own request/deps validation.
-    """
-    if not isinstance(request, InvestigationRequest):
-        raise ServiceError("invalid_request_type")
-    deps = _validate_deps(deps)
+class InvestigateService:
+    """Application use case for orchestrating full investigation requests.
 
-    request_id = _content_hash(request)
-    cursor_offset = 0
-    if request.cursor is not None:
-        cursor_offset = _decode_investigate_cursor(
-            request.cursor, request_id, deps.snapshot.build_id
+    Orchestrates:
+    - Request validation & cursor parsing
+    - Task classification & capability/skill discovery
+    - Routing (delegating non-proceed outcomes to assemble_context)
+    - On proceed:
+      - Skill dispatch & capability evidence collection
+      - Causal archaeology (why.py)
+      - SearchService execution & lineage application
+      - Bounded live research
+      - Evidence deduplication, pagination, and cursor generation
+      - Budget-enforced response compaction
+    """
+
+    def __init__(self, deps: ServiceDeps) -> None:
+        self._deps = _validate_deps(deps)
+        self._snapshot_repo = SnapshotRepository(self._deps.snapshot.database)
+        self._search_service = SearchService(
+            self._snapshot_repo,
+            embed_query=self._deps.embed_query,
+            rerank=self._deps.rerank,
+            clock=self._deps.clock,
         )
 
-    classification = classify(request)
-    # The opt-in gate, applied once and early: a request without `host_skills` never reaches the
-    # skill set, so dispatch cannot emit a ref, a gap, an action, or a new enum member to a
-    # client that did not ask for one.
-    opted_in = request.host_skills is not None
-    lookup = discover(classification, deps.registry, deps.skill_set if opted_in else None)
-    decision = route(classification, lookup, request)
-    pack_gaps = _pack_currency_gaps(lookup)
+    @property
+    def deps(self) -> ServiceDeps:
+        return self._deps
 
-    if decision.outcome != "proceed":
-        # `assemble_context`'s `_request_id` recomputes the identical content-hash formula this
-        # module uses above (both: model_dump(mode="json", exclude={"cursor"}) -> canonical JSON
-        # -> sha256:), so delegating here keeps `request_id` byte-identical to a manually built
-        # result -- `mode="full"` still routes to the route-gated branch because `assemble_context`
-        # gates on `decision.outcome`, not on `mode`, whenever it isn't already "proceed".
-        return assemble_context(request, decision, mode="full", extra_gaps=pack_gaps)
+    @property
+    def snapshot_repo(self) -> SnapshotRepository:
+        return self._snapshot_repo
 
-    evidence: list[EvidenceRecord] = []
-    warnings: list[str] = []
-    degradation: list[str] = []
-    status: Literal["complete", "partial", "route_only", "abstained"] = "complete"
-    host_actions: list[HostAction] = []
-    extra_gaps: list[str] = list(pack_gaps)
-    lineage_claims: list[ClaimRecord] = []
-    lineage_conflicts: list[str] = []
-    next_cursor: str | None = None
-    if decision.outcome == "proceed":
-        # Capability evidence (Slice 7A-2): one EvidenceRecord per matched `lookup.capabilities`
-        # entry -- "Method and tool discovery" requires capability refs alongside knowledge, not
-        # local retrieval alone. `lookup` was already computed above for route()'s has_evidence
-        # gate; nothing here re-queries the registry.
+    @property
+    def search_service(self) -> SearchService:
+        return self._search_service
+
+    def investigate(self, request: InvestigationRequest) -> InvestigationResult:
+        """Execute the investigation pipeline."""
+        if not isinstance(request, InvestigationRequest):
+            raise ServiceError("invalid_request_type")
+
+        request_id = _content_hash(request)
+        cursor_offset = 0
+        if request.cursor is not None:
+            cursor_offset = _decode_investigate_cursor(
+                request.cursor, request_id, self._deps.snapshot.build_id
+            )
+
+        classification = classify(request)
+        opted_in = request.host_skills is not None
+        lookup = discover(classification, self._deps.registry, self._deps.skill_set if opted_in else None)
+        decision = route(classification, lookup, request)
+        pack_gaps = _pack_currency_gaps(lookup)
+
+        if decision.outcome != "proceed":
+            return assemble_context(request, decision, mode="full", extra_gaps=pack_gaps)
+
+        return self._proceed(
+            request, request_id, cursor_offset, classification, lookup, decision, pack_gaps, opted_in
+        )
+
+    def _proceed(
+        self,
+        request: InvestigationRequest,
+        request_id: str,
+        cursor_offset: int,
+        classification: Any,
+        lookup: Any,
+        decision: Any,
+        pack_gaps: list[str],
+        opted_in: bool,
+    ) -> InvestigationResult:
         capability_evidence = [_capability_evidence_record(capability) for capability in lookup.capabilities]
-        # Skill refs lead the evidence list for the same reason capabilities do: they are the
-        # smallest, most specific answer to "what procedure applies here". `dispatch` is only
-        # reached under the opt-in gate, so `skill_evidence` is [] for every pre-skills client.
         skill_dispatch = (
-            dispatch(lookup, request.host_skills or [], ceiling=deps.skill_ceiling)
+            dispatch(lookup, request.host_skills or [], ceiling=self._deps.skill_ceiling)
             if opted_in else None
         )
         skill_evidence = [_skill_evidence_record(item) for item in skill_dispatch.skills] if skill_dispatch else []
 
-        snapshot_repo = SnapshotRepository(deps.snapshot.database)
         causal_evidence: list[EvidenceRecord] = []
+        lineage_claims: list[ClaimRecord] = []
+        lineage_conflicts: list[str] = []
+        warnings: list[str] = []
+        degradation: list[str] = []
+
         if request.code_target:
             c_ev, c_claims, c_conflicts, c_warn, c_deg = _resolve_code_target_causality(
-                request.code_target, deps.repo, snapshot_repo
+                request.code_target, self._deps.repo, self._snapshot_repo
             )
             causal_evidence = c_ev
             lineage_claims = lineage_claims + c_claims
@@ -765,19 +785,13 @@ def investigate(request: InvestigationRequest, deps: ServiceDeps) -> Investigati
             remaining_slots = max_evidence
             local_offset = cursor_offset - prefix_count
 
-        search_service = SearchService(
-            snapshot_repo,
-            embed_query=deps.embed_query,
-            rerank=deps.rerank,
-            clock=deps.clock,
-        )
-        outcome = search_service.search(
+        outcome = self._search_service.search(
             request.task,
             request.budgets,
             offset=local_offset,
         )
         raw_local_evidence = to_evidence_records(outcome)
-        local_evidence, search_claims, search_conflicts = _apply_lineage(raw_local_evidence, snapshot_repo)
+        local_evidence, search_claims, search_conflicts = _apply_lineage(raw_local_evidence, self._snapshot_repo)
         lineage_claims = lineage_claims + search_claims
         lineage_conflicts = lineage_conflicts + search_conflicts
 
@@ -787,12 +801,7 @@ def investigate(request: InvestigationRequest, deps: ServiceDeps) -> Investigati
         warnings = warnings + list(outcome.warnings)
         degradation = degradation + list(outcome.degradation)
 
-        # Bounded live research (Slice 12A-2): run only when `deps.research` was actually
-        # provisioned (`_run_research` returns `[]` otherwise -- the byte-identical-to-12A-1
-        # invariant), then fold outcomes the same way `context.py`'s `_assembled_result` folds
-        # them for assembled claims: fetched/cached evidence appended, everything else a named
-        # `research_unavailable:<code>` degradation entry plus its already-computed host actions.
-        research_outcomes = _run_research(request, deps)
+        research_outcomes = _run_research(request, self._deps)
         host_actions, research_degradation, research_evidence = _fold_research(research_outcomes)
         degradation = degradation + research_degradation
 
@@ -808,7 +817,7 @@ def investigate(request: InvestigationRequest, deps: ServiceDeps) -> Investigati
 
         if has_more:
             next_offset = cursor_offset + len(evidence)
-            next_cursor = _encode_investigate_cursor(request_id, deps.snapshot.build_id, next_offset)
+            next_cursor = _encode_investigate_cursor(request_id, self._deps.snapshot.build_id, next_offset)
             truncated = True
             if len(evidence) >= max_evidence:
                 degradation.append("max_evidence_exceeded")
@@ -816,11 +825,12 @@ def investigate(request: InvestigationRequest, deps: ServiceDeps) -> Investigati
             next_cursor = None
             truncated = False
 
-        status = (
+        status: Literal["complete", "partial", "route_only", "abstained"] = (
             "partial"
             if truncated or research_degradation or any(is_shortfall(note) for note in degradation)
             else "complete"
         )
+        extra_gaps = list(pack_gaps)
         if skill_dispatch is not None:
             skill_gaps, skill_actions = _skill_outcomes(skill_dispatch.skills)
             extra_gaps = list(skill_dispatch.gaps) + skill_gaps
@@ -830,28 +840,28 @@ def investigate(request: InvestigationRequest, deps: ServiceDeps) -> Investigati
                 extra_gaps.append(f"no_skill_for_domain:{classification.domain}")
                 host_actions = host_actions + [drafting]
 
-    result = InvestigationResult(
-        schema_version="1", status=status, request_id=request_id, evidence=evidence,
-        claims=lineage_claims, conflicts=lineage_conflicts, gaps=list(decision.gaps) + extra_gaps, host_actions=host_actions,
-        warnings=warnings, degradation=degradation, budgets=request.budgets, next_cursor=next_cursor,
-    )
-    # `max_output_chars` is enforced HERE and nowhere else on this path. Both non-`proceed`
-    # outcomes return through `assemble_context`, which compacts before returning; the `proceed`
-    # branch built and returned its result inline, so the ONE path that actually carries retrieved
-    # evidence -- the largest response this tool produces -- was the only one that never checked
-    # the declared budget. Measured on a real snapshot before this line existed: a request
-    # declaring 256 characters received 2581 and was labelled `complete`.
-    #
-    # `max_evidence` above is a different ceiling and does not subsume this one: it bounds the
-    # NUMBER of records, which says nothing about their size. Twenty short passages and twenty
-    # long ones both satisfy it.
-    #
-    # Compaction drops only evidence no claim cites. `claims` is `[]` on this path, so nothing is
-    # protected and every record is droppable -- correct rather than harsh: a caller who declares
-    # a budget too small to hold evidence gets the shortfall named in `degradation`
-    # (`output_budget_compacted`, plus `output_budget_unmet` when even an empty result overruns)
-    # instead of a quietly oversized response.
-    return compact_to_budget(result, request.budgets.max_output_chars)
+        result = InvestigationResult(
+            schema_version="1", status=status, request_id=request_id, evidence=evidence,
+            claims=lineage_claims, conflicts=lineage_conflicts, gaps=list(decision.gaps) + extra_gaps, host_actions=host_actions,
+            warnings=warnings, degradation=degradation, budgets=request.budgets, next_cursor=next_cursor,
+        )
+        return compact_to_budget(result, request.budgets.max_output_chars)
+
+
+def investigate(request: InvestigationRequest, deps: ServiceDeps) -> InvestigationResult:
+    """Compose classify -> discover -> route, then, only on `proceed`, retrieve over the
+    snapshot AND run bounded live research (Slice 12A-2) over any `http`/`https` candidate-
+    material locators. `route_only`/`abstained` delegate to `context.assemble_context` (Slice
+    12A-1), which carries the route decision's gaps, escalation `host_actions`, and safety
+    `warnings`, and never retrieves or fabricates evidence -- design.md "Routing/retrieval":
+    "Generic discovery only routes or abstains." Deterministic: identical `request`/`deps` state
+    always yields an identical result (`deps.research is None` -> research stays dormant ->
+    result is byte-identical to a build with no research wired in at all). Errors raised by the
+    frozen stages (`ClassificationError`/`LookupError`/`RouteError`/`RetrievalError`) are already
+    typed `ValueError` subclasses with a `.code` and propagate unwrapped; `ServiceError` is
+    reserved for this module's own request/deps validation.
+    """
+    return InvestigateService(deps).investigate(request)
 
 
 def _read_one(
@@ -1151,4 +1161,4 @@ def read(request: ReadRequest, deps: ServiceDeps) -> ReadResult:
     return service.read(request)
 
 
-__all__ = ["ReadService", "ServiceDeps", "ServiceError", "investigate", "read"]
+__all__ = ["InvestigateService", "ReadService", "ServiceDeps", "ServiceError", "investigate", "read"]

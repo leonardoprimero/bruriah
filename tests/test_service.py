@@ -22,6 +22,7 @@ from bruriah.registries import Registry
 from bruriah.repository import SnapshotRepository
 from bruriah.retrieval import RetrievalError, is_shortfall
 from bruriah.service import (
+    InvestigateService,
     ReadService,
     ServiceDeps, ServiceError, _candidate_urls, _encode_cursor, _encode_investigate_cursor,
     investigate, read,
@@ -1411,3 +1412,14 @@ def test_read_service_direct_instantiation(deps) -> None:
     assert res.items[0].status == "ok"
     assert res.items[0].evidence_kind == "capability"
 
+
+def test_investigate_service_direct_instantiation(deps) -> None:
+    service = InvestigateService(deps)
+    assert service.deps is deps
+    assert service.snapshot_repo is not None
+    assert service.search_service is not None
+
+    req = InvestigationRequest(task=_TASK, budgets=Budgets())
+    res = service.investigate(req)
+    assert res.status in {"complete", "partial"}
+    assert res.request_id is not None
