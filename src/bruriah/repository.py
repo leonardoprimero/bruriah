@@ -60,6 +60,25 @@ class LineageRelation:
     relation: str
 
 
+@dataclass(frozen=True)
+class AlternativeRow:
+    name: str
+    disposition: str
+    reason: str
+    premises: tuple[str, ...]
+    document_ref: str
+
+
+@dataclass(frozen=True)
+class PremiseRow:
+    premise_id: str
+    statement: str
+    status: str
+    invalidated_by: str | None
+    rationale: str | None
+    document_ref: str
+
+
 def parse_heading_path(raw: str) -> tuple[str, ...]:
     """Parse JSON heading path array from database into a tuple of strings."""
     try:
@@ -347,3 +366,61 @@ class SnapshotRepository:
             ]
         except sqlite3.DatabaseError as error:
             raise RepositoryError("passages_unreadable") from error
+
+    def has_counterfactual_tables(self) -> bool:
+        try:
+            row = self._db.execute(
+                "SELECT count(*) FROM sqlite_master WHERE type='table' AND name IN ('alternatives', 'premises')"
+            ).fetchone()
+            return bool(row and row[0] == 2)
+        except sqlite3.DatabaseError:
+            return False
+
+    def get_alternatives(self) -> list[AlternativeRow]:
+        if not self.has_counterfactual_tables():
+            return []
+        try:
+            rows = self._db.execute(
+                "SELECT name, disposition, reason, premises_json, document_ref FROM alternatives"
+            ).fetchall()
+            result: list[AlternativeRow] = []
+            for r in rows:
+                try:
+                    p_list = json.loads(r[3])
+                    if not isinstance(p_list, list):
+                        p_list = []
+                except Exception:
+                    p_list = []
+                result.append(
+                    AlternativeRow(
+                        name=r[0],
+                        disposition=r[1],
+                        reason=r[2],
+                        premises=tuple(str(p) for p in p_list),
+                        document_ref=r[4],
+                    )
+                )
+            return result
+        except sqlite3.DatabaseError as error:
+            raise RepositoryError("alternatives_unreadable") from error
+
+    def get_premises(self) -> dict[str, PremiseRow]:
+        if not self.has_counterfactual_tables():
+            return {}
+        try:
+            rows = self._db.execute(
+                "SELECT premise_id, statement, status, invalidated_by, rationale, document_ref FROM premises"
+            ).fetchall()
+            return {
+                r[0]: PremiseRow(
+                    premise_id=r[0],
+                    statement=r[1],
+                    status=r[2],
+                    invalidated_by=r[3],
+                    rationale=r[4],
+                    document_ref=r[5],
+                )
+                for r in rows
+            }
+        except sqlite3.DatabaseError as error:
+            raise RepositoryError("premises_unreadable") from error

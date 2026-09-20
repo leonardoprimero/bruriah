@@ -35,6 +35,7 @@ import base64
 import hashlib
 import json
 from pathlib import Path
+import re
 import sqlite3
 import time
 from collections.abc import Callable
@@ -46,7 +47,8 @@ from .cache import find_by_ref
 from .classify import classify
 from .context import assemble_context, compact_to_budget
 from .contracts import (
-    ClaimRecord, EvidenceRecord, HostAction, InvestigationRequest, InvestigationResult, PermissionDisclosure,
+    AlternativeRecord, ClaimRecord, CounterfactualAssessment, EvidenceRecord, HostAction,
+    InvestigationRequest, InvestigationResult, PermissionDisclosure, PremiseRecord,
     ReadItem, ReadRange, ReadRequest, ReadResult,
 )
 from .dispatch import DEFAULT_SKILL_CEILING, SkillDispatch, dispatch
@@ -675,6 +677,187 @@ def _resolve_code_target_causality(
     return evidence, claims, conflicts, warnings, degradation
 
 
+def _evaluate_counterfactual(
+    request: InvestigationRequest,
+    snapshot_repo: SnapshotRepository,
+) -> tuple[
+    CounterfactualAssessment | None,
+    list[AlternativeRecord],
+    list[PremiseRecord],
+    list[EvidenceRecord],
+    list[str],
+]:
+    """Evaluate candidate task/target against historical alternatives and premises."""
+    if not snapshot_repo.has_counterfactual_tables():
+        return None, [], [], [], []
+
+    alt_rows = snapshot_repo.get_alternatives()
+    if not alt_rows:
+        return None, [], [], [], []
+
+    premises_map = snapshot_repo.get_premises()
+    task_text = request.task.lower()
+    target_text = request.code_target.lower() if request.code_target else ""
+
+    matched_alt = None
+    for alt in alt_rows:
+        alt_name_lower = alt.name.lower()
+        pattern = rf"\b{re.escape(alt_name_lower)}\b"
+        if re.search(pattern, task_text) or (target_text and re.search(pattern, target_text)):
+            matched_alt = alt
+            break
+
+    if matched_alt is None:
+        return None, [], [], [], []
+
+    invalidated_premises = [
+        premises_map[pid]
+        for pid in matched_alt.premises
+        if pid in premises_map and premises_map[pid].status == "invalidated"
+    ]
+    active_premises = [
+        premises_map[pid]
+        for pid in matched_alt.premises
+        if pid in premises_map and premises_map[pid].status == "active"
+    ]
+    unassessed_premises = [
+        pid
+        for pid in matched_alt.premises
+        if pid not in premises_map or premises_map[pid].status not in ("active", "invalidated")
+    ]
+
+    supporting_refs: list[str] = []
+    cf_evidence: list[EvidenceRecord] = []
+
+    try:
+        doc_passages = snapshot_repo.get_passages_by_document(matched_alt.document_ref, limit=1)
+        for p in doc_passages:
+            supporting_refs.append(p.ref)
+            cf_evidence.append(
+                EvidenceRecord(
+                    ref=p.ref,
+                    kind="local",
+                    publisher=p.relative_path,
+                    locator=p.relative_path,
+                    citation_locator=f"{p.relative_path}#{p.start_line}-{p.end_line}",
+                    digest=f"sha256:{p.source_hash}",
+                    extraction_method="markdown_section",
+                    authority="primary",
+                    authority_rationale=f"Evaluated alternative '{matched_alt.name}' ({matched_alt.disposition}).",
+                    freshness="current",
+                    license="permitted",
+                    reuse="permitted",
+                    conflict="none",
+                )
+            )
+    except RepositoryError:
+        pass
+
+    cf_conflicts: list[str] = []
+    if invalidated_premises:
+        verdict: Literal[
+            "repeat_of_rejected_architecture",
+            "premise_changed_requires_reevaluation",
+            "unassessed_premise",
+        ] = "premise_changed_requires_reevaluation"
+        inv_p = invalidated_premises[0]
+        inv_by = f"commit {inv_p.invalidated_by[:12]}" if inv_p.invalidated_by else "subsequent decision"
+        rationale = (
+            f"Alternative '{matched_alt.name}' was evaluated and {matched_alt.disposition} "
+            f"because: {matched_alt.reason}. However, premise '{inv_p.premise_id}' was "
+            f"invalidated by {inv_by}. The decision requires reevaluation under current conditions."
+        )
+        cf_conflicts.append(
+            f"Historical rejection of '{matched_alt.name}' questioned: premise '{inv_p.premise_id}' was invalidated by {inv_by}"
+        )
+
+        if inv_p.document_ref and inv_p.document_ref != matched_alt.document_ref:
+            try:
+                inv_passages = snapshot_repo.get_passages_by_document(inv_p.document_ref, limit=1)
+                for p in inv_passages:
+                    if p.ref not in supporting_refs:
+                        supporting_refs.append(p.ref)
+                        cf_evidence.append(
+                            EvidenceRecord(
+                                ref=p.ref,
+                                kind="local",
+                                publisher=p.relative_path,
+                                locator=p.relative_path,
+                                citation_locator=f"{p.relative_path}#{p.start_line}-{p.end_line}",
+                                digest=f"sha256:{p.source_hash}",
+                                extraction_method="markdown_section",
+                                authority="primary",
+                                authority_rationale=f"Invalidated premise '{inv_p.premise_id}'.",
+                                freshness="current",
+                                license="permitted",
+                                reuse="permitted",
+                                conflict="none",
+                            )
+                        )
+            except RepositoryError:
+                pass
+    elif active_premises and not unassessed_premises:
+        verdict = "repeat_of_rejected_architecture"
+        rationale = (
+            f"Alternative '{matched_alt.name}' was evaluated and {matched_alt.disposition} "
+            f"because: {matched_alt.reason}. All supporting premises "
+            f"({', '.join(matched_alt.premises)}) remain active."
+        )
+        cf_conflicts.append(
+            f"Task matches rejected architecture '{matched_alt.name}' under active premises: {matched_alt.reason}"
+        )
+    else:
+        verdict = "unassessed_premise"
+        rationale = (
+            f"Alternative '{matched_alt.name}' was evaluated and {matched_alt.disposition} "
+            f"({matched_alt.reason}), but supporting premises have no current verification record."
+        )
+
+    disposition_val: Literal["rejected", "deferred", "superseded"] = (
+        matched_alt.disposition  # type: ignore[assignment]
+        if matched_alt.disposition in ("rejected", "deferred", "superseded")
+        else "rejected"
+    )
+
+    assessment = CounterfactualAssessment(
+        matched_alternative=matched_alt.name,
+        decision_ref=matched_alt.document_ref,
+        verdict=verdict,
+        supporting_evidence=supporting_refs,
+        rationale=rationale,
+    )
+
+    alt_records = [
+        AlternativeRecord(
+            name=matched_alt.name,
+            disposition=disposition_val,
+            reason=matched_alt.reason,
+            premises=list(matched_alt.premises),
+        )
+    ]
+
+    premise_records = []
+    for pid in matched_alt.premises:
+        p_row = premises_map.get(pid)
+        if p_row:
+            p_status: Literal["active", "invalidated", "uncertain"] = (
+                p_row.status  # type: ignore[assignment]
+                if p_row.status in ("active", "invalidated", "uncertain")
+                else "uncertain"
+            )
+            premise_records.append(
+                PremiseRecord(
+                    id=p_row.premise_id,
+                    statement=p_row.statement,
+                    status=p_status,
+                    invalidated_by=p_row.invalidated_by,
+                    rationale=p_row.rationale,
+                )
+            )
+
+    return assessment, alt_records, premise_records, cf_evidence, cf_conflicts
+
+
 class InvestigateService:
     """Application use case for orchestrating full investigation requests.
 
@@ -773,6 +956,11 @@ class InvestigateService:
             degradation = degradation + c_deg
 
         prefix_evidence = skill_evidence + causal_evidence + capability_evidence
+        cf_assessment, cf_alts, cf_premises, cf_evidence, cf_conflicts = _evaluate_counterfactual(
+            request, self._snapshot_repo
+        )
+        lineage_conflicts = lineage_conflicts + cf_conflicts
+        prefix_evidence = prefix_evidence + cf_evidence
         prefix_count = len(prefix_evidence)
         max_evidence = request.budgets.max_evidence
 
@@ -844,6 +1032,7 @@ class InvestigateService:
             schema_version="1", status=status, request_id=request_id, evidence=evidence,
             claims=lineage_claims, conflicts=lineage_conflicts, gaps=list(decision.gaps) + extra_gaps, host_actions=host_actions,
             warnings=warnings, degradation=degradation, budgets=request.budgets, next_cursor=next_cursor,
+            alternatives=cf_alts, premises=cf_premises, counterfactual_assessment=cf_assessment,
         )
         return compact_to_budget(result, request.budgets.max_output_chars)
 

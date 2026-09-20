@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Any
 
 
 @dataclass(frozen=True)
@@ -13,6 +14,9 @@ class SourceMetadata:
     deprecates: tuple[str, ...] = ()
     amends: tuple[str, ...] = ()
     commit: str | None = None
+    alternatives: tuple[dict[str, Any], ...] = ()
+    premises: tuple[dict[str, Any], ...] = ()
+    invalidated_premises: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)

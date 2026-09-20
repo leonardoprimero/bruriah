@@ -226,6 +226,8 @@ def _protected_refs(result: InvestigationResult) -> frozenset[str]:
     for claim in result.claims:
         refs.update(claim.supporting_refs)
         refs.update(claim.conflicting_refs)
+    if result.counterfactual_assessment:
+        refs.update(result.counterfactual_assessment.supporting_evidence)
     return frozenset(refs)
 
 

@@ -161,6 +161,26 @@ CREATE TABLE lineage (
 ) WITHOUT ROWID;
 CREATE INDEX idx_lineage_pred ON lineage(predecessor_target);
 CREATE INDEX idx_lineage_pred_ref ON lineage(predecessor_ref);
+CREATE TABLE premises (
+    premise_id TEXT PRIMARY KEY,
+    statement TEXT NOT NULL,
+    status TEXT NOT NULL,
+    invalidated_by TEXT,
+    rationale TEXT,
+    document_ref TEXT NOT NULL,
+    FOREIGN KEY(document_ref) REFERENCES documents(document_ref)
+) WITHOUT ROWID;
+CREATE INDEX idx_premises_doc ON premises(document_ref);
+CREATE TABLE alternatives (
+    name TEXT NOT NULL,
+    disposition TEXT NOT NULL,
+    reason TEXT NOT NULL,
+    premises_json TEXT NOT NULL,
+    document_ref TEXT NOT NULL,
+    PRIMARY KEY (name, document_ref),
+    FOREIGN KEY(document_ref) REFERENCES documents(document_ref)
+) WITHOUT ROWID;
+CREATE INDEX idx_alternatives_name ON alternatives(name);
 CREATE TABLE corpus_stats (key TEXT PRIMARY KEY, num_value REAL, str_value TEXT) WITHOUT ROWID;
 CREATE TABLE term_df (term TEXT PRIMARY KEY, df INTEGER NOT NULL) WITHOUT ROWID;
 CREATE TABLE term_postings (
@@ -756,6 +776,73 @@ def _detect_lineage_cycles(lineage_records: list[tuple[str, str, str | None, str
             dfs(start_node)
 
 
+def _build_premise_and_alternative_records(
+    documents: Sequence[Document],
+) -> tuple[list[tuple[str, str, str, str | None, str | None, str]], list[tuple[str, str, str, str, str]]]:
+    premises_map: dict[str, dict[str, Any]] = {}
+    for doc in documents:
+        for p in doc.metadata.premises:
+            pid = p.get("id")
+            if not pid:
+                continue
+            premises_map[pid] = {
+                "premise_id": pid,
+                "statement": p.get("statement", ""),
+                "status": p.get("status", "active"),
+                "invalidated_by": p.get("invalidated_by"),
+                "rationale": p.get("rationale"),
+                "document_ref": doc.document_ref,
+            }
+
+    for doc in documents:
+        for inv_id in doc.metadata.invalidated_premises:
+            inv_id_clean = inv_id.strip()
+            inv_by = doc.metadata.commit or doc.document_ref
+            if inv_id_clean in premises_map:
+                premises_map[inv_id_clean]["status"] = "invalidated"
+                premises_map[inv_id_clean]["invalidated_by"] = inv_by
+            else:
+                premises_map[inv_id_clean] = {
+                    "premise_id": inv_id_clean,
+                    "statement": f"Premise {inv_id_clean}",
+                    "status": "invalidated",
+                    "invalidated_by": inv_by,
+                    "rationale": "Invalidated by subsequent decision",
+                    "document_ref": doc.document_ref,
+                }
+
+    premise_rows = [
+        (
+            p["premise_id"],
+            p["statement"],
+            p["status"],
+            p["invalidated_by"],
+            p["rationale"],
+            p["document_ref"],
+        )
+        for p in premises_map.values()
+    ]
+
+    alt_rows = []
+    for doc in documents:
+        for alt in doc.metadata.alternatives:
+            name = alt.get("name")
+            if not name:
+                continue
+            disposition = alt.get("disposition", "rejected")
+            reason = alt.get("reason", "")
+            premises_list = alt.get("premises", [])
+            alt_rows.append((
+                name,
+                disposition,
+                reason,
+                json.dumps(premises_list),
+                doc.document_ref,
+            ))
+
+    return premise_rows, alt_rows
+
+
 def _build_lexical_index(database: sqlite3.Connection) -> None:
     rows = database.execute(
         "SELECT ref, search_text FROM passages ORDER BY ref"
@@ -898,6 +985,11 @@ def build_candidate(
         lineage_records = _build_lineage_records(documents)
         _detect_lineage_cycles(lineage_records)
         database.executemany("INSERT INTO lineage VALUES (?, ?, ?, ?)", lineage_records)
+        premise_records, alternative_records = _build_premise_and_alternative_records(documents)
+        if premise_records:
+            database.executemany("INSERT INTO premises VALUES (?, ?, ?, ?, ?, ?)", premise_records)
+        if alternative_records:
+            database.executemany("INSERT INTO alternatives VALUES (?, ?, ?, ?, ?)", alternative_records)
         _build_lexical_index(database)
         index_meta = _metadata(config, manifest_hash, build_id)
         database.executemany("INSERT INTO index_meta VALUES (?, ?)", index_meta.items())

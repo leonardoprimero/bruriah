@@ -141,6 +141,55 @@ def _metadata(frontmatter: dict[str, Any]) -> SourceMetadata:
     commit_raw = frontmatter.get("commit")
     commit = str(commit_raw).strip().lower() if commit_raw is not None else None
 
+    raw_alts = frontmatter.get("alternatives", [])
+    alts: list[dict[str, Any]] = []
+    if isinstance(raw_alts, list):
+        for item in raw_alts:
+            if isinstance(item, dict) and "name" in item:
+                premises_val = item.get("premises", [])
+                if not isinstance(premises_val, list):
+                    premises_val = [premises_val]
+                premises_clean = [str(p).strip() for p in premises_val if p is not None and str(p).strip()]
+                alts.append({
+                    "name": str(item["name"]).strip(),
+                    "disposition": str(item.get("disposition", "rejected")).strip().lower(),
+                    "reason": str(item.get("reason", "")).strip(),
+                    "premises": premises_clean,
+                })
+
+    raw_premises = frontmatter.get("premises", [])
+    premises: list[dict[str, Any]] = []
+    if isinstance(raw_premises, list):
+        for item in raw_premises:
+            if isinstance(item, dict) and "id" in item:
+                premises.append({
+                    "id": str(item["id"]).strip(),
+                    "statement": str(item.get("statement", "")).strip(),
+                    "status": str(item.get("status", "active")).strip().lower(),
+                    "invalidated_by": str(item.get("invalidated_by", "")).strip() or None if item.get("invalidated_by") else None,
+                    "rationale": str(item.get("rationale", "")).strip() or None if item.get("rationale") else None,
+                })
+            elif isinstance(item, str) and item.strip():
+                parts = item.split("|", 1)
+                pid = parts[0].strip()
+                stmt = parts[1].strip() if len(parts) > 1 else pid
+                premises.append({
+                    "id": pid,
+                    "statement": stmt,
+                    "status": "active",
+                    "invalidated_by": None,
+                    "rationale": None,
+                })
+
+    raw_inv = frontmatter.get("invalidated_premises", frontmatter.get("premise_invalidated", []))
+    inv_items = raw_inv if isinstance(raw_inv, list) else [raw_inv]
+    inv_clean: list[str] = []
+    for it in inv_items:
+        if it is not None:
+            for sub in str(it).replace(",", " ").split():
+                if sub.strip():
+                    inv_clean.append(sub.strip())
+
     return SourceMetadata(
         provenance=tuple(dict.fromkeys(provenance)),
         provenance_urls=tuple(dict.fromkeys(urls)),
@@ -150,6 +199,9 @@ def _metadata(frontmatter: dict[str, Any]) -> SourceMetadata:
         deprecates=_extract_list("deprecates"),
         amends=_extract_list("amends"),
         commit=commit,
+        alternatives=tuple(alts),
+        premises=tuple(premises),
+        invalidated_premises=tuple(dict.fromkeys(inv_clean)),
     )
 
 

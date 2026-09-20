@@ -139,6 +139,27 @@ class ClaimRecord(ClosedModel):
     state: Literal["supported", "conflicted", "insufficient", "unknown"]
     supporting_refs: list[Ref] = []
     conflicting_refs: list[Ref] = []
+class PremiseRecord(ClosedModel):
+    id: ShortText
+    statement: ShortText
+    status: Literal["active", "invalidated", "uncertain"]
+    invalidated_by: ShortText | None = None
+    rationale: ShortText | None = None
+class AlternativeRecord(ClosedModel):
+    name: ShortText
+    disposition: Literal["rejected", "deferred", "superseded"]
+    reason: ShortText
+    premises: list[ShortText] = []
+class CounterfactualAssessment(ClosedModel):
+    matched_alternative: ShortText
+    decision_ref: ShortText
+    verdict: Literal[
+        "repeat_of_rejected_architecture",
+        "premise_changed_requires_reevaluation",
+        "unassessed_premise",
+    ]
+    supporting_evidence: list[Ref] = []
+    rationale: ShortText
 class HostAction(ClosedModel):
     kind: Literal["web_search", "fetch_public_url", "inspect_capability", "request_jurisdiction",
                  "consult_professional", "draft_skill_candidate", "install_skill"]
@@ -157,6 +178,9 @@ class InvestigationResult(ClosedModel):
     degradation: list[ShortText]
     budgets: Budgets
     next_cursor: str | None = None
+    alternatives: list[AlternativeRecord] = []
+    premises: list[PremiseRecord] = []
+    counterfactual_assessment: CounterfactualAssessment | None = None
 class ReadRange(ClosedModel):
     # Character offsets, 1-indexed and inclusive -- NOT line numbers. This model is handed to the
     # host verbatim as `read_evidence`'s `inputSchema`, so the unit has to be stated here or it is
@@ -211,7 +235,13 @@ class ReadResult(ClosedModel):
     budgets: Budgets
     next_cursor: str | None = None
 __all__ = [
-    "PermissionDisclosure",
+    "AlternativeRecord",
+    "CounterfactualAssessment",
     "HostSkill",
-    "InvestigationRequest", "InvestigationResult", "ReadRequest", "ReadResult"
+    "InvestigationRequest",
+    "InvestigationResult",
+    "PermissionDisclosure",
+    "PremiseRecord",
+    "ReadRequest",
+    "ReadResult",
 ]

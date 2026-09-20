@@ -114,6 +114,10 @@ def build(
             "%(trailers:key=Supersedes,valueonly=true)",
             "%(trailers:key=Deprecates,valueonly=true)",
             "%(trailers:key=Amends,valueonly=true)",
+            "%(trailers:key=Alternative-Rejected,valueonly=true)",
+            "%(trailers:key=Rejection-Reason,valueonly=true)",
+            "%(trailers:key=Premise,valueonly=true)",
+            "%(trailers:key=Premise-Invalidated,valueonly=true)",
             "%b",
         ])
         + _RECORD_FMT
@@ -127,11 +131,12 @@ def build(
     written = examined = 0
     for entry in _git(repo, *args).split(_RECORD):
         parts = entry.strip("\n").split(_SEPARATOR)
-        if len(parts) < 8:
+        if len(parts) < 12:
             continue
-        sha, when, author, subject, raw_supersedes, raw_deprecates, raw_amends, body = (
-            part.strip() for part in parts[:8]
-        )
+        (
+            sha, when, author, subject, raw_supersedes, raw_deprecates, raw_amends,
+            raw_alt_rejected, raw_rejection_reason, raw_premise, raw_premise_inv, body,
+        ) = (part.strip() for part in parts[:12])
         examined += 1
         if not body:
             continue  # a subject records what changed, never why
@@ -143,6 +148,10 @@ def build(
         supersedes = _clean_hashes(raw_supersedes)
         deprecates = _clean_hashes(raw_deprecates)
         amends = _clean_hashes(raw_amends)
+        alt_rejected = [line.strip() for line in raw_alt_rejected.splitlines() if line.strip()]
+        rejection_reasons = [line.strip() for line in raw_rejection_reason.splitlines() if line.strip()]
+        raw_premises = [line.strip() for line in raw_premise.splitlines() if line.strip()]
+        premise_invalidated = [line.strip() for line in raw_premise_inv.splitlines() if line.strip()]
 
         frontmatter_lines = ["---", f"commit: {sha}"]
         if supersedes:
@@ -154,14 +163,58 @@ def build(
         if amends:
             frontmatter_lines.append("amends:")
             frontmatter_lines.extend(f"  - {item}" for item in amends)
+        if alt_rejected:
+            frontmatter_lines.append("alternatives:")
+            premise_ids = [p.split("|")[0].strip() for p in raw_premises]
+            for idx, alt in enumerate(alt_rejected):
+                reason = (
+                    rejection_reasons[idx]
+                    if idx < len(rejection_reasons)
+                    else (rejection_reasons[0] if rejection_reasons else "")
+                )
+                frontmatter_lines.append(f"  - name: {alt}")
+                frontmatter_lines.append("    disposition: rejected")
+                if reason:
+                    frontmatter_lines.append(f"    reason: {reason}")
+                if premise_ids:
+                    frontmatter_lines.append("    premises:")
+                    for pid in premise_ids:
+                        frontmatter_lines.append(f"      - {pid}")
+        if raw_premises:
+            frontmatter_lines.append("premises:")
+            for p in raw_premises:
+                parts_p = p.split("|", 1)
+                pid = parts_p[0].strip()
+                stmt = parts_p[1].strip() if len(parts_p) > 1 else pid
+                frontmatter_lines.append(f"  - id: {pid}")
+                frontmatter_lines.append(f"    statement: {stmt}")
+                frontmatter_lines.append("    status: active")
+        if premise_invalidated:
+            frontmatter_lines.append("invalidated_premises:")
+            for p_inv in premise_invalidated:
+                frontmatter_lines.append(f"  - {p_inv}")
         frontmatter_lines.append("---")
         frontmatter = "\n".join(frontmatter_lines) + "\n\n"
+
+        alt_section = ""
+        if alt_rejected:
+            alt_section = (
+                "\n## Evaluated Alternatives\n"
+                + "".join(
+                    f"- **{alt}** (rejected): "
+                    + (rejection_reasons[i] if i < len(rejection_reasons) else "")
+                    + "\n"
+                    for i, alt in enumerate(alt_rejected)
+                )
+                + "\n"
+            )
 
         document = (
             frontmatter
             + f"# {subject}\n\n"
             f"**Decided:** {when[:10]} · **Commit:** `{sha[:12]}` · **Author:** {author}\n\n"
-            f"{body[:_MAX_BODY]}\n\n"
+            f"{body[:_MAX_BODY]}\n"
+            f"{alt_section}\n"
             "## Files this decision touched\n"
             + "".join(f"- `{item}`\n" for item in sorted(set(files))[:12])
         )
