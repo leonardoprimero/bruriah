@@ -700,12 +700,32 @@ def _evaluate_counterfactual(
     target_text = request.code_target.lower() if request.code_target else ""
 
     matched_alt = None
+    task_words = re.findall(r"\w+", task_text)
+    target_words = re.findall(r"\w+", target_text) if target_text else []
+    all_words = task_words + target_words
+
     for alt in alt_rows:
         alt_name_lower = alt.name.lower()
-        pattern = rf"\b{re.escape(alt_name_lower)}\b"
-        if re.search(pattern, task_text) or (target_text and re.search(pattern, target_text)):
+        # 1. Exact substring
+        if alt_name_lower in task_text or (target_text and alt_name_lower in target_text):
             matched_alt = alt
             break
+
+        # 2. Word boundary regex
+        try:
+            pattern = rf"\b{re.escape(alt_name_lower)}\b"
+            if re.search(pattern, task_text) or (target_text and re.search(pattern, target_text)):
+                matched_alt = alt
+                break
+        except re.error:
+            pass
+
+        # 3. Token-set match: all distinct keywords (len >= 3) of the alternative appear in the text
+        alt_tokens = [tok for tok in re.findall(r"\w+", alt_name_lower) if len(tok) >= 3]
+        if len(alt_tokens) >= 2:
+            if all(tok in task_text or any(w.startswith(tok[:4]) for w in all_words) for tok in alt_tokens):
+                matched_alt = alt
+                break
 
     if matched_alt is None:
         return None, [], [], [], []
