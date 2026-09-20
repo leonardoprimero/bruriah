@@ -1,12 +1,12 @@
-# Real-World Case Study: Preventing Architectural Regressions in Coding Agents
+# Illustrative Case Study: Preventing Architectural Regressions in Coding Agents
 
-This case study demonstrates how Bruriah prevents coding agents from reintroducing previously evaluated and discarded architectures.
+This case study demonstrates how Bruriah prevents coding agents from reintroducing previously evaluated and discarded architectures, using a real architectural turning point from this project's history.
 
 ---
 
 ## The Scenario
 
-- **Codebase:** Mature multi-contributor repository (>3,000 commits).
+- **Context:** An evolving codebase with active architectural decision tracking.
 - **Subsystem:** Model Context Protocol (MCP) server interface (`src/bruriah/mcp_server.py`).
 - **The Actor:** An autonomous coding agent (Claude Code, Cursor, or Antigravity) tasked with modernizing and refactoring the server code.
 - **The Task:** *"Refactor `mcp_server.py` to use FastMCP for cleaner decorator-based routing."*
@@ -21,7 +21,7 @@ This case study demonstrates how Bruriah prevents coding agents from reintroduci
 4. **The Regression:** The agent rewrites the server using `FastMCP`.
 5. **The Invisible Bug:** In production, unknown input fields in JSON-RPC payloads are silently dropped because FastMCP disables `extra="forbid"`. Client requests with malformed or unvalidated fields pass through uninspected, bypassing server-side validation.
 
-The agent didn't make a syntax error or a logic bug; it lacked **causal memory**. Nothing in the working tree told it that FastMCP had already been evaluated, tested, and rejected 18 months earlier.
+The agent didn't make a syntax error or a logic bug; it lacked **causal memory**. Nothing in the working tree told it that FastMCP had already been evaluated, tested, and rejected earlier in the project's history.
 
 ---
 
