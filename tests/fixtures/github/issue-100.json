@@ -1,0 +1,13 @@
+{
+    "number": 100,
+    "title": "Flaky corpus writer under load",
+    "body": "Investigated a couple of approaches before landing on a per-build file lock.",
+    "state": "closed",
+    "state_reason": "completed",
+    "created_at": "2026-07-01T10:00:00Z",
+    "closed_at": "2026-07-10T15:30:00Z",
+    "html_url": "https://github.com/acme/widget/issues/100",
+    "user": {
+        "login": "alice"
+    }
+}

@@ -5,6 +5,27 @@ and the entries here name what changed for *you* rather than which files moved.
 
 ## [Unreleased]
 
+### Added: `bruriah corpus --github` ingests linked GitHub issues and pull requests
+- `bruriah corpus` can now derive corpus documents from the GitHub issues and pull requests a
+  commit closes (`Fixes`/`Closes`/`Resolves #N`, `owner/repo#N`, and the squash-merge `(#N)`
+  subject suffix), in addition to the commit history it already derives from. Opt-in via
+  `--github [OWNER/REPO]` (bare form auto-detects from the `origin` remote), `--github-cache DIR`
+  (cached responses; a warm cache builds fully offline with no token), and `--github-token-env
+  NAME` (default `GITHUB_TOKEN`; unset warns once and continues unauthenticated). Off by default:
+  without `--github`, behavior and output are unchanged, with zero GitHub calls.
+- A pull request that cross-references the linked issue and was closed without merging, or a
+  duplicate issue closed as `not_planned`, is written as a rejected alternative
+  (`alternatives:` / `disposition: rejected`), the same front-matter shape the commit-trailer
+  path already produces -- so the counterfactual engine can surface a GitHub-derived rejection
+  exactly like a repository-derived one. Explicit `Premise:` lines in the issue/PR body are read
+  with the same grammar as the commit-trailer form. A per-issue fetch failure is skipped with a
+  warning to stderr rather than aborting the build; `github-manifest.json` in the corpus root
+  records what was fetched, skipped, and served from cache.
+- New modules: `src/bruriah/github_corpus.py` (the document builder) and
+  `gitcorpus.walk_commits` (an additive commit walk exposing bodiless commits too, since a
+  squash-merge subject's `(#N)` suffix can carry no body at all). `gitcorpus.build`'s own output
+  is unchanged byte-for-byte.
+
 ### Fixed: The own-history embedder ablation table is now reproducible
 - The own-history table in `evals/project-memory/README.md` ("The embedder was the bottleneck")
   was originally measured against this worktree's uncommitted HEAD (`60b4eca`), with no

@@ -22,5 +22,23 @@ One scenario, one issue thread:
 - `issue-39.json` — `GET /repos/{owner}/{repo}/issues/39`. Closed with `state_reason: not_planned`,
   a duplicate referencing #41.
 
+A second scenario, added for the document builder (`github_corpus.py`, T3), reusing `issue-39.json`
+above as the cross-referenced not-planned duplicate rather than duplicating it:
+
+- `issue-100.json` — `GET /repos/{owner}/{repo}/issues/100`. Closed with `state_reason: completed`;
+  no `Premise:` line (issue #41 above already covers premise extraction), so this scenario exercises
+  a document with alternatives but no premises.
+- `issue-100-timeline.json` — one unrelated `labeled` event plus three `cross-referenced` events:
+  PR #101 (merged, not a rejected alternative), PR #102 (closed unmerged, no closing comment -- the
+  fixed-phrase fallback), and issue #39 (a plain issue cross-reference, no `pull_request` key --
+  the `state_reason: not_planned` rejected-alternative path).
+- `pull-101.json` — merged; its body ("Fixes #100") is also what the squash-merge `(#N)` subject
+  suffix flow reads via `pull_request_self`, so this one PR fixture doubles as the "same issue
+  linked by two different commits" scenario.
+- `pull-102.json` / `pull-102-comments.json` — closed without merge; comments is an empty list, so
+  the reason falls back to the fixed phrase rather than a trimmed comment.
+- `issue-39-comments.json` — the closing comment for issue #39's `not_planned` closure, read through
+  the same issues-comments endpoint used for PR comments.
+
 The `owner/repo` and timestamps are fictional; the field shapes match GitHub's documented REST
 responses as of API version `2022-11-28`.

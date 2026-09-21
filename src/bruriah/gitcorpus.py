@@ -78,6 +78,17 @@ def _slug(text: str) -> str:
     return re.sub(r"[^a-z0-9]+", "-", text.lower())[:60].strip("-") or "untitled"
 
 
+def _split_premise_value(raw: str) -> tuple[str, str]:
+    """Split one `Premise:` value into `(id, statement)` on the first `|`. With no `|`, the whole
+    value serves as both -- the same one-line grammar for both the commit-trailer form `build`
+    reads below and the free-form issue/PR body line `github_corpus` reads (T3), so a reader who
+    learns the grammar in one place already knows it in the other."""
+    parts = raw.split("|", 1)
+    premise_id = parts[0].strip()
+    statement = parts[1].strip() if len(parts) > 1 else premise_id
+    return premise_id, statement
+
+
 @dataclass(frozen=True)
 class CorpusResult:
     written: int
@@ -165,7 +176,7 @@ def build(
             frontmatter_lines.extend(f"  - {item}" for item in amends)
         if alt_rejected:
             frontmatter_lines.append("alternatives:")
-            premise_ids = [p.split("|")[0].strip() for p in raw_premises]
+            premise_ids = [_split_premise_value(p)[0] for p in raw_premises]
             for idx, alt in enumerate(alt_rejected):
                 reason = (
                     rejection_reasons[idx]
@@ -183,9 +194,7 @@ def build(
         if raw_premises:
             frontmatter_lines.append("premises:")
             for p in raw_premises:
-                parts_p = p.split("|", 1)
-                pid = parts_p[0].strip()
-                stmt = parts_p[1].strip() if len(parts_p) > 1 else pid
+                pid, stmt = _split_premise_value(p)
                 frontmatter_lines.append(f"  - id: {pid}")
                 frontmatter_lines.append(f"    statement: {stmt}")
                 frontmatter_lines.append("    status: active")
@@ -227,3 +236,45 @@ def build(
         )
         written += 1
     return CorpusResult(written, examined)
+
+
+@dataclass(frozen=True)
+class WalkedCommit:
+    """One non-merge commit at a revision: exactly the fields `github_corpus` needs to resolve
+    issue links, nothing else. Deliberately narrower than the twelve-field trailer format `build`
+    reads -- `github_corpus` has no use for lineage trailers, and a link can live in a commit whose
+    body is empty (a squash-merge subject's `(#N)` suffix carries no body at all), so this walk
+    must NOT apply `build`'s "skip bodiless commits" filter the way `build` itself does."""
+
+    sha: str
+    date: str
+    subject: str
+    body: str
+
+
+def walk_commits(
+    repo: Path, limit: int | None = None, *, revision: str = "HEAD"
+) -> tuple[WalkedCommit, ...]:
+    """Every non-merge commit at `revision`, sha/date/subject/body only, INCLUDING commits `build`
+    would skip for lacking a body -- `github_corpus` (`bruriah corpus --github`) needs to see a
+    squash-merge subject's `(#N)` suffix even when nothing follows it.
+
+    A second, separate `git log` invocation from `build`'s own, on purpose: reusing `build`'s much
+    larger trailer-reading format string here (or refactoring `build` to reuse this one) would risk
+    the one thing this module is not allowed to risk -- `build`'s byte-identical output for commits.
+    This function only ADDS a code path; it does not touch a single line `build` already runs.
+    """
+    _require_commit(repo, revision)
+    fmt = _SEPARATOR_FMT.join(["%H", "%aI", "%s", "%b"]) + _RECORD_FMT
+    args = ["log", "--no-merges", f"--format={fmt}"]
+    if limit:
+        args.append(f"-{limit}")
+    args.append(revision)
+    commits: list[WalkedCommit] = []
+    for entry in _git(repo, *args).split(_RECORD):
+        parts = entry.strip("\n").split(_SEPARATOR)
+        if len(parts) < 4:
+            continue
+        sha, when, subject, body = (part.strip() for part in parts[:4])
+        commits.append(WalkedCommit(sha=sha, date=when, subject=subject, body=body))
+    return tuple(commits)

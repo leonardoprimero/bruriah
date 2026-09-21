@@ -197,6 +197,32 @@ def build_cli_parser(
         help="derive the corpus as of this commit (default HEAD). Pin it to reproduce a "
         "published measurement: the history IS the corpus, so it grows under the number.",
     )
+    corpus_parser.add_argument(
+        "--github",
+        nargs="?",
+        const="auto",
+        default=None,
+        metavar="OWNER/REPO",
+        help="also ingest the GitHub issues and pull requests linked commits close, as corpus "
+        "documents (opt-in, off by default; git corpus only, ignored with --pdf). Bare --github "
+        "derives OWNER/REPO from the repository's 'origin' remote.",
+    )
+    corpus_parser.add_argument(
+        "--github-cache",
+        type=Path,
+        default=None,
+        metavar="DIR",
+        help="directory for cached GitHub API responses (default: <cache-dir>/github, inside "
+        "this tool's own cache directory -- keeps the corpus output directory itself clean, and "
+        "reusing the same --github-cache DIR is what makes a --github build reproducible offline).",
+    )
+    corpus_parser.add_argument(
+        "--github-token-env",
+        default="GITHUB_TOKEN",
+        metavar="NAME",
+        help="environment variable holding a GitHub token for --github (default GITHUB_TOKEN). "
+        "Unauthenticated requests are limited to 60/hour; a warning is printed once when unset.",
+    )
     ask = add("ask", "Run one investigation and show the evidence.")
     ask.add_argument("question", help="what you want to know about your own corpus")
     ask.add_argument(

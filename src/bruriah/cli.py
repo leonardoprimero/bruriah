@@ -14,7 +14,8 @@ import mcp.server.stdio
 import yaml
 from fastembed import TextEmbedding
 
-from . import __version__, clients, gitcorpus, pdfcorpus
+from . import __version__, clients, gitcorpus, github_corpus, pdfcorpus
+from .github_read import ResponseCache as _GitHubResponseCache
 from ._cli.common import (
     DEFAULT_EMBEDDING_MODEL,
     CliError,
@@ -540,13 +541,64 @@ def _cmd_corpus(args: argparse.Namespace) -> int:
     if not (repo / ".git").exists():
         raise CliError("not_a_git_repository")
     result = gitcorpus.build(repo, args.out, args.limit, revision=args.revision)
-    print(json.dumps(
-        {"documents": result.written, "commits_examined": result.examined, "out": str(args.out),
-         "revision": args.revision},
-        indent=2, sort_keys=True,
-    ))
+    payload: dict[str, Any] = {
+        "documents": result.written, "commits_examined": result.examined, "out": str(args.out),
+        "revision": args.revision,
+    }
+    # `--github` is opt-in and off by default: with it absent (the common case, and every build
+    # before this flag existed), nothing below this line ever runs -- no import side effect beyond
+    # the module import above, no GitHub call, no extra file written. The git corpus above is
+    # exactly what `gitcorpus.build` alone would have produced.
+    if getattr(args, "github", None) is not None:
+        github_payload = _cmd_corpus_github(args, repo)
+        payload["github"] = github_payload
+    print(json.dumps(payload, indent=2, sort_keys=True))
     _report_corpus_coverage(result)
     return 0
+
+
+def _cmd_corpus_github(args: argparse.Namespace, repo: Path) -> dict[str, Any]:
+    """The `--github` half of `bruriah corpus`: resolve OWNER/REPO, walk the same commits the git
+    corpus above just walked, and ingest the issues/PRs they close. Split out of `_cmd_corpus`
+    only to keep that function's normal (github-less) path short and easy to read top to bottom."""
+    if args.github == "auto":
+        try:
+            repo_slug = github_corpus.detect_repo_slug(repo)
+        except github_corpus.GitHubCorpusError as error:
+            raise CliError(error.code) from error
+    else:
+        repo_slug = args.github
+    if "/" not in repo_slug:
+        raise CliError("invalid_repo_slug")
+
+    paths = _resolve_paths(args)
+    cache_dir = args.github_cache or (paths.cache_dir / "github")
+    token = os.environ.get(args.github_token_env)
+    if not token:
+        print(
+            f"warning: {args.github_token_env} is not set; unauthenticated GitHub requests are "
+            "limited to 60/hour.",
+            file=sys.stderr,
+        )
+
+    commits = gitcorpus.walk_commits(repo, args.limit, revision=args.revision)
+
+    # Network is opt-in, same switch as everywhere else in this tool (`paths.network_enabled`,
+    # `--network-enabled`, default False): with it off, `--github` still builds from a warm
+    # `--github-cache`, and any uncached issue is skipped-and-warned rather than reaching out.
+    github_result = github_corpus.build_documents(
+        commits, args.out, repo=repo_slug, cache=_GitHubResponseCache(cache_dir),
+        revision=args.revision, token=token, network_enabled=paths.network_enabled,
+    )
+    return {
+        "repo": repo_slug,
+        "documents": github_result.documents_written,
+        "issues_fetched": github_result.issues_fetched,
+        "issues_skipped": github_result.issues_skipped,
+        "cross_repo_skipped": github_result.cross_repo_skipped,
+        "cache_dir": str(cache_dir),
+        "manifest": str(github_result.manifest_path),
+    }
 
 
 def _cmd_index(

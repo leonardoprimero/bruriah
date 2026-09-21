@@ -429,6 +429,41 @@ What this achieves:
 
 ---
 
+## 13b. Ingesting GitHub Issues and Pull Requests (`bruriah corpus --github`)
+
+An issue's own wording is often the vocabulary a later search for that decision actually uses, and
+a pull request closed without being merged -- or an issue closed as a duplicate -- is exactly the
+kind of rejected alternative the counterfactual engine (section 1) needs to see. This is opt-in and
+off by default: with `--github` absent, `bruriah corpus` behaves exactly as it always has, with zero
+GitHub calls.
+
+```bash
+# One-time: ingest the issues/PRs linked from commits into the same corpus directory, alongside
+# the commit-derived decision documents. --github with no value derives OWNER/REPO from the
+# 'origin' remote; pass it explicitly for a fork, a mirror, or a CI checkout with no remote.
+export GITHUB_TOKEN=ghp_...                 # optional -- unauthenticated is 60 requests/hour
+bruriah corpus --repo . --out "$B/corpus" --github OWNER/REPO --github-cache "$B/github-cache"
+bruriah index  --data-dir "$B/data" --corpus-root "$B/corpus" --policy "$B/policy.yaml"
+```
+
+- `--github [OWNER/REPO]` -- ingest linked issues/PRs; bare `--github` auto-detects from `origin`.
+- `--github-cache DIR` -- where GitHub API responses are cached, keyed by endpoint. Reusing the
+  same directory is what makes a build reproducible: with a warm cache, the build completes
+  offline with no token and no network access at all.
+- `--github-token-env NAME` -- environment variable holding a token (default `GITHUB_TOKEN`).
+  Unset is fine; a warning is printed once and requests continue unauthenticated.
+
+Each linked issue becomes one document (`YYYY-MM-DD-issue-N-<slug>.md`), front matter naming the
+linking commit, the issue number, and its GitHub URL. A pull request cross-referencing that issue
+which was closed without merging, or a duplicate issue closed as `not_planned`, is recorded as an
+`alternatives:` entry with `disposition: rejected` -- the same front-matter shape `bruriah corpus`
+already writes for a commit's `Alternative-Rejected` trailer (section 1), so the counterfactual
+engine treats a GitHub-derived rejection exactly like a repository-derived one. A fetch failure
+skips that one issue with a warning to stderr rather than aborting the build, and
+`github-manifest.json` in the corpus root records what was fetched, skipped, and served from cache.
+
+---
+
 ## 14. Architectural Drift Detection: `bruriah drift`
 
 Codebases naturally drift away from architectural intent. Developers or autonomous coding agents touch files governed by architectural decisions without realizing those decisions were superseded, or introduce regressions against active lineage constraints.

@@ -1664,6 +1664,148 @@ def test_resolve_model_prefixes_bge_v1_5_variants_get_the_instruction_prefix() -
     assert resolve_model_prefixes("BAAI/bge-large-en-v1.5") == (prefix, "")
 
 
+def _github_link_repo(tmp_path: Path, *, origin: str | None = None) -> Path:
+    """One commit that closes issue #41 -- the same fixture scenario `test_github_corpus.py`
+    seeds a cache for -- optionally with an `origin` remote for auto-detection."""
+    repo = tmp_path / "github_repo"
+    repo.mkdir()
+    run = lambda *args: subprocess.run(["git", *args], cwd=repo, check=True, capture_output=True)
+    run("init", "-q")
+    run("config", "user.email", "test@example.invalid")
+    run("config", "user.name", "Test")
+    if origin is not None:
+        run("remote", "add", "origin", origin)
+    (repo / "a.txt").write_text("one")
+    run("add", "-A")
+    run("commit", "-q", "-m", "fix: race condition\n\nCloses #41.")
+    return repo
+
+
+def test_cli_corpus_without_github_flag_makes_no_github_call_and_is_byte_identical(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The acceptance criterion, literally: `bruriah corpus` without `--github` must call none of
+    `github_corpus`'s entry points and must write exactly what `gitcorpus.build` alone writes."""
+
+    def _must_not_be_called(*_args: object, **_kwargs: object) -> object:
+        raise AssertionError("github_corpus must not be touched without --github")
+
+    monkeypatch.setattr(cli.github_corpus, "detect_repo_slug", _must_not_be_called)
+    monkeypatch.setattr(cli.github_corpus, "build_documents", _must_not_be_called)
+    monkeypatch.setattr(cli, "_GitHubResponseCache", _must_not_be_called)
+
+    repo = _github_link_repo(tmp_path)
+    out_flagless = tmp_path / "out_flagless"
+    exit_code = cli.bruriah_main(["corpus", "--repo", str(repo), "--out", str(out_flagless)])
+    assert exit_code == 0
+
+    out_baseline = tmp_path / "out_baseline"
+    cli.gitcorpus.build(repo, out_baseline)
+
+    flagless_files = {p.name: p.read_bytes() for p in out_flagless.glob("*")}
+    baseline_files = {p.name: p.read_bytes() for p in out_baseline.glob("*")}
+    assert flagless_files == baseline_files
+    assert "github-manifest.json" not in flagless_files
+
+
+def test_cli_corpus_github_builds_offline_from_a_warm_cache_without_a_token(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from test_github_corpus import _seed
+
+    monkeypatch.delenv("GITHUB_TOKEN", raising=False)
+    repo = _github_link_repo(tmp_path)
+    out = tmp_path / "out"
+    cache_dir = tmp_path / "github_cache"
+    from bruriah.github_read import ResponseCache
+
+    _seed(ResponseCache(cache_dir), "acme", "widget")
+
+    exit_code = cli.bruriah_main([
+        "corpus", "--repo", str(repo), "--out", str(out),
+        "--github", "acme/widget", "--github-cache", str(cache_dir),
+        "--config-dir", str(tmp_path / "config"), "--data-dir", str(tmp_path / "data"),
+        "--cache-dir", str(tmp_path / "cache"), "--log-dir", str(tmp_path / "log"),
+    ])
+    assert exit_code == 0
+
+    captured = capsys.readouterr()
+    data = json.loads(captured.out)
+    assert data["github"]["documents"] == 1
+    assert data["github"]["issues_fetched"] == 1
+    assert (out / "github-manifest.json").is_file()
+    assert len(list(out.glob("*issue-41*.md"))) == 1
+    assert "GITHUB_TOKEN is not set" in captured.err
+
+
+def test_cli_corpus_github_cache_defaults_under_the_tools_own_cache_dir(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("GITHUB_TOKEN", raising=False)
+    repo = _github_link_repo(tmp_path)
+    cache_dir = tmp_path / "cache"
+
+    exit_code = cli.bruriah_main([
+        "corpus", "--repo", str(repo), "--out", str(tmp_path / "out"),
+        "--github", "acme/widget",
+        "--config-dir", str(tmp_path / "config"), "--data-dir", str(tmp_path / "data"),
+        "--cache-dir", str(cache_dir), "--log-dir", str(tmp_path / "log"),
+    ])
+    assert exit_code == 0
+    data = json.loads(capsys.readouterr().out)
+    assert data["github"]["cache_dir"] == str(cache_dir / "github")
+
+
+@pytest.mark.parametrize(
+    "origin,expected",
+    [
+        ("https://github.com/acme/widget.git", "acme/widget"),
+        ("git@github.com:acme/widget.git", "acme/widget"),
+    ],
+)
+def test_cli_corpus_github_bare_flag_autodetects_owner_repo_from_origin(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch,
+    origin: str, expected: str,
+) -> None:
+    from bruriah.github_corpus import GitHubCorpusResult
+
+    seen: dict[str, str] = {}
+
+    def _fake_build_documents(commits, out, *, repo, **kwargs):  # noqa: ANN001 -- test double
+        seen["repo"] = repo
+        out.mkdir(parents=True, exist_ok=True)
+        manifest_path = out / "github-manifest.json"
+        manifest_path.write_text("{}", encoding="utf-8")
+        return GitHubCorpusResult(
+            documents_written=0, commits_scanned=len(commits), issues_fetched=0,
+            issues_skipped=0, cross_repo_skipped=0, cache_hits=0, network_calls=0,
+            manifest_path=manifest_path,
+        )
+
+    monkeypatch.setattr(cli.github_corpus, "build_documents", _fake_build_documents)
+    repo = _github_link_repo(tmp_path, origin=origin)
+    exit_code = cli.bruriah_main([
+        "corpus", "--repo", str(repo), "--out", str(tmp_path / "out"), "--github",
+        "--config-dir", str(tmp_path / "config"), "--data-dir", str(tmp_path / "data"),
+        "--cache-dir", str(tmp_path / "cache"), "--log-dir", str(tmp_path / "log"),
+    ])
+    assert exit_code == 0
+    assert seen["repo"] == expected
+
+
+def test_cli_corpus_github_rejects_a_slug_without_a_slash(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str],
+) -> None:
+    repo = _github_link_repo(tmp_path)
+    exit_code = cli.bruriah_main([
+        "corpus", "--repo", str(repo), "--out", str(tmp_path / "out"), "--github", "not-a-slug",
+        "--config-dir", str(tmp_path / "config"), "--data-dir", str(tmp_path / "data"),
+        "--cache-dir", str(tmp_path / "cache"), "--log-dir", str(tmp_path / "log"),
+    ])
+    assert exit_code == 1
+    assert "invalid_repo_slug" in capsys.readouterr().err
+
+
 def test_resolve_model_prefixes_jina_v2_base_es_no_prefix() -> None:
     """The new default and its sibling v2 models use no prefix, same as jina v3 above -- and must
     not be caught by the `elif "e5" in model_name` fallback (they aren't, but the registry entry

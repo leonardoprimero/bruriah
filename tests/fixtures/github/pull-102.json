@@ -1,0 +1,14 @@
+{
+    "number": 102,
+    "title": "Attempt: optimistic concurrency instead of locking",
+    "body": "Alternative approach to #100: detect the collision after the fact instead of locking.",
+    "state": "closed",
+    "merged": false,
+    "merged_at": null,
+    "closed_at": "2026-07-06T08:00:00Z",
+    "created_at": "2026-07-04T09:00:00Z",
+    "html_url": "https://github.com/acme/widget/pull/102",
+    "user": {
+        "login": "carol"
+    }
+}
