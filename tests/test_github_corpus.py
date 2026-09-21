@@ -15,6 +15,7 @@ from typing import Any
 
 import pytest
 
+from bruriah import github_corpus
 from bruriah.corpus import CorpusPolicy, parse_document
 from bruriah.github_corpus import (
     GitHubCorpusError,
@@ -23,6 +24,7 @@ from bruriah.github_corpus import (
 )
 from bruriah.github_read import ResponseCache, _RawResponse
 from bruriah.gitcorpus import WalkedCommit, walk_commits
+from bruriah.index import BuildConfig, build_candidate
 
 FIXTURES = Path(__file__).parent / "fixtures" / "github"
 
@@ -318,6 +320,159 @@ class TestTimelineCrossReferenceFromAnotherRepoIsSkipped:
         assert result.cross_repo_skipped == 2
         manifest = json.loads((tmp_path / "out" / "github-manifest.json").read_text(encoding="utf-8"))
         assert manifest["counts"]["cross_repo_skipped"] == 2
+
+
+# ---------------------------------------------------------------------------
+# _collect_alternatives -- a timeline `cross-referenced` event fires once per *mention*, not once
+# per PR/issue: the same PR can be cross-referenced more than once, and two distinct PRs can share
+# a title. Both used to survive as duplicate `alternatives` frontmatter entries colliding on the
+# `(name, document_ref)` primary key `index.py`'s `alternatives` table enforces -- see
+# `TestDuplicateAlternativesStillIndex` for the reproduction through the real index build.
+# ---------------------------------------------------------------------------
+
+
+class TestCollectAlternativesDeduplicatesCrossReferences:
+    def _ledger(self, tmp_path: Path, transport: Any) -> Any:
+        cache = ResponseCache(tmp_path / "cache")
+        return github_corpus._Ledger(
+            cache=cache, owner="acme", repo="widget", token=None, network_enabled=True,
+            transport=transport, clock=lambda: 0.0, sleep=lambda _seconds: None,
+        )
+
+    def test_same_pr_cross_referenced_twice_yields_one_alternative_and_one_fetch(
+        self, tmp_path: Path
+    ) -> None:
+        fetch_counts: dict[str, int] = {}
+
+        def transport(method: str, url: str, token: str | None) -> _RawResponse:
+            fetch_counts[url] = fetch_counts.get(url, 0) + 1
+            if url.endswith("/issues/41/timeline"):
+                event = {
+                    "event": "cross-referenced",
+                    "source": {"issue": {
+                        "number": 310,
+                        "html_url": "https://github.com/acme/widget/pull/310",
+                        "pull_request": {"merged_at": None},
+                    }},
+                }
+                body: Any = [event, event]
+            elif url.endswith("/pulls/310"):
+                body = {
+                    "title": "Fix: retry storm", "state": "closed", "merged_at": None,
+                    "closed_at": "2026-08-01T00:00:00Z",
+                }
+            elif url.endswith("/issues/310/comments"):
+                body = []
+            else:
+                raise AssertionError(f"unexpected fetch: {url}")
+            return _RawResponse(status=200, headers={}, body=json.dumps(body).encode())
+
+        ledger = self._ledger(tmp_path, transport)
+        alternatives, cross_repo_skipped = github_corpus._collect_alternatives(41, ledger, "acme/widget")
+
+        assert cross_repo_skipped == 0
+        assert len(alternatives) == 1
+        assert alternatives[0]["name"] == "Fix: retry storm"
+        assert fetch_counts["https://api.github.com/repos/acme/widget/pulls/310"] == 1
+
+    def test_two_distinct_prs_with_the_same_title_both_survive_disambiguated(
+        self, tmp_path: Path
+    ) -> None:
+        def transport(method: str, url: str, token: str | None) -> _RawResponse:
+            if url.endswith("/issues/41/timeline"):
+                body: Any = [
+                    {
+                        "event": "cross-referenced",
+                        "source": {"issue": {
+                            "number": 320,
+                            "html_url": "https://github.com/acme/widget/pull/320",
+                            "pull_request": {"merged_at": None},
+                        }},
+                    },
+                    {
+                        "event": "cross-referenced",
+                        "source": {"issue": {
+                            "number": 321,
+                            "html_url": "https://github.com/acme/widget/pull/321",
+                            "pull_request": {"merged_at": None},
+                        }},
+                    },
+                ]
+            elif url.endswith("/pulls/320"):
+                # Trailing whitespace a title should never have carried into the corpus.
+                body = {
+                    "title": "Fix: retry with backoff  ", "state": "closed", "merged_at": None,
+                    "closed_at": "2026-08-01T00:00:00Z",
+                }
+            elif url.endswith("/pulls/321"):
+                # Same title after normalization, spelled with a doubled internal space instead.
+                body = {
+                    "title": "Fix: retry  with backoff", "state": "closed", "merged_at": None,
+                    "closed_at": "2026-08-02T00:00:00Z",
+                }
+            elif url.endswith("/comments"):
+                body = []
+            else:
+                raise AssertionError(f"unexpected fetch: {url}")
+            return _RawResponse(status=200, headers={}, body=json.dumps(body).encode())
+
+        ledger = self._ledger(tmp_path, transport)
+        alternatives, _ = github_corpus._collect_alternatives(41, ledger, "acme/widget")
+
+        names = [alt["name"] for alt in alternatives]
+        assert names == ["Fix: retry with backoff", "Fix: retry with backoff (#321)"]
+
+
+# ---------------------------------------------------------------------------
+# build_documents + index.build_candidate -- a document whose timeline cross-referenced the same
+# PR twice used to carry two identical `alternatives` entries and die with a raw
+# `sqlite3.IntegrityError` ~4.5 minutes into a real `bruriah index` build, because the
+# `alternatives` table's primary key is `(name, document_ref)`.
+# ---------------------------------------------------------------------------
+
+
+class TestDuplicateAlternativesStillIndex:
+    def test_document_with_a_duplicate_cross_reference_indexes_without_error(
+        self, tmp_path: Path
+    ) -> None:
+        cache = ResponseCache(tmp_path / "cache")
+        cache.set("/repos/acme/widget/issues/300", _load("issue-300.json"))
+        cache.set("/repos/acme/widget/issues/300/timeline", _load("issue-300-timeline.json"))
+        cache.set("/repos/acme/widget/pulls/47", _load("pull-47.json"))
+        cache.set("/repos/acme/widget/issues/47/comments", _load("pull-47-comments.json"))
+        out = tmp_path / "out"
+        commits = [_commit("f" * 40, "fix: note", "Closes #300.")]
+        result = build_documents(
+            commits, out, repo="acme/widget", cache=cache, network_enabled=False,
+        )
+        assert result.documents_written == 1
+
+        policy = CorpusPolicy(include=("*.md",), exclude=())
+        doc_path = next(out.glob("*issue-300*.md"))
+        document = parse_document(doc_path, out, policy)
+        assert len(document.metadata.alternatives) == 1
+
+        fingerprint = json.dumps({
+            "artifact": "model.onnx", "artifact_sha256": "a" * 64, "pooling": "mean",
+            "runtime": "fastembed==0.8.0", "snapshot": "snapshot-a", "source": "example/model",
+        }, sort_keys=True)
+        policy_path = tmp_path / "policy.yaml"
+        policy_path.write_text("version: 1\ninclude: ['*.md']\nexclude: []\n", encoding="utf-8")
+        config = BuildConfig(
+            root=out, policy_path=policy_path, schema_version=1,
+            parser_version="corpus-v2", service_version="0.1.0", mcp_range=">=1.28.1,<2",
+            embedding_model="test/minilm", embedding_revision="snapshot-a",
+            embedding_dimensions=3, embedding_fingerprint=fingerprint, ranking_config="rrf-v1",
+        )
+
+        def fake_embeddings(texts: list[str]) -> list[bytes]:
+            import hashlib
+            return [hashlib.sha256(text.encode()).digest()[:12] for text in texts]
+
+        index_result = build_candidate(
+            config, tmp_path / "candidate.sqlite3", policy, fake_embeddings,
+        )
+        assert index_result.documents == 1
 
 
 # ---------------------------------------------------------------------------

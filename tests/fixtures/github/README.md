@@ -54,5 +54,14 @@ collides with a number that means something else in the corpus repo.
   payloads omit it). Neither foreign source has a fixture of its own: fetching either one is exactly
   the bug this scenario exists to catch.
 
+A fourth scenario, added for the duplicate-alternative fix (`github_corpus.py`,
+`_collect_alternatives`): a real GitHub timeline carries one `cross-referenced` event per
+*mention*, so the same PR can appear more than once and (before the fix) produced two identical
+`alternatives` entries that broke `bruriah index` on the `(name, document_ref)` primary key.
+
+- `issue-300.json` — `GET /repos/{owner}/{repo}/issues/300`. Closed, no premises.
+- `issue-300-timeline.json` — two `cross-referenced` events, both from PR #47 above (reused
+  rather than duplicated): the same unmerged PR mentioned twice.
+
 The `owner/repo` and timestamps are fictional; the field shapes match GitHub's documented REST
 responses as of API version `2022-11-28`.

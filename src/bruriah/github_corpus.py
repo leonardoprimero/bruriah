@@ -337,6 +337,31 @@ def _source_repo_slug(src_issue: dict[str, Any]) -> str | None:
     return None
 
 
+def _normalize_alt_text(value: str) -> str:
+    """Strip and collapse a name/reason to single spaces -- a GitHub title routinely carries stray
+    whitespace, and two titles that differ only in that whitespace must still compare equal."""
+    return " ".join(value.split())
+
+
+def _dedupe_alternative_names(alternatives: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Two *distinct* PRs/issues can carry the same title, which the per-number dedup in
+    `_collect_alternatives` below cannot catch: it only stops the same source being counted
+    twice. Keep the first source's name bare and suffix every later collision with its own
+    PR/issue number, so both survive `index.py`'s `(name, document_ref)` primary key."""
+    seen: dict[str, int] = {}
+    result: list[dict[str, Any]] = []
+    for alt in alternatives:
+        number = alt.pop("_source_number", None)
+        name = _normalize_alt_text(str(alt.get("name", "")))
+        reason = alt.get("reason")
+        if isinstance(reason, str):
+            alt["reason"] = _normalize_alt_text(reason)
+        seen[name] = seen.get(name, 0) + 1
+        alt["name"] = name if seen[name] == 1 else f"{name} (#{number})"
+        result.append(alt)
+    return result
+
+
 def _collect_alternatives(number: int, ledger: _Ledger, repo: str) -> tuple[list[dict[str, Any]], int]:
     """The rejected-alternative documents for `number`'s cross-referenced timeline events, plus how
     many of those events were skipped because their source lives in another repository -- a fork
@@ -344,9 +369,16 @@ def _collect_alternatives(number: int, ledger: _Ledger, repo: str) -> tuple[list
     A foreign source is counted here exactly like a cross-repo `closes`/`mentions` commit link
     (`_resolve_links_for_commit`) and never fetched: its number means nothing in `repo`, and
     fetching it risks pulling an unrelated same-numbered PR/issue into the document, or a 404 that
-    would otherwise drop the whole issue (see the module docstring)."""
+    would otherwise drop the whole issue (see the module docstring).
+
+    GitHub's timeline carries one `cross-referenced` event per *mention*, not one per PR/issue, so
+    the same PR can appear more than once here. A source number already seen for this document is
+    skipped before it is fetched a second time -- no second fetch, no second alternative -- and the
+    result is then passed through `_dedupe_alternative_names` for the separate case of two
+    different sources sharing a title."""
     alternatives: list[dict[str, Any]] = []
     cross_repo_skipped = 0
+    seen_numbers: set[int] = set()
     for event in ledger.timeline(number):
         if not isinstance(event, dict) or event.get("event") != "cross-referenced":
             continue
@@ -361,6 +393,9 @@ def _collect_alternatives(number: int, ledger: _Ledger, repo: str) -> tuple[list
         if source_repo is None or source_repo.lower() != repo.lower():
             cross_repo_skipped += 1
             continue
+        if src_number in seen_numbers:
+            continue
+        seen_numbers.add(src_number)
         if "pull_request" in src_issue:
             pull = ledger.pull(src_number)
             alt = _rejected_alternative_from_pull(pull, ledger, src_number)
@@ -368,8 +403,9 @@ def _collect_alternatives(number: int, ledger: _Ledger, repo: str) -> tuple[list
             full_issue = ledger.issue(src_number)
             alt = _rejected_alternative_from_issue(full_issue, ledger, src_number)
         if alt is not None:
+            alt["_source_number"] = src_number
             alternatives.append(alt)
-    return alternatives, cross_repo_skipped
+    return _dedupe_alternative_names(alternatives), cross_repo_skipped
 
 
 def _render_document(
