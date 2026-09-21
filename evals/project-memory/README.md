@@ -23,7 +23,7 @@ Without that the scorer reports 0% and looks like a retrieval collapse rather th
 `tests/test_project_memory_eval.py` asserts every ground-truth document is still produced by this
 repository's own history, so the numbers below stay reproducible from the published repository.
 
-## `report_counterfactuals.py` — GitHub-derived counterfactual coverage (script ready, not yet measured)
+## `report_counterfactuals.py` — GitHub-derived counterfactual coverage
 
 `evals/retrieval/report_reach.py` reports where the correct document lands in an unbudgeted
 ranking; `evals/retrieval/report_counterfactuals.py` is its sibling for the other half of
@@ -39,16 +39,10 @@ SQL — and traces a document to an issue by filename (`YYYY-MM-DD-issue-N-<slug
 `SourceMetadata`'s fields and is therefore never persisted into the index's stored document
 metadata.
 
-No numbers below yet: this script exists and is covered by `tests/test_report_counterfactuals.py`,
-but has not been run against a `--github`-built index. T4's network half will publish the coverage
-figures here once a GitHub token is authorized:
-
-```bash
-python evals/retrieval/report_counterfactuals.py --corpus leakcanary --data-dir /tmp/data-leakcanary-github \
-    --questions evals/project-memory/leakcanary-issues.jsonl --out /tmp/lc-counterfactuals.jsonl
-python evals/retrieval/report_counterfactuals.py --corpus egui --data-dir /tmp/data-egui-github \
-    --questions evals/project-memory/egui-issues.jsonl --out /tmp/egui-counterfactuals.jsonl
-```
+Measured 2026-09-21, published below: **"Issue ingestion, measured 2026-09-21"**. 115 rejected
+alternatives recovered across `square/leakcanary` and `emilk/egui`, 34 of 236 questions now carry a
+counterfactual the engine could not raise before, zero premises (nobody writes explicit `Premise:`
+lines in a GitHub issue).
 
 ## The embedder was the bottleneck, measured 2026-09-20
 
@@ -286,6 +280,177 @@ for model in sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2 \
 done
 # score with evals/retrieval/report_reach.py against leakcanary-issues.jsonl / egui-issues.jsonl
 ```
+
+## Issue ingestion, measured 2026-09-21
+
+**The question.** `bruriah corpus --github` (`odd/tasks/github-issue-pr-ingestion.md`) ingests the
+GitHub issues and pull requests a commit links (`Fixes #N`, `Closes #N`, `owner/repo#N`, the
+squash-merge `(#N)` subject suffix) as corpus documents. Two things were unmeasured: does adding
+that vocabulary help retrieval, and — the sharper question, because the counterfactual engine
+(section 1 of `README.md`) is the actual feature — does the engine now KNOW about rejections it
+did not know about before: pull requests closed without merging and issues closed as
+`not_planned`, written as `alternatives:` entries the same shape a commit trailer already produces.
+
+**The method.** Paired, same discipline as "Two repositories nobody here wrote" and "The embedder
+was the bottleneck" above: `square/leakcanary` (0f7dbab17e2a) and `emilk/egui` (5d3e958ecfd3),
+identical commit documents byte-identical to the published baseline corpora (884 and 2,180
+documents — `diff -r` against the corpora those sections already published, zero differences), the
+same model (`jina-embeddings-v2-base-es`), the same fusion (`RRF_K=60`, no reranker), the same 236
+questions (`leakcanary-issues.jsonl` / `egui-issues.jsonl`). The only variable is whether the
+GitHub-derived documents are in the corpus. Network access is opt-in twice over: `--github` does
+nothing without also passing the tool-wide `--network-enabled` switch (see "T3b" below), and with
+`--network-enabled` off but a warm `--github-cache`, the build is fully offline — that cache
+directory is the reproducibility pin the same way a pinned commit sha is for the corpus itself.
+
+### The raw table, and why it drops
+
+| corpus | n | condition | recall@3 | recall@10 | MRR@10 |
+|---|---|---|---|---|---|
+| leakcanary | 153 | commit docs only (baseline) | 0.373 | 0.471 | 0.330 |
+| leakcanary | 153 | + GitHub docs | 0.242 | 0.399 | 0.144 |
+| egui | 83 | commit docs only (baseline) | 0.554 | 0.723 | 0.473 |
+| egui | 83 | + GitHub docs | 0.410 | 0.687 | 0.243 |
+
+McNemar (top-3, exact, two-sided): leakcanary 0 entered / 20 left, p<0.0001; egui 0 entered / 12
+left, p=0.0005. Read at face value this looks like a regression, and it would be a real one if
+these were held-out questions. They are not: `evals/retrieval/pairs.py` builds every question from
+a GitHub issue's own title (see "Two repositories nobody here wrote" above), so for a question
+built from issue #41, the document `bruriah corpus --github` writes for issue #41 is a
+near-verbatim vocabulary match for its own question — and correctly outranks the commit that closed
+it. `evals/retrieval/report_issue_document_rank.py` confirms this directly: the question's own
+issue document ranks **1st for 147/153 leakcanary questions and 82/83 egui questions**, and ranks
+*above* the commit truth for 150/153 and 82/83 respectively. This is not a retrieval failure; it is
+the evaluation question set answering itself, and it is why the raw table above cannot be read as a
+verdict on ingestion.
+
+### The table that isolates the actual question: does ingestion degrade commit retrieval
+
+Same ranking, same run, with every GitHub-derived document filtered back out before scoring the
+commit truth's rank — no second index build, just reading the same fused order twice
+(`report_issue_document_rank.py`'s `truth_rank_commit_only`):
+
+| corpus | n | condition | recall@3 | recall@10 | McNemar (entered/left, p) | unchanged rank |
+|---|---|---|---|---|---|---|
+| leakcanary | 153 | commit docs only (baseline) | 0.373 | 0.471 | — | — |
+| leakcanary | 153 | commit truth, GitHub docs present but excluded from scoring | 0.392 | 0.458 | 3 / 0, p=0.25 | 76/153 |
+| egui | 83 | commit docs only (baseline) | 0.554 | 0.723 | — | — |
+| egui | 83 | commit truth, GitHub docs present but excluded from scoring | 0.554 | 0.735 | 3 / 3, p=1.00 | 53/83 |
+
+Neither comparison is significant, and neither moves in a consistent direction (leakcanary
+recall@3 ticks up, egui recall@10 ticks up, both changes inside noise at this sample size).
+**Ingesting linked GitHub documents does not degrade commit-document retrieval.** The apparent
+collapse in the raw table above is entirely the question set's own issue documents outranking the
+commits they describe, not the commit ranking getting worse.
+
+### The counterfactual table — the number this feature actually exists for
+
+For each question naming a `provenance.issue`, whether the index holds a rejected alternative or
+premise traceable to that exact issue (`evals/retrieval/report_counterfactuals.py`; a row counts
+only when its `document_ref` names a document matching the `YYYY-MM-DD-issue-N-<slug>.md`
+convention `github_corpus.build_documents` writes — the `issue:` front-matter key itself is never
+persisted into the index, so the filename is the only signal available):
+
+| corpus | questions with `provenance.issue` | with a GitHub document | alternatives (total / GitHub-derived) | premises | questions with a traceable alternative |
+|---|---|---|---|---|---|
+| leakcanary | 153 | 150 | 17 / 17 | 0 | 10 |
+| egui | 83 | 82 | 98 / 98 | 0 | 24 |
+| **combined** | **236** | **232** | **115 / 115** | **0** | **34** |
+
+(egui's 98 alternatives come from 66 distinct issue documents — several issues gained more than
+one rejected cross-reference.) **115 rejected alternatives recovered from two real repositories
+that did not exist in either corpus before this feature, and 34 of 236 questions now have a
+counterfactual the engine can raise that it could not raise before.** Zero premises on either
+corpus: premises are read only from explicit `Premise:` lines in an issue or PR body, using the
+same grammar as a commit trailer (`odd/tasks/github-issue-pr-ingestion.md`, "Decisions taken"), and
+nobody writing a GitHub issue writes one — that is the expected outcome of a strict, no-NLP
+extraction rule, not a defect in it.
+
+### What this does NOT show
+
+No retrieval claim for issue ingestion can be made from this question set, in either direction: the
+raw table's collapse is a self-answering-question artifact, not evidence that ingestion hurts, and
+the commit-only table's flat result says only that ingestion does not hurt commit retrieval, not
+that it helps anything retrieval-shaped. A held-out question set — one not built from GitHub issue
+titles in the first place — is the measurement that could actually show ingestion improving
+retrieval, and it has not been run. What this page DOES establish is the counterfactual number
+above: the engine holds rejected alternatives after this feature that it structurally could not
+hold before it, regardless of what a held-out retrieval measurement would later show.
+
+### Two defects this measurement found and fixed on the branch
+
+- **Foreign-repo timeline references** (`e956e61`): the timeline walker resolved
+  `cross-referenced` events by number alone, so a reference from a DIFFERENT repository sharing the
+  same issue/PR number could fetch an unrelated document or 404 the whole issue; fixed by checking
+  the event's own source repository before fetching it.
+- **Duplicate cross-reference events** (`4fb0c87`, found by the egui build specifically): a
+  timeline can carry more than one `cross-referenced` event for the same source PR, so the same
+  unmerged PR was appended as an alternative twice and collided on the
+  `alternatives (name, document_ref)` primary key; fixed by deduplicating by `(repo, number)`
+  before an alternative is built.
+
+### Cost
+
+Fetch (`bruriah corpus --network-enabled --github`, one-time, cached afterward): leakcanary 16 min
+online, 1,284 network calls, 2,043 commits scanned, 326 links found, 322 issue documents, 1 not
+found, 33 cross-repo references skipped; egui 43 min online, 4,433 commits scanned, 276 links
+found, 272 issue documents, 4 not found, 782 cross-repo references skipped (a later rebuild for the
+duplicate-cross-reference fix above cost 5 more network calls, for the not-found retries, and was
+otherwise served entirely from cache). Cache on disk: leakcanary 25 MB / 1,281 files, egui 60 MB /
+3,118 files. Index build: leakcanary 1,206 documents / 2,702 passages / 186 s; egui 2,452 documents
+/ 5,384 passages / **316 s measured** (this page's own working notes recorded 277 s from an earlier
+run; the index log for the build these numbers were scored against reports 316.11 s wall time, and
+that is the figure kept here — see the note at the top of this file on why a measured file always
+wins over a remembered one). Both indexes' commit documents are byte-identical to the corpora
+"Two repositories nobody here wrote" and "The embedder was the bottleneck" already publish (884 and
+2,180 documents respectively).
+
+### Reproduce
+
+```bash
+git clone --filter=blob:none https://github.com/square/leakcanary && git -C leakcanary checkout 0f7dbab17e2a
+git clone --filter=blob:none https://github.com/emilk/egui && git -C egui checkout 5d3e958ecfd3
+
+# One-time, cached afterward. --network-enabled is required or --github builds offline from
+# whatever --github-cache already holds (see docs/cli-and-tools.md 13b and README.md's opt-in
+# sentence for why this is a separate switch from --github itself).
+bruriah corpus --network-enabled --repo leakcanary --out corpus/leakcanary-github \
+    --revision 0f7dbab17e2a --github square/leakcanary --github-cache github-cache/leakcanary
+bruriah corpus --network-enabled --repo egui --out corpus/egui-github \
+    --revision 5d3e958ecfd3 --github emilk/egui --github-cache github-cache/egui
+
+bruriah index --corpus-root corpus/leakcanary-github --policy policy.yaml \
+    --data-dir indexes/leakcanary-github --model jinaai/jina-embeddings-v2-base-es
+bruriah index --corpus-root corpus/egui-github --policy policy.yaml \
+    --data-dir indexes/egui-github --model jinaai/jina-embeddings-v2-base-es
+
+# The raw table (recall vs. the published baselines in this directory):
+python evals/retrieval/report_reach.py --corpus leakcanary --data-dir indexes/leakcanary-github \
+    --questions evals/project-memory/leakcanary-issues.jsonl --out ranks-leakcanary.jsonl
+python evals/retrieval/report_paired.py --corpus leakcanary \
+    --baseline evals/project-memory/leakcanary-embedder-ablation-jina.jsonl \
+    --candidate ranks-leakcanary.jsonl
+# (repeat both for egui with egui-embedder-ablation-jina.jsonl)
+
+# The commit-only table:
+python evals/retrieval/report_issue_document_rank.py --data-dir indexes/leakcanary-github \
+    --questions evals/project-memory/leakcanary-issues.jsonl --out issue-doc-ranks-leakcanary.jsonl
+# (repeat for egui)
+
+# The counterfactual table:
+python evals/retrieval/report_counterfactuals.py --corpus leakcanary --data-dir indexes/leakcanary-github \
+    --questions evals/project-memory/leakcanary-issues.jsonl --out counterfactuals-leakcanary.jsonl --json
+# (repeat for egui)
+```
+
+Full per-question artifacts:
+[`leakcanary-github-ingestion-ranks.jsonl`](leakcanary-github-ingestion-ranks.jsonl),
+[`leakcanary-github-ingestion-issue-document-ranks.jsonl`](leakcanary-github-ingestion-issue-document-ranks.jsonl),
+[`leakcanary-github-ingestion-counterfactuals.jsonl`](leakcanary-github-ingestion-counterfactuals.jsonl),
+[`leakcanary-github-ingestion-manifest.json`](leakcanary-github-ingestion-manifest.json),
+[`egui-github-ingestion-ranks.jsonl`](egui-github-ingestion-ranks.jsonl),
+[`egui-github-ingestion-issue-document-ranks.jsonl`](egui-github-ingestion-issue-document-ranks.jsonl),
+[`egui-github-ingestion-counterfactuals.jsonl`](egui-github-ingestion-counterfactuals.jsonl),
+[`egui-github-ingestion-manifest.json`](egui-github-ingestion-manifest.json).
 
 ## Heading ancestry moves the top of the ranking and nothing deeper, measured 2026-08-28
 

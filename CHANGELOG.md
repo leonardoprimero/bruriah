@@ -30,6 +30,12 @@ and the entries here name what changed for *you* rather than which files moved.
   on a real repo): it now prints one line up front naming `--network-enabled` and the cache
   directory in use, and collapses those per-issue offline-cache-miss warnings into a single count
   line; other skip reasons still warn per issue.
+- New eval scripts `evals/retrieval/report_paired.py` (paired recall/MRR/exact McNemar between two
+  rank files) and `evals/retrieval/report_issue_document_rank.py` (commit-truth rank, commit-only
+  rank, and own-issue-document rank per question); measured on `square/leakcanary` and `emilk/egui`
+  and published in `evals/project-memory/README.md`, "Issue ingestion, measured 2026-09-21": 115
+  rejected alternatives recovered, 34 of 236 questions now carry a counterfactual the engine could
+  not raise before, and ingestion does not degrade commit-document retrieval.
 
 ### Fixed: The own-history embedder ablation table is now reproducible
 - The own-history table in `evals/project-memory/README.md` ("The embedder was the bottleneck")
