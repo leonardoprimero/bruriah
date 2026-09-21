@@ -25,6 +25,11 @@ and the entries here name what changed for *you* rather than which files moved.
   `gitcorpus.walk_commits` (an additive commit walk exposing bodiless commits too, since a
   squash-merge subject's `(#N)` suffix can carry no body at all). `gitcorpus.build`'s own output
   is unchanged byte-for-byte.
+- `--github` was silently gated by the tool-wide `--network-enabled` switch (default off) with no
+  discoverable signal beyond one `github_offline_cache_miss` warning per issue (hundreds of lines
+  on a real repo): it now prints one line up front naming `--network-enabled` and the cache
+  directory in use, and collapses those per-issue offline-cache-miss warnings into a single count
+  line; other skip reasons still warn per issue.
 
 ### Fixed: The own-history embedder ablation table is now reproducible
 - The own-history table in `evals/project-memory/README.md` ("The embedder was the bottleneck")

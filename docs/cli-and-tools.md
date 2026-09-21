@@ -452,6 +452,17 @@ bruriah index  --data-dir "$B/data" --corpus-root "$B/corpus" --policy "$B/polic
   offline with no token and no network access at all.
 - `--github-token-env NAME` -- environment variable holding a token (default `GITHUB_TOKEN`).
   Unset is fine; a warning is printed once and requests continue unauthenticated.
+- `--network-enabled` -- the tool-wide network switch (default off; also settable via the
+  `NETWORK_ENABLED` env var or `config.json`), and `--github` honors it like every other network
+  path in this tool. With it off, `--github` still builds from whatever `--github-cache` already
+  holds, and any uncached issue is skipped rather than fetched; with it on, uncached issues are
+  fetched from `api.github.com`. Because this switch is easy to miss, `--github` prints one line
+  up front when it is off, naming the cache directory in use, and collapses any resulting
+  offline-cache-miss skips into a single count line instead of one warning per issue:
+
+  ```bash
+  bruriah corpus --network-enabled --repo . --out ./corpus --github OWNER/REPO --github-cache ./github-cache
+  ```
 
 Each linked issue becomes one document (`YYYY-MM-DD-issue-N-<slug>.md`), front matter naming the
 linking commit, the issue number, and its GitHub URL. A pull request cross-referencing that issue

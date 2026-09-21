@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import argparse
+import contextlib
+import io
 import json
 import os
 import sys
 from array import array
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from pathlib import Path
 from typing import Any
 
@@ -581,12 +583,22 @@ def _cmd_corpus_github(args: argparse.Namespace, repo: Path) -> dict[str, Any]:
             file=sys.stderr,
         )
 
-    commits = gitcorpus.walk_commits(repo, args.limit, revision=args.revision)
-
     # Network is opt-in, same switch as everywhere else in this tool (`paths.network_enabled`,
     # `--network-enabled`, default False): with it off, `--github` still builds from a warm
-    # `--github-cache`, and any uncached issue is skipped-and-warned rather than reaching out.
-    github_result = github_corpus.build_documents(
+    # `--github-cache`, and any uncached issue is skipped-and-warned rather than reaching out. That
+    # design is right but was undiscoverable (T3b): say so up front, naming the flag that changes
+    # it, before spending any time walking commits or hitting the cache.
+    if not paths.network_enabled:
+        print(
+            f"Network is disabled (--network-enabled is off); `--github` will only use the warm "
+            f"cache at {cache_dir}. Pass --network-enabled to let it fetch uncached issues from "
+            "GitHub.",
+            file=sys.stderr,
+        )
+
+    commits = gitcorpus.walk_commits(repo, args.limit, revision=args.revision)
+
+    github_result = _build_github_documents_reporting(
         commits, args.out, repo=repo_slug, cache=_GitHubResponseCache(cache_dir),
         revision=args.revision, token=token, network_enabled=paths.network_enabled,
     )
@@ -599,6 +611,57 @@ def _cmd_corpus_github(args: argparse.Namespace, repo: Path) -> dict[str, Any]:
         "cache_dir": str(cache_dir),
         "manifest": str(github_result.manifest_path),
     }
+
+
+# One line per issue that misses the offline cache: exactly how `github_corpus.build_documents`
+# formats it (`f"warning: skipping issue #{number} ({repo}): {error}"`, and `GitHubOfflineError`
+# stringifies as `"github_offline_cache_miss: <path>"`). Matched, never re-derived, so a wording
+# change in either place fails loudly here instead of silently stopping the collapse below.
+_OFFLINE_CACHE_MISS_MARKER = ": github_offline_cache_miss:"
+
+
+def _build_github_documents_reporting(
+    commits: Sequence[gitcorpus.WalkedCommit],
+    out: Path,
+    *,
+    repo: str,
+    cache: _GitHubResponseCache,
+    revision: str,
+    token: str | None,
+    network_enabled: bool,
+) -> github_corpus.GitHubCorpusResult:
+    """Call `github_corpus.build_documents` exactly as before -- its signature, behavior, and every
+    warning it decides to print are untouched (T3's native review already approved them; T3b must
+    not reopen that). This only post-processes the stderr TEXT that call already writes, at the CLI
+    boundary: with the network switch off, hundreds of per-issue `github_offline_cache_miss` lines
+    (T3b's finding) collapse into one count line, while every other warning -- rate limit, other
+    `GitHubError`s -- passes through unchanged. With the switch on, nothing is captured at all."""
+    if network_enabled:
+        return github_corpus.build_documents(
+            commits, out, repo=repo, cache=cache, revision=revision, token=token,
+            network_enabled=network_enabled,
+        )
+
+    captured = io.StringIO()
+    with contextlib.redirect_stderr(captured):
+        result = github_corpus.build_documents(
+            commits, out, repo=repo, cache=cache, revision=revision, token=token,
+            network_enabled=network_enabled,
+        )
+
+    offline_misses = 0
+    for line in captured.getvalue().splitlines():
+        if _OFFLINE_CACHE_MISS_MARKER in line:
+            offline_misses += 1
+            continue
+        print(line, file=sys.stderr)
+    if offline_misses:
+        print(
+            f"warning: {offline_misses} issue(s) skipped ({repo}) due to a GitHub offline cache "
+            "miss; pass --network-enabled to fetch them.",
+            file=sys.stderr,
+        )
+    return result
 
 
 def _cmd_index(

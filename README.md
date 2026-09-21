@@ -147,8 +147,10 @@ any handler runs — defeating authoritative server-side validation.
 | **Network & Privacy** | Frequently cloud-dependent | **100% local-first**. Stdio only, no telemetry |
 
 Ingesting the GitHub issues and pull requests a commit closes (`bruriah corpus --github`) is the
-one opt-in exception: it is off by default, and even when enabled it only ever talks to
-`api.github.com`, pinned to whatever it wrote into `--github-cache` for reproducibility.
+one opt-in exception: it is off by default, gated by the same tool-wide `--network-enabled` switch
+as every other network path (also off by default -- with it off, `--github` still builds offline
+from a warm `--github-cache`), and even when enabled it only ever talks to `api.github.com`,
+pinned to whatever it wrote into `--github-cache` for reproducibility.
 
 ### Prompt-Injection-Resistant Retrieval Boundary
 
@@ -189,7 +191,7 @@ We evaluate Bruriah against real codebases and publish negative results alongsid
 | **Own-History Retrieval (24 questions)** | English recall@3 **0.750** · recall@10 0.917 · Spanish recall@3 **0.750** · recall@10 0.917 (before: Spanish 0.500) | 209-document corpus of Bruriah's own git history as of v1.4.0 (`fff2a71`) |
 | **Query Latency** | **≈46µs per passage** (linear) | 1,000 passages in 45ms, 16,000 in 734ms on M4 Pro |
 | **Index Size** | **≈5 KB per passage** | 16k passages ≈ 79 MB SQLite database |
-| **Test Suite** | **1,492 tests** · 0 failures · skips only when an environment prerequisite is absent | Full matrix on Python 3.12, 3.13, 3.14 across Linux, macOS, and Windows |
+| **Test Suite** | **1,495 tests** · 0 failures · skips only when an environment prerequisite is absent | Full matrix on Python 3.12, 3.13, 3.14 across Linux, macOS, and Windows |
 
 > **Want the full methodology and ablations?**  
 > Read our in-depth evaluation report: [**Evaluation Methodology & Benchmarks (`evals/project-memory/README.md`)**](evals/project-memory/README.md).

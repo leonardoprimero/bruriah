@@ -1806,6 +1806,116 @@ def test_cli_corpus_github_rejects_a_slug_without_a_slash(
     assert "invalid_repo_slug" in capsys.readouterr().err
 
 
+def test_cli_corpus_github_network_off_empty_cache_prints_upfront_line_and_collapses_misses(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """T3b (a): with the tool-wide network switch off (the default) and no warm cache, the CLI
+    must say so up front -- naming `--network-enabled` and the cache directory -- and collapse the
+    per-issue `github_offline_cache_miss` warnings into a single count line instead of one per
+    issue (322 lines on a real repo before this fix)."""
+    monkeypatch.delenv("GITHUB_TOKEN", raising=False)
+    repo = _github_link_repo(tmp_path)
+    cache_dir = tmp_path / "github_cache"  # never seeded: every issue is guaranteed to miss
+
+    exit_code = cli.bruriah_main([
+        "corpus", "--repo", str(repo), "--out", str(tmp_path / "out"),
+        "--github", "acme/widget", "--github-cache", str(cache_dir),
+        "--config-dir", str(tmp_path / "config"), "--data-dir", str(tmp_path / "data"),
+        "--cache-dir", str(tmp_path / "cache"), "--log-dir", str(tmp_path / "log"),
+    ])
+    assert exit_code == 0
+    err = capsys.readouterr().err
+    lines = err.splitlines()
+
+    upfront = [
+        line for line in lines if "--network-enabled" in line and "disabled" in line.lower()
+    ]
+    assert len(upfront) == 1, f"expected exactly one up-front line, got: {lines!r}"
+    assert str(cache_dir) in upfront[0]
+
+    assert "github_offline_cache_miss:" not in err
+
+    summary_lines = [line for line in lines if line.startswith("warning:") and "cache miss" in line]
+    assert len(summary_lines) == 1, f"expected exactly one summary line, got: {lines!r}"
+    assert "1" in summary_lines[0]
+
+
+def test_cli_corpus_github_network_off_warm_cache_has_no_offline_cache_miss_lines(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """T3b (b): with the network switch off but the cache already warm, there is nothing to
+    collapse or explain -- zero offline-cache-miss warnings, per-issue or summarized."""
+    from test_github_corpus import _seed
+
+    from bruriah.github_read import ResponseCache
+
+    monkeypatch.delenv("GITHUB_TOKEN", raising=False)
+    repo = _github_link_repo(tmp_path)
+    cache_dir = tmp_path / "github_cache"
+    _seed(ResponseCache(cache_dir), "acme", "widget")
+
+    exit_code = cli.bruriah_main([
+        "corpus", "--repo", str(repo), "--out", str(tmp_path / "out"),
+        "--github", "acme/widget", "--github-cache", str(cache_dir),
+        "--config-dir", str(tmp_path / "config"), "--data-dir", str(tmp_path / "data"),
+        "--cache-dir", str(tmp_path / "cache"), "--log-dir", str(tmp_path / "log"),
+    ])
+    assert exit_code == 0
+    err = capsys.readouterr().err
+
+    assert "github_offline_cache_miss" not in err
+    assert "cache miss" not in err
+
+
+def test_cli_corpus_github_offline_collapses_only_offline_cache_miss_warnings(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """T3b (c): collapsing is specific to `github_offline_cache_miss` -- another skip reason
+    (e.g. `github_not_found`) keeps its own per-issue warning line even while an offline miss in
+    the same build collapses into the summary."""
+    from bruriah.github_corpus import GitHubCorpusResult
+
+    def _fake_build_documents(commits, out, *, repo, **kwargs):  # noqa: ANN001 -- test double
+        out.mkdir(parents=True, exist_ok=True)
+        manifest_path = out / "github-manifest.json"
+        manifest_path.write_text("{}", encoding="utf-8")
+        print(
+            f"warning: skipping issue #41 ({repo}): github_offline_cache_miss: "
+            f"/repos/{repo}/issues/41",
+            file=sys.stderr,
+        )
+        print(
+            f"warning: skipping issue #7 ({repo}): github_not_found: /repos/{repo}/issues/7",
+            file=sys.stderr,
+        )
+        return GitHubCorpusResult(
+            documents_written=0, commits_scanned=len(commits), issues_fetched=0,
+            issues_skipped=2, cross_repo_skipped=0, cache_hits=0, network_calls=0,
+            manifest_path=manifest_path,
+        )
+
+    monkeypatch.setattr(cli.github_corpus, "build_documents", _fake_build_documents)
+    repo = _github_link_repo(tmp_path)
+    exit_code = cli.bruriah_main([
+        "corpus", "--repo", str(repo), "--out", str(tmp_path / "out"),
+        "--github", "acme/widget",
+        "--config-dir", str(tmp_path / "config"), "--data-dir", str(tmp_path / "data"),
+        "--cache-dir", str(tmp_path / "cache"), "--log-dir", str(tmp_path / "log"),
+    ])
+    assert exit_code == 0
+    err = capsys.readouterr().err
+
+    assert "github_offline_cache_miss:" not in err
+    assert err.count("github_not_found:") == 1
+    assert "warning: skipping issue #7" in err
+
+    summary_lines = [
+        line for line in err.splitlines() if line.startswith("warning:") and "cache miss" in line
+    ]
+    assert len(summary_lines) == 1
+    assert "1" in summary_lines[0]
+
+
 def test_resolve_model_prefixes_jina_v2_base_es_no_prefix() -> None:
     """The new default and its sibling v2 models use no prefix, same as jina v3 above -- and must
     not be caught by the `elif "e5" in model_name` fallback (they aren't, but the registry entry
