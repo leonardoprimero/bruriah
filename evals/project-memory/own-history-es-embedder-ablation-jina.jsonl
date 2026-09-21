@@ -1,0 +1,12 @@
+{"corpus": "own-history-es", "id": "w01", "latency_ms": 34.329, "model": "jina-v2-base-es", "rank": 3}
+{"corpus": "own-history-es", "id": "w02", "latency_ms": 28.945, "model": "jina-v2-base-es", "rank": 29}
+{"corpus": "own-history-es", "id": "w03", "latency_ms": 28.525, "model": "jina-v2-base-es", "rank": 6}
+{"corpus": "own-history-es", "id": "w04", "latency_ms": 30.216, "model": "jina-v2-base-es", "rank": 3}
+{"corpus": "own-history-es", "id": "w05", "latency_ms": 32.764, "model": "jina-v2-base-es", "rank": 1}
+{"corpus": "own-history-es", "id": "w06", "latency_ms": 28.121, "model": "jina-v2-base-es", "rank": 1}
+{"corpus": "own-history-es", "id": "w07", "latency_ms": 28.473, "model": "jina-v2-base-es", "rank": 1}
+{"corpus": "own-history-es", "id": "w08", "latency_ms": 29.406, "model": "jina-v2-base-es", "rank": 1}
+{"corpus": "own-history-es", "id": "w09", "latency_ms": 28.919, "model": "jina-v2-base-es", "rank": 1}
+{"corpus": "own-history-es", "id": "w10", "latency_ms": 28.9, "model": "jina-v2-base-es", "rank": 10}
+{"corpus": "own-history-es", "id": "w11", "latency_ms": 40.665, "model": "jina-v2-base-es", "rank": 2}
+{"corpus": "own-history-es", "id": "w12", "latency_ms": 33.767, "model": "jina-v2-base-es", "rank": 1}
