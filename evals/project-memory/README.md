@@ -23,6 +23,33 @@ Without that the scorer reports 0% and looks like a retrieval collapse rather th
 `tests/test_project_memory_eval.py` asserts every ground-truth document is still produced by this
 repository's own history, so the numbers below stay reproducible from the published repository.
 
+## `report_counterfactuals.py` — GitHub-derived counterfactual coverage (script ready, not yet measured)
+
+`evals/retrieval/report_reach.py` reports where the correct document lands in an unbudgeted
+ranking; `evals/retrieval/report_counterfactuals.py` is its sibling for the other half of
+`odd/tasks/github-issue-pr-ingestion.md` T4 — it asks whether the counterfactual engine actually
+learned something new from a `bruriah corpus --github` build, not just whether retrieval improved.
+For each question row that carries `provenance.issue` (see `leakcanary-issues.jsonl` /
+`egui-issues.jsonl`), it reports whether the index holds a GitHub-derived document for that issue
+and, if so, whether that document carries at least one rejected alternative or premise; in total it
+counts every rejected alternative and premise the engine now knows, split GitHub-derived vs.
+commit-derived. It reads the index only through `bruriah.repository.SnapshotRepository` — no raw
+SQL — and traces a document to an issue by filename (`YYYY-MM-DD-issue-N-<slug>.md`, the convention
+`github_corpus.build_documents` writes), because the `issue:` front-matter key is not one of
+`SourceMetadata`'s fields and is therefore never persisted into the index's stored document
+metadata.
+
+No numbers below yet: this script exists and is covered by `tests/test_report_counterfactuals.py`,
+but has not been run against a `--github`-built index. T4's network half will publish the coverage
+figures here once a GitHub token is authorized:
+
+```bash
+python evals/retrieval/report_counterfactuals.py --corpus leakcanary --data-dir /tmp/data-leakcanary-github \
+    --questions evals/project-memory/leakcanary-issues.jsonl --out /tmp/lc-counterfactuals.jsonl
+python evals/retrieval/report_counterfactuals.py --corpus egui --data-dir /tmp/data-egui-github \
+    --questions evals/project-memory/egui-issues.jsonl --out /tmp/egui-counterfactuals.jsonl
+```
+
 ## The embedder was the bottleneck, measured 2026-09-20
 
 `## The model matters more than the weighting` below (2026-07-26) found `jina-embeddings-v2-base-es`
