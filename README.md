@@ -22,7 +22,7 @@
 
 ---
 
-## Quickstart in 60 Seconds
+## Quickstart
 
 ```bash
 pip install bruriah          # Linux, macOS or Windows
@@ -31,6 +31,12 @@ pip install bruriah          # Linux, macOS or Windows
 B=~/.bruriah/myproject       # one directory per project, outside the repo
 bruriah init --repo . --data-dir "$B/data" --config-dir "$B/config"
 ```
+
+The default embedding model (`jinaai/jina-embeddings-v2-base-es`, see section 4) downloads once,
+about 614 MB on disk; after that, `init` on a 677-commit repository took 18.2–18.4s wall clock with
+the model cached, and one `bruriah ask` query took 1.35s -- see
+[`evals/project-memory/README.md`](evals/project-memory/README.md#the-embedder-was-the-bottleneck-measured-2026-09-20)
+for the full measurement.
 
 Ask it something from your terminal before wiring up any client:
 
@@ -175,8 +181,8 @@ We evaluate Bruriah against real codebases and publish negative results alongsid
 
 | Metric | Result | Benchmark Details |
 |---|---|---|
-| **External Retrieval (236 questions)** | recall@3 **0.377** · recall@10 0.487 · MRR@10 0.322 | Real issue titles & closing commits from `square/leakcanary` (884 docs) and `emilk/egui` (1,878 docs) |
-| **Own-History Retrieval (24 questions)** | English recall@3 **0.750** · recall@10 0.917 | 178-document corpus of Bruriah's own git history |
+| **External Retrieval (236 questions)** | recall@3 **0.436** · recall@10 0.559 · MRR@10 0.380 (before: 0.373 · 0.500 · 0.325) | Real issue titles & closing commits from `square/leakcanary` (884 docs) and `emilk/egui` (2,180 docs), measured with `jinaai/jina-embeddings-v2-base-es`, the default as of 1.4.0; "before" is the previous default, `paraphrase-multilingual-MiniLM-L12-v2` |
+| **Own-History Retrieval (24 questions)** | English recall@3 **0.750** · recall@10 0.917 · Spanish recall@3 **0.750** · recall@10 0.917 (before: Spanish 0.500) | 204-document corpus of Bruriah's own git history as of the measurement date (no `--revision` pinned -- see the evals report) |
 | **Query Latency** | **≈46µs per passage** (linear) | 1,000 passages in 45ms, 16,000 in 734ms on M4 Pro |
 | **Index Size** | **≈5 KB per passage** | 16k passages ≈ 79 MB SQLite database |
 | **Test Suite** | **1,374 tests** · 0 failures · skips only when an environment prerequisite is absent | Full matrix on Python 3.12, 3.13, 3.14 across Linux, macOS, and Windows |

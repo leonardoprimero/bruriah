@@ -23,6 +23,208 @@ Without that the scorer reports 0% and looks like a retrieval collapse rather th
 `tests/test_project_memory_eval.py` asserts every ground-truth document is still produced by this
 repository's own history, so the numbers below stay reproducible from the published repository.
 
+## The embedder was the bottleneck, measured 2026-09-20
+
+`## The model matters more than the weighting` below (2026-07-26) found `jina-embeddings-v2-base-es`
+beating the shipped default on 218 passages of this repository's own history, and closed with
+**"Do not read this as 'change the default.'"** — one bilingual model on one 95%-English-queried-
+in-Spanish corpus was not enough evidence, and a German or Japanese corpus could plausibly have
+done worse on it. This section is the follow-up that either earns that change or does not: two
+external corpora nobody here wrote, two additional English-only candidates, and this repository's
+own history re-measured at its now-larger size.
+
+### The method
+
+Paired, same as "Two repositories nobody here wrote" below: the identical derived corpus indexed
+once per model, same questions, same fusion (`RRF_K=60`, unchanged), no reranker. Four models: the
+shipped default, `jina-embeddings-v2-base-es`, and two commonly-recommended English-only
+asymmetric-retrieval models, `BAAI/bge-small-en-v1.5` and `BAAI/bge-base-en-v1.5` — chosen partly
+because running them exposed a real registry gap (below). Python 3.14.7, fastembed 0.8.0, M4 Pro,
+macOS, measured against this repository's code at commit `044a660` (the ablation worktree recorded
+its own commit as `60b4eca`, built from the same tree).
+
+### The corpora
+
+| repository | pinned at | documents (measured) | documents ("Two repositories", below) | questions |
+|---|---|---|---|---|
+| `square/leakcanary` | `0f7dbab17e2a` | 884 | 604 | 153 |
+| `emilk/egui` | `5d3e958ecfd3` | 2,180 | 2,119 | 83 |
+
+Same effect the "Two repositories" section below already documents: both clones have grown since
+that section's corpora were built, so the absolute recall figures below belong to *these* corpora
+and should not be compared cell-by-cell against that section's. **A third number does not match
+anything published: `emilk/egui`'s document count is 2,180 here, not the 1,878 README.md section 4
+states for this same pinned commit.** Investigated below; treat 1,878 as unverified.
+
+### A registry gap this ablation exposed
+
+`resolve_model_prefixes` (`_cli/common.py`) listed `BAAI/bge-base-en` and `BAAI/bge-small-en` but
+not the `-v1.5` names these models are actually released as, and its `"e5" in model_name` fallback
+does not catch them either. Verified directly: `resolve_model_prefixes` returned `('', '')` for
+both bge-v1.5 models with no flags passed — the bge numbers in the table below are bge run WITHOUT
+its recommended "Represent this sentence for searching relevant passages: " instruction prefix.
+Fixed in the commit that made jina the default (`feat(embed)`, shipped in 1.4.0): `KNOWN_MODEL_PREFIXES`
+lists the `-v1.5` names there and `tests/test_cli.py` asserts the prefix for them. The measurement
+below predates that commit, so the prefix follow-up re-runs bge with the prefix passed explicitly
+through `--query-prefix`, which is what the fix now does by default.
+
+### The result
+
+recall@3 / recall@10 / MRR@10, combined over both corpora (236 questions), and index build cost:
+
+| model | combined recall@3 | recall@10 | MRR@10 | McNemar p vs default | egui index time | egui index size |
+|---|---|---|---|---|---|---|
+| `paraphrase-multilingual-MiniLM-L12-v2` *(default before this change)* | 0.373 | 0.500 | 0.325 | — | 33 s | 42 M |
+| `jinaai/jina-embeddings-v2-base-es` | **0.436** | 0.559 | 0.380 | **0.0081** | 242 s | 43 M |
+| `BAAI/bge-small-en-v1.5` (no prefix) | 0.441 | 0.602 | 0.398 | 0.0037 | 48 s | 42 M |
+| `BAAI/bge-base-en-v1.5` (no prefix) | 0.453 | 0.619 | 0.414 | 0.0003 | 141 s | 43 M |
+
+Per-corpus recall@3: leakcanary 0.301 → 0.373 (jina) / 0.379 (bge-small) / 0.386 (bge-base); egui
+0.506 → 0.554 (jina) / 0.554 (bge-small) / 0.578 (bge-base). Full per-question ranks:
+[`leakcanary-embedder-ablation-baseline.jsonl`](leakcanary-embedder-ablation-baseline.jsonl),
+[`leakcanary-embedder-ablation-jina.jsonl`](leakcanary-embedder-ablation-jina.jsonl),
+[`egui-embedder-ablation-baseline.jsonl`](egui-embedder-ablation-baseline.jsonl),
+[`egui-embedder-ablation-jina.jsonl`](egui-embedder-ablation-jina.jsonl).
+
+Every candidate beats the default on this pair of corpora, bge-base by the widest margin. **This
+table alone would have picked bge-base.** The own-history table below is why it was not picked.
+
+### The bge instruction prefix does not move the needle here
+
+Re-indexed both bge-v1.5 models with `--query-prefix "Represent this sentence for searching
+relevant passages: " --passage-prefix ""`, the model card's recommended asymmetric usage:
+
+| model | combined recall@3, no prefix | prefixed | McNemar p, prefixed vs no-prefix |
+|---|---|---|---|
+| `bge-small-en-v1.5` | 0.441 | 0.449 | 0.7266 |
+| `bge-base-en-v1.5` | 0.453 | 0.475 | 0.2266 |
+
+Both prefixed models beat the default significantly (combined p=0.0009 and p<0.0001); neither beats
+its own unprefixed version significantly at this sample size — the prefix's effect is not
+statistically distinguishable from noise here, though the point estimates move in bge-base's favour
+on egui specifically (recall@3 0.578 → 0.639). Prefixed bge-base is the single best combined
+recall@3 of every condition run in this measurement (0.475) — and it still loses on the own-history
+table below.
+
+### The own-history table says the opposite of the pair above
+
+12 questions per language, indexed at this worktree's HEAD (`60b4eca`, no `--revision` pinned —
+see below):
+
+| language | model | recall@3 | recall@10 |
+|---|---|---|---|
+| en | baseline | 0.750 | 0.917 |
+| en | `jina-v2-base-es` | 0.750 | 0.917 |
+| en | `bge-small-en-v1.5` | 0.750 | 1.000 |
+| en | `bge-base-en-v1.5` | 0.833 | 0.917 |
+| es | baseline | 0.500 | 0.917 |
+| es | `jina-v2-base-es` | **0.750** | 0.917 |
+| es | `bge-small-en-v1.5` | 0.333 | 0.417 |
+| es | `bge-base-en-v1.5` | 0.417 | 0.500 |
+
+None of these differences reach significance at n=12 (McNemar p ≥ 0.375 on every Spanish
+comparison, including the prefixed bge-small variant). But the direction is what decides this:
+**both bge models regress Spanish recall@3 below the baseline they are supposed to beat** —
+bge-small to 0.333, bge-base to 0.417, both under the shipped default's 0.500, even with
+bge-small's instruction prefix applied (0.417, still under baseline). `jina-v2-base-es` is the only
+candidate that does not cost Spanish recall, and it is the only one built for bilingual retrieval
+in the first place. English is flat-to-slightly-better for all four; nothing there argues against
+any of them.
+
+Full per-question ranks:
+[`own-history-en-embedder-ablation-baseline.jsonl`](own-history-en-embedder-ablation-baseline.jsonl),
+[`own-history-en-embedder-ablation-jina.jsonl`](own-history-en-embedder-ablation-jina.jsonl),
+[`own-history-es-embedder-ablation-baseline.jsonl`](own-history-es-embedder-ablation-baseline.jsonl),
+[`own-history-es-embedder-ablation-jina.jsonl`](own-history-es-embedder-ablation-jina.jsonl).
+
+**Why the default changes now and did not on 2026-07-26.** That section's caution was about
+generalising from one bilingual model on one corpus. This measurement adds two external corpora
+where bge, an English-only family, wins outright — and precisely because bge wins there, it proves
+the point the caution was protecting: the bge candidates are the best choice on English-heavy
+corpora and the worst choice on this one, which is bilingual by construction. `jina-v2-base-es` is
+the only model measured anywhere on this page that does not regress either language on any corpus
+tested. That is the property a *default* needs, not the highest score on any single table —
+`bruriah index --model` remains how an operator picks the corpus-specific winner instead.
+
+### The corpus this table used is no longer 178 documents, and nothing pins it
+
+The twelve-question table below (`## The model matters more than the weighting`) carries no
+`--revision`. Built fresh at HEAD for this measurement: **204 documents**, not 178 — 278 non-merge
+commits examined, 204 carried an explanatory body, more than when that section was written because
+this repository's own history keeps growing under the measurement, the exact effect the
+leakcanary/egui sections already warn about for external corpora. Recommendation: pin the
+own-history corpus with `bruriah corpus --repo . --revision <sha>`, the way the leakage table
+elsewhere on this page already does, or every future re-run of this table measures a different
+corpus under the same name.
+
+### The noise-filter idea does not recover anything
+
+Baseline's 148 combined misses (leakcanary 107 + egui 41) were checked for whether their top-3
+slots were occupied by bot commits, release commits, or the answer's own near-duplicate — cheap
+classifications a filter could plausibly strip before ranking. **0 of 148 recovered**: 0/107 on
+leakcanary, 2/41 on egui carried an offending top-3 slot, and neither crossed back into the top 3
+once it was removed. No corpus-noise filter will be built on this evidence; the loss is not this.
+([`leakcanary-embedder-ablation-baseline-misses.jsonl`](leakcanary-embedder-ablation-baseline-misses.jsonl),
+[`egui-embedder-ablation-baseline-misses.jsonl`](egui-embedder-ablation-baseline-misses.jsonl).)
+
+### The published egui document count does not reproduce
+
+README.md section 4 states `emilk/egui` as 1,878 documents at this same pinned commit
+(`5d3e958ecfd3`). This measurement got 2,180, twice: once from the pinned clone at this worktree's
+HEAD, and once more from a detached checkout of `e7f2d81` — the commit that originally published
+1,878 — run against the same untouched clone. Both agree with each other (identical file lists,
+zero diff) and disagree with the published figure by the same margin (+302 documents, +16%). The
+cause was not found: not a code-drift artifact between `e7f2d81` and this measurement's commit,
+since the generator produced identical output from both. Treat 1,878 as unverified and 2,180 as
+this measurement's reproducible, twice-confirmed figure; README.md section 4 is updated to state
+it.
+
+### What this does not establish
+
+Two corpora plus twelve own-history questions is still not a general claim about embedding models,
+the same caveat every section on this page carries. Nothing about the reranker — none was used.
+Nothing about other bilingual pairs: `jina-v2-base-es` is Spanish-tuned specifically, and a corpus
+queried in a third language has no evidence here either way. The bge numbers are handicapped
+exactly as much as the prefix follow-up measures and no more; a fully-tuned bge deployment
+(different chunking, a reranker, a different fusion weight) is untested.
+
+### Index build cost, model size, and this repository's own numbers
+
+| model | on-disk model cache | egui index time | leakcanary index time |
+|---|---|---|---|
+| `paraphrase-multilingual-MiniLM-L12-v2` | 0.22 GB | 33 s | 12 s |
+| `jina-embeddings-v2-base-es` | 0.64 GB | 242 s | 122 s |
+
+Indexing is roughly 6–7× slower with the new default, and the model download is about 3× larger.
+**Existing indexes are unaffected by this change**: the embedding model is pinned per snapshot
+(`embedding_model` in `platform.py`'s build descriptor) and `build_serve_deps` reads the query
+embedder's model from there, fail-closed against any mismatch, never from the CLI's current
+default — see `test_build_serve_deps_queries_with_the_snapshots_own_model_not_the_current_default`
+in `tests/test_cli.py`.
+
+Measured on this repository's own `bruriah init`, against a fresh clone of `pallets/itsdangerous`
+(677 commits), with the model already cached from the runs above: **18.2–18.4 s wall clock**
+(`/usr/bin/time -p`, two runs), model cache **614 MB** on disk (`du -sh` of
+`models--jinaai--jina-embeddings-v2-base-es` under `~/Library/Caches/bruriah/models`), one
+`bruriah ask` query **1.35 s** wall clock. A genuinely cold download was not observed in this
+measurement — the model was already cached from the ablation runs above — so 614 MB is reported as
+the on-disk size an operator should expect to download once, not a timed download.
+
+### Reproduce
+
+```bash
+git clone --filter=blob:none https://github.com/square/leakcanary && git -C leakcanary checkout 0f7dbab17e2a
+git clone --filter=blob:none https://github.com/emilk/egui && git -C egui checkout 5d3e958ecfd3
+bruriah corpus --repo leakcanary --out corpus/leakcanary
+bruriah corpus --repo egui --out corpus/egui
+for model in sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2 \
+             jinaai/jina-embeddings-v2-base-es BAAI/bge-small-en-v1.5 BAAI/bge-base-en-v1.5; do
+  bruriah index --corpus-root corpus/leakcanary --policy policy.yaml --data-dir indexes/lc-<slug> --model "$model"
+  bruriah index --corpus-root corpus/egui --policy policy.yaml --data-dir indexes/egui-<slug> --model "$model"
+done
+# score with evals/retrieval/report_reach.py against leakcanary-issues.jsonl / egui-issues.jsonl
+```
+
 ## Heading ancestry moves the top of the ranking and nothing deeper, measured 2026-08-28
 
 A passage used to be indexed as its own section and nothing more, so a `### Windows` section under
