@@ -49,6 +49,7 @@ Design, matching `fetch.py`'s conventions where they apply:
 """
 from __future__ import annotations
 
+import http.client
 import json
 import re
 import time
@@ -154,6 +155,11 @@ def _default_transport(method: str, url: str, token: str | None) -> _RawResponse
             # raising `TimeoutError` directly.
             raise GitHubError("github_timeout", str(exc.reason) or "timed out") from exc
         raise GitHubError("github_network_error", str(exc.reason)) from exc
+    except (http.client.HTTPException, OSError) as exc:
+        # A mid-body failure (`IncompleteRead`, `ConnectionResetError`, an `ssl.SSLError` on reset)
+        # happens inside `response.read()`, after `urlopen` already returned successfully, so it is
+        # neither `HTTPError` nor `URLError` and would otherwise escape the skip-and-warn boundary.
+        raise GitHubError("github_network_error", str(exc) or type(exc).__name__) from exc
 
 
 class ResponseCache:

@@ -8,7 +8,9 @@ callables instead of real timing.
 """
 from __future__ import annotations
 
+import http.client
 import json
+import ssl
 from pathlib import Path
 from typing import Any
 
@@ -271,6 +273,46 @@ class TestDefaultTransportTimeout:
         with pytest.raises(GitHubError) as excinfo:
             github_read._default_transport("GET", "https://api.github.com/x", None)
         assert excinfo.value.code == "github_timeout"
+
+
+# ---------------------------------------------------------------------------
+# Mid-body read failures (R1-CRITICAL): a connection reset while streaming the response body
+# must be translated to `GitHubError`, not escape as a raw transport exception.
+# ---------------------------------------------------------------------------
+
+
+class TestDefaultTransportMidBodyReadFailure:
+    @pytest.mark.parametrize(
+        "read_exc",
+        [http.client.IncompleteRead(b""), ConnectionResetError(), ssl.SSLError()],
+        ids=["incomplete_read", "connection_reset", "ssl_error"],
+    )
+    def test_mid_body_read_failure_raises_github_network_error(
+        self, monkeypatch: pytest.MonkeyPatch, read_exc: Exception
+    ) -> None:
+        import bruriah.github_read as github_read
+
+        class _FakeResponse:
+            status = 200
+            headers: dict[str, str] = {}
+
+            def read(self) -> bytes:
+                raise read_exc
+
+            def __enter__(self) -> "_FakeResponse":
+                return self
+
+            def __exit__(self, *exc: Any) -> None:
+                return None
+
+        def _fake_urlopen(request: Any, timeout: float | None = None) -> _FakeResponse:
+            return _FakeResponse()
+
+        monkeypatch.setattr(github_read.urllib.request, "urlopen", _fake_urlopen)
+        with pytest.raises(GitHubError) as excinfo:
+            github_read._default_transport("GET", "https://api.github.com/x", None)
+        assert excinfo.value.code == "github_network_error"
+        assert excinfo.value.__cause__ is read_exc
 
 
 # ---------------------------------------------------------------------------
