@@ -20,7 +20,11 @@ Design decisions, carried over verbatim from `odd/tasks/github-issue-pr-ingestio
 - **Rejected alternatives come from GitHub state, not from a template.** A cross-referenced pull
   request that was closed without being merged, or a cross-referenced issue closed with
   `state_reason: not_planned`, is treated as a rejected alternative to the issue that references
-  it. The rejection reason is the last comment posted before the item closed, trimmed to
+  it -- but only when that cross-reference's source lives in the corpus repo itself. A real GitHub
+  timeline can carry a `cross-referenced` event whose source is a fork or a downstream project;
+  that source's number means nothing in the corpus repo, so it is counted alongside cross-repo
+  commit links and never fetched, exactly like the `closes`/`mentions` cross-repo case above. The
+  rejection reason is the last comment posted before the item closed, trimmed to
   `_REASON_MAX_CHARS`; an item closed with no comment at all gets the fixed phrase
   `_NO_COMMENT_REASON` instead of an empty string, so the document never claims a reason it does
   not have.
@@ -45,6 +49,7 @@ Design decisions, carried over verbatim from `odd/tasks/github-issue-pr-ingestio
 from __future__ import annotations
 
 import json
+import re
 import sys
 import time
 from collections.abc import Callable, Sequence
@@ -289,8 +294,40 @@ def _rejected_alternative_from_issue(issue: dict[str, Any], ledger: _Ledger, num
     }
 
 
-def _collect_alternatives(number: int, ledger: _Ledger) -> list[dict[str, Any]]:
+_HTML_URL_REPO = re.compile(
+    r"^https?://github\.com/(?P<owner>[^/]+)/(?P<repo>[^/]+)/(?:issues|pull)/\d+/?$"
+)
+
+
+def _source_repo_slug(src_issue: dict[str, Any]) -> str | None:
+    """The `owner/repo` a timeline `cross-referenced` event's source issue/PR belongs to, or
+    `None` when it cannot be determined. `repository.full_name` is the field GitHub's own
+    timeline API puts on a cross-reference source; `html_url` is the fallback for a payload (or a
+    fixture) that omits it, parsed with the same `/(issues|pull)/<n>` shape `issue_links` already
+    recognizes for a same-repo-vs-cross-repo reference in commit text."""
+    repository = src_issue.get("repository")
+    if isinstance(repository, dict):
+        full_name = repository.get("full_name")
+        if isinstance(full_name, str) and full_name:
+            return full_name
+    html_url = src_issue.get("html_url")
+    if isinstance(html_url, str):
+        match = _HTML_URL_REPO.match(html_url)
+        if match:
+            return f"{match.group('owner')}/{match.group('repo')}"
+    return None
+
+
+def _collect_alternatives(number: int, ledger: _Ledger, repo: str) -> tuple[list[dict[str, Any]], int]:
+    """The rejected-alternative documents for `number`'s cross-referenced timeline events, plus how
+    many of those events were skipped because their source lives in another repository -- a fork
+    or a downstream project cross-referencing this issue, which GitHub's real timelines do carry.
+    A foreign source is counted here exactly like a cross-repo `closes`/`mentions` commit link
+    (`_resolve_links_for_commit`) and never fetched: its number means nothing in `repo`, and
+    fetching it risks pulling an unrelated same-numbered PR/issue into the document, or a 404 that
+    would otherwise drop the whole issue (see the module docstring)."""
     alternatives: list[dict[str, Any]] = []
+    cross_repo_skipped = 0
     for event in ledger.timeline(number):
         if not isinstance(event, dict) or event.get("event") != "cross-referenced":
             continue
@@ -301,6 +338,10 @@ def _collect_alternatives(number: int, ledger: _Ledger) -> list[dict[str, Any]]:
         src_number = src_issue.get("number")
         if not isinstance(src_number, int):
             continue
+        source_repo = _source_repo_slug(src_issue)
+        if source_repo is None or source_repo.lower() != repo.lower():
+            cross_repo_skipped += 1
+            continue
         if "pull_request" in src_issue:
             pull = ledger.pull(src_number)
             alt = _rejected_alternative_from_pull(pull, ledger, src_number)
@@ -309,7 +350,7 @@ def _collect_alternatives(number: int, ledger: _Ledger) -> list[dict[str, Any]]:
             alt = _rejected_alternative_from_issue(full_issue, ledger, src_number)
         if alt is not None:
             alternatives.append(alt)
-    return alternatives
+    return alternatives, cross_repo_skipped
 
 
 def _render_document(
@@ -419,7 +460,8 @@ def build_documents(
     for number in sorted(linking_commits):
         try:
             issue = ledger.issue(number)
-            alternatives = _collect_alternatives(number, ledger)
+            alternatives, timeline_cross_repo = _collect_alternatives(number, ledger, repo)
+            cross_repo_skipped += timeline_cross_repo
         except GitHubError as error:
             issues_skipped += 1
             print(

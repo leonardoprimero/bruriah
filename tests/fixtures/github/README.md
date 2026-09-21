@@ -40,5 +40,19 @@ above as the cross-referenced not-planned duplicate rather than duplicating it:
 - `issue-39-comments.json` — the closing comment for issue #39's `not_planned` closure, read through
   the same issues-comments endpoint used for PR comments.
 
+A third scenario, added for the timeline cross-repo skip fix (`github_corpus.py`, R3-001): a real
+GitHub timeline can carry a `cross-referenced` event whose source lives in another repository
+entirely (a fork, a downstream project) -- that source must never be fetched, even when its number
+collides with a number that means something else in the corpus repo.
+
+- `issue-200.json` — `GET /repos/{owner}/{repo}/issues/200`. Closed, no premises, no same-repo
+  cross-references of its own.
+- `issue-200-timeline.json` — one unrelated `labeled` event plus two `cross-referenced` events, both
+  foreign: number 47 (deliberately colliding with `acme/widget`'s own PR #47 from the first
+  scenario, resolved via the source's `repository.full_name`) and number 999 (resolved via the
+  source's `html_url` instead, since it carries no `repository` object -- some GitHub timeline
+  payloads omit it). Neither foreign source has a fixture of its own: fetching either one is exactly
+  the bug this scenario exists to catch.
+
 The `owner/repo` and timestamps are fictional; the field shapes match GitHub's documented REST
 responses as of API version `2022-11-28`.

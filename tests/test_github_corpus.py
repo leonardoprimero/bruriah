@@ -271,6 +271,56 @@ class TestCrossRepoLinksAreSkipped:
 
 
 # ---------------------------------------------------------------------------
+# build_documents -- a timeline cross-reference from another repository is skipped and counted,
+# never fetched (R3-001): a real GitHub timeline can cross-reference a fork or a downstream
+# project, and that source's number means nothing in the corpus repo.
+# ---------------------------------------------------------------------------
+
+
+class TestTimelineCrossReferenceFromAnotherRepoIsSkipped:
+    def _build(self, tmp_path: Path, *, transport: Any):
+        cache = ResponseCache(tmp_path / "cache")
+        cache.set("/repos/acme/widget/issues/200", _load("issue-200.json"))
+        cache.set("/repos/acme/widget/issues/200/timeline", _load("issue-200-timeline.json"))
+        commits = [_commit("h" * 40, "fix: note the fork reference", "Closes #200.")]
+        result = build_documents(
+            commits, tmp_path / "out", repo="acme/widget", cache=cache,
+            network_enabled=True, transport=transport,
+        )
+        return tmp_path / "out", result
+
+    def test_neither_foreign_source_is_ever_fetched(self, tmp_path: Path) -> None:
+        def _never_called(*_args: Any, **_kwargs: Any) -> _RawResponse:
+            raise AssertionError("a foreign-repo timeline cross-reference must never be fetched")
+
+        out, result = self._build(tmp_path, transport=_never_called)
+        # Document still built -- a bug that fetches the wrong same-numbered PR/issue in the corpus
+        # repo (or 404s trying) must not drop the whole issue document.
+        assert result.documents_written == 1
+        assert result.issues_skipped == 0
+
+    def test_foreign_sources_never_appear_as_alternatives(self, tmp_path: Path) -> None:
+        def _never_called(*_args: Any, **_kwargs: Any) -> _RawResponse:
+            raise AssertionError("a foreign-repo timeline cross-reference must never be fetched")
+
+        out, _ = self._build(tmp_path, transport=_never_called)
+        policy = CorpusPolicy(include=("*.md",), exclude=())
+        doc_path = next(out.glob("*issue-200*.md"))
+        document = parse_document(doc_path, out, policy)
+        assert document.metadata.alternatives == ()
+
+    def test_cross_repo_skipped_counts_both_resolution_paths(self, tmp_path: Path) -> None:
+        def _never_called(*_args: Any, **_kwargs: Any) -> _RawResponse:
+            raise AssertionError("a foreign-repo timeline cross-reference must never be fetched")
+
+        _, result = self._build(tmp_path, transport=_never_called)
+        # #47 resolved via source.issue.repository.full_name, #999 via source.issue.html_url.
+        assert result.cross_repo_skipped == 2
+        manifest = json.loads((tmp_path / "out" / "github-manifest.json").read_text(encoding="utf-8"))
+        assert manifest["counts"]["cross_repo_skipped"] == 2
+
+
+# ---------------------------------------------------------------------------
 # build_documents -- failure policy: skip-and-warn, never abort the whole build
 # ---------------------------------------------------------------------------
 

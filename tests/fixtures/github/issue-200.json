@@ -1,0 +1,13 @@
+{
+    "number": 200,
+    "title": "Timeline carries a cross-reference from a fork",
+    "body": "No alternatives of its own -- the only cross-reference on this issue's timeline comes from a different repository entirely.",
+    "state": "closed",
+    "state_reason": "completed",
+    "created_at": "2026-08-01T10:00:00Z",
+    "closed_at": "2026-08-10T15:30:00Z",
+    "html_url": "https://github.com/acme/widget/issues/200",
+    "user": {
+        "login": "alice"
+    }
+}

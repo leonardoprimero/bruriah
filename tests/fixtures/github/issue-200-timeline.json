@@ -1,0 +1,37 @@
+[
+    {
+        "event": "labeled",
+        "label": {
+            "name": "bug"
+        }
+    },
+    {
+        "event": "cross-referenced",
+        "source": {
+            "type": "issue",
+            "issue": {
+                "number": 47,
+                "html_url": "https://github.com/other-org/fork/pull/47",
+                "repository": {
+                    "full_name": "other-org/fork"
+                },
+                "state": "closed",
+                "pull_request": {
+                    "merged_at": null
+                }
+            }
+        }
+    },
+    {
+        "event": "cross-referenced",
+        "source": {
+            "type": "issue",
+            "issue": {
+                "number": 999,
+                "html_url": "https://github.com/other-org/downstream/issues/999",
+                "state": "closed",
+                "state_reason": "not_planned"
+            }
+        }
+    }
+]
