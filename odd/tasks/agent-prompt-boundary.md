@@ -26,7 +26,9 @@ repository-authored free text into it; the third is code-evident but not yet dem
 **Demonstrated** (probe against c64cf1b: a corpus whose decision subject, author name and
 body bullets each carry a distinct marker, indexed, then each rendering run):
 
-- `brief --agent` emits all four markers. Verbatim from the run:
+- `brief --agent` emits the decision subject, the author name and a body bullet — three of
+  the four poisoned surfaces; the fourth, the superseding decision's subject, surfaces
+  through `guard` and `heal` instead. Verbatim from the run:
 
   ```text
   ## Active Architectural Constraints
@@ -200,4 +202,7 @@ documentation honesty debts (egui document count, unpinned bge rows), pushing, t
 
 ## Next step
 
-T0 first: the failing test that proves the leak exists before anything is changed.
+T0 is delivered and red. T1 next: `guard --agent` renders structure only, then T2 (`brief`)
+and T3 (`heal`), each turning one parametrization of
+`test_agent_rendering_carries_no_repository_authored_text` green without moving any
+human-rendering assertion.

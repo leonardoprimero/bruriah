@@ -48,6 +48,16 @@ AUTHOR_MARKER = "ZZAUTHOR"
 BULLET_MARKER = "ZZBULLET"
 MARKERS = (SUBJECT_MARKER, SUCCESSOR_MARKER, AUTHOR_MARKER, BULLET_MARKER)
 
+# What each HUMAN rendering must keep naming, surface by surface. Asserting "at least one
+# marker survives" would let a fix strip the subject and the author from the human output
+# and still pass, which is the regression the counter-assertion exists to catch; these
+# are the exact markers each human rendering carries today.
+HUMAN_EXPECTED = {
+    "brief": (SUBJECT_MARKER, AUTHOR_MARKER, BULLET_MARKER),
+    "guard": (SUCCESSOR_MARKER,),
+    "heal": (SUBJECT_MARKER, SUCCESSOR_MARKER, BULLET_MARKER),
+}
+
 # Long enough to survive passage-length filtering, and phrased like the rest of a corpus.
 _PAD = (
     "This paragraph exists so the document carries a passage of ordinary length, "
@@ -56,8 +66,19 @@ _PAD = (
 
 
 def _git(repo: Path, *args: str) -> str:
+    """Run git with the ambient user configuration neutralised.
+
+    A fresh `git init` still inherits the invoking user's global config. On a machine with
+    `commit.gpgsign` set, `git commit` blocks on a signing prompt; with `core.hooksPath` or
+    an `init.templateDir` set, it runs someone else's hooks. Either turns this fixture into
+    a hang or an unexplained failure on one developer's machine or one CI runner, so they
+    are pinned off here rather than assumed absent. The timeout bounds the hang if some
+    other prompt appears anyway.
+    """
     return subprocess.run(
-        ["git", *args], cwd=repo, check=True, capture_output=True, text=True
+        ["git", "-c", "commit.gpgsign=false", "-c", "core.hooksPath=",
+         "-c", "init.templateDir=", *args],
+        cwd=repo, check=True, capture_output=True, text=True, timeout=60,
     ).stdout.strip()
 
 
@@ -142,22 +163,35 @@ supersedes:
 
 
 def _run(capsys: pytest.CaptureFixture[str], argv: list[str]) -> str:
-    """Run one bruriah command and return everything it printed."""
+    """Run one bruriah command, prove it succeeded, and return what it printed.
+
+    The exit status and stderr are checked rather than discarded. A command that fails
+    prints its error to stderr and leaves stdout empty, and empty stdout contains no
+    markers -- so without these assertions every leak test in this file would pass
+    vacuously the moment an invocation broke. That is the exact failure mode this module
+    exists to catch, and it applies to the module itself first.
+    """
     capsys.readouterr()
-    cli.bruriah_main(argv)
-    return capsys.readouterr().out
+    exit_code = cli.bruriah_main(argv)
+    captured = capsys.readouterr()
+    assert exit_code == 0, (
+        f"`bruriah {' '.join(argv[:2])}` exited {exit_code}; its output proves nothing.\n"
+        f"stderr: {captured.err}"
+    )
+    assert captured.out.strip(), (
+        f"`bruriah {' '.join(argv[:2])}` printed nothing; a marker-free empty rendering is "
+        f"not evidence that the boundary held.\nstderr: {captured.err}"
+    )
+    return captured.out
 
 
-def _agent(capsys, governed, command: str) -> str:
+def _render(capsys, governed, command: str, *, agent: bool) -> str:
     repo, argv = governed
     target = "refactor storage" if command == "brief" else "storage.py"
-    return _run(capsys, [command, target, *argv, "--repo", str(repo), "--agent"])
-
-
-def _human(capsys, governed, command: str) -> str:
-    repo, argv = governed
-    target = "refactor storage" if command == "brief" else "storage.py"
-    return _run(capsys, [command, target, *argv, "--repo", str(repo)])
+    return _run(
+        capsys,
+        [command, target, *argv, "--repo", str(repo), *(["--agent"] if agent else [])],
+    )
 
 
 def test_the_fixture_reaches_every_agent_renderer(capsys, governed) -> None:
@@ -192,7 +226,7 @@ def test_the_fixture_reaches_every_agent_renderer(capsys, governed) -> None:
 
 @pytest.mark.parametrize("command", ["brief", "guard", "heal"])
 def test_agent_rendering_carries_no_repository_authored_text(capsys, governed, command) -> None:
-    rendering = _agent(capsys, governed, command)
+    rendering = _render(capsys, governed, command, agent=True)
     leaked = [marker for marker in MARKERS if marker in rendering]
     assert not leaked, (
         f"`bruriah {command} --agent` carried repository-authored text {leaked} into an "
@@ -207,8 +241,9 @@ def test_human_rendering_still_names_the_governing_decision(capsys, governed, co
     A person reading a terminal is not an instruction-following agent, so the subject and
     the author stay. Without this, emptying the renderings entirely would look like success.
     """
-    rendering = _human(capsys, governed, command)
-    assert any(marker in rendering for marker in MARKERS), (
-        f"`bruriah {command}` no longer names the governing decision to its human reader; "
-        f"the boundary fix must not empty the human rendering:\n{rendering}"
+    rendering = _render(capsys, governed, command, agent=False)
+    missing = [marker for marker in HUMAN_EXPECTED[command] if marker not in rendering]
+    assert not missing, (
+        f"`bruriah {command}` stopped naming {missing} to its human reader; the boundary "
+        f"fix must narrow the agent rendering, not the human one:\n{rendering}"
     )
