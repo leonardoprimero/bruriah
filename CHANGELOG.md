@@ -3,6 +3,18 @@
 Notable changes, newest first. This project follows [semantic versioning](https://semver.org/),
 and the entries here name what changed for *you* rather than which files moved.
 
+## [Unreleased]
+
+### Fixed: The own-history embedder ablation table is now reproducible
+- The own-history table in `evals/project-memory/README.md` ("The embedder was the bottleneck")
+  was originally measured against this worktree's uncommitted HEAD (`60b4eca`), with no
+  `--revision` pinned; a later rebase dropped that commit from every branch, so the published
+  numbers could no longer be reproduced. Re-measured and pinned at `fff2a71` (tag v1.4.0):
+  baseline and `jina-v2-base-es` reproduce the originally published recall@3/recall@10 figures
+  digit-for-digit against the 209-document corpus that revision now yields. The top-level
+  `README.md` benchmark table and the `_SYMMETRIC_MODEL_PATTERNS` comment in
+  `src/bruriah/_cli/common.py` are updated to match.
+
 ## [1.4.0] — 2026-09-20
 
 ### Changed: Default embedding model is now `jina-embeddings-v2-base-es`

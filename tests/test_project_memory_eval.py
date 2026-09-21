@@ -141,3 +141,49 @@ def test_the_published_leakage_count_is_still_true() -> None:
         f"English questions reach peak leakage {_LEAKAGE_THRESHOLD}; it is now {leaking}. Update "
         "the figure and the paragraph that reasons from it, in this commit."
     )
+
+
+# --- The own-history embedder ablation table has to name a revision that actually reproduces it --
+# "The own-history table says the opposite of the pair above" was first measured at this worktree's
+# uncommitted HEAD (`60b4eca`), a commit that a later rebase dropped from every branch. Nothing
+# pinned it, so the corpus it measured no longer exists anywhere reachable from the published
+# repository -- the same failure mode `_PUBLISHED_CORPUS_REVISION` above exists to catch, just not
+# caught here the first time. Re-measured and pinned at `fff2a71` (tag v1.4.0, the last commit on
+# `main` before this fix), the tag this project actually ships.
+_ABLATION_CORPUS_REVISION = "fff2a71"
+_ABLATION_CORPUS_DOCUMENTS = 209
+
+
+def test_the_own_history_ablation_table_names_a_revision_that_reproduces_it() -> None:
+    readme = (EVALS / "README.md").read_text(encoding="utf-8")
+    heading = "### The own-history table says the opposite of the pair above"
+    assert heading in readme, "the own-history ablation section moved or was renamed"
+    section = readme.split(heading, 1)[1].split("\n## ", 1)[0]
+    assert _ABLATION_CORPUS_REVISION in section, (
+        f"the own-history ablation table no longer names `{_ABLATION_CORPUS_REVISION}` as the "
+        "pinned revision it was measured at -- without a revision the corpus it describes grows "
+        "under the measurement and the table stops being reproducible."
+    )
+
+    toplevel = subprocess.run(["git", "rev-parse", "--show-toplevel"], cwd=ROOT,
+                              capture_output=True, text=True, timeout=60)
+    if toplevel.returncode != 0:
+        pytest.skip("not a git checkout")
+    repo = toplevel.stdout.strip()
+    if subprocess.run(["git", "cat-file", "-e", f"{_ABLATION_CORPUS_REVISION}^{{commit}}"],
+                      cwd=repo, capture_output=True, timeout=60).returncode != 0:
+        pytest.skip(f"{_ABLATION_CORPUS_REVISION} is not in this checkout (shallow clone?); the "
+                    "pinned own-history corpus cannot be derived here")
+    with tempfile.TemporaryDirectory() as workspace:
+        built = subprocess.run(
+            [sys.executable, str(GENERATOR), "--repo", repo, "--out", workspace,
+             "--revision", _ABLATION_CORPUS_REVISION],
+            capture_output=True, text=True, timeout=300)
+        assert built.returncode == 0, built.stdout + built.stderr
+        documents = len(list(Path(workspace).glob("*.md")))
+
+    assert documents == _ABLATION_CORPUS_DOCUMENTS, (
+        f"`{_ABLATION_CORPUS_REVISION}` was pinned as yielding {_ABLATION_CORPUS_DOCUMENTS} "
+        f"documents; it now yields {documents}. The pin no longer resolves to the corpus the "
+        "own-history ablation table describes."
+    )

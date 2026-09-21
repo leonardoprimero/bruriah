@@ -108,19 +108,30 @@ table below.
 
 ### The own-history table says the opposite of the pair above
 
-12 questions per language, indexed at this worktree's HEAD (`60b4eca`, no `--revision` pinned —
-see below):
+12 questions per language, indexed at `fff2a71` (tag v1.4.0), pinned with
+`bruriah corpus --repo . --revision fff2a71` — **209 documents**. The table below was originally
+measured at this worktree's uncommitted HEAD (`60b4eca`) with no `--revision` pinned; a later
+rebase dropped that commit from every branch, so the original corpus no longer exists anywhere
+reachable from the published repository. Re-measured against the pinned corpus above; see
+"The corpus this table used is now pinned at `fff2a71`" below for the exact commands.
 
 | language | model | recall@3 | recall@10 |
 |---|---|---|---|
 | en | baseline | 0.750 | 0.917 |
 | en | `jina-v2-base-es` | 0.750 | 0.917 |
-| en | `bge-small-en-v1.5` | 0.750 | 1.000 |
-| en | `bge-base-en-v1.5` | 0.833 | 0.917 |
+| en | `bge-small-en-v1.5` *(unpinned — see note)* | 0.750 | 1.000 |
+| en | `bge-base-en-v1.5` *(unpinned — see note)* | 0.833 | 0.917 |
 | es | baseline | 0.500 | 0.917 |
 | es | `jina-v2-base-es` | **0.750** | 0.917 |
-| es | `bge-small-en-v1.5` | 0.333 | 0.417 |
-| es | `bge-base-en-v1.5` | 0.417 | 0.500 |
+| es | `bge-small-en-v1.5` *(unpinned — see note)* | 0.333 | 0.417 |
+| es | `bge-base-en-v1.5` *(unpinned — see note)* | 0.417 | 0.500 |
+
+**Baseline and `jina-v2-base-es` are re-measured against the `fff2a71`-pinned corpus and reproduce
+the originally published numbers digit-for-digit.** The two `bge-v1.5` rows are **not**
+re-measured: they were run only in the `60b4eca` worktree, which is gone, so this table keeps
+their originally published figures but marks them as still describing the old, unpinned
+204-document corpus rather than the 209-document corpus pinned above. Re-running bge against the
+pinned corpus is future work and is not claimed here.
 
 None of these differences reach significance at n=12 (McNemar p ≥ 0.375 on every Spanish
 comparison, including the prefixed bge-small variant). But the direction is what decides this:
@@ -146,16 +157,40 @@ the only model measured anywhere on this page that does not regress either langu
 tested. That is the property a *default* needs, not the highest score on any single table —
 `bruriah index --model` remains how an operator picks the corpus-specific winner instead.
 
-### The corpus this table used is no longer 178 documents, and nothing pins it
+### The corpus this table used is now pinned at `fff2a71`
 
-The twelve-question table below (`## The model matters more than the weighting`) carries no
-`--revision`. Built fresh at HEAD for this measurement: **204 documents**, not 178 — 278 non-merge
-commits examined, 204 carried an explanatory body, more than when that section was written because
-this repository's own history keeps growing under the measurement, the exact effect the
-leakcanary/egui sections already warn about for external corpora. Recommendation: pin the
-own-history corpus with `bruriah corpus --repo . --revision <sha>`, the way the leakage table
-elsewhere on this page already does, or every future re-run of this table measures a different
-corpus under the same name.
+The own-history table above was originally built with no `--revision`, so it measured this
+worktree's uncommitted HEAD (`60b4eca`) — a commit a later rebase dropped from every branch,
+which is exactly the failure mode this note used to warn about in the abstract and then walked
+into concretely: **an unpinned self-growing corpus stopped being reproducible from the published
+repository.** The twelve-question table below (`## The model matters more than the weighting`)
+carries the same warning for its own, older, 178-document figure — that one remains unpinned and
+is not fixed by this note.
+
+Pinned now at `fff2a71` (tag v1.4.0): `bruriah corpus --repo . --revision fff2a71` yields **209
+documents**, 283 non-merge commits examined — not the 204 originally reported here, which came
+from the now-deleted `60b4eca` worktree, itself already grown from the 178 the older table cites.
+Reproduce the table above with:
+
+```bash
+bruriah corpus --repo . --out /tmp/corpus --revision fff2a71
+bruriah index --corpus-root /tmp/corpus --policy policy.yaml --data-dir /tmp/data-baseline \
+    --model sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2
+bruriah index --corpus-root /tmp/corpus --policy policy.yaml --data-dir /tmp/data-jina \
+    --model jinaai/jina-embeddings-v2-base-es
+python evals/retrieval/report_reach.py --corpus own-history-en --data-dir /tmp/data-baseline \
+    --questions evals/project-memory/decisions-en.jsonl --json
+python evals/retrieval/report_reach.py --corpus own-history-es --data-dir /tmp/data-baseline \
+    --questions evals/project-memory/decisions-es.jsonl --json
+# repeat both report_reach.py calls against /tmp/data-jina for the jina-v2-base-es row;
+# the `top 3` / `top 10` shares in that JSON output are recall@3 / recall@10
+```
+
+`policy.yaml` here is the default `bruriah init` bootstraps (`version: 1`, `include: ['**']`,
+`exclude: ['private/**']`) — this ablation names no policy of its own, so this is what was used.
+Running these commands reproduces the baseline and `jina-v2-base-es` rows of the table above
+digit-for-digit; it says nothing about the two `bge-v1.5` rows, which were never re-run against
+this pinned corpus.
 
 ### The noise-filter idea does not recover anything
 
