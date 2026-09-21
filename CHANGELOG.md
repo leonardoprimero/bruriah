@@ -3,7 +3,7 @@
 Notable changes, newest first. This project follows [semantic versioning](https://semver.org/),
 and the entries here name what changed for *you* rather than which files moved.
 
-## [Unreleased]
+## [1.5.0] — 2026-09-21
 
 ### Added: `bruriah corpus --github` ingests linked GitHub issues and pull requests
 - `bruriah corpus` can now derive corpus documents from the GitHub issues and pull requests a

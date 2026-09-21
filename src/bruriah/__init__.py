@@ -1,10 +1,11 @@
 """Bruriah: a read-only, two-tool MCP knowledge router over your own corpus."""
+
 from __future__ import annotations
 
 import importlib.util
 import os
 
-__version__ = "1.4.0"
+__version__ = "1.5.0"
 
 # Bruriah needs a platform that can promote a snapshot ATOMICALLY: take an exclusive lock, open a
 # validated file in a way that cannot be swapped underneath it, and publish a pointer while readers
