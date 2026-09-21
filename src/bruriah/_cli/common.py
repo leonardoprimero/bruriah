@@ -89,9 +89,10 @@ KNOWN_MODEL_PREFIXES: dict[str, tuple[str, str]] = {
 # detection or sentence similarity, not for asymmetric query-document retrieval.
 # `bruriah index` emits a warning when the chosen model matches any of these patterns,
 # because the recall gap between symmetric and asymmetric models on this task is large
-# (measured on this project's own history: jina-embeddings-v2-base-es Spanish recall@3 0.750 vs
-# the shipped default paraphrase-multilingual-MiniLM-L12-v2 0.583; see
-# evals/project-memory/README.md).
+# (measured on this project's own history at 204 documents: DEFAULT_EMBEDDING_MODEL
+# jina-embeddings-v2-base-es Spanish recall@3 0.750 vs the old default
+# paraphrase-multilingual-MiniLM-L12-v2's 0.500 -- one of the patterns below; see
+# "The embedder was the bottleneck, measured 2026-09-20" in evals/project-memory/README.md).
 _SYMMETRIC_MODEL_PATTERNS: frozenset[str] = frozenset({
     "paraphrase-",
     "all-minilm",
