@@ -17,6 +17,7 @@ from bruriah.github import GitHubError
 from bruriah.github_read import (
     GitHubNotFoundError,
     GitHubOfflineError,
+    GitHubRateLimitedError,
     ResponseCache,
     _RawResponse,
     get_issue,
@@ -208,6 +209,71 @@ class TestServerErrorRetry:
 
 
 # ---------------------------------------------------------------------------
+# Default transport timeout (R4-001): a stalled connection must never block forever.
+# ---------------------------------------------------------------------------
+
+
+class TestDefaultTransportTimeout:
+    def test_urlopen_is_called_with_a_timeout(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        import bruriah.github_read as github_read
+
+        captured: dict[str, Any] = {}
+
+        class _FakeResponse:
+            status = 200
+            headers: dict[str, str] = {}
+
+            def read(self) -> bytes:
+                return b"{}"
+
+            def __enter__(self) -> "_FakeResponse":
+                return self
+
+            def __exit__(self, *exc: Any) -> None:
+                return None
+
+        def _fake_urlopen(request: Any, timeout: float | None = None) -> _FakeResponse:
+            captured["timeout"] = timeout
+            return _FakeResponse()
+
+        monkeypatch.setattr(github_read.urllib.request, "urlopen", _fake_urlopen)
+        github_read._default_transport(
+            "GET", "https://api.github.com/repos/acme/widget/issues/41", None,
+        )
+        assert captured["timeout"] == github_read._DEFAULT_TIMEOUT_SECONDS
+
+    def test_a_stalled_connection_raises_a_typed_timeout_error(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        import bruriah.github_read as github_read
+
+        def _fake_urlopen(request: Any, timeout: float | None = None) -> Any:
+            raise TimeoutError("timed out")
+
+        monkeypatch.setattr(github_read.urllib.request, "urlopen", _fake_urlopen)
+        with pytest.raises(GitHubError) as excinfo:
+            github_read._default_transport(
+                "GET", "https://api.github.com/repos/acme/widget/issues/41", None,
+            )
+        assert excinfo.value.code == "github_timeout"
+
+    def test_a_urlerror_wrapping_a_timeout_also_raises_the_typed_timeout_error(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        import urllib.error
+
+        import bruriah.github_read as github_read
+
+        def _fake_urlopen(request: Any, timeout: float | None = None) -> Any:
+            raise urllib.error.URLError(TimeoutError("timed out"))
+
+        monkeypatch.setattr(github_read.urllib.request, "urlopen", _fake_urlopen)
+        with pytest.raises(GitHubError) as excinfo:
+            github_read._default_transport("GET", "https://api.github.com/x", None)
+        assert excinfo.value.code == "github_timeout"
+
+
+# ---------------------------------------------------------------------------
 # Rate-limit handling (403 / 429)
 # ---------------------------------------------------------------------------
 
@@ -248,6 +314,87 @@ class TestRateLimit:
         with pytest.raises(GitHubError):
             get_issue("acme", "widget", 41, cache=cache, transport=transport)
         assert len(transport.calls) == 1
+
+
+# ---------------------------------------------------------------------------
+# Rate limit window closed (R4-002): a reset far in the future must never be slept through, and a
+# request must never be retried a blind third time after the one rate-limit sleep is spent.
+# ---------------------------------------------------------------------------
+
+
+class TestRateLimitWindowClosed:
+    def test_far_reset_raises_immediately_without_sleeping(self, tmp_path: Path) -> None:
+        cache = ResponseCache(tmp_path)
+        transport = _ScriptedTransport([
+            _json_response(
+                403, {"message": "rate limited"},
+                headers={"X-RateLimit-Remaining": "0", "X-RateLimit-Reset": "3600"},
+            ),
+        ])
+        sleep = _RecordingSleep()
+        with pytest.raises(GitHubRateLimitedError) as excinfo:
+            get_issue(
+                "acme", "widget", 41, cache=cache, transport=transport, sleep=sleep,
+                clock=_clock_seq(0.0, 0.0),
+            )
+        assert sleep.calls == []
+        assert len(transport.calls) == 1
+        assert excinfo.value.reset_at == pytest.approx(3600.0)
+
+    def test_rate_limited_error_is_a_github_error(self, tmp_path: Path) -> None:
+        cache = ResponseCache(tmp_path)
+        transport = _ScriptedTransport([
+            _json_response(
+                403, {"message": "rate limited"},
+                headers={"X-RateLimit-Remaining": "0", "X-RateLimit-Reset": "3600"},
+            ),
+        ])
+        with pytest.raises(GitHubError):
+            get_issue(
+                "acme", "widget", 41, cache=cache, transport=transport,
+                clock=_clock_seq(0.0, 0.0),
+            )
+
+    def test_near_reset_sleeps_once_for_the_full_wait_then_retries(self, tmp_path: Path) -> None:
+        cache = ResponseCache(tmp_path)
+        transport = _ScriptedTransport([
+            _json_response(
+                403, {"message": "rate limited"},
+                headers={"X-RateLimit-Remaining": "0", "X-RateLimit-Reset": "120"},
+            ),
+            _json_response(200, _load("issue-41.json")),
+        ])
+        sleep = _RecordingSleep()
+        result = get_issue(
+            "acme", "widget", 41, cache=cache, transport=transport, sleep=sleep,
+            clock=_clock_seq(0.0, 0.0),
+        )
+        assert result["number"] == 41
+        assert sleep.calls == [120.0]
+        assert len(transport.calls) == 2
+
+    def test_rate_limited_again_after_the_one_sleep_raises_without_a_third_attempt(
+        self, tmp_path: Path
+    ) -> None:
+        cache = ResponseCache(tmp_path)
+        transport = _ScriptedTransport([
+            _json_response(
+                403, {"message": "rate limited"},
+                headers={"X-RateLimit-Remaining": "0", "X-RateLimit-Reset": "10"},
+            ),
+            _json_response(
+                403, {"message": "still rate limited"},
+                headers={"X-RateLimit-Remaining": "0", "X-RateLimit-Reset": "10"},
+            ),
+        ])
+        sleep = _RecordingSleep()
+        with pytest.raises(GitHubRateLimitedError):
+            get_issue(
+                "acme", "widget", 41, cache=cache, transport=transport, sleep=sleep,
+                clock=_clock_seq(0.0, 0.0, 0.0),
+            )
+        assert len(transport.calls) == 2
+        assert sleep.calls == [10.0]
 
 
 # ---------------------------------------------------------------------------

@@ -17,13 +17,25 @@ Design, matching `fetch.py`'s conventions where they apply:
   machinery (this module only ever talks to `api.github.com`, never a caller-supplied host).
 - **Token is a parameter, never an environment read.** Same rule `post_review` already follows;
   the CLI (T3) resolves `--github-token-env` and passes the value in.
-- **Bounded retry.** Up to `_MAX_ATTEMPTS` (3) attempts per request, exponential backoff on 5xx,
-  and on 403/429 that carry `X-RateLimit-Remaining: 0` or `Retry-After` -- sleeping until
-  `X-RateLimit-Reset` (capped at `_MAX_RATE_LIMIT_SLEEP_SECONDS`) rather than blind backoff, since
-  GitHub tells us exactly when the window reopens. A 404 is never retried: it raises
-  `GitHubNotFoundError` immediately so the document builder can skip-and-warn instead of treating a
-  missing issue as a transient failure. `clock`/`sleep` are injectable so tests never sleep for
-  real.
+- **Every request carries a timeout.** `_default_transport` calls `urlopen` with
+  `_DEFAULT_TIMEOUT_SECONDS` (30s); a stalled connection or a stalled read raises
+  `TimeoutError`/`socket.timeout`, which is translated to `GitHubError("github_timeout", ...)` --
+  the same skip-and-warn path a 404 or a persistent 5xx already takes, instead of blocking
+  `bruriah corpus --github` forever.
+- **Bounded retry.** Up to `_MAX_ATTEMPTS` (3) attempts per request, exponential backoff on 5xx. A
+  404 is never retried: it raises `GitHubNotFoundError` immediately so the document builder can
+  skip-and-warn instead of treating a missing issue as a transient failure. `clock`/`sleep` are
+  injectable so tests never sleep for real.
+- **Rate limiting sleeps at most once.** On 403/429 that carry `X-RateLimit-Remaining: 0` or
+  `Retry-After`, the wait until `X-RateLimit-Reset` is computed uncapped. An unauthenticated budget
+  resets up to an hour out, and `_MAX_RATE_LIMIT_SLEEP_SECONDS` (300s) is not a sleep cap so much as
+  a "is this window actually reopening soon" threshold: a wait past it raises
+  `GitHubRateLimitedError` immediately, no sleep spent. A wait within it is slept once, in full
+  (never capped down); a request that comes back rate-limited again after that one sleep raises
+  `GitHubRateLimitedError` rather than blindly spending a third attempt on an exhausted window.
+  `GitHubRateLimitedError` carries `reset_at` (epoch seconds) so `github_corpus.build_documents` can
+  stop issuing further requests for the rest of the build instead of repeating the same stall for
+  every remaining uncached issue.
 - **Bounded pagination.** `get_issue_timeline` and `get_issue_comments` follow the `Link: rel=
   "next"` header, concatenating pages into one list, capped at `_MAX_PAGES` (20) requests -- a
   "sane page cap" per the task: at 100 items/page that is 2,000 items per issue thread, far beyond
@@ -54,6 +66,7 @@ _MAX_ATTEMPTS = 3
 _MAX_PAGES = 20
 _BASE_BACKOFF_SECONDS = 1.0
 _MAX_RATE_LIMIT_SLEEP_SECONDS = 300.0
+_DEFAULT_TIMEOUT_SECONDS = 30.0
 _LINK_NEXT_RE = re.compile(r'<([^>]+)>\s*;\s*rel="next"')
 
 
@@ -73,6 +86,19 @@ class GitHubOfflineError(GitHubError):
     def __init__(self, path: str) -> None:
         super().__init__("github_offline_cache_miss", path)
         self.path = path
+
+
+class GitHubRateLimitedError(GitHubError):
+    """The hourly rate-limit window is closed and staying with this request would either sleep
+    through most of an hour or spend a blind retry on an exhausted window -- see the module
+    docstring's "Rate limiting sleeps at most once" bullet. `reset_at` is the epoch-seconds moment
+    the window reopens, so a caller (`github_corpus.build_documents`) can stop issuing further
+    requests for the rest of the build instead of repeating the same stall per issue."""
+
+    def __init__(self, path: str, reset_at: float) -> None:
+        super().__init__("github_rate_limited", path)
+        self.path = path
+        self.reset_at = reset_at
 
 
 @dataclass(frozen=True)
@@ -107,7 +133,7 @@ def _default_transport(method: str, url: str, token: str | None) -> _RawResponse
         headers["Authorization"] = f"Bearer {token}"
     request = urllib.request.Request(url, headers=headers, method=method)
     try:
-        with urllib.request.urlopen(request) as response:
+        with urllib.request.urlopen(request, timeout=_DEFAULT_TIMEOUT_SECONDS) as response:
             return _RawResponse(
                 status=response.status, headers=dict(response.headers.items()), body=response.read(),
             )
@@ -118,7 +144,15 @@ def _default_transport(method: str, url: str, token: str | None) -> _RawResponse
             body = b""
         response_headers = dict(exc.headers.items()) if exc.headers is not None else {}
         return _RawResponse(status=exc.code, headers=response_headers, body=body)
+    except TimeoutError as exc:
+        # A read timeout (after `urlopen` already returned, e.g. inside `response.read()`) raises
+        # `socket.timeout`/`TimeoutError` directly rather than wrapping it in a `URLError`.
+        raise GitHubError("github_timeout", str(exc) or "timed out") from exc
     except urllib.error.URLError as exc:
+        if isinstance(exc.reason, TimeoutError):
+            # A connect-phase timeout is the one `URLError` carries as `.reason` instead of
+            # raising `TimeoutError` directly.
+            raise GitHubError("github_timeout", str(exc.reason) or "timed out") from exc
         raise GitHubError("github_network_error", str(exc.reason)) from exc
 
 
@@ -163,7 +197,12 @@ def _is_rate_limited(response: _RawResponse) -> bool:
     return remaining == "0" or _header(response.headers, "Retry-After") is not None
 
 
-def _rate_limit_delay(response: _RawResponse, now: float) -> float:
+def _rate_limit_wait_seconds(response: _RawResponse, now: float) -> float:
+    """Seconds until the rate-limit window reopens (or the `Retry-After` wait), uncapped -- the
+    caller decides whether that wait is worth sleeping through or should raise instead. Unlike the
+    version this replaced, this never clamps to `_MAX_RATE_LIMIT_SLEEP_SECONDS`: clamping here
+    would silently turn "the window reopens in an hour" into "sleep 5 minutes, then fail anyway,"
+    which is exactly the wasted-sleep behavior `GitHubRateLimitedError` exists to avoid."""
     reset = _header(response.headers, "X-RateLimit-Reset")
     if reset is not None:
         try:
@@ -176,7 +215,7 @@ def _rate_limit_delay(response: _RawResponse, now: float) -> float:
             delay = float(retry_after) if retry_after is not None else _BASE_BACKOFF_SECONDS
         except ValueError:
             delay = _BASE_BACKOFF_SECONDS
-    return max(0.0, min(delay, _MAX_RATE_LIMIT_SLEEP_SECONDS))
+    return max(0.0, delay)
 
 
 def _request_with_retry(
@@ -188,8 +227,16 @@ def _request_with_retry(
     clock: Callable[[], float],
     sleep: Callable[[float], None],
 ) -> _RawResponse:
-    """One GitHub request, retried up to `_MAX_ATTEMPTS` times on 5xx and on rate-limited 403/429.
-    A 404 raises immediately (never retried); any other non-2xx status raises immediately too."""
+    """One GitHub request, retried up to `_MAX_ATTEMPTS` times on 5xx. A 404 raises immediately
+    (never retried); any other non-retryable non-2xx status raises immediately too.
+
+    Rate-limited 403/429 responses follow a separate, one-sleep-maximum path (see the module
+    docstring's "Rate limiting sleeps at most once" bullet): a wait past `_MAX_RATE_LIMIT_SLEEP_
+    SECONDS` raises `GitHubRateLimitedError` without sleeping, a wait within it is slept once in
+    full, and a second rate-limited response after that sleep raises `GitHubRateLimitedError`
+    rather than spending a third, still-rate-limited attempt.
+    """
+    rate_limit_sleep_used = False
     for attempt in range(1, _MAX_ATTEMPTS + 1):
         response = transport(method, url, token)
         if 200 <= response.status < 300:
@@ -197,14 +244,18 @@ def _request_with_retry(
         if response.status == 404:
             raise GitHubNotFoundError(url)
 
-        retryable = response.status >= 500 or _is_rate_limited(response)
-        if not retryable or attempt == _MAX_ATTEMPTS:
-            raise GitHubError(f"github_api_{response.status}", _error_detail(response))
-
         if _is_rate_limited(response):
-            sleep(_rate_limit_delay(response, clock()))
-        else:
-            sleep(_BASE_BACKOFF_SECONDS * (2 ** (attempt - 1)))
+            now = clock()
+            wait = _rate_limit_wait_seconds(response, now)
+            if rate_limit_sleep_used or wait > _MAX_RATE_LIMIT_SLEEP_SECONDS:
+                raise GitHubRateLimitedError(url, now + wait)
+            sleep(wait)
+            rate_limit_sleep_used = True
+            continue
+
+        if response.status < 500 or attempt == _MAX_ATTEMPTS:
+            raise GitHubError(f"github_api_{response.status}", _error_detail(response))
+        sleep(_BASE_BACKOFF_SECONDS * (2 ** (attempt - 1)))
 
     # Defensive: every branch above returns or raises, so this is unreachable in practice.
     raise GitHubError("github_retry_exhausted", url)
@@ -370,6 +421,7 @@ def get_issue_comments(
 __all__ = [
     "GitHubNotFoundError",
     "GitHubOfflineError",
+    "GitHubRateLimitedError",
     "ResponseCache",
     "Transport",
     "get_issue",

@@ -425,6 +425,53 @@ class TestManifest:
 # ---------------------------------------------------------------------------
 
 
+class TestRateLimitWindowStopsFurtherFetches:
+    """R4-002: once one fetch reports the hourly rate-limit window closed, the rest of the build
+    must not attempt another network call -- cache hits are still served -- and the manifest must
+    say so instead of silently truncating the corpus."""
+
+    def test_uncached_issues_after_the_window_closes_are_skipped_without_a_second_call(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        cache = ResponseCache(tmp_path / "cache")
+        _seed(cache, "acme", "widget")  # issue #41 and its dependencies are all cache-warm
+
+        calls = {"n": 0}
+
+        def _transport(method: str, url: str, token: str | None) -> _RawResponse:
+            calls["n"] += 1
+            if calls["n"] > 1:
+                raise AssertionError("no transport call after the rate limit window closes")
+            return _RawResponse(
+                status=403,
+                headers={"X-RateLimit-Remaining": "0", "X-RateLimit-Reset": "4000"},
+                body=b'{"message": "rate limited"}',
+            )
+
+        commits = [
+            _commit("a" * 40, "fix: race condition", "Closes #41."),  # cache hit
+            _commit("i" * 40, "chore: first uncached issue", "Fixes #900."),
+            _commit("j" * 40, "chore: second uncached issue", "Fixes #901."),
+        ]
+        result = build_documents(
+            commits, tmp_path / "out", repo="acme/widget", cache=cache,
+            network_enabled=True, transport=_transport, clock=lambda: 0.0, sleep=lambda _s: None,
+        )
+
+        assert result.documents_written == 1  # #41, served entirely from cache
+        assert result.issues_skipped == 2  # #900 and #901
+        assert calls["n"] == 1  # only the first uncached issue ever reaches the transport
+
+        manifest = json.loads((tmp_path / "out" / "github-manifest.json").read_text(encoding="utf-8"))
+        assert manifest["counts"]["rate_limited_skipped"] == 2
+        assert manifest["rate_limited_until"] == "1970-01-01T01:06:40Z"  # epoch 4000, UTC
+
+        err = capsys.readouterr().err
+        rate_limit_lines = [line for line in err.splitlines() if "rate limit" in line]
+        assert len(rate_limit_lines) == 1
+        assert "2" in rate_limit_lines[0]
+
+
 class TestClosesTargetThatIsItselfAPullRequest:
     def test_a_commit_that_closes_a_pull_request_number_does_not_crash(self, tmp_path: Path) -> None:
         cache = ResponseCache(tmp_path / "cache")

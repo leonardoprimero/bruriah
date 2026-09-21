@@ -36,6 +36,13 @@ Design decisions, carried over verbatim from `odd/tasks/github-issue-pr-ingestio
   (including `GitHubOfflineError`, its offline-cache-miss subclass) are caught per resolved issue
   number: that one issue is skipped, a warning goes to stderr, and every other issue still gets
   built. A commit history with one broken link should not cost a reader the rest of their corpus.
+- **A closed rate-limit window is one event, not one failure per issue.** `GitHubRateLimitedError`
+  (`github_read.py`) is handled separately from an ordinary `GitHubError`: `_Ledger` remembers
+  `reset_at` the first time it is raised, and every later fetch for a path not already in the cache
+  raises the same error immediately, with no network call -- see `_Ledger._fetch`. `build_documents`
+  counts each such skip under `rate_limited_skipped`, records `rate_limited_until` (ISO-8601 UTC) in
+  the manifest, and prints exactly one stderr summary line after the loop, instead of the per-issue
+  warning every other `GitHubError` gets -- the window closing is one thing that happened, not N.
 - **Provenance without a contract change.** `EvidenceRecord.publisher` (`contracts.py`) is set at
   query time from a passage's `relative_path` (see `retrieval.py`/`service.py`), which this module
   cannot touch (T3 scope explicitly excludes `contracts.py`, `service.py`, and `mcp_server.py`).
@@ -54,6 +61,7 @@ import sys
 import time
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -61,6 +69,7 @@ import yaml
 
 from .github import GitHubError
 from .github_read import (
+    GitHubRateLimitedError,
     ResponseCache,
     Transport,
     _default_transport,
@@ -199,6 +208,10 @@ class _Ledger:
     sleep: Callable[[float], None]
     cache_hits: int = 0
     network_calls: int = 0
+    # Set the first time any fetch raises `GitHubRateLimitedError` (R4-002): once the hourly
+    # window is known closed, every later fetch for a path this cache does not already hold
+    # raises immediately instead of repeating the same rate-limited round trip per issue.
+    rate_limited_until: float | None = None
 
     def _seen(self, path: str) -> None:
         if self.cache.get(path) is not None:
@@ -206,41 +219,47 @@ class _Ledger:
         else:
             self.network_calls += 1
 
+    def _fetch(self, path: str, fetch: Callable[[], Any]) -> Any:
+        if self.rate_limited_until is not None and self.cache.get(path) is None:
+            raise GitHubRateLimitedError(path, self.rate_limited_until)
+        self._seen(path)
+        try:
+            return fetch()
+        except GitHubRateLimitedError as error:
+            self.rate_limited_until = error.reset_at
+            raise
+
     def issue(self, number: int) -> dict[str, Any]:
         path = f"/repos/{self.owner}/{self.repo}/issues/{number}"
-        self._seen(path)
-        return get_issue(
+        return self._fetch(path, lambda: get_issue(
             self.owner, self.repo, number, cache=self.cache, token=self.token,
             network_enabled=self.network_enabled, transport=self.transport,
             clock=self.clock, sleep=self.sleep,
-        )
+        ))
 
     def pull(self, number: int) -> dict[str, Any]:
         path = f"/repos/{self.owner}/{self.repo}/pulls/{number}"
-        self._seen(path)
-        return get_pull(
+        return self._fetch(path, lambda: get_pull(
             self.owner, self.repo, number, cache=self.cache, token=self.token,
             network_enabled=self.network_enabled, transport=self.transport,
             clock=self.clock, sleep=self.sleep,
-        )
+        ))
 
     def timeline(self, number: int) -> list[Any]:
         path = f"/repos/{self.owner}/{self.repo}/issues/{number}/timeline"
-        self._seen(path)
-        return get_issue_timeline(
+        return self._fetch(path, lambda: get_issue_timeline(
             self.owner, self.repo, number, cache=self.cache, token=self.token,
             network_enabled=self.network_enabled, transport=self.transport,
             clock=self.clock, sleep=self.sleep,
-        )
+        ))
 
     def comments(self, number: int) -> list[Any]:
         path = f"/repos/{self.owner}/{self.repo}/issues/{number}/comments"
-        self._seen(path)
-        return get_issue_comments(
+        return self._fetch(path, lambda: get_issue_comments(
             self.owner, self.repo, number, cache=self.cache, token=self.token,
             network_enabled=self.network_enabled, transport=self.transport,
             clock=self.clock, sleep=self.sleep,
-        )
+        ))
 
 
 def _resolve_links_for_commit(
@@ -457,11 +476,21 @@ def build_documents(
     documents: dict[str, str] = {}
     issues_fetched = 0
     issues_skipped = 0
+    rate_limited_numbers: list[int] = []
     for number in sorted(linking_commits):
         try:
             issue = ledger.issue(number)
             alternatives, timeline_cross_repo = _collect_alternatives(number, ledger, repo)
             cross_repo_skipped += timeline_cross_repo
+        except GitHubRateLimitedError:
+            # The window is closed for the rest of this build (`ledger.rate_limited_until` is
+            # already set by `_Ledger._fetch`): every remaining uncached issue takes this same
+            # zero-network path, cache hits excepted. One summary warning is printed below, after
+            # the loop, instead of one per skipped issue -- the whole point is that the window
+            # closing is one event, not one per issue.
+            issues_skipped += 1
+            rate_limited_numbers.append(number)
+            continue
         except GitHubError as error:
             issues_skipped += 1
             print(
@@ -480,8 +509,20 @@ def build_documents(
         (out / filename).write_text(document, encoding="utf-8", newline="\n")
         documents[str(number)] = filename
 
+    rate_limited_until_iso: str | None = None
+    if rate_limited_numbers:
+        assert ledger.rate_limited_until is not None  # set by `_Ledger._fetch` on the first raise
+        rate_limited_until_iso = datetime.fromtimestamp(
+            ledger.rate_limited_until, tz=timezone.utc,
+        ).strftime("%Y-%m-%dT%H:%M:%SZ")
+        print(
+            f"warning: GitHub rate limit window closed; skipped {len(rate_limited_numbers)} "
+            f"issue(s) ({repo}) until it reopens at {rate_limited_until_iso}",
+            file=sys.stderr,
+        )
+
     manifest_path = out / _MANIFEST_NAME
-    manifest = {
+    manifest: dict[str, Any] = {
         "repo": repo,
         "revision": revision,
         "counts": {
@@ -489,12 +530,15 @@ def build_documents(
             "links_found": sum(len(v) for v in linking_commits.values()),
             "issues_fetched": issues_fetched,
             "issues_skipped": issues_skipped,
+            "rate_limited_skipped": len(rate_limited_numbers),
             "cross_repo_skipped": cross_repo_skipped,
             "cache_hits": ledger.cache_hits,
             "network_calls": ledger.network_calls,
         },
         "documents": dict(sorted(documents.items(), key=lambda item: int(item[0]))),
     }
+    if rate_limited_until_iso is not None:
+        manifest["rate_limited_until"] = rate_limited_until_iso
     # `sort_keys=False`: ordering is already deterministic by construction (insertion order for
     # the top-level fields, ascending issue number for `documents`) -- `sort_keys=True` would
     # re-sort `documents` alphabetically as strings ("100" before "41"), undoing that.

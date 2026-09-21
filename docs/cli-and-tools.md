@@ -461,6 +461,10 @@ already writes for a commit's `Alternative-Rejected` trailer (section 1), so the
 engine treats a GitHub-derived rejection exactly like a repository-derived one. A fetch failure
 skips that one issue with a warning to stderr rather than aborting the build, and
 `github-manifest.json` in the corpus root records what was fetched, skipped, and served from cache.
+Every request carries a 30s timeout, and once the hourly rate limit is exhausted the build stops
+making further GitHub calls for the rest of the run (cache hits still served): remaining uncached
+issues are skipped in one batch, `github-manifest.json` records the count under
+`rate_limited_skipped` plus a `rate_limited_until` timestamp, and one stderr line reports it.
 
 ---
 
