@@ -1,0 +1,36 @@
+[
+  {
+    "event": "labeled",
+    "label": {
+      "name": "bug"
+    }
+  },
+  {
+    "event": "cross-referenced",
+    "source": {
+      "type": "issue",
+      "issue": {
+        "number": 50,
+        "html_url": "https://github.com/acme/widget/pull/50",
+        "state": "closed",
+        "pull_request": {
+          "merged_at": "2026-06-09T12:00:00Z"
+        }
+      }
+    }
+  },
+  {
+    "event": "cross-referenced",
+    "source": {
+      "type": "issue",
+      "issue": {
+        "number": 47,
+        "html_url": "https://github.com/acme/widget/pull/47",
+        "state": "closed",
+        "pull_request": {
+          "merged_at": null
+        }
+      }
+    }
+  }
+]

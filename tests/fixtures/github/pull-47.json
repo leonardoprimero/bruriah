@@ -1,0 +1,14 @@
+{
+  "number": 47,
+  "title": "Attempt: retry on lock contention instead of locking",
+  "body": "Alternative approach to #41: retry the write instead of taking a lock.",
+  "state": "closed",
+  "merged": false,
+  "merged_at": null,
+  "closed_at": "2026-06-08T08:00:00Z",
+  "created_at": "2026-06-03T09:00:00Z",
+  "html_url": "https://github.com/acme/widget/pull/47",
+  "user": {
+    "login": "carol"
+  }
+}

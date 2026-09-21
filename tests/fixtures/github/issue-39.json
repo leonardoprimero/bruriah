@@ -1,0 +1,13 @@
+{
+  "number": 39,
+  "title": "Duplicate: builds sometimes corrupt the corpus",
+  "body": "See #41 for the real issue; closing this one as a duplicate.",
+  "state": "closed",
+  "state_reason": "not_planned",
+  "created_at": "2026-05-20T11:00:00Z",
+  "closed_at": "2026-05-21T09:00:00Z",
+  "html_url": "https://github.com/acme/widget/issues/39",
+  "user": {
+    "login": "dave"
+  }
+}

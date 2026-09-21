@@ -1,0 +1,13 @@
+{
+  "number": 41,
+  "title": "Race condition when two builds run concurrently",
+  "body": "Steps to reproduce:\n1. Run `bruriah corpus` twice at once against the same --out directory.\n2. Observe a truncated document on disk.\n\nPremise: The corpus writer is not process-safe.",
+  "state": "closed",
+  "state_reason": "completed",
+  "created_at": "2026-06-01T10:00:00Z",
+  "closed_at": "2026-06-10T15:30:00Z",
+  "html_url": "https://github.com/acme/widget/issues/41",
+  "user": {
+    "login": "alice"
+  }
+}
