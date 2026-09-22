@@ -598,14 +598,14 @@ Nothing about `fix/agent-prompt-boundary` is outstanding as engineering work.
 
 What remains is not engineering, it is the user's decision:
 
-- **Commit, push, merge, tag.** The release preparation sits uncommitted in the working tree
-  on purpose. Tagging `v1.6.0` publishes to PyPI irreversibly, so no automated step here goes
-  near it.
-- **The 2.0.0 work, tracked separately.** The `investigate_work` boundary defect — corpus
-  prose reaching the discovery response through the `alternatives`/`premises` front-matter
-  contract — is a different defect of the same class, needs a contract break, and needs
-  `evals/injection/` behind it. It was never in this branch's scope and this release does not
-  describe it.
+- **Push, merge, tag.** The release preparation is committed; nothing is pushed and no tag
+  exists. Tagging `v1.6.0` publishes to PyPI irreversibly, so that step is the user's alone
+  and no automated step here goes near it.
+- **The 2.0.0 work, tracked separately.** A second defect of the same class exists on the MCP
+  path. It needs a contract break and needs `evals/injection/` behind it, so it was never in
+  this branch's scope. Its mechanism is deliberately not written down here: this file is
+  committed to a public repository, so describing an unfixed channel in it would publish that
+  channel. The full account belongs with the release that closes it.
 - **One optional follow-up, recorded rather than scheduled:** extend the fixture so `brief`
   receives a file target, exercising the blast-radius path channel that R3-001 found
   unreachable on the current fixture. It would prove an invariant category end to end; it
