@@ -48,7 +48,20 @@ class TestHealingSynthesis:
         assert "Must never import sqlite3 directly in usecases." in pattern
         assert len(directives) >= 3
 
-    def test_generate_agent_prompt(self):
+    def test_generate_agent_prompt_names_decisions_without_quoting_them(self):
+        """The assertion set here was inverted deliberately.
+
+        The previous version of this test required the decision subject, the violation
+        message and the canonical pattern to be PRESENT in the agent prompt -- it pinned the
+        defect as the contract. Repository-authored text rendered under "**Instruction for
+        Agent**" is an instruction written by whoever authored that decision, not by the
+        operator running the command, so what the prompt must now carry is structure: the
+        violated path, the governing sha, the closed-vocabulary lineage state, and the route
+        to read the decision itself.
+
+        The fixture is unchanged from that version, so the ABSENT half asserts against the
+        exact strings the old prompt printed.
+        """
         bp = RemediationBlueprint(
             file_path="src/auth.py",
             decision_subject="OAuth2 Security",
@@ -60,16 +73,45 @@ class TestHealingSynthesis:
                 RemediationStep(2, "Inject session manager", "Use SessionManager."),
             ),
             directives=("Use HTTP-only cookies",),
+            lineage_state="SUPERSEDES",
         )
 
         prompt = _generate_agent_prompt("src/auth.py", [bp])
+
+        # Structure, identifiers and repository-authored literals: present.
         assert "# 🛠️ Bruriah Architectural Remediation Blueprint" in prompt
         assert "**Target**: `src/auth.py`" in prompt
         assert "Do NOT apply quick hacks" in prompt
-        assert "OAuth2 Security (`11223344`)" in prompt
-        assert "Plain token in cookie" in prompt
-        assert "Use HTTP-only encrypted session cookies" in prompt
-        assert "1. **Remove plain cookie**: Delete plain cookie setter." in prompt
+        assert "`112233445566`" in prompt
+        assert "Violation in `src/auth.py`" in prompt
+        assert "SUPERSEDES" in prompt
+        assert "`bruriah why src/auth.py`" in prompt
+        assert "`git show 112233445566`" in prompt
+
+        # Everything a decision author wrote: absent.
+        assert "OAuth2 Security" not in prompt
+        assert "Plain token in cookie" not in prompt
+        assert "Use HTTP-only encrypted session cookies" not in prompt
+        assert "Use HTTP-only cookies" not in prompt
+        # The synthesized steps interpolate the message and the pattern, so the recipe is
+        # written here now rather than drawn from `refactoring_steps`.
+        assert "Remove plain cookie" not in prompt
+        assert "Inject session manager" not in prompt
+
+    def test_generate_agent_prompt_renders_unknown_for_a_missing_lineage_state(self):
+        """The lineage vocabulary is closed, so an empty value maps to UNKNOWN, not to blank."""
+        bp = RemediationBlueprint(
+            file_path="src/auth.py",
+            decision_subject="OAuth2 Security",
+            decision_sha="112233445566",
+            violation_message="Plain token in cookie",
+            canonical_pattern="Use HTTP-only encrypted session cookies",
+            refactoring_steps=(),
+            directives=(),
+        )
+
+        prompt = _generate_agent_prompt("src/auth.py", [bp])
+        assert "**Lineage State**: UNKNOWN" in prompt
 
 
 class TestEvaluateHeal:
@@ -106,6 +148,7 @@ class TestEvaluateHeal:
                     decision_title="Decoupled Persistence",
                     decision_sha="aabbccdd",
                     message="Direct database access detected.",
+                    lineage_state="SUPERSEDES",
                 ),
             ),
             agent_context="",
@@ -125,6 +168,9 @@ class TestEvaluateHeal:
         assert bp.decision_subject == "Decoupled Persistence"
         assert bp.decision_sha == "aabbccddeeff"
         assert len(bp.refactoring_steps) == 3
+        # Carried from the guard violation so the agent rendering has a closed-vocabulary
+        # reason to print instead of `violation_message`.
+        assert bp.lineage_state == "SUPERSEDES"
 
 
 class TestHealFormatting:
@@ -135,9 +181,7 @@ class TestHealFormatting:
             decision_sha="11223344",
             violation_message="Violation message",
             canonical_pattern="Use repository pattern",
-            refactoring_steps=(
-                RemediationStep(1, "Step 1", "Detail 1"),
-            ),
+            refactoring_steps=(RemediationStep(1, "Step 1", "Detail 1"),),
             directives=("Directive 1",),
         )
         res = HealingResult(
@@ -233,4 +277,3 @@ class TestHealCli:
             assert code == 1
             captured = capsys.readouterr()
             assert "bruriah: error: git_error" in captured.err
-

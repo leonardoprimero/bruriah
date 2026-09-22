@@ -47,6 +47,12 @@ class RemediationBlueprint:
     canonical_pattern: str
     refactoring_steps: tuple[RemediationStep, ...]
     directives: tuple[str, ...]
+    # The lineage relation, upper-cased: SUPERSEDES, DEPRECATES or AMENDS. Carried from the
+    # guard violation so the agent-facing rendering can say WHY a file is flagged without
+    # quoting `violation_message`, which states the same fact inside a sentence that also
+    # quotes the successor decision's subject. The vocabulary is closed at index time
+    # (`index.py` writes exactly those three relations), never taken from a document.
+    lineage_state: str = ""
 
 
 @dataclass(frozen=True)
@@ -80,9 +86,7 @@ def _synthesize_steps(
 
     # Extract or summarize canonical pattern
     canonical_pattern = (
-        directives[1]
-        if len(directives) > 1
-        else f"Follow architectural constraints established in commit {sha[:8]}."
+        directives[1] if len(directives) > 1 else f"Follow architectural constraints established in commit {sha[:8]}."
     )
 
     steps = (
@@ -110,7 +114,28 @@ def _generate_agent_prompt(
     target: str,
     blueprints: Sequence[RemediationBlueprint],
 ) -> str:
-    """Generate structured, pedagogical instructions for AI coding agents."""
+    """Render the agent-facing remediation blueprint, naming decisions by reference only.
+
+    Everything in this string reads as instruction to whatever consumes it -- it is a
+    numbered refactoring recipe under a "do this" heading -- so it carries no text a
+    decision author wrote: no subject, no canonical pattern, no directive prose, no
+    violation message. This renderer was the sharpest case of the three. `_synthesize_steps`
+    harvests `- ` and `* ` bullet lines out of a decision body into `directives`, promotes
+    `directives[1]` to `canonical_pattern`, and step 2 then rendered that bullet as the
+    instruction to restructure by. A line lifted from a document and printed as step 2 of a
+    refactoring recipe is an instruction the operator running this command never issued.
+    `violation_message` additionally quotes the successor decision's subject, since it comes
+    from drift's `action_recommendation`.
+
+    What remains is a literal authored in this repository, a closed-vocabulary value
+    (lineage relation), or a format-validated identifier (commit sha, repository path). The
+    text is not unreachable -- step 2 routes the agent to `bruriah why` and `git show`, which
+    both return it -- it is simply not pre-injected. `format_heal_human` and
+    `format_heal_json` are unchanged and still carry all of it: a person reading a terminal
+    is not an instruction-following agent.
+
+    Pinned by `tests/test_agent_prompt_boundary.py`.
+    """
     if not blueprints:
         return "No architectural violations detected. The codebase complies with active governance."
 
@@ -118,24 +143,33 @@ def _generate_agent_prompt(
         "# 🛠️ Bruriah Architectural Remediation Blueprint",
         f"**Target**: `{target}`",
         "**Instruction for Agent**: Do NOT apply quick hacks, monkey-patches, or bypass interfaces.",
-        "Refactor the code according to the canonical project patterns below:\n",
+        "Refactor the code according to the canonical project patterns. The governing decisions",
+        "below are named by reference, not quoted: read one before changing what it governs.\n",
     ]
 
     for i, bp in enumerate(blueprints, start=1):
+        state = bp.lineage_state or "UNKNOWN"
+        sha = bp.decision_sha
         lines.append(f"## Issue {i}: Violation in `{bp.file_path}`")
-        lines.append(f"- **Governing Decision**: {bp.decision_subject} (`{bp.decision_sha[:8]}`)")
-        lines.append(f"- **Violation**: {bp.violation_message}")
-        lines.append(f"- **Canonical Design Pattern**: {bp.canonical_pattern}")
-        lines.append("- **Directives**:")
-        for d in bp.directives:
-            lines.append(f"  * {d}")
+        lines.append(f"- **Governing Decision**: `{sha}`")
+        lines.append(f"- **Lineage State**: {state}")
         lines.append("- **Actionable Refactoring Recipe**:")
-        for step in bp.refactoring_steps:
-            lines.append(f"  {step.order}. **{step.action}**: {step.detail}")
+        lines.append(f"  1. **Isolate Non-Compliant Code**: Decouple the offending logic in `{bp.file_path}`.")
+        lines.append(
+            "  2. **Apply Canonical Architectural Pattern**: Read the governing decision first — run "
+            f"`bruriah why {bp.file_path}` or `git show {sha}` — then restructure to match what it establishes."
+        )
+        lines.append(
+            f"  3. **Verify Architectural Compliance**: Run `bruriah guard {bp.file_path}` to confirm "
+            "the violation is resolved."
+        )
         lines.append("")
 
+    # "the above directives" used to point at bullet lines harvested from decision bodies.
+    # Those are gone from this rendering, so the sentence names what is actually above it.
     lines.append(
-        "After refactoring, ensure that all unit tests pass and code strictly adheres to the above directives."
+        "After refactoring, ensure that all unit tests pass and the code strictly adheres to the "
+        "governing decisions named above."
     )
     return "\n".join(lines)
 
@@ -198,6 +232,7 @@ def evaluate_heal(
                 canonical_pattern=canonical_pattern,
                 refactoring_steps=steps,
                 directives=directives,
+                lineage_state=v.lineage_state,
             )
         )
 
@@ -237,7 +272,13 @@ def format_heal_human(result: HealingResult) -> str:
 
 
 def format_heal_agent(result: HealingResult) -> str:
-    """Return prompt injection snippet for AI agents."""
+    """Return the agent-facing remediation summary.
+
+    The old name for this was "prompt injection snippet", which is precisely what the
+    rendering now refuses to be: it carries no decision prose, only structure — the violated
+    path, the governing decision's sha, its lineage state, and a recipe written here. See
+    `_generate_agent_prompt` for why.
+    """
     return result.agent_prompt
 
 
