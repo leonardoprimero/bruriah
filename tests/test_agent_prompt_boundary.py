@@ -47,7 +47,29 @@ SUBJECT_MARKER = "ZZSUBJECT"
 SUCCESSOR_MARKER = "ZZSUCCESSOR"
 AUTHOR_MARKER = "ZZAUTHOR"
 BULLET_MARKER = "ZZBULLET"
-MARKERS = (SUBJECT_MARKER, SUCCESSOR_MARKER, AUTHOR_MARKER, BULLET_MARKER)
+# The governed-file list is the one repository-authored channel the invariant lets through, as
+# category (c): a format-validated repository-relative path. So this marker does not probe
+# "does a document-authored path reach the rendering" -- it is allowed to. It probes the
+# break-out: those paths are rendered inside a markdown code span, and a backtick would close
+# that span early and leave the remainder reading as prose rather than as a quoted identifier.
+# The marker therefore sits AFTER the backtick in the fixture entry, so it can only appear in a
+# rendering if the backtick survived with it. Placed before the backtick it would ride a
+# perfectly valid path into the output and fail for something the invariant permits.
+#
+# Recorded honestly: on this fixture the assertion below is currently satisfied by two upstream
+# filters rather than by the agent-rendering boundary, and is therefore a closed-channel record,
+# not a live probe.
+#   1. `why.py` extracts the section with `- \`([^\`]+)\``, so the backtick terminates the match
+#      and only `src/breakout` survives parsing -- the marker never leaves the document.
+#   2. Even that remainder reaches no rendering here: the only document-derived path channel
+#      into an `--agent` block is brief's blast radius, fed from `analyze_impact` over brief's
+#      target files, and this fixture invokes brief with a task intent and no targets.
+# `agent_surface.repo_path` does reject the backtick form (it returns `<unprintable path>`,
+# covered in `tests/test_agent_surface.py`), so the in-code boundary holds independently. The
+# marker stays because a channel proved closed is a result worth keeping, and because it fails
+# loudly if either filter above is ever relaxed.
+PATH_MARKER = "ZZPATH"
+MARKERS = (SUBJECT_MARKER, SUCCESSOR_MARKER, AUTHOR_MARKER, BULLET_MARKER, PATH_MARKER)
 
 # What each HUMAN rendering must keep naming, surface by surface. Asserting "at least one
 # marker survives" would let a fix strip the subject and the author from the human output
@@ -130,6 +152,7 @@ verification_date: 2026-01-01
 
 ## Files this decision touched
 - `storage.py`
+- `src/breakout`{PATH_MARKER}.py`
 """,
         encoding="utf-8",
     )
@@ -224,6 +247,36 @@ def test_the_fixture_reaches_every_agent_renderer(capsys, governed) -> None:
 
     heal = _run(capsys, ["heal", "storage.py", *argv, "--repo", str(repo), "--json"])
     assert '"HEALABLE"' in heal, f"heal produced no blueprint; its renderer never ran:\n{heal}"
+
+
+def test_the_route_the_agent_renderings_print_actually_works(capsys, governed) -> None:
+    """Withholding the text is only honest if the route to it works.
+
+    Every `--agent` rendering names the decision by reference and tells the agent to run
+    `bruriah why <file>` for the prose. That promise is what makes the boundary a narrowing
+    rather than a deletion, and a substring assertion cannot tell a working route from a
+    plausible-looking one: `bruriah why` accepts a target, and this module already records a
+    case where handing a path to a command whose positional was a revision returned an empty
+    report indistinguishable from a real answer. So the command is actually run, and its output
+    is required to name the governing decision -- otherwise the withheld text would be
+    unreachable through the printed instruction rather than merely not pre-injected.
+    """
+    repo, argv = governed
+
+    for command in ("brief", "guard", "heal"):
+        rendering = _render(capsys, governed, command, agent=True)
+        assert "bruriah why" in rendering, (
+            f"`bruriah {command} --agent` withholds the decision prose without routing the "
+            f"agent anywhere it can read it:\n{rendering}"
+        )
+
+    # The printed shape, run for real. `_run` asserts exit 0 and non-empty stdout, so a route
+    # the CLI rejects fails here instead of passing as a substring.
+    why = _run(capsys, ["why", "storage.py", *argv, "--repo", str(repo)])
+    assert SUBJECT_MARKER in why, (
+        "`bruriah why storage.py` succeeded without naming the governing decision, so the "
+        f"route the agent renderings print returns nothing it withheld:\n{why}"
+    )
 
 
 @pytest.mark.parametrize("command", ["brief", "guard", "heal"])

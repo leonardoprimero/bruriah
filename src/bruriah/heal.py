@@ -10,6 +10,7 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Sequence
 
+from . import agent_surface
 from .drift import get_git_diff_files
 from .guard import evaluate_guard
 from .why import find_decision_in_database
@@ -50,8 +51,8 @@ class RemediationBlueprint:
     # The lineage relation, upper-cased: SUPERSEDES, DEPRECATES or AMENDS. Carried from the
     # guard violation so the agent-facing rendering can say WHY a file is flagged without
     # quoting `violation_message`, which states the same fact inside a sentence that also
-    # quotes the successor decision's subject. The vocabulary is closed at index time
-    # (`index.py` writes exactly those three relations), never taken from a document.
+    # quotes the successor decision's subject. The vocabulary is closed in `agent_surface`,
+    # which is where the agent rendering maps it through `KNOWN_LINEAGE_STATES`.
     lineage_state: str = ""
 
 
@@ -129,10 +130,18 @@ def _generate_agent_prompt(
 
     What remains is a literal authored in this repository, a closed-vocabulary value
     (lineage relation), or a format-validated identifier (commit sha, repository path). The
-    text is not unreachable -- step 2 routes the agent to `bruriah why` and `git show`, which
-    both return it -- it is simply not pre-injected. `format_heal_human` and
-    `format_heal_json` are unchanged and still carry all of it: a person reading a terminal
-    is not an instruction-following agent.
+    last two are enforced by `agent_surface`, not assumed: every sha, path and lineage state
+    below is routed through it, so a malformed value renders as its placeholder rather than
+    being interpolated raw. The text is not unreachable -- the route below points the agent at
+    `bruriah why` and `git show`, which both return it -- it is simply not pre-injected.
+    `format_heal_human` and `format_heal_json` are unchanged and still carry all of it: a
+    person reading a terminal is not an instruction-following agent.
+
+    The recipe is rendered from `bp.refactoring_steps` rather than restated here. An earlier
+    version of this renderer hard-coded its own three steps, which left two parallel recipes:
+    a maintainer editing the step wording in `_synthesize_steps` would not see the edit reach
+    `--agent`. Only `step.action` is rendered -- see the comment at the loop for why
+    `step.detail` cannot be.
 
     Pinned by `tests/test_agent_prompt_boundary.py`.
     """
@@ -148,21 +157,26 @@ def _generate_agent_prompt(
     ]
 
     for i, bp in enumerate(blueprints, start=1):
-        state = bp.lineage_state or "UNKNOWN"
-        sha = bp.decision_sha
-        lines.append(f"## Issue {i}: Violation in `{bp.file_path}`")
+        state = agent_surface.closed(bp.lineage_state, agent_surface.KNOWN_LINEAGE_STATES)
+        sha = agent_surface.commit_sha(bp.decision_sha)
+        path = agent_surface.repo_path(bp.file_path)
+        lines.append(f"## Issue {i}: Violation in `{path}`")
         lines.append(f"- **Governing Decision**: `{sha}`")
         lines.append(f"- **Lineage State**: {state}")
+        lines.append(
+            f"- **Read the governing decision before changing what it governs**: run `bruriah why {path}` "
+            f"or `git show {sha}`."
+        )
         lines.append("- **Actionable Refactoring Recipe**:")
-        lines.append(f"  1. **Isolate Non-Compliant Code**: Decouple the offending logic in `{bp.file_path}`.")
-        lines.append(
-            "  2. **Apply Canonical Architectural Pattern**: Read the governing decision first — run "
-            f"`bruriah why {bp.file_path}` or `git show {sha}` — then restructure to match what it establishes."
-        )
-        lines.append(
-            f"  3. **Verify Architectural Compliance**: Run `bruriah guard {bp.file_path}` to confirm "
-            "the violation is resolved."
-        )
+        # `step.action` only, never `step.detail`. Every action in `_synthesize_steps` is a
+        # literal authored in this repository, but every detail interpolates `message` and
+        # `canonical_pattern`: `message` comes from drift's `action_recommendation` and quotes
+        # the successor decision's subject, and `canonical_pattern` is a bullet line harvested
+        # out of a decision body. Rendering a detail here would put text a decision author
+        # wrote into a numbered instruction the operator never issued, which is the defect this
+        # renderer exists to avoid. `format_heal_human` still prints both.
+        for step in bp.refactoring_steps:
+            lines.append(f"  {step.order}. **{step.action}**")
         lines.append("")
 
     # "the above directives" used to point at bullet lines harvested from decision bodies.
