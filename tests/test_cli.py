@@ -2326,15 +2326,38 @@ class TestAgentRenderingDegradationWarning:
     )
     @pytest.mark.parametrize("output_mode", [[], ["--json"]])
     def test_a_run_that_did_not_ask_for_agent_gets_no_stderr(
-        self, capsys, command, argv, patched, result_name, output_mode
+        self,
+        capsys,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        command,
+        argv,
+        patched,
+        result_name,
+        output_mode,
     ):
         from unittest.mock import patch as mock_patch
 
+        paths = _paths(tmp_path)
+        monkeypatch.setenv("FASTEMBED_CACHE_PATH", str(paths.cache_dir / "models"))
         result = getattr(self, result_name)()
         capsys.readouterr()
 
         with mock_patch(patched, return_value=result):
-            exit_code = cli.bruriah_main([*argv, *output_mode])
+            exit_code = cli.bruriah_main(
+                [
+                    *argv,
+                    *output_mode,
+                    "--config-dir",
+                    str(paths.config_dir),
+                    "--data-dir",
+                    str(paths.data_dir),
+                    "--cache-dir",
+                    str(paths.cache_dir),
+                    "--log-dir",
+                    str(paths.log_dir),
+                ]
+            )
 
         captured = capsys.readouterr()
         assert exit_code == 0
@@ -2349,15 +2372,37 @@ class TestAgentRenderingDegradationWarning:
         ],
     )
     def test_an_agent_run_gets_exactly_one_warning_naming_its_command(
-        self, capsys, command, argv, patched, result_name
+        self,
+        capsys,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        command,
+        argv,
+        patched,
+        result_name,
     ):
         from unittest.mock import patch as mock_patch
 
+        paths = _paths(tmp_path)
+        monkeypatch.setenv("FASTEMBED_CACHE_PATH", str(paths.cache_dir / "models"))
         result = getattr(self, result_name)()
         capsys.readouterr()
 
         with mock_patch(patched, return_value=result):
-            exit_code = cli.bruriah_main([*argv, "--agent"])
+            exit_code = cli.bruriah_main(
+                [
+                    *argv,
+                    "--agent",
+                    "--config-dir",
+                    str(paths.config_dir),
+                    "--data-dir",
+                    str(paths.data_dir),
+                    "--cache-dir",
+                    str(paths.cache_dir),
+                    "--log-dir",
+                    str(paths.log_dir),
+                ]
+            )
 
         captured = capsys.readouterr()
         assert exit_code == 0
@@ -2374,16 +2419,39 @@ class TestAgentRenderingDegradationWarning:
             (["heal", "src/auth.py"], "bruriah.cli.run_heal", "_degraded_heal_result"),
         ],
     )
-    def test_an_agent_run_over_a_clean_rendering_is_silent(self, capsys, argv, patched, result_name):
+    def test_an_agent_run_over_a_clean_rendering_is_silent(
+        self,
+        capsys,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        argv,
+        patched,
+        result_name,
+    ):
         """The counter-assertion: a warning on every `--agent` run would be noise nobody reads."""
         from dataclasses import replace
         from unittest.mock import patch as mock_patch
 
+        paths = _paths(tmp_path)
+        monkeypatch.setenv("FASTEMBED_CACHE_PATH", str(paths.cache_dir / "models"))
         result = replace(getattr(self, result_name)(), agent_rendering_degraded=False)
         capsys.readouterr()
 
         with mock_patch(patched, return_value=result):
-            exit_code = cli.bruriah_main([*argv, "--agent"])
+            exit_code = cli.bruriah_main(
+                [
+                    *argv,
+                    "--agent",
+                    "--config-dir",
+                    str(paths.config_dir),
+                    "--data-dir",
+                    str(paths.data_dir),
+                    "--cache-dir",
+                    str(paths.cache_dir),
+                    "--log-dir",
+                    str(paths.log_dir),
+                ]
+            )
 
         captured = capsys.readouterr()
         assert exit_code == 0
