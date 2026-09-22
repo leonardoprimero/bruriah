@@ -28,6 +28,11 @@ class BriefError(ValueError):
         super().__init__(f"{code}: {detail}" if detail else code)
 
 
+# Decision statuses this module recognises. Anything outside this set renders as UNKNOWN in
+# the agent context rather than being quoted back into it.
+_KNOWN_DECISION_STATUSES = frozenset({"active", "superseded", "deprecated", "amended"})
+
+
 @dataclass(frozen=True)
 class SupersedeTemplate:
     """Structured proposal template for superseding an architectural invariant."""
@@ -38,10 +43,16 @@ class SupersedeTemplate:
     proposed_invariant: str = "<describe the new invariant or replacement architecture>"
     rationale: str = "<technical reasoning justifying why this approach is superior now>"
 
-    def to_markdown(self) -> str:
+    def to_markdown(self, *, name_subject: bool = True) -> str:
+        """Render the proposal template; `name_subject=False` identifies the target by sha only."""
+        target = (
+            f"{self.target_subject} (`{self.target_sha[:8]}`)"
+            if name_subject
+            else f"`{self.target_sha[:8]}` (run `git show` to read it)"
+        )
         return (
             "#### Architectural Supersede Proposal\n"
-            f"- **Target Decision**: {self.target_subject} (`{self.target_sha[:8]}`)\n"
+            f"- **Target Decision**: {target}\n"
             f"- **Changed Premise**: {self.changed_premise}\n"
             f"- **Proposed Invariant**: {self.proposed_invariant}\n"
             f"- **Technical Rationale**: {self.rationale}\n"
@@ -105,7 +116,11 @@ def _extract_directives(subject: str, sha: str, body: str) -> tuple[str, ...]:
     return tuple(directives)
 
 
-def _generate_supersede_instructions(constraints: Sequence[GoverningConstraint]) -> str:
+def _generate_supersede_instructions(
+    constraints: Sequence[GoverningConstraint],
+    *,
+    name_subject: bool = True,
+) -> str:
     """Generate the formal Supersede Protocol instructions for agents and devs."""
     lines: list[str] = [
         "### Supersede Protocol Directive (Architectural Governance)",
@@ -120,7 +135,7 @@ def _generate_supersede_instructions(constraints: Sequence[GoverningConstraint])
             target_sha=sample.commit_sha,
             target_subject=sample.subject,
         )
-        lines.append(template.to_markdown())
+        lines.append(template.to_markdown(name_subject=name_subject))
     else:
         lines.append(
             "#### Architectural Supersede Proposal\n"
@@ -140,7 +155,24 @@ def _generate_agent_context(
     co_governed: Sequence[str],
     supersede_instructions: str,
 ) -> str:
-    """Format structured context optimized for agent prompt injection."""
+    """Render the agent-facing pre-flight brief, naming decisions by reference only.
+
+    Everything in this string reads as instruction to whatever consumes it, so it carries no
+    text a decision author wrote: no subject, no author name, no directive prose, no successor
+    title. `_extract_directives` is the sharpest case -- it harvests bullet lines from a
+    decision body and, failing those, promotes sentences *selected because* they contain
+    `must`, `cannot`, `do not`, `require` or `prohibit`. A sentence chosen for being phrased as
+    a command, printed under a constraints heading, is an instruction the operator running this
+    command never issued.
+
+    What remains is a literal authored in this repository, the operator's own intent, a
+    closed-vocabulary value (status badge, risk level), or a format-validated identifier (commit
+    sha, repository path). The text is not unreachable -- `bruriah why` and `git show` both
+    return it -- it is simply not pre-injected. `format_brief_human` is unchanged and still
+    prints all of it: a person reading a terminal is not an instruction-following agent.
+
+    Pinned by `tests/test_agent_prompt_boundary.py`.
+    """
     target_str = ", ".join(f"`{t}`" for t in targets) if targets else "None specified (general intent)"
     lines: list[str] = [
         "# Bruriah Pre-Flight Architectural Brief",
@@ -148,24 +180,24 @@ def _generate_agent_context(
         f"- **Target Files**: {target_str}",
         f"- **Risk Level**: {risk_level}",
         "",
-        "## Active Architectural Constraints",
+        "## Governing decisions",
     ]
 
     if not constraints:
         lines.append("No conflicting or governing architectural decisions found for this task.")
     else:
+        lines.append("The decisions below govern this task. They are named by reference, not quoted: run")
+        lines.append("`bruriah why <file>` or `git show <sha>` to read one before changing what it governs.")
+        lines.append("")
         for c in constraints:
-            status_badge = f"[{c.status.upper()}]"
-            lines.append(f"### {status_badge} {c.subject} (`{c.commit_sha[:8]}`)")
-            lines.append(f"- **Author & Date**: {c.author} ({c.date})")
-            lines.append("- **Directives**:")
-            for d in c.directives:
-                lines.append(f"  * {d}")
-            if c.active_successor_title:
-                lines.append(
-                    f"  * SUPERSEDED BY: {c.active_successor_title} (`{c.active_successor_sha}`)"
-                )
-            lines.append("")
+            # `corpus.py:128` does `frontmatter.get("status") or "unknown"` with no validation
+            # against a closed set, so the value is mapped through a known vocabulary rather
+            # than quoted into the badge.
+            status = c.status.strip().lower()
+            badge = status.upper() if status in _KNOWN_DECISION_STATUSES else "UNKNOWN"
+            succ = f", active successor `{c.active_successor_sha}`" if c.active_successor_sha else ""
+            lines.append(f"- [{badge}] decision `{c.commit_sha[:8]}`{succ}")
+        lines.append("")
 
     if co_governed:
         lines.append("## Blast Radius / Co-Governed Files")
@@ -283,9 +315,7 @@ def evaluate_brief(
                 if not decision_info:
                     continue
 
-                directives = _extract_directives(
-                    decision_info.subject, decision_info.commit_sha, decision_info.body
-                )
+                directives = _extract_directives(decision_info.subject, decision_info.commit_sha, decision_info.body)
                 supersede_template = SupersedeTemplate(
                     target_sha=decision_info.commit_sha,
                     target_subject=decision_info.subject,
@@ -310,6 +340,7 @@ def evaluate_brief(
 
     constraints_tuple = tuple(decisions_map.values())
     co_governed_tuple = tuple(sorted(co_governed_files_set - set(target_list)))
+    # The human and JSON surfaces keep the decision subject; only the agent rendering drops it.
     supersede_instructions = _generate_supersede_instructions(constraints_tuple)
     agent_context = _generate_agent_context(
         intent=clean_intent,
@@ -317,7 +348,7 @@ def evaluate_brief(
         risk_level=overall_risk,
         constraints=constraints_tuple,
         co_governed=co_governed_tuple,
-        supersede_instructions=supersede_instructions,
+        supersede_instructions=_generate_supersede_instructions(constraints_tuple, name_subject=False),
     )
 
     return ArchitecturalBrief(
@@ -347,7 +378,7 @@ def format_brief_human(brief: ArchitecturalBrief) -> str:
 
     lines: list[str] = [
         "🏛️  Bruriah Architectural Brief — Pre-flight Dossier",
-        f"   Intent: \"{brief.task_intent}\"" if brief.task_intent else "   Intent: Not specified",
+        f'   Intent: "{brief.task_intent}"' if brief.task_intent else "   Intent: Not specified",
         f"   Risk Level: {risk_str} · {len(brief.targets)} target(s) · {len(brief.constraints)} constraint(s)\n",
     ]
 
@@ -365,9 +396,7 @@ def format_brief_human(brief: ArchitecturalBrief) -> str:
             for d in c.directives:
                 lines.append(f"    ↳ {d}")
             if c.active_successor_title:
-                lines.append(
-                    f"    ⚠️  SUPERSEDED BY: {c.active_successor_title} ({c.active_successor_sha})"
-                )
+                lines.append(f"    ⚠️  SUPERSEDED BY: {c.active_successor_title} ({c.active_successor_sha})")
         lines.append("")
 
     if brief.co_governed_files:
