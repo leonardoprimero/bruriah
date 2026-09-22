@@ -64,7 +64,7 @@ BULLET_MARKER = "ZZBULLET"
 #   2. Even that remainder reaches no rendering here: the only document-derived path channel
 #      into an `--agent` block is brief's blast radius, fed from `analyze_impact` over brief's
 #      target files, and this fixture invokes brief with a task intent and no targets.
-# `agent_surface.repo_path` does reject the backtick form (it returns `<unprintable path>`,
+# `agent_surface.printable_path` does reject the backtick form (it returns `<unprintable path>`,
 # covered in `tests/test_agent_surface.py`), so the in-code boundary holds independently. The
 # marker stays because a channel proved closed is a result worth keeping, and because it fails
 # loudly if either filter above is ever relaxed.
@@ -247,6 +247,23 @@ def test_the_fixture_reaches_every_agent_renderer(capsys, governed) -> None:
 
     heal = _run(capsys, ["heal", "storage.py", *argv, "--repo", str(repo), "--json"])
     assert '"HEALABLE"' in heal, f"heal produced no blueprint; its renderer never ran:\n{heal}"
+
+    # brief is asserted through its own agent rendering rather than through `--json`, because
+    # what has to have run is the renderer the leak test reads. Its reach is a different shape
+    # from guard's and heal's: brief is invoked with a task INTENT, so the decisions it names
+    # arrive from the keyword lookup in `evaluate_brief` over the indexed passages, not from
+    # drift. If that lookup ever stops matching this fixture's documents, brief renders
+    # "No conflicting or governing architectural decisions found" -- a marker-free string that
+    # would satisfy the leak assertion while proving nothing whatsoever.
+    brief = _render(capsys, governed, "brief", agent=True)
+    assert "No conflicting or governing architectural decisions found" not in brief, (
+        f"brief matched no decision, so its leak assertion passes vacuously:\n{brief}"
+    )
+    superseded_short = _git(repo, "rev-parse", "HEAD~1")[:8]
+    assert f"decision `{superseded_short}`" in brief, (
+        f"brief's agent rendering names no governing decision by sha, so the boundary it is "
+        f"asserted to hold was never exercised:\n{brief}"
+    )
 
 
 def test_the_route_the_agent_renderings_print_actually_works(capsys, governed) -> None:

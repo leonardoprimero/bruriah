@@ -48,7 +48,10 @@ class GuardViolation:
     """A violation of architectural governance."""
 
     file_path: str
-    severity: str  # "VETO" (blocking) or "WARNING" (advisory)
+    # "VETO" (blocking) or "WARNING" (advisory). `evaluate_guard` writes only those two, but
+    # this is an untyped `str` and a comment is not enforcement, so the agent rendering maps it
+    # through `agent_surface.KNOWN_SEVERITIES`.
+    severity: str
     decision_title: str
     decision_sha: str
     message: str
@@ -123,13 +126,20 @@ def _generate_agent_context(
     the successor's.
 
     What remains is a literal authored in this repository, a closed-vocabulary value
-    (severity, lineage relation), or a format-validated identifier (commit sha, repository
-    path). The last two are enforced by `agent_surface`, not assumed: every sha, path and
-    lineage state below is routed through it, so a malformed value renders as its placeholder
-    rather than being interpolated raw. The text is not unreachable -- `bruriah why` and
-    `git show` both return it -- it is simply not pre-injected. `format_guard_human` is
-    unchanged and still prints it: a person reading a terminal is not an
-    instruction-following agent.
+    (severity, lineage relation), or an identifier this repository format-validates (a commit
+    sha; a path checked for printability and code-span safety, which is all `printable_path`
+    claims). The last two are enforced by `agent_surface`, not assumed: every sha, path,
+    severity and lineage state below is routed through it, so a value outside the vocabulary or
+    the format renders as its placeholder rather than being interpolated raw. The text is not
+    unreachable -- `bruriah why` and `git show` both return it -- it is simply not
+    pre-injected. `format_guard_human` is unchanged and still prints it: a person reading a
+    terminal is not an instruction-following agent.
+
+    The route this prints is a shape (`bruriah why <file>`, `git show <sha>`) rather than a
+    filled-in command, so unlike `heal` there is no per-decision route line to withhold when an
+    identifier is rejected. `report_degradation` still says that a substitution happened, in
+    the rendering and once on stderr, because the raw value survives in the human and JSON
+    renderings and an operator who cannot see the disagreement cannot act on it.
 
     Pinned by `tests/test_agent_prompt_boundary.py`.
     """
@@ -143,7 +153,7 @@ def _generate_agent_context(
 
     if contracts:
         for c in contracts:
-            files_str = ", ".join(f"`{agent_surface.repo_path(f)}`" for f in c.governed_files)
+            files_str = ", ".join(f"`{agent_surface.printable_path(f)}`" for f in c.governed_files)
             lines.append(f"#### Decision `{agent_surface.commit_sha(c.decision_sha)}`")
             lines.append(f"- Governs: {files_str}")
             lines.append("")
@@ -160,13 +170,14 @@ def _generate_agent_context(
                 else ""
             )
             state = agent_surface.closed(v.lineage_state, agent_surface.KNOWN_LINEAGE_STATES)
+            severity = agent_surface.closed(v.severity, agent_surface.KNOWN_SEVERITIES)
             lines.append(
-                f"- [{v.severity}] `{agent_surface.repo_path(v.file_path)}` — governing decision "
+                f"- [{severity}] `{agent_surface.printable_path(v.file_path)}` — governing decision "
                 f"`{agent_surface.commit_sha(v.decision_sha)}` has lineage state {state}{succ}"
             )
         lines.append("")
 
-    return "\n".join(lines).strip()
+    return agent_surface.report_degradation("\n".join(lines).strip(), command="guard")
 
 
 def evaluate_guard(
