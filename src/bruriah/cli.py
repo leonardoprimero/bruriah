@@ -16,7 +16,7 @@ import mcp.server.stdio
 import yaml
 from fastembed import TextEmbedding
 
-from . import __version__, clients, gitcorpus, github_corpus, pdfcorpus
+from . import __version__, agent_surface, clients, gitcorpus, github_corpus, pdfcorpus
 from .github_read import ResponseCache as _GitHubResponseCache
 from ._cli.common import (
     DEFAULT_EMBEDDING_MODEL,
@@ -50,8 +50,14 @@ from .index import BuildConfig, BuildResult, Embedder, IndexLifecycleError, buil
 from .index_runner import EmbedderFactory, _default_embedder_factory, _embedding_fingerprint, run_index
 from .mcp_server import build_server
 from .platform import (
-    PlatformError, PlatformPaths, ensure_private_dirs, find_project_root, load_build_descriptor, load_deps,
-    project_scoped_paths, resolve_paths,
+    PlatformError,
+    PlatformPaths,
+    ensure_private_dirs,
+    find_project_root,
+    load_build_descriptor,
+    load_deps,
+    project_scoped_paths,
+    resolve_paths,
 )
 from .aliases import AliasError, install_aliases, uninstall_aliases
 from .hooks import HookError, install_hook, uninstall_hook
@@ -199,7 +205,6 @@ def _index_summary_line(result: BuildResult) -> str:
     )
 
 
-
 def run_init(paths: PlatformPaths) -> Path:
     """Create private dirs + a default `config.json` (idempotent); registers no client/legacy config."""
     ensure_private_dirs(paths)
@@ -229,7 +234,11 @@ def _suggested_question(corpus_root: Path) -> str | None:
 
 
 def _run_init_repo_bootstrap(
-    paths: PlatformPaths, repo: Path, *, limit: int | None = None, model_name: str,
+    paths: PlatformPaths,
+    repo: Path,
+    *,
+    limit: int | None = None,
+    model_name: str,
     embedder_factory: EmbedderFactory = _default_embedder_factory,
     query_prefix: str | None = None,
     passage_prefix: str | None = None,
@@ -267,15 +276,22 @@ def _run_init_repo_bootstrap(
                 file=sys.stderr,
             )
         index_result = run_index(
-            paths, corpus_root.resolve(), policy_path.resolve(), model_name=model_name,
+            paths,
+            corpus_root.resolve(),
+            policy_path.resolve(),
+            model_name=model_name,
             embedder_factory=embedder_factory,
-            query_prefix=query_prefix, passage_prefix=passage_prefix,
+            query_prefix=query_prefix,
+            passage_prefix=passage_prefix,
         )
     else:
         index_result = None
     return {
-        "policy": policy_path, "corpus_root": corpus_root, "corpus": corpus_result,
-        "index": index_result, "question": _suggested_question(corpus_root),
+        "policy": policy_path,
+        "corpus_root": corpus_root,
+        "corpus": corpus_result,
+        "index": index_result,
+        "question": _suggested_question(corpus_root),
     }
 
 
@@ -286,16 +302,25 @@ def _build_launch_manifest(paths: PlatformPaths) -> clients.LaunchManifest:
     return clients.LaunchManifest(
         command=sys.executable,
         args=(
-            "-m", "bruriah.cli", "serve",
-            "--config-dir", str(paths.config_dir), "--data-dir", str(paths.data_dir),
-            "--cache-dir", str(paths.cache_dir), "--log-dir", str(paths.log_dir),
+            "-m",
+            "bruriah.cli",
+            "serve",
+            "--config-dir",
+            str(paths.config_dir),
+            "--data-dir",
+            str(paths.data_dir),
+            "--cache-dir",
+            str(paths.cache_dir),
+            "--log-dir",
+            str(paths.log_dir),
         ),
         server_name="bruriah",
     )
 
 
 def run_client_configs(
-    paths: PlatformPaths, manifest: clients.LaunchManifest,
+    paths: PlatformPaths,
+    manifest: clients.LaunchManifest,
 ) -> dict[clients.ClientId, Path]:
     """Render and persist all six client configs under a private `clients/` subdir of
     `config_dir`; deterministic content and `ClientId` declaration order (`clients.render_all`).
@@ -316,7 +341,9 @@ def run_client_configs(
 
 
 def build_serve_deps(
-    paths: PlatformPaths, *, embedder_factory: EmbedderFactory = _default_embedder_factory,
+    paths: PlatformPaths,
+    *,
+    embedder_factory: EmbedderFactory = _default_embedder_factory,
     reranker_model: str | None = None,
     reranker_factory: RerankerFactory = _default_reranker_factory,
     repo: Path | None = None,
@@ -344,10 +371,7 @@ def build_serve_deps(
     try:
         descriptor = load_build_descriptor(paths)
         embed, fingerprint, dimensions = embedder_factory(descriptor.embedding_model)
-        if (
-            fingerprint != descriptor.embedding_fingerprint
-            or dimensions != descriptor.embedding_dimensions
-        ):
+        if fingerprint != descriptor.embedding_fingerprint or dimensions != descriptor.embedding_dimensions:
             raise CliError("embedding_model_mismatch")
 
         def embed_query(text: str) -> bytes:
@@ -365,9 +389,6 @@ async def _serve_stdio(deps: ServiceDeps) -> None:
         await server.run(read_stream, write_stream, server.create_initialization_options())
 
 
-
-
-
 def _cmd_index_prune(args: argparse.Namespace) -> int:
     paths = _resolve_paths(args)
     try:
@@ -379,11 +400,10 @@ def _cmd_index_prune(args: argparse.Namespace) -> int:
     return 0
 
 
-
-
-
 def _cmd_init(
-    args: argparse.Namespace, *, embedder_factory: EmbedderFactory = _default_embedder_factory,
+    args: argparse.Namespace,
+    *,
+    embedder_factory: EmbedderFactory = _default_embedder_factory,
 ) -> int:
     paths = _resolve_paths(args)
     repo_root = args.repo.resolve() if args.repo is not None else None
@@ -414,7 +434,10 @@ def _cmd_init(
         assert repo_root is not None
         print(f"Reading the history of {args.repo}...", file=sys.stderr)
         bootstrap = _run_init_repo_bootstrap(
-            paths, args.repo, limit=args.limit, model_name=args.model,
+            paths,
+            args.repo,
+            limit=args.limit,
+            model_name=args.model,
             embedder_factory=embedder_factory,
             query_prefix=getattr(args, "query_prefix", None),
             passage_prefix=getattr(args, "passage_prefix", None),
@@ -470,9 +493,7 @@ def _cmd_init(
             for name in ("data_dir", "config_dir", "cache_dir", "log_dir")
             if getattr(args, name, None) is not None
         )
-        command = (
-            f'bruriah ask "{bootstrap["question"]}"' + (f" {directories}" if directories else "")
-        )
+        command = f'bruriah ask "{bootstrap["question"]}"' + (f" {directories}" if directories else "")
         print(
             "\nThe index is active. Ask it something it is known to answer -- this question is "
             f"the newest decision\nin your own history:\n\n  {command}\n",
@@ -526,16 +547,19 @@ def _cmd_corpus(args: argparse.Namespace) -> int:
 
     if args.pdf is not None:
         result_pdf = pdfcorpus.build(args.pdf, args.out)
-        print(json.dumps(
-            {
-                "documents": result_pdf.documents,
-                "empty_pages_skipped": result_pdf.skipped_empty_pages,
-                "files_examined": result_pdf.files_examined,
-                "out": str(args.out),
-                "pages_examined": result_pdf.pages_examined,
-            },
-            indent=2, sort_keys=True,
-        ))
+        print(
+            json.dumps(
+                {
+                    "documents": result_pdf.documents,
+                    "empty_pages_skipped": result_pdf.skipped_empty_pages,
+                    "files_examined": result_pdf.files_examined,
+                    "out": str(args.out),
+                    "pages_examined": result_pdf.pages_examined,
+                },
+                indent=2,
+                sort_keys=True,
+            )
+        )
         _report_pdf_coverage(result_pdf)
         return 0
 
@@ -544,7 +568,9 @@ def _cmd_corpus(args: argparse.Namespace) -> int:
         raise CliError("not_a_git_repository")
     result = gitcorpus.build(repo, args.out, args.limit, revision=args.revision)
     payload: dict[str, Any] = {
-        "documents": result.written, "commits_examined": result.examined, "out": str(args.out),
+        "documents": result.written,
+        "commits_examined": result.examined,
+        "out": str(args.out),
         "revision": args.revision,
     }
     # `--github` is opt-in and off by default: with it absent (the common case, and every build
@@ -578,8 +604,7 @@ def _cmd_corpus_github(args: argparse.Namespace, repo: Path) -> dict[str, Any]:
     token = os.environ.get(args.github_token_env)
     if not token:
         print(
-            f"warning: {args.github_token_env} is not set; unauthenticated GitHub requests are "
-            "limited to 60/hour.",
+            f"warning: {args.github_token_env} is not set; unauthenticated GitHub requests are limited to 60/hour.",
             file=sys.stderr,
         )
 
@@ -599,8 +624,13 @@ def _cmd_corpus_github(args: argparse.Namespace, repo: Path) -> dict[str, Any]:
     commits = gitcorpus.walk_commits(repo, args.limit, revision=args.revision)
 
     github_result = _build_github_documents_reporting(
-        commits, args.out, repo=repo_slug, cache=_GitHubResponseCache(cache_dir),
-        revision=args.revision, token=token, network_enabled=paths.network_enabled,
+        commits,
+        args.out,
+        repo=repo_slug,
+        cache=_GitHubResponseCache(cache_dir),
+        revision=args.revision,
+        token=token,
+        network_enabled=paths.network_enabled,
     )
     return {
         "repo": repo_slug,
@@ -638,14 +668,24 @@ def _build_github_documents_reporting(
     `GitHubError`s -- passes through unchanged. With the switch on, nothing is captured at all."""
     if network_enabled:
         return github_corpus.build_documents(
-            commits, out, repo=repo, cache=cache, revision=revision, token=token,
+            commits,
+            out,
+            repo=repo,
+            cache=cache,
+            revision=revision,
+            token=token,
             network_enabled=network_enabled,
         )
 
     captured = io.StringIO()
     with contextlib.redirect_stderr(captured):
         result = github_corpus.build_documents(
-            commits, out, repo=repo, cache=cache, revision=revision, token=token,
+            commits,
+            out,
+            repo=repo,
+            cache=cache,
+            revision=revision,
+            token=token,
             network_enabled=network_enabled,
         )
 
@@ -665,7 +705,9 @@ def _build_github_documents_reporting(
 
 
 def _cmd_index(
-    args: argparse.Namespace, *, embedder_factory: EmbedderFactory = _default_embedder_factory,
+    args: argparse.Namespace,
+    *,
+    embedder_factory: EmbedderFactory = _default_embedder_factory,
 ) -> int:
     paths = _resolve_paths(args)
     if not args.corpus_root.is_dir():
@@ -693,7 +735,10 @@ def _cmd_index(
         )
     try:
         result = run_index(
-            paths, corpus_root, policy, model_name=args.model,
+            paths,
+            corpus_root,
+            policy,
+            model_name=args.model,
             embedder_factory=embedder_factory,
             query_prefix=getattr(args, "query_prefix", None),
             passage_prefix=getattr(args, "passage_prefix", None),
@@ -702,7 +747,9 @@ def _cmd_index(
         # yaml.YAMLError (a malformed --policy that exists) is neither ValueError nor OSError.
         raise CliError(f"index_failed:{getattr(error, 'code', type(error).__name__)}") from error
     summary = {
-        "build_id": result.build_id, "documents": result.documents, "passages": result.passages,
+        "build_id": result.build_id,
+        "documents": result.documents,
+        "passages": result.passages,
         # Reuse is the difference between a reindex that costs seconds and one that costs the whole
         # corpus again, and it is invisible from the outside -- the resulting snapshot is identical
         # either way. Reporting it is how the user learns that the second `index` was cheap, and how
@@ -730,7 +777,9 @@ def _cmd_serve(args: argparse.Namespace) -> int:
 
 
 def _cmd_ask(
-    args: argparse.Namespace, *, embedder_factory: EmbedderFactory = _default_embedder_factory,
+    args: argparse.Namespace,
+    *,
+    embedder_factory: EmbedderFactory = _default_embedder_factory,
     reranker_factory: RerankerFactory = _default_reranker_factory,
 ) -> int:
     """Run one investigation from the terminal and show what came back.
@@ -779,14 +828,17 @@ def _cmd_ask(
             if claim.get("state") == "conflicted":
                 print(f"  claim (conflicted): {claim['text']}")
         if payload["status"] == "abstained":
-            print("\n  No approved policy covers this domain, so nothing is returned rather than the\n"
-                  "  nearest-looking passage. That is the designed answer, not a failure.\n")
+            print(
+                "\n  No approved policy covers this domain, so nothing is returned rather than the\n"
+                "  nearest-looking passage. That is the designed answer, not a failure.\n"
+            )
             return 0
 
         # When a reference was named, list only it: relisting eight results above the text you
         # asked for buries the thing you asked for.
-        shown = [(n, item) for n, item in enumerate(local, start=1)
-                 if not args.read or n in args.read][: args.limit if not args.read else None]
+        shown = [(n, item) for n, item in enumerate(local, start=1) if not args.read or n in args.read][
+            : args.limit if not args.read else None
+        ]
         for position, item in shown:
             print(f"\n  [{position}] {item['citation_locator']}")
             print(f"      authority: {item['authority']} ({item['authority_rationale']})")
@@ -832,8 +884,10 @@ def _cmd_ask(
             if getattr(args, name, None) is not None
         )
         command = f'bruriah ask "{args.question}" --read 1' + (f" {directories}" if directories else "")
-        print("\n  Nothing above is the document's text -- only references to it. That is the whole\n"
-              f"  design: read one explicitly with\n\n    {command}\n")
+        print(
+            "\n  Nothing above is the document's text -- only references to it. That is the whole\n"
+            f"  design: read one explicitly with\n\n    {command}\n"
+        )
         return 0
     finally:
         deps.snapshot.database.close()
@@ -921,6 +975,7 @@ def _cmd_review(args: argparse.Namespace) -> int:
         changed_lines = get_changed_lines(repo, revision)
         try:
             from .platform import open_snapshot
+
             snapshot = open_snapshot(paths)
             database = snapshot.database
         except PlatformError:
@@ -982,11 +1037,7 @@ def _cmd_lens(args: argparse.Namespace) -> int:
     if repo is None:
         raise CliError("not_a_git_repository")
     target_path = Path(args.file)
-    rel_path = (
-        str(target_path.relative_to(repo))
-        if target_path.is_absolute()
-        else str(target_path)
-    )
+    rel_path = str(target_path.relative_to(repo)) if target_path.is_absolute() else str(target_path)
     try:
         result = run_lens(paths, repo, rel_path)
     except LensError as error:
@@ -1060,6 +1111,20 @@ def _cmd_impact(args: argparse.Namespace) -> int:
     return 0
 
 
+def _warn_if_agent_rendering_degraded(command: str, degraded: bool) -> None:
+    """Tell the operator, once, that the `--agent` rendering they just printed was degraded.
+
+    Here rather than in `agent_surface`, because this is the only layer that knows which output
+    format was selected. The renderers run on every `guard`, `brief` and `heal` evaluation
+    whatever the operator asked for, so warning from inside them put a line about `--agent` on
+    the stderr of plain runs and `--json` runs that never passed it -- unexpected stderr on a
+    successful exit, which a CI wrapper reads as noise at best and as failure at worst, carrying
+    advice the operator had already taken.
+    """
+    if degraded:
+        print(agent_surface.degradation_warning(command), file=sys.stderr)
+
+
 def _cmd_guard(args: argparse.Namespace) -> int:
     paths = _resolve_paths(args)
     repo = find_project_root(args.repo.resolve())
@@ -1080,6 +1145,7 @@ def _cmd_guard(args: argparse.Namespace) -> int:
 
     if args.agent:
         print(result.agent_context)
+        _warn_if_agent_rendering_degraded("guard", result.agent_rendering_degraded)
     elif args.json:
         print(format_guard_json(result))
     else:
@@ -1108,6 +1174,7 @@ def _cmd_brief(args: argparse.Namespace) -> int:
 
     if args.agent:
         print(result.agent_context)
+        _warn_if_agent_rendering_degraded("brief", result.agent_rendering_degraded)
     elif args.json:
         print(format_brief_json(result))
     else:
@@ -1136,7 +1203,9 @@ def _cmd_decide(args: argparse.Namespace) -> int:
             if not solution:
                 solution = input("Decision & Solution: ").strip()
         else:
-            raise CliError("missing_required_fields: --title, --problem, and --solution are required in non-interactive mode.")
+            raise CliError(
+                "missing_required_fields: --title, --problem, and --solution are required in non-interactive mode."
+            )
 
     # Parse alternatives from Name:Tradeoff:Reason
     alternatives: list[Alternative] = []
@@ -1197,6 +1266,7 @@ def _cmd_heal(args: argparse.Namespace) -> int:
 
     if args.agent:
         print(format_heal_agent(result))
+        _warn_if_agent_rendering_degraded("heal", result.agent_rendering_degraded)
     elif args.json:
         print(format_heal_json(result))
     else:
@@ -1309,7 +1379,9 @@ def _cmd_alias(args: argparse.Namespace) -> int:
 
 
 def _cmd_watch(
-    args: argparse.Namespace, *, embedder_factory: EmbedderFactory = _default_embedder_factory,
+    args: argparse.Namespace,
+    *,
+    embedder_factory: EmbedderFactory = _default_embedder_factory,
 ) -> int:
     from . import watch
 

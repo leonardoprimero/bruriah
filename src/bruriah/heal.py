@@ -53,7 +53,12 @@ class RemediationBlueprint:
     # quoting `violation_message`, which states the same fact inside a sentence that also
     # quotes the successor decision's subject. The vocabulary is closed in `agent_surface`,
     # which is where the agent rendering maps it through `KNOWN_LINEAGE_STATES`.
-    lineage_state: str = ""
+    #
+    # Required, with no default, for the reason spelled out at `GuardViolation.lineage_state`:
+    # `= ""` is outside the closed vocabulary, so a forgotten assignment rendered `UNKNOWN`,
+    # collected `DEGRADED_NOTICE` and claimed a value could not be validated -- a fabricated
+    # security warning that looked exactly like a real one. Now it is a `TypeError`.
+    lineage_state: str
 
 
 @dataclass(frozen=True)
@@ -65,6 +70,10 @@ class HealingResult:
     inspected_files: tuple[str, ...]
     blueprints: tuple[RemediationBlueprint, ...]
     agent_prompt: str
+    # Whether `agent_prompt` carries a placeholder in place of a rejected identifier. See
+    # `GuardResult.agent_rendering_degraded`: the warning belongs to the CLI, which knows
+    # whether `--agent` was selected, not to a renderer that runs on every evaluation.
+    agent_rendering_degraded: bool = False
 
 
 def _synthesize_steps(
@@ -117,7 +126,7 @@ def _synthesize_steps(
 def _generate_agent_prompt(
     target: str,
     blueprints: Sequence[RemediationBlueprint],
-) -> str:
+) -> tuple[str, bool]:
     """Render the agent-facing remediation blueprint, naming decisions by reference only.
 
     Everything in this string reads as instruction to whatever consumes it -- it is a
@@ -142,14 +151,30 @@ def _generate_agent_prompt(
     `format_heal_human` and `format_heal_json` are unchanged and still carry all of it: a
     person reading a terminal is not an instruction-following agent.
 
-    **When an identifier is rejected, the route is withheld rather than printed.** This
-    renderer used to emit ``run `bruriah why <unprintable path>` or `git show UNKNOWN` `` --
-    a literal command it invited an agent to run, naming a path that is not one and a revision
-    git answers with `fatal: ambiguous argument`. Withholding the prose is only honest while
-    the route to it works, so where it cannot the rendering says the decision could not be
-    identified safely and points at the human rendering, which still has the raw value.
-    `report_degradation` says the same thing once on stderr, so the substitution is visible to
-    the operator rather than only to whatever reads the prompt.
+    **The route is a shape, not a filled-in command, and getting there took two tries.**
+    Originally this renderer emitted ``run `bruriah why <unprintable path>` or
+    `git show UNKNOWN` `` when an identifier was rejected -- a literal command naming a path
+    that is not one and a revision git answers with `fatal: ambiguous argument`. The obvious
+    repair was to print the command only when both halves validate, and that repair was worse
+    than the defect: it made a filled-in ``run `bruriah why {path}` `` the SUCCESS path, with a
+    git-derived path interpolated into it after nothing but `printable_path` -- which by its
+    own contract accepts `;`, `&&`, `$(...)` and spaces, and only promises the value cannot
+    break out of the code span around it. A repository can commit a file whose name carries any
+    of those, and the result was a shell-shaped string an agent is told to run.
+
+    So the route is now the un-filled shape `bruriah why <file>` / `git show <sha>`, stated once
+    in the header, exactly as `guard` and `brief` have always stated it. The path and the sha
+    appear only where they already appeared: as quoted identifiers on their own structured
+    lines. An agent has both and can substitute them itself under whatever quoting its own
+    shell needs. There is no per-decision route line left to withhold on rejection, which is
+    also why the branch that used to do so is gone -- `annotate_degradation` marks the
+    rendering and `cli.py` tells the operator, and that is the whole of it.
+
+    Not tightening `printable_path` instead is deliberate. Escaping or filtering would make the
+    filled-in command safe for one shell and leave the real question -- why is this renderer
+    building a command string at all -- unanswered, and `printable_path` is shared with every
+    other path in every other rendering, where rejecting spaces and `&` would reject values
+    that are correct.
 
     The recipe is rendered from `bp.refactoring_steps` rather than restated here, so a
     maintainer editing the step wording in `_synthesize_steps` sees the edit reach `--agent`
@@ -159,14 +184,15 @@ def _generate_agent_prompt(
     Pinned by `tests/test_agent_prompt_boundary.py`.
     """
     if not blueprints:
-        return "No architectural violations detected. The codebase complies with active governance."
+        return "No architectural violations detected. The codebase complies with active governance.", False
 
     lines: list[str] = [
         "# 🛠️ Bruriah Architectural Remediation Blueprint",
         f"**Target**: `{agent_surface.printable_path(target)}`",
         "**Instruction for Agent**: Do NOT apply quick hacks, monkey-patches, or bypass interfaces.",
         "Refactor the code according to the canonical project patterns. The governing decisions",
-        "below are named by reference, not quoted: read one before changing what it governs.\n",
+        "below are named by reference, not quoted: run `bruriah why <file>` or `git show <sha>`",
+        "to read one before changing what it governs.\n",
     ]
 
     for i, bp in enumerate(blueprints, start=1):
@@ -176,21 +202,6 @@ def _generate_agent_prompt(
         lines.append(f"## Issue {i}: Violation in `{path}`")
         lines.append(f"- **Governing Decision**: `{sha}`")
         lines.append(f"- **Lineage State**: {state}")
-        # The route is printed only when both halves of it are identifiers. `bruriah why` takes
-        # the path and `git show` takes the sha, so a placeholder in either makes the printed
-        # command fail for the agent told to run it -- and a command that cannot work is worse
-        # than no command, because it reads as though the prose were reachable.
-        if sha == agent_surface.UNKNOWN or path == agent_surface.UNPRINTABLE_PATH:
-            lines.append(
-                "- **No route printed**: this decision could not be identified safely, so no "
-                "command to read it is given here. Run `bruriah heal` without `--agent` for the "
-                "raw values."
-            )
-        else:
-            lines.append(
-                f"- **Read the governing decision before changing what it governs**: run `bruriah why {path}` "
-                f"or `git show {sha}`."
-            )
         lines.append("- **Actionable Refactoring Recipe**:")
         # `step.action` only, never `step.detail`. Every action `_synthesize_steps` builds is a
         # literal authored in this repository, but every detail interpolates `message` and
@@ -221,7 +232,7 @@ def _generate_agent_prompt(
         "After refactoring, ensure that all unit tests pass and the code strictly adheres to the "
         "governing decisions named above."
     )
-    return agent_surface.report_degradation("\n".join(lines), command="heal")
+    return agent_surface.annotate_degradation("\n".join(lines))
 
 
 def evaluate_heal(
@@ -286,7 +297,7 @@ def evaluate_heal(
             )
         )
 
-    agent_prompt = _generate_agent_prompt(resolved_target, blueprints)
+    agent_prompt, agent_degraded = _generate_agent_prompt(resolved_target, blueprints)
 
     return HealingResult(
         target=resolved_target,
@@ -294,6 +305,7 @@ def evaluate_heal(
         inspected_files=guard_result.inspected_files,
         blueprints=tuple(blueprints),
         agent_prompt=agent_prompt,
+        agent_rendering_degraded=agent_degraded,
     )
 
 

@@ -19,6 +19,13 @@ Two things this file is deliberately built to avoid:
   emptied, or if the commands stopped finding anything. So the human renderings are
   asserted to still carry the same text: they are read by a person, and a person is not
   an instruction-following agent.
+- **Proving the markers are gone without proving the rendering is right.** Every assertion
+  below about a marker is satisfied by `UNKNOWN`, because a placeholder contains no marker.
+  So a closed vocabulary that does not match its producer -- the badge checked against
+  statuses no module writes, say -- would render `UNKNOWN` and a degradation notice on every
+  real run, and every leak test here would still pass.
+  `test_the_well_formed_fixture_renders_with_no_placeholder_at_all` is the counter-assertion,
+  and `tests/test_agent_surface.py` pins each vocabulary against its producer's source.
 - **Mistaking a path that never ran for a path that held.** `heal` short-circuits to
   "No architectural violations detected" unless `guard` reports a violation, and `guard`
   only does when drift finds a STALE governing decision. Two earlier probes of this defect
@@ -39,7 +46,7 @@ from pathlib import Path
 
 import pytest
 
-from bruriah import cli
+from bruriah import agent_surface, cli
 from test_cli import _fake_embedder_factory
 
 # One marker per repository-authored surface, so a failure names the channel that leaked.
@@ -220,6 +227,22 @@ def _render(capsys, governed, command: str, *, agent: bool) -> str:
     )
 
 
+def _render_brief_over_a_file_target(capsys, governed) -> str:
+    """`brief --agent` reached through `--targets`, which is a different channel entirely.
+
+    `_render` invokes brief with a task INTENT, so its constraints come from the keyword lookup
+    in `evaluate_brief`, which hard-codes `status="active"`. The file-target path goes through
+    `analyze_impact`, which writes the lineage RELATION of the first alert into `status` -- so
+    a stale decision arrives at the badge as `supersedes`. That is the only way to exercise the
+    badge against a non-`active` value, and it is the path on which the vocabulary was wrong.
+    """
+    repo, argv = governed
+    return _run(
+        capsys,
+        ["brief", "refactor storage", "--targets", "storage.py", *argv, "--repo", str(repo), "--agent"],
+    )
+
+
 def test_the_fixture_reaches_every_agent_renderer(capsys, governed) -> None:
     """Guard against the false negative that makes every other test in this file vacuous.
 
@@ -294,6 +317,111 @@ def test_the_route_the_agent_renderings_print_actually_works(capsys, governed) -
         "`bruriah why storage.py` succeeded without naming the governing decision, so the "
         f"route the agent renderings print returns nothing it withheld:\n{why}"
     )
+
+
+@pytest.mark.parametrize("command", ["brief", "guard", "heal"])
+def test_the_well_formed_fixture_renders_with_no_placeholder_at_all(capsys, governed, command) -> None:
+    """Nothing in this fixture is malformed, so nothing in its rendering may be a placeholder.
+
+    This is the assertion whose absence let the same class of defect survive four rounds of
+    review, one level deeper each time. Every other test in this module asks whether a marker
+    leaked, and `UNKNOWN` carries no marker -- so a closed vocabulary that has drifted from its
+    producer degrades every single real run, prints a notice telling an agent the decision
+    could not be identified safely, warns the operator that a value "could not be validated as
+    an identifier", and passes every leak test here without a murmur.
+
+    That was not hypothetical. `KNOWN_DECISION_STATUSES` was `{active, superseded, deprecated,
+    amended}` while `analyze_impact` writes `active` or a lineage relation, so three of its
+    four members matched no producer and every stale decision reaching `brief --agent` through
+    a file target rendered `[UNKNOWN]` with the full degradation apparatus behind it. The
+    fixture here reached brief by intent, where the status is hard-coded `active`, so it never
+    touched the broken branch -- see `test_the_brief_badge_is_clean_on_the_file_target_path`,
+    which does.
+    """
+    rendering = _render(capsys, governed, command, agent=True)
+
+    assert agent_surface.DEGRADED_NOTICE not in rendering, (
+        f"`bruriah {command} --agent` reported degradation on a fixture with nothing malformed "
+        f"in it; a vocabulary or an identifier format has drifted from its producer:\n{rendering}"
+    )
+    for placeholder in (agent_surface.UNKNOWN, agent_surface.UNPRINTABLE_PATH, agent_surface.UNRECOGNISED_ACTION):
+        assert placeholder not in rendering, (
+            f"`bruriah {command} --agent` substituted {placeholder!r} for a value this fixture "
+            f"supplies correctly:\n{rendering}"
+        )
+
+
+@pytest.mark.parametrize("command", ["brief", "guard", "heal"])
+def test_a_clean_agent_run_writes_nothing_to_stderr(capsys, governed, command) -> None:
+    """The operator-facing half of the assertion above, at the CLI boundary.
+
+    `_run` already fails on a non-zero exit, but a successful command that prints a warning is
+    exactly what a CI wrapper reads as trouble. Paired with the `--json` and plain-run cases in
+    `tests/test_cli.py`, this says the warning appears when something really was substituted
+    and at no other time.
+    """
+    repo, argv = governed
+    target = "refactor storage" if command == "brief" else "storage.py"
+    capsys.readouterr()
+
+    exit_code = cli.bruriah_main([command, target, *argv, "--repo", str(repo), "--agent"])
+    captured = capsys.readouterr()
+
+    assert exit_code == 0, captured.err
+    assert captured.err == "", (
+        f"`bruriah {command} --agent` warned about a degraded rendering on a well-formed fixture:\n{captured.err}"
+    )
+
+
+def test_the_brief_badge_is_clean_on_the_file_target_path(capsys, governed) -> None:
+    """The producer path the intent-driven fixture never reaches, and where the badge was wrong.
+
+    Through `--targets`, brief's constraints come from `analyze_impact`, which writes the
+    lineage relation of the first alert into `DecisionImpact.status`. This fixture's decision
+    is superseded, so the badge receives `supersedes` -- a value the vocabulary it was checked
+    against did not contain. The rendering was `[UNKNOWN]` plus `DEGRADED_NOTICE` plus a stderr
+    line, on a corpus with nothing wrong in it.
+
+    Asserted on the value rather than merely on the absence of a placeholder, so this fails if
+    the badge ever goes quiet in some other way.
+    """
+    rendering = _render_brief_over_a_file_target(capsys, governed)
+
+    assert "[SUPERSEDES]" in rendering, (
+        f"brief's agent rendering does not name the lineage state of a stale governing "
+        f"decision reached through a file target:\n{rendering}"
+    )
+    assert agent_surface.UNKNOWN not in rendering, rendering
+    assert agent_surface.DEGRADED_NOTICE not in rendering, rendering
+    leaked = [marker for marker in MARKERS if marker in rendering]
+    assert not leaked, f"brief leaked {leaked} on the file-target path:\n{rendering}"
+
+
+def test_no_agent_rendering_prints_a_command_with_a_value_substituted_into_it(capsys, governed) -> None:
+    """Every command an agent is told to run is a shape, in all three renderings.
+
+    A round of this work filled `heal`'s route line in -- ``run `bruriah why {path}` `` -- to
+    repair a route that could not work when an identifier was rejected. That turned a
+    git-derived path into a literal command inside an instruction block, after nothing but
+    `printable_path`, which accepts `;`, `&&`, `$(...)` and spaces by documented contract. The
+    repair was reverted rather than hardened: an agent has the path and the sha from the
+    structured lines and can substitute them under its own shell's quoting.
+
+    `tests/test_heal.py` proves the metacharacter cases at the renderer. This proves the
+    property holds end to end for all three commands, so a future filled-in route anywhere
+    fails here too.
+    """
+    for command in ("brief", "guard", "heal"):
+        rendering = _render(capsys, governed, command, agent=True)
+        for line in rendering.splitlines():
+            for shell_command in ("bruriah why", "git show", "bruriah guard", "bruriah heal", "bruriah brief"):
+                if shell_command not in line:
+                    continue
+                remainder = line.split(shell_command, 1)[1].lstrip()
+                assert remainder.startswith(("<", "`", "—", "to read it")) or remainder == "", (
+                    f"`bruriah {command} --agent` printed a filled-in command; the route must "
+                    f"be an un-filled shape:\n{line}"
+                )
 
 
 @pytest.mark.parametrize("command", ["brief", "guard", "heal"])

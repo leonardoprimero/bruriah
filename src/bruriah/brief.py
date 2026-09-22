@@ -39,39 +39,23 @@ class SupersedeTemplate:
     proposed_invariant: str = "<describe the new invariant or replacement architecture>"
     rationale: str = "<technical reasoning justifying why this approach is superior now>"
 
-    def to_markdown(self, *, name_subject: bool = True) -> str:
-        """Render the proposal template; `name_subject=False` identifies the target by sha only.
+    def to_markdown(self) -> str:
+        """Render the proposal template for the human and JSON surfaces, subject and all.
 
-        The two branches are two different surfaces and are treated differently on purpose.
-        `name_subject=True` feeds `supersede_protocol_instructions`, which reaches the human
-        and JSON renderings: those are out of scope by instruction and keep printing the
-        subject and the raw sha, because a person reading a terminal is not an
-        instruction-following agent.
+        This is a human-surface renderer and only that. It used to take `name_subject`, whose
+        `False` branch produced the agent-context form, and the default was `True` -- the
+        subject-bearing branch -- on a method both surfaces call. A maintainer who reached for
+        the obvious call got the leaking one, and no unit test on the agent renderer would have
+        caught it, because those tests passed the instructions in as literal strings.
 
-        `name_subject=False` is rendered ONLY into the agent context, and it was the bypass in
-        the whole enforcement: it interpolated `self.target_sha[:8]` raw into a markdown code
-        span while the sibling `decision` line in `_generate_agent_context` routed the same
-        value through `agent_surface`, and the sha arrives from an indexed document's `commit:`
-        frontmatter. Eight characters is room enough for a backtick that closes the span and
-        leaves the rest reading as prose. It now goes through `short_commit_sha`, which
-        validates the whole value BEFORE truncating it -- see that function for why the order
-        matters -- and when the value is not a sha the "run `git show`" route is withheld
-        rather than printed as a command that cannot work.
+        The agent form now lives in `_generate_agent_context`, built there from the constraints
+        that renderer already holds. This one cannot be handed to the agent surface at all, so
+        it keeps doing exactly what it always did -- raw sha, subject named -- because a person
+        reading a terminal is not an instruction-following agent.
         """
-        if name_subject:
-            target = f"{self.target_subject} (`{self.target_sha[:8]}`)"
-        else:
-            sha = agent_surface.short_commit_sha(self.target_sha)
-            target = (
-                f"`{agent_surface.UNKNOWN}` — this decision could not be identified safely, so no "
-                "command to read it is printed here; run `bruriah brief` without `--agent` for "
-                "the raw value"
-                if sha == agent_surface.UNKNOWN
-                else f"`{sha}` (run `git show` to read it)"
-            )
         return (
             "#### Architectural Supersede Proposal\n"
-            f"- **Target Decision**: {target}\n"
+            f"- **Target Decision**: {self.target_subject} (`{self.target_sha[:8]}`)\n"
             f"- **Changed Premise**: {self.changed_premise}\n"
             f"- **Proposed Invariant**: {self.proposed_invariant}\n"
             f"- **Technical Rationale**: {self.rationale}\n"
@@ -87,7 +71,11 @@ class GoverningConstraint:
     subject: str
     author: str
     date: str
-    status: str  # "active", "superseded", "deprecates", "amends"
+    # "active", or the lineage relation of the first alert: "supersedes", "deprecates" or
+    # "amends". Copied from `impact.DecisionImpact.status`, whose producer is the authority --
+    # this is NOT the `status:` frontmatter key. `agent_surface.KNOWN_CONSTRAINT_STATUSES` is
+    # the closed set the agent badge checks against, pinned to this producer by a test.
+    status: str
     governed_files: tuple[str, ...]
     directives: tuple[str, ...]
     active_successor_title: str | None = None
@@ -107,6 +95,10 @@ class ArchitecturalBrief:
     recommendations: tuple[str, ...]
     supersede_protocol_instructions: str
     agent_context: str
+    # Whether `agent_context` carries a placeholder in place of a rejected identifier. See
+    # `GuardResult.agent_rendering_degraded`: the warning belongs to the CLI, which knows
+    # whether `--agent` was selected, not to a renderer that runs on every evaluation.
+    agent_rendering_degraded: bool = False
 
 
 def _extract_directives(subject: str, sha: str, body: str) -> tuple[str, ...]:
@@ -135,34 +127,87 @@ def _extract_directives(subject: str, sha: str, body: str) -> tuple[str, ...]:
     return tuple(directives)
 
 
-def _generate_supersede_instructions(
-    constraints: Sequence[GoverningConstraint],
-    *,
-    name_subject: bool = True,
-) -> str:
-    """Generate the formal Supersede Protocol instructions for agents and devs."""
-    lines: list[str] = [
-        "### Supersede Protocol Directive (Architectural Governance)",
-        "Decisions in this repository are binding architectural contracts under their documented premises.",
-        "If current requirements, library updates, or modern tooling make an existing invariant obsolete,",
-        "**DO NOT silently violate it**. Instead, declare an explicit Supersede Proposal before making changes:",
-        "",
-    ]
+# The preamble both supersede blocks open with. Shared because it is the same instruction to
+# both audiences and it is a literal authored here; only the target line differs between them.
+_SUPERSEDE_PREAMBLE: tuple[str, ...] = (
+    "### Supersede Protocol Directive (Architectural Governance)",
+    "Decisions in this repository are binding architectural contracts under their documented premises.",
+    "If current requirements, library updates, or modern tooling make an existing invariant obsolete,",
+    "**DO NOT silently violate it**. Instead, declare an explicit Supersede Proposal before making changes:",
+    "",
+)
+
+# The proposal skeleton printed when there is no constraint to name. Every field is a
+# placeholder authored here, so both surfaces print it unchanged.
+_SUPERSEDE_BLANK_PROPOSAL = (
+    "#### Architectural Supersede Proposal\n"
+    "- **Target Decision**: <subject> (`<sha>`)\n"
+    "- **Changed Premise**: <explain why the past assumption no longer holds>\n"
+    "- **Proposed Invariant**: <describe replacement invariant or design>\n"
+    "- **Technical Rationale**: <benchmark, version update, or architectural reasoning>\n"
+)
+
+
+def _generate_supersede_instructions(constraints: Sequence[GoverningConstraint]) -> str:
+    """Generate the Supersede Protocol instructions for the human and JSON surfaces.
+
+    Human-surface only, and the signature is what says so. It took `name_subject`, defaulting
+    to the subject-bearing branch, and `evaluate_brief` called it twice -- once for each
+    surface, distinguished by a keyword argument that was easy to drop. The agent surface no
+    longer calls it at all.
+    """
+    lines: list[str] = list(_SUPERSEDE_PREAMBLE)
     if constraints:
         sample = constraints[0]
         template = SupersedeTemplate(
             target_sha=sample.commit_sha,
             target_subject=sample.subject,
         )
-        lines.append(template.to_markdown(name_subject=name_subject))
+        lines.append(template.to_markdown())
     else:
-        lines.append(
-            "#### Architectural Supersede Proposal\n"
-            "- **Target Decision**: <subject> (`<sha>`)\n"
-            "- **Changed Premise**: <explain why the past assumption no longer holds>\n"
-            "- **Proposed Invariant**: <describe replacement invariant or design>\n"
-            "- **Technical Rationale**: <benchmark, version update, or architectural reasoning>\n"
-        )
+        lines.append(_SUPERSEDE_BLANK_PROPOSAL)
+    return "\n".join(lines)
+
+
+def _agent_supersede_block(constraints: Sequence[GoverningConstraint]) -> str:
+    """Build the agent-context supersede block: the same protocol, named by sha only.
+
+    Built here rather than accepted as an argument. `_generate_agent_context` used to be handed
+    a finished string, which meant the one guarantee its docstring makes -- that nothing in it
+    is text a decision author wrote -- depended on every caller remembering to ask for the
+    right branch of `_generate_supersede_instructions`. The subject-bearing branch was that
+    function's DEFAULT. Now the agent renderer constructs its own block from the constraints it
+    already holds, there is no parameter to pass the wrong thing through, and the docstring is
+    true by construction instead of by convention.
+
+    The target is named by sha, routed through `short_commit_sha`, which validates the whole
+    value before truncating it -- the eight-character prefix of a malformed sha is hex often
+    enough, and the discarded remainder is exactly where a backtick would sit. The route stays
+    a shape: "run `git show` to read it", with the sha quoted on its own rather than
+    substituted into the command.
+    """
+    lines: list[str] = list(_SUPERSEDE_PREAMBLE)
+    if not constraints:
+        lines.append(_SUPERSEDE_BLANK_PROPOSAL)
+        return "\n".join(lines)
+
+    sample = constraints[0]
+    sha = agent_surface.short_commit_sha(sample.commit_sha)
+    target = (
+        f"`{agent_surface.UNKNOWN}` — this decision could not be identified safely, so no "
+        "command to read it is printed here; run `bruriah brief` without `--agent` for "
+        "the raw value"
+        if sha == agent_surface.UNKNOWN
+        else f"`{sha}` (run `git show` to read it)"
+    )
+    blank = SupersedeTemplate(target_sha="", target_subject="")
+    lines.append(
+        "#### Architectural Supersede Proposal\n"
+        f"- **Target Decision**: {target}\n"
+        f"- **Changed Premise**: {blank.changed_premise}\n"
+        f"- **Proposed Invariant**: {blank.proposed_invariant}\n"
+        f"- **Technical Rationale**: {blank.rationale}\n"
+    )
     return "\n".join(lines)
 
 
@@ -172,8 +217,7 @@ def _generate_agent_context(
     risk_level: str,
     constraints: Sequence[GoverningConstraint],
     co_governed: Sequence[str],
-    supersede_instructions: str,
-) -> str:
+) -> tuple[str, bool]:
     """Render the agent-facing pre-flight brief, naming decisions by reference only.
 
     Everything in this string reads as instruction to whatever consumes it, so it carries no
@@ -188,13 +232,17 @@ def _generate_agent_context(
     closed-vocabulary value (status badge, risk level), or an identifier this repository
     format-validates (a commit sha; a path checked for printability and code-span safety, which
     is all `printable_path` claims). The last two are enforced by `agent_surface`, not assumed:
-    every status, risk level, sha and path below is routed through it, including the sha inside
-    the supersede template `supersede_instructions` carries. A value outside the vocabulary or
-    the format renders as its placeholder rather than being interpolated raw, and
-    `report_degradation` says so once on stderr. The text is not unreachable -- `bruriah why`
-    and `git show` both return it -- it is simply not pre-injected. `format_brief_human` is
-    unchanged and still prints all of it: a person reading a terminal is not an
-    instruction-following agent.
+    every status, risk level, sha and path below is routed through it, including the sha in the
+    supersede block. A value outside the vocabulary or the format renders as its placeholder
+    rather than being interpolated raw, and the returned flag says so. The text is not
+    unreachable -- `bruriah why` and `git show` both return it -- it is simply not pre-injected.
+    `format_brief_human` is unchanged and still prints all of it: a person reading a terminal is
+    not an instruction-following agent.
+
+    The supersede block is BUILT here, by `_agent_supersede_block`, rather than passed in. It
+    used to arrive as a `supersede_instructions` string, which left the guarantee above
+    depending on the caller having asked `_generate_supersede_instructions` for its non-default
+    branch. There is no longer a parameter through which decision prose can enter this function.
 
     The task intent is the one piece of free text here, and it stays: the operator typed it, so
     it is the only instruction in this block that is genuinely theirs.
@@ -224,10 +272,12 @@ def _generate_agent_context(
         lines.append("`bruriah why <file>` or `git show <sha>` to read one before changing what it governs.")
         lines.append("")
         for c in constraints:
-            # `_metadata` in `corpus.py` takes `status` straight from document frontmatter with
-            # no validation against a closed set, so `agent_surface` maps it through a known
-            # vocabulary rather than quoting the document's value into the badge.
-            badge = agent_surface.closed(c.status, agent_surface.KNOWN_DECISION_STATUSES)
+            # `GoverningConstraint.status` is `"active"` or a lineage relation, because that is
+            # what `analyze_impact` writes into `DecisionImpact.status`. The vocabulary checked
+            # here was `{active, superseded, deprecated, amended}`, which matched only the
+            # first: every stale decision rendered `[UNKNOWN]` and dragged `DEGRADED_NOTICE`
+            # onto a perfectly well-formed corpus. See `KNOWN_CONSTRAINT_STATUSES`.
+            badge = agent_surface.closed(c.status, agent_surface.KNOWN_CONSTRAINT_STATUSES)
             succ = (
                 f", active successor `{agent_surface.commit_sha(c.active_successor_sha)}`"
                 if c.active_successor_sha
@@ -245,8 +295,8 @@ def _generate_agent_context(
         lines.append(f"Modifying targets may impact: {impacted}")
         lines.append("")
 
-    lines.append(supersede_instructions)
-    return agent_surface.report_degradation("\n".join(lines), command="brief")
+    lines.append(_agent_supersede_block(constraints))
+    return agent_surface.annotate_degradation("\n".join(lines))
 
 
 def evaluate_brief(
@@ -381,15 +431,16 @@ def evaluate_brief(
 
     constraints_tuple = tuple(decisions_map.values())
     co_governed_tuple = tuple(sorted(co_governed_files_set - set(target_list)))
-    # The human and JSON surfaces keep the decision subject; only the agent rendering drops it.
+    # The human and JSON surfaces keep the decision subject; the agent rendering builds its own
+    # sha-only supersede block inside `_generate_agent_context`, so there is no second call here
+    # whose keyword argument decides whether a subject leaks.
     supersede_instructions = _generate_supersede_instructions(constraints_tuple)
-    agent_context = _generate_agent_context(
+    agent_context, agent_degraded = _generate_agent_context(
         intent=clean_intent,
         targets=target_list,
         risk_level=overall_risk,
         constraints=constraints_tuple,
         co_governed=co_governed_tuple,
-        supersede_instructions=_generate_supersede_instructions(constraints_tuple, name_subject=False),
     )
 
     return ArchitecturalBrief(
@@ -401,6 +452,7 @@ def evaluate_brief(
         recommendations=tuple(recommendations),
         supersede_protocol_instructions=supersede_instructions,
         agent_context=agent_context,
+        agent_rendering_degraded=agent_degraded,
     )
 
 
