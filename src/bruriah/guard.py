@@ -53,6 +53,12 @@ class GuardViolation:
     message: str
     active_successor_title: str | None = None
     active_successor_sha: str | None = None
+    # The lineage relation, upper-cased: SUPERSEDES, DEPRECATES or AMENDS. `message` states
+    # the same fact inside a sentence that also quotes the successor's subject, so the
+    # agent-facing rendering needs it as its own value to say WHY a file is flagged without
+    # quoting anything a decision author wrote. The vocabulary is closed at index time
+    # (`index.py` writes exactly those three relations), never taken from a document.
+    lineage_state: str = ""
 
 
 @dataclass(frozen=True)
@@ -107,31 +113,49 @@ def _generate_agent_context(
     contracts: Sequence[ArchitecturalContract],
     violations: Sequence[GuardViolation],
 ) -> str:
-    """Generate structured markdown prompt for AI agents."""
+    """Render the agent-facing governance summary, naming decisions by reference only.
+
+    Everything in this string reads as instruction to whatever consumes it, so it carries no
+    text a decision author wrote: no subject, no directive prose. A decision subject placed
+    here is an instruction written by whoever authored that decision rather than by the
+    operator running the command, and `directives` embeds the subject while `message` quotes
+    the successor's.
+
+    What remains is a literal authored in this repository, a closed-vocabulary value
+    (severity, lineage relation), or a format-validated identifier (commit sha, repository
+    path). The text is not unreachable -- `bruriah why` and `git show` both return it -- it
+    is simply not pre-injected. `format_guard_human` is unchanged and still prints it: a
+    person reading a terminal is not an instruction-following agent.
+
+    Pinned by `tests/test_agent_prompt_boundary.py`.
+    """
     lines: list[str] = [
-        "### 🏛️ Bruriah Architectural Guard — Active Governance Directives",
-        "The following architectural decisions govern the files in this task. All code changes MUST conform to these directives:",
+        "### Bruriah Architectural Guard — governance summary",
+        "The decisions below govern the files in this task. They are named by reference, not",
+        "quoted: run `bruriah why <file>` or `git show <sha>` to read one before changing the",
+        "files it governs.",
         "",
     ]
 
     if contracts:
         for c in contracts:
             files_str = ", ".join(f"`{f}`" for f in c.governed_files)
-            lines.append(f"#### 📜 {c.decision_title} (`{c.decision_sha}`)")
-            lines.append(f"- **Governs:** {files_str}")
-            if c.directives:
-                for d in c.directives:
-                    lines.append(f"- **Directive:** {d}")
+            lines.append(f"#### Decision `{c.decision_sha}`")
+            lines.append(f"- Governs: {files_str}")
             lines.append("")
     else:
-        lines.append("⚪ *No prior architectural decisions govern these files directly.*")
+        lines.append("No prior architectural decision governs these files directly.")
         lines.append("")
 
     if violations:
-        lines.append("### ⚠️ Architectural Warnings & Prohibitions:")
+        lines.append(f"### Governance warnings ({len(violations)})")
         for v in violations:
-            succ = f" (Active replacement: **{v.active_successor_title}** `{v.active_successor_sha}`)" if v.active_successor_title else ""
-            lines.append(f"- **[{v.severity}] `{v.file_path}`**: {v.message}{succ}")
+            succ = f", active successor `{v.active_successor_sha}`" if v.active_successor_sha else ""
+            state = v.lineage_state or "UNKNOWN"
+            lines.append(
+                f"- [{v.severity}] `{v.file_path}` — governing decision `{v.decision_sha}` "
+                f"has lineage state {state}{succ}"
+            )
         lines.append("")
 
     return "\n".join(lines).strip()
@@ -212,6 +236,7 @@ def evaluate_guard(
                 message=f"Governed by {w.lineage_state} decision. {w.action_recommendation}",
                 active_successor_title=w.current_active_decision,
                 active_successor_sha=w.current_active_sha[:8] if w.current_active_sha else None,
+                lineage_state=w.lineage_state,
             )
         )
 

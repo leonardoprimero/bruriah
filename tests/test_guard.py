@@ -34,7 +34,14 @@ class TestReceiptDigestAndContext:
         d3 = _compute_receipt_digest("src/auth.py", "NON_COMPLIANT", ["src/auth.py"], ["doc:1"], 1)
         assert d1 != d3
 
-    def test_generate_agent_context(self):
+    def test_generate_agent_context_names_decisions_without_quoting_them(self):
+        """The agent context carries identifiers and closed vocabularies, never decision prose.
+
+        This assertion set was inverted deliberately. It previously required the decision
+        title, the directive and the successor title to be PRESENT, which is the defect:
+        everything in this string reads as instruction to whatever consumes it, so text a
+        decision author wrote arrives as an instruction the operator never issued.
+        """
         contract = ArchitecturalContract(
             decision_ref="doc:auth",
             decision_title="OAuth2 Security Architecture",
@@ -50,15 +57,27 @@ class TestReceiptDigestAndContext:
             message="Drift detected.",
             active_successor_title="New Auth Model",
             active_successor_sha="22222222",
+            lineage_state="SUPERSEDES",
         )
 
         ctx = _generate_agent_context([contract], [violation])
-        assert "Bruriah Architectural Guard — Active Governance Directives" in ctx
-        assert "OAuth2 Security Architecture" in ctx
-        assert "Maintain OAuth2 tokens without session cookies." in ctx
-        assert "[VETO] `src/auth.py`" in ctx
-        assert "Drift detected." in ctx
-        assert "New Auth Model" in ctx
+
+        # What the agent needs in order to act, and can verify: identifiers, paths, and
+        # values from vocabularies this repository closes.
+        assert "Bruriah Architectural Guard — governance summary" in ctx
+        assert "`11111111`" in ctx
+        assert "`src/auth.py`" in ctx and "`src/tokens.py`" in ctx
+        assert "[VETO]" in ctx
+        assert "SUPERSEDES" in ctx
+        assert "`22222222`" in ctx
+        # And a route to the prose, so it is withheld rather than lost.
+        assert "bruriah why" in ctx
+
+        # What a decision author wrote, which must not arrive as instruction.
+        assert "OAuth2 Security Architecture" not in ctx
+        assert "Maintain OAuth2 tokens without session cookies." not in ctx
+        assert "Drift detected." not in ctx
+        assert "New Auth Model" not in ctx
 
 
 class TestEvaluateGuard:
