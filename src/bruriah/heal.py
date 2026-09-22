@@ -90,6 +90,9 @@ def _synthesize_steps(
         directives[1] if len(directives) > 1 else f"Follow architectural constraints established in commit {sha[:8]}."
     )
 
+    # The actions are the exact literals in `agent_surface.KNOWN_REMEDIATION_ACTIONS`, which is
+    # what lets the agent rendering print them rather than fall back to a generic label.
+    # `tests/test_heal.py` asserts the two cannot drift apart.
     steps = (
         RemediationStep(
             order=1,
@@ -128,20 +131,30 @@ def _generate_agent_prompt(
     `violation_message` additionally quotes the successor decision's subject, since it comes
     from drift's `action_recommendation`.
 
-    What remains is a literal authored in this repository, a closed-vocabulary value
-    (lineage relation), or a format-validated identifier (commit sha, repository path). The
-    last two are enforced by `agent_surface`, not assumed: every sha, path and lineage state
-    below is routed through it, so a malformed value renders as its placeholder rather than
-    being interpolated raw. The text is not unreachable -- the route below points the agent at
+    What remains is a literal authored in this repository, a closed-vocabulary value (lineage
+    relation, remediation action), or an identifier this repository format-validates (a commit
+    sha; a path checked for printability and code-span safety, which is all `printable_path`
+    claims). The last two are enforced by `agent_surface`, not assumed: every sha, path,
+    lineage state and step action below is routed through it -- including the `**Target**`
+    header, which is the operator's own argument but is rendered in a code span like every
+    other path here. The text is not unreachable -- the route below points the agent at
     `bruriah why` and `git show`, which both return it -- it is simply not pre-injected.
     `format_heal_human` and `format_heal_json` are unchanged and still carry all of it: a
     person reading a terminal is not an instruction-following agent.
 
-    The recipe is rendered from `bp.refactoring_steps` rather than restated here. An earlier
-    version of this renderer hard-coded its own three steps, which left two parallel recipes:
-    a maintainer editing the step wording in `_synthesize_steps` would not see the edit reach
-    `--agent`. Only `step.action` is rendered -- see the comment at the loop for why
-    `step.detail` cannot be.
+    **When an identifier is rejected, the route is withheld rather than printed.** This
+    renderer used to emit ``run `bruriah why <unprintable path>` or `git show UNKNOWN` `` --
+    a literal command it invited an agent to run, naming a path that is not one and a revision
+    git answers with `fatal: ambiguous argument`. Withholding the prose is only honest while
+    the route to it works, so where it cannot the rendering says the decision could not be
+    identified safely and points at the human rendering, which still has the raw value.
+    `report_degradation` says the same thing once on stderr, so the substitution is visible to
+    the operator rather than only to whatever reads the prompt.
+
+    The recipe is rendered from `bp.refactoring_steps` rather than restated here, so a
+    maintainer editing the step wording in `_synthesize_steps` sees the edit reach `--agent`
+    instead of leaving two parallel recipes. Only `step.action` is rendered, and only when it
+    is one this repository authored -- see the comments at the loop.
 
     Pinned by `tests/test_agent_prompt_boundary.py`.
     """
@@ -150,7 +163,7 @@ def _generate_agent_prompt(
 
     lines: list[str] = [
         "# 🛠️ Bruriah Architectural Remediation Blueprint",
-        f"**Target**: `{target}`",
+        f"**Target**: `{agent_surface.printable_path(target)}`",
         "**Instruction for Agent**: Do NOT apply quick hacks, monkey-patches, or bypass interfaces.",
         "Refactor the code according to the canonical project patterns. The governing decisions",
         "below are named by reference, not quoted: read one before changing what it governs.\n",
@@ -159,24 +172,47 @@ def _generate_agent_prompt(
     for i, bp in enumerate(blueprints, start=1):
         state = agent_surface.closed(bp.lineage_state, agent_surface.KNOWN_LINEAGE_STATES)
         sha = agent_surface.commit_sha(bp.decision_sha)
-        path = agent_surface.repo_path(bp.file_path)
+        path = agent_surface.printable_path(bp.file_path)
         lines.append(f"## Issue {i}: Violation in `{path}`")
         lines.append(f"- **Governing Decision**: `{sha}`")
         lines.append(f"- **Lineage State**: {state}")
-        lines.append(
-            f"- **Read the governing decision before changing what it governs**: run `bruriah why {path}` "
-            f"or `git show {sha}`."
-        )
+        # The route is printed only when both halves of it are identifiers. `bruriah why` takes
+        # the path and `git show` takes the sha, so a placeholder in either makes the printed
+        # command fail for the agent told to run it -- and a command that cannot work is worse
+        # than no command, because it reads as though the prose were reachable.
+        if sha == agent_surface.UNKNOWN or path == agent_surface.UNPRINTABLE_PATH:
+            lines.append(
+                "- **No route printed**: this decision could not be identified safely, so no "
+                "command to read it is given here. Run `bruriah heal` without `--agent` for the "
+                "raw values."
+            )
+        else:
+            lines.append(
+                f"- **Read the governing decision before changing what it governs**: run `bruriah why {path}` "
+                f"or `git show {sha}`."
+            )
         lines.append("- **Actionable Refactoring Recipe**:")
-        # `step.action` only, never `step.detail`. Every action in `_synthesize_steps` is a
+        # `step.action` only, never `step.detail`. Every action `_synthesize_steps` builds is a
         # literal authored in this repository, but every detail interpolates `message` and
         # `canonical_pattern`: `message` comes from drift's `action_recommendation` and quotes
         # the successor decision's subject, and `canonical_pattern` is a bullet line harvested
         # out of a decision body. Rendering a detail here would put text a decision author
         # wrote into a numbered instruction the operator never issued, which is the defect this
         # renderer exists to avoid. `format_heal_human` still prints both.
+        #
+        # And the action is checked against `KNOWN_REMEDIATION_ACTIONS` rather than trusted,
+        # because "every action is a repository literal" was a claim about one producer while
+        # `RemediationStep.action` is an untyped free string on a public dataclass -- the same
+        # comment-instead-of-enforcement pattern `agent_surface` exists to end. An unrecognised
+        # action keeps its step NUMBER, which is this repository's own structure, and loses its
+        # wording.
         for step in bp.refactoring_steps:
-            lines.append(f"  {step.order}. **{step.action}**")
+            action = agent_surface.authored(
+                step.action,
+                agent_surface.KNOWN_REMEDIATION_ACTIONS,
+                agent_surface.UNRECOGNISED_ACTION,
+            )
+            lines.append(f"  {step.order}. **{action}**")
         lines.append("")
 
     # "the above directives" used to point at bullet lines harvested from decision bodies.
@@ -185,7 +221,7 @@ def _generate_agent_prompt(
         "After refactoring, ensure that all unit tests pass and the code strictly adheres to the "
         "governing decisions named above."
     )
-    return "\n".join(lines)
+    return agent_surface.report_degradation("\n".join(lines), command="heal")
 
 
 def evaluate_heal(

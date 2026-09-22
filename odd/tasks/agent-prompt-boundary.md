@@ -81,14 +81,33 @@ the wrong trade.
 Every string in an `--agent` rendering must be one of:
 
 - **(a)** a literal authored in this repository,
-- **(b)** a value from a closed vocabulary (`active`/`superseded`/`deprecated`,
-  `VETO`/`WARNING`, `rejected`/`deferred`/`superseded`, a risk level), or
-- **(c)** a format-validated identifier: a 40-character hex sha, a repository-relative
-  path, an ISO-8601 date.
+- **(b)** a value from a closed vocabulary, each one a frozenset in `agent_surface`:
+  decision status (`active`/`superseded`/`deprecated`/`amended`), lineage relation
+  (`supersedes`/`deprecates`/`amends`), severity (`VETO`/`WARNING`), risk level
+  (`LOW`/`MEDIUM`/`HIGH`/`CRITICAL`), and the remediation actions `heal` authors, or
+- **(c)** an identifier whose **format** `agent_surface` validates: a commit sha (7–64 hex
+  characters, `commit_sha`), or a value checked for **printability and markdown-code-span
+  safety** (`printable_path`).
 
 Repository-authored free text — subjects, author names, bodies, derived directive
 prose — is named by reference, never quoted. An agent that wants the text calls
 `bruriah why <file>` or `git show <sha>`; it is not unreachable, only not pre-injected.
+
+**Correction (review round 4).** Category (c) said "a repository-relative path" was validated
+as such. It never was, and the function that did it was called `repo_path`, which said the same
+thing in its name. It rejects the empty value, over-long values, the backtick, and Unicode
+categories Cc, Cf, Zl and Zp — it does **not** validate path shape, relativeness or
+containment, and `/etc/passwd`, `../../outside` and an ordinary English sentence all pass it.
+They pass deliberately: the renderers print git-derived paths, `path:line` targets, revision
+ranges and whatever target the operator typed through the same function, so a containment check
+there would reject correct values. The function is now `printable_path`, named for what it
+proves, and category (c) above claims only that. Category (b) also omitted `amended`, which
+`agent_surface` has always shipped in `KNOWN_DECISION_STATUSES`, and listed
+`rejected`/`deferred`/`superseded` — a vocabulary no `--agent` renderer uses.
+
+An ISO-8601 date is listed in no category any more: the date channel was dropped from the
+agent renderings in T2 (the `Author & Date` line went with the author name) and nothing
+validates one, so naming it here would claim an enforcement that does not exist.
 
 **Correction (review round 3).** An earlier version of this section wrote the route as
 `bruriah why <sha>`. That is wrong: `why`'s positional is `target` — "target file and
@@ -111,11 +130,11 @@ delimiter. A narrower claim that survives inspection is worth more.
 Files: `src/bruriah/guard.py`, `src/bruriah/brief.py`, `src/bruriah/heal.py`,
 `src/bruriah/agent_surface.py` (new), `tests/test_guard.py`, `tests/test_brief.py`,
 `tests/test_heal.py`, `tests/test_agent_prompt_boundary.py` (new),
-`tests/test_agent_surface.py` (new), `README.md`, `CHANGELOG.md`, `pyproject.toml`,
-`src/bruriah/__init__.py`, `uv.lock`.
+`tests/test_agent_surface.py` (new), `README.md`, `odd/tasks/agent-prompt-boundary.md` (this
+file), `CHANGELOG.md`, `pyproject.toml`, `src/bruriah/__init__.py`, `uv.lock`.
 
-Three of those were added to this list after the fact, during review round 3, because the
-candidate touched them and the list did not authorize them:
+Four of those were added to this list after the fact — three during review round 3 and this
+file during round 4 — because the candidate touched them and the list did not authorize them:
 
 - `src/bruriah/agent_surface.py` and `tests/test_agent_surface.py` — the invariant above names
   three categories, and before this module each renderer asserted the closure in a comment
@@ -129,8 +148,17 @@ candidate touched them and the list did not authorize them:
 **Human renderings are out of scope and must not change.** `format_guard_human`,
 `format_brief_human` and `format_heal_human` keep printing subjects and authors: a
 person reading a terminal is not an instruction-following agent, and narrowing that
-output would be a regression with no threat to justify it. `format_*_json` likewise
-stays as it is — it is a data interchange surface, not a prompt.
+output would be a regression with no threat to justify it.
+
+**`format_*_json` did change, in one direction: it gained keys.** An earlier version of this
+section said it "stays as it is", which was false. `GuardViolation` and `RemediationBlueprint`
+each gained a `lineage_state` field so the agent renderings could state WHY a file is flagged
+without quoting `message`, and both dataclasses are serialised with `asdict` — so
+`format_guard_json` and `format_heal_json` each emit one additional key. Nothing was removed
+and no value changed. Nothing pinned those shapes, either, which is how the claim survived;
+`test_format_guard_json_shape_is_pinned_key_by_key` and
+`test_format_heal_json_shape_is_pinned_key_by_key` now assert them key by key, including that
+the prose the agent rendering withholds is still present in full.
 
 Out of scope: the `investigate_work` boundary (2.0.0), the `alternatives`/`premises`
 contract narrowing, `evals/injection/`, splitting `cli.py`/`service.py`, the
@@ -193,8 +221,8 @@ documentation honesty debts (egui document count, unpinned bge rows), pushing, t
 - [x] `format_guard_human`, `format_brief_human`, `format_heal_human` byte-identical in
   behaviour — pinned by `test_human_rendering_still_names_the_governing_decision`.
 - [ ] Five Conventional Commits, one per task. Nothing pushed until reviewed. — six landed so
-  far (three for T0, one each for T1–T3); the review-round work described below is still
-  uncommitted, and T4's release commit is outstanding.
+  far (three for T0, one each for T1–T3); the round 3 and round 4 review work described below
+  is still uncommitted, and T4's release commit is outstanding.
 
 ## Progress / evidence
 
@@ -242,9 +270,10 @@ It is history, not the present state of the suite.
 0 failed**. The file stood at 7 passed / 0 failed when T3 landed; review round 3 added
 `test_the_route_the_agent_renderings_print_actually_works`, taking it to 8.
 
-Full suite: **1,576 collected, 1,558 passed, 18 skipped, 0 failed**. The skips are all
-environment-prerequisite skips (the author's private corpus, the legacy `cerebro.db`).
-`uv run ruff check .` clean.
+Full suite after review round 4: **1,627 collected, 1,609 passed, 18 skipped, 0 failed**
+(1,576 / 1,558 before it). The skips are all environment-prerequisite skips (the author's
+private corpus, the legacy `cerebro.db`). `uv run ruff check .` clean; `uv run mypy src`
+clean.
 
 The three fixes landed as:
 
@@ -274,9 +303,10 @@ comment.
   this candidate, the scope list extended to the files actually touched (`README.md`,
   `agent_surface.py`, `test_agent_surface.py`) with the reason README is unavoidable, and
   Progress rewritten to the delivered state instead of the T0 red.
-- **README test count.** Section 4 claimed 1,525 tests while the suite collected 1,576, so
+- **README test count.** Section 4 claimed 1,515 tests while the suite collected 1,576, so
   `test_readme_claims.py::test_readme_test_count_matches_collected` was failing. Updated to
-  the number the run reports.
+  the number the run reports. (An earlier version of this line said 1,515 was 1,525; the diff
+  is `1,515 -> 1,576`.)
 
 **Acted on, with a result that is not what the finding expected:**
 
@@ -297,7 +327,8 @@ comment.
      `**Target Files**: None specified (general intent)` and contains no blast-radius block.
   `guard`'s `governed_files` and `heal`'s `file_path` are git-derived (`direct_files` comes
   from `analyze_impact`'s inspected git files), never document-derived, so they cannot carry
-  this string either. `agent_surface.repo_path` does independently reject the backtick form
+  this string either. `agent_surface.printable_path` (called `repo_path` until review round 4)
+  does independently reject the backtick form
   (returns `<unprintable path>`, covered in `tests/test_agent_surface.py`), so the in-code
   boundary holds on its own.
 
@@ -315,6 +346,101 @@ comment.
 - **The `mypy` errors in `tests/`.** Six pre-existing failures in `tests/test_skills.py` and
   one other test module, none on any file this branch touches. Fixing them is unrelated
   scope and would inflate a security release.
+
+### Review corrections (round 4)
+
+The fourth review approved the candidate and raised 14 findings, six of them WARNING. All six
+were acted on; the two that turned out to need a narrower answer than the finding assumed are
+recorded as such.
+
+**The enforcement had a bypass, in the one branch only the agent sees.**
+`SupersedeTemplate.to_markdown`'s `name_subject=False` branch interpolated
+`self.target_sha[:8]` raw into a markdown code span while the sibling `decision` line routed
+the same value through `agent_surface` — so `_generate_agent_context`'s claim that every sha
+below it is routed was false for that channel, and the sha comes from an indexed document's
+`commit:` frontmatter. Eight characters is room enough for a backtick that closes the span.
+Three of the four review lenses found this independently.
+
+The fix introduces `agent_surface.short_commit_sha`, which validates the **whole** value before
+truncating it, and both truncating sites now use it (the template, and brief's `decision` line,
+which was `commit_sha(c.commit_sha[:8])`). The order is the decision: validating the
+eight-character prefix accepts the prefix of a malformed sha and discards exactly the remainder
+that carries the payload. It is stated in `short_commit_sha`'s docstring and at both call
+sites. `name_subject=True` is deliberately left interpolating the raw sha — it feeds the human
+and JSON surfaces, which are out of scope by instruction.
+
+The new tests drive a malformed sha **through the template** and **through the renderer**:
+`test_generate_agent_context_refuses_malformed_sha_through_the_supersede_template` builds the
+instructions with `_generate_supersede_instructions(..., name_subject=False)`, the exact call
+`evaluate_brief` makes. The existing malformed-identifier test passes `supersede_instructions`
+as a literal string and therefore never exercised the template at all, which is how the bypass
+survived a round of review with tests that looked like they covered it.
+
+**A degraded rendering printed an instruction that cannot work.** On a rejected identifier,
+`heal` still emitted ``run `bruriah why <unprintable path>` or `git show UNKNOWN` `` — a
+literal command handed to an agent, naming a path that is not one and a revision git answers
+with `fatal: ambiguous argument`. Nothing announced the substitution, while the human and JSON
+renderings went on carrying the raw value.
+
+Now `heal` omits the route line entirely when either half of it is a placeholder and says, in
+this repository's own words, that the decision could not be identified safely and the human
+rendering has the raw value. `brief`'s supersede template does the same for its
+"run `git show` to read it" route. `agent_surface.report_degradation` appends `DEGRADED_NOTICE`
+to any rendering carrying a placeholder and writes **one** line to stderr — one per rendering,
+not per identifier, so a guard run with twenty violations does not print the same fact twenty
+times. All three renderers call it.
+
+`guard` is the narrower answer: it prints **no** filled-in route line to withhold. Its route is
+a shape (`bruriah why <file>`, `git show <sha>`) that an agent substitutes into, so there is
+nothing there that breaks when an identifier is rejected. It gets the notice and the stderr
+line, which is the part of that finding that applies to it, and `_generate_agent_context`'s
+docstring now says why the rest does not.
+
+**`closed()` was documented as total and was not.** It called `value.strip()` with no guard, so
+a `None` status raised `AttributeError` and aborted the whole `--agent` command with a
+traceback — against the module docstring's promise. `closed` and `printable_path` now accept
+`None` (`commit_sha` already did), and each has a test for it.
+
+**`repo_path` claimed more than it did.** It rejected only the empty string, over-long values,
+the backtick and Unicode category Cc — accepting Zl, Zp and Cf (a bidi override reorders
+everything after it; `U+2028` is a line break to a great many renderers), all invisible in a
+diff. Those three categories are now rejected. And it accepted absolute paths, `..` and
+ordinary English sentences, which the name and docstring both denied: it is now
+`printable_path`, its docstring claims only printability and code-span safety, the module
+docstring says the same, and `test_it_does_not_validate_path_shape_or_containment` pins the
+narrow claim as the contract rather than leaving it as an unrecorded gap. The invariant's
+category (c) above is corrected to match.
+
+**The JSON surfaces had changed and this document denied it.** Corrected in Scope above, with
+two new tests pinning both shapes key by key.
+
+**Closed vocabularies asserted by comment rather than enforced.** `guard` interpolated
+`v.severity` raw and `brief` interpolated `risk_level` raw, both while their docstrings named
+those values closed; `heal` rendered `step.action` on the strength of a comment about
+`_synthesize_steps` while `RemediationStep.action` is an untyped free string on a public
+dataclass. `agent_surface` gained `KNOWN_SEVERITIES`, `KNOWN_RISK_LEVELS` and
+`KNOWN_REMEDIATION_ACTIONS`, and all three values are routed. An unrecognised action keeps its
+step **number** — this repository's own structure — and loses its wording to
+`UNRECOGNISED_ACTION`. `authored()` is the variant of `closed()` for multi-word authored
+labels, since upper-casing suits a badge and disfigures "Isolate Non-Compliant Code".
+`test_the_actions_synthesize_steps_builds_are_all_in_the_vocabulary` makes producer/vocabulary
+drift a failure instead of a silent fallback. `heal`'s `**Target**` header, the one path left
+interpolated raw while its docstring claimed otherwise, is routed too.
+
+**`brief` had no reach assertion.** `test_the_fixture_reaches_every_agent_renderer` proved
+guard renders a violation and heal renders a blueprint, but nothing proved brief matched
+anything — so if `evaluate_brief`'s keyword lookup ever stopped finding the fixture's
+documents, brief would render "No conflicting or governing architectural decisions found" and
+the leak assertion would pass on a marker-free string, which is the precise failure mode that
+test file exists to prevent. It now asserts brief's agent rendering names the superseded
+decision by sha.
+
+**Documentation accuracy.** `heal`'s docstring claimed "an earlier version of this renderer
+hard-coded its own three steps"; `git show c64cf1b:src/bruriah/heal.py` shows the base already
+iterating `bp.refactoring_steps`, so the note described an intermediate draft of this branch,
+not the history, and is gone. The README line in this candidate's diff is `1,515 -> 1,576`,
+not `1,525`. The status vocabulary in category (b) was missing `amended`. The test count is
+updated to **1,627**, the number the full run reports.
 
 ## Next step
 

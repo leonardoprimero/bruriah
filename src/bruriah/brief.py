@@ -40,12 +40,35 @@ class SupersedeTemplate:
     rationale: str = "<technical reasoning justifying why this approach is superior now>"
 
     def to_markdown(self, *, name_subject: bool = True) -> str:
-        """Render the proposal template; `name_subject=False` identifies the target by sha only."""
-        target = (
-            f"{self.target_subject} (`{self.target_sha[:8]}`)"
-            if name_subject
-            else f"`{self.target_sha[:8]}` (run `git show` to read it)"
-        )
+        """Render the proposal template; `name_subject=False` identifies the target by sha only.
+
+        The two branches are two different surfaces and are treated differently on purpose.
+        `name_subject=True` feeds `supersede_protocol_instructions`, which reaches the human
+        and JSON renderings: those are out of scope by instruction and keep printing the
+        subject and the raw sha, because a person reading a terminal is not an
+        instruction-following agent.
+
+        `name_subject=False` is rendered ONLY into the agent context, and it was the bypass in
+        the whole enforcement: it interpolated `self.target_sha[:8]` raw into a markdown code
+        span while the sibling `decision` line in `_generate_agent_context` routed the same
+        value through `agent_surface`, and the sha arrives from an indexed document's `commit:`
+        frontmatter. Eight characters is room enough for a backtick that closes the span and
+        leaves the rest reading as prose. It now goes through `short_commit_sha`, which
+        validates the whole value BEFORE truncating it -- see that function for why the order
+        matters -- and when the value is not a sha the "run `git show`" route is withheld
+        rather than printed as a command that cannot work.
+        """
+        if name_subject:
+            target = f"{self.target_subject} (`{self.target_sha[:8]}`)"
+        else:
+            sha = agent_surface.short_commit_sha(self.target_sha)
+            target = (
+                f"`{agent_surface.UNKNOWN}` — this decision could not be identified safely, so no "
+                "command to read it is printed here; run `bruriah brief` without `--agent` for "
+                "the raw value"
+                if sha == agent_surface.UNKNOWN
+                else f"`{sha}` (run `git show` to read it)"
+            )
         return (
             "#### Architectural Supersede Proposal\n"
             f"- **Target Decision**: {target}\n"
@@ -162,24 +185,34 @@ def _generate_agent_context(
     command never issued.
 
     What remains is a literal authored in this repository, the operator's own intent, a
-    closed-vocabulary value (status badge, risk level), or a format-validated identifier (commit
-    sha, repository path). The last two are enforced by `agent_surface`, not assumed: every
-    status, sha and path below is routed through it, so a malformed value renders as its
-    placeholder rather than being interpolated raw. The text is not unreachable --
-    `bruriah why` and `git show` both return it -- it is simply not pre-injected.
-    `format_brief_human` is unchanged and still prints all of it: a person reading a terminal is
-    not an instruction-following agent.
+    closed-vocabulary value (status badge, risk level), or an identifier this repository
+    format-validates (a commit sha; a path checked for printability and code-span safety, which
+    is all `printable_path` claims). The last two are enforced by `agent_surface`, not assumed:
+    every status, risk level, sha and path below is routed through it, including the sha inside
+    the supersede template `supersede_instructions` carries. A value outside the vocabulary or
+    the format renders as its placeholder rather than being interpolated raw, and
+    `report_degradation` says so once on stderr. The text is not unreachable -- `bruriah why`
+    and `git show` both return it -- it is simply not pre-injected. `format_brief_human` is
+    unchanged and still prints all of it: a person reading a terminal is not an
+    instruction-following agent.
+
+    The task intent is the one piece of free text here, and it stays: the operator typed it, so
+    it is the only instruction in this block that is genuinely theirs.
 
     Pinned by `tests/test_agent_prompt_boundary.py`.
     """
     target_str = (
-        ", ".join(f"`{agent_surface.repo_path(t)}`" for t in targets) if targets else "None specified (general intent)"
+        ", ".join(f"`{agent_surface.printable_path(t)}`" for t in targets)
+        if targets
+        else "None specified (general intent)"
     )
     lines: list[str] = [
         "# Bruriah Pre-Flight Architectural Brief",
         f"- **Task Intent**: {intent if intent else 'Not specified'}",
         f"- **Target Files**: {target_str}",
-        f"- **Risk Level**: {risk_level}",
+        # `analyze_impact` writes one of four levels and `evaluate_brief` orders them, but the
+        # field is an untyped `str` and a comment naming the producer is not enforcement.
+        f"- **Risk Level**: {agent_surface.closed(risk_level, agent_surface.KNOWN_RISK_LEVELS)}",
         "",
         "## Governing decisions",
     ]
@@ -200,17 +233,20 @@ def _generate_agent_context(
                 if c.active_successor_sha
                 else ""
             )
-            lines.append(f"- [{badge}] decision `{agent_surface.commit_sha(c.commit_sha[:8])}`{succ}")
+            # `short_commit_sha`, not `commit_sha(...[:8])`: validating the truncated prefix
+            # accepts the prefix of a malformed sha and discards the remainder that carries
+            # whatever was appended to it.
+            lines.append(f"- [{badge}] decision `{agent_surface.short_commit_sha(c.commit_sha)}`{succ}")
         lines.append("")
 
     if co_governed:
         lines.append("## Blast Radius / Co-Governed Files")
-        impacted = ", ".join(f"`{agent_surface.repo_path(f)}`" for f in co_governed[:8])
+        impacted = ", ".join(f"`{agent_surface.printable_path(f)}`" for f in co_governed[:8])
         lines.append(f"Modifying targets may impact: {impacted}")
         lines.append("")
 
     lines.append(supersede_instructions)
-    return "\n".join(lines)
+    return agent_surface.report_degradation("\n".join(lines), command="brief")
 
 
 def evaluate_brief(
