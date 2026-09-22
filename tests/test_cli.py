@@ -30,7 +30,8 @@ from mcp.shared.memory import create_connected_server_and_client_session
 _TODAY = date(2026, 7, 25)
 _NOW = datetime(2026, 7, 23, 12, 0, 0, tzinfo=timezone.utc)  # pinned: cache-stats freshness too
 _FINGERPRINT = (
-    '{"artifact":"model.onnx","artifact_sha256":"' + "a" * 64
+    '{"artifact":"model.onnx","artifact_sha256":"'
+    + "a" * 64
     + '","pooling":"mean","runtime":"fastembed==0.8.0","snapshot":"snapshot-a","source":"example/model"}'
 )
 _FILLER = "Unrelated filler sentence for padding purposes only. " * 6
@@ -58,8 +59,11 @@ def _corpus(tmp_path: Path) -> tuple[Path, Path]:
 
 def _paths(tmp_path: Path):
     return resolve_paths(
-        cli_config_dir=tmp_path / "config", cli_data_dir=tmp_path / "data",
-        cli_cache_dir=tmp_path / "cache", cli_log_dir=tmp_path / "log", env={},
+        cli_config_dir=tmp_path / "config",
+        cli_data_dir=tmp_path / "data",
+        cli_cache_dir=tmp_path / "cache",
+        cli_log_dir=tmp_path / "log",
+        env={},
     )
 
 
@@ -67,11 +71,20 @@ def _evidence_for_cache(**overrides: object) -> EvidenceRecord:
     """Minimal `EvidenceRecord` for driving `cache.write_cache_atomic` directly in doctor tests
     (Slice 12D) -- mirrors `test_cache.py`'s own `_evidence` helper."""
     payload = dict(
-        ref="live:sha256:" + "a" * 32, kind="captured_live", publisher="example.test",
-        locator="https://example.test:443/page", citation_locator="https://example.test:443/page",
-        digest="sha256:" + "b" * 64, extraction_method="raw_lines", authority="unknown",
-        authority_rationale="Live HTTP fetch.", freshness="unknown", license="unknown",
-        reuse="unknown", conflict="unknown", retrieved_at=_NOW,
+        ref="live:sha256:" + "a" * 32,
+        kind="captured_live",
+        publisher="example.test",
+        locator="https://example.test:443/page",
+        citation_locator="https://example.test:443/page",
+        digest="sha256:" + "b" * 64,
+        extraction_method="raw_lines",
+        authority="unknown",
+        authority_rationale="Live HTTP fetch.",
+        freshness="unknown",
+        license="unknown",
+        reuse="unknown",
+        conflict="unknown",
+        retrieved_at=_NOW,
     )
     payload.update(overrides)
     return EvidenceRecord(**payload)
@@ -79,8 +92,11 @@ def _evidence_for_cache(**overrides: object) -> EvidenceRecord:
 
 def _write_cache_entry(cache_dir: Path, url: str, *, retrieved_at: datetime) -> None:
     entry = cache.build_cache_entry(
-        _evidence_for_cache(retrieved_at=retrieved_at), retrieved_at=retrieved_at,
-        ttl=timedelta(hours=1), body=b"cached body content", max_excerpt_chars=1000,
+        _evidence_for_cache(retrieved_at=retrieved_at),
+        retrieved_at=retrieved_at,
+        ttl=timedelta(hours=1),
+        body=b"cached body content",
+        max_excerpt_chars=1000,
         policy_version="1.0.0",
     )
     cache.write_cache_atomic(cache_dir, url, entry)
@@ -97,7 +113,11 @@ def test_end_to_end_init_index_serve_doctor(tmp_path: Path, capsys: pytest.Captu
         assert stat.S_IMODE(paths.data_dir.stat().st_mode) == 0o700
 
     result = cli.run_index(
-        paths, root, policy_path, model_name="test/minilm", embedder_factory=_fake_embedder_factory,
+        paths,
+        root,
+        policy_path,
+        model_name="test/minilm",
+        embedder_factory=_fake_embedder_factory,
     )
     assert result.documents == 1 and result.passages >= 1
     assert (paths.data_dir / "build-config.json").is_file()
@@ -106,14 +126,14 @@ def test_end_to_end_init_index_serve_doctor(tmp_path: Path, capsys: pytest.Captu
     report = cli.run_doctor(paths, today=_TODAY)
     assert report["healthy"] is True
     assert report["snapshot"]["build_id"] == result.build_id
-    assert report["registry"]["pack_ids"] == [
-        "programming.minimal", "project.memory", "research.minimal"]
+    assert report["registry"]["pack_ids"] == ["programming.minimal", "project.memory", "research.minimal"]
 
     capsys.readouterr()  # discard init/index stdout before the serve-wiring stdout-clean check
     deps = cli.build_serve_deps(paths, embedder_factory=_fake_embedder_factory)
     assert deps.embed_query is not None  # bugfix: serve now wires a real query embedder
     server = cli.build_server(deps)
     try:
+
         async def _run() -> None:
             async with create_connected_server_and_client_session(server) as session:
                 await session.initialize()
@@ -124,6 +144,7 @@ def test_end_to_end_init_index_serve_doctor(tmp_path: Path, capsys: pytest.Captu
                 read = await session.call_tool("read_evidence", {"refs": [ref]})
                 assert not read.isError
                 assert read.structuredContent["items"][0]["status"] == "ok"
+
         anyio.run(_run)
     finally:
         deps.snapshot.database.close()
@@ -148,8 +169,15 @@ def test_init_is_idempotent_and_registers_no_client(tmp_path: Path) -> None:
 
 def _init_args(paths) -> list[str]:
     return [
-        "init", "--config-dir", str(paths.config_dir), "--data-dir", str(paths.data_dir),
-        "--cache-dir", str(paths.cache_dir), "--log-dir", str(paths.log_dir),
+        "init",
+        "--config-dir",
+        str(paths.config_dir),
+        "--data-dir",
+        str(paths.data_dir),
+        "--cache-dir",
+        str(paths.cache_dir),
+        "--log-dir",
+        str(paths.log_dir),
     ]
 
 
@@ -198,13 +226,23 @@ def test_init_client_configs_are_idempotent(tmp_path: Path) -> None:
 
 
 def test_init_client_manifest_failure_is_typed_not_bare(
-    tmp_path: Path, capsys: pytest.CaptureFixture,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture,
 ) -> None:
     bad_config_dir = tmp_path / "bad;name"  # a shell metacharacter lands in a rendered arg
-    exit_code = cli.bruriah_main([
-        "init", "--config-dir", str(bad_config_dir), "--data-dir", str(tmp_path / "data"),
-        "--cache-dir", str(tmp_path / "cache"), "--log-dir", str(tmp_path / "log"),
-    ])
+    exit_code = cli.bruriah_main(
+        [
+            "init",
+            "--config-dir",
+            str(bad_config_dir),
+            "--data-dir",
+            str(tmp_path / "data"),
+            "--cache-dir",
+            str(tmp_path / "cache"),
+            "--log-dir",
+            str(tmp_path / "log"),
+        ]
+    )
     assert exit_code == 1
     assert "client_manifest_invalid" in capsys.readouterr().err
 
@@ -263,10 +301,14 @@ def test_doctor_reports_each_packs_currency_and_stays_healthy_past_expiry(tmp_pa
 
     assert report["registry"]["status"] == "ok"
     assert report["registry"]["pack_currency"] == {
-        "programming.minimal": "expired", "project.memory": "expired", "research.minimal": "expired",
+        "programming.minimal": "expired",
+        "project.memory": "expired",
+        "research.minimal": "expired",
     }
     assert cli.run_doctor(paths, today=_TODAY, now=_NOW)["registry"]["pack_currency"] == {
-        "programming.minimal": "current", "project.memory": "current", "research.minimal": "current",
+        "programming.minimal": "current",
+        "project.memory": "current",
+        "research.minimal": "current",
     }
 
 
@@ -293,10 +335,19 @@ def test_cli_dispatch_typed_errors_no_bare_exception(tmp_path: Path, capsys: pyt
     root, policy_path = _corpus(tmp_path)
 
     missing_root = tmp_path / "does-not-exist"
-    exit_code = cli.bruriah_main([
-        "index", "--config-dir", str(config_dir), "--data-dir", str(data_dir),
-        "--corpus-root", str(missing_root), "--policy", str(policy_path),
-    ])
+    exit_code = cli.bruriah_main(
+        [
+            "index",
+            "--config-dir",
+            str(config_dir),
+            "--data-dir",
+            str(data_dir),
+            "--corpus-root",
+            str(missing_root),
+            "--policy",
+            str(policy_path),
+        ]
+    )
     assert exit_code == 1
     assert "corpus_root_not_found" in capsys.readouterr().err
 
@@ -307,34 +358,70 @@ def test_cli_dispatch_typed_errors_no_bare_exception(tmp_path: Path, capsys: pyt
     assert "invalid_config" in capsys.readouterr().err
 
     empty_config = tmp_path / "empty-config"
-    exit_code = cli.bruriah_main([
-        "serve", "--config-dir", str(empty_config), "--data-dir", str(tmp_path / "empty-data"),
-    ])
+    exit_code = cli.bruriah_main(
+        [
+            "serve",
+            "--config-dir",
+            str(empty_config),
+            "--data-dir",
+            str(tmp_path / "empty-data"),
+        ]
+    )
     assert exit_code == 1  # never enters the blocking stdio loop on an uninitialized dir
     assert "index_not_built" in capsys.readouterr().err
 
     bad_policy = tmp_path / "bad.yaml"
     bad_policy.write_text("include: [unclosed\n:::", encoding="utf-8")  # exists but malformed YAML
-    exit_code = cli.bruriah_main([
-        "index", "--config-dir", str(tmp_path / "c2"), "--data-dir", str(tmp_path / "d2"),
-        "--corpus-root", str(root), "--policy", str(bad_policy),
-    ])
+    exit_code = cli.bruriah_main(
+        [
+            "index",
+            "--config-dir",
+            str(tmp_path / "c2"),
+            "--data-dir",
+            str(tmp_path / "d2"),
+            "--corpus-root",
+            str(root),
+            "--policy",
+            str(bad_policy),
+        ]
+    )
     assert exit_code == 1 and "index_failed" in capsys.readouterr().err  # typed, not a traceback
 
     # init's mkdir into a file-path (no per-site guard) must still exit typed via the backstop.
-    file_seg = tmp_path / "afile"; file_seg.write_text("x", encoding="utf-8")
-    exit_code = cli.bruriah_main(["init", "--config-dir", str(file_seg / "cfg"),
-        "--data-dir", str(tmp_path / "d3"), "--cache-dir", str(tmp_path / "ca3"), "--log-dir", str(tmp_path / "l3")])
+    file_seg = tmp_path / "afile"
+    file_seg.write_text("x", encoding="utf-8")
+    exit_code = cli.bruriah_main(
+        [
+            "init",
+            "--config-dir",
+            str(file_seg / "cfg"),
+            "--data-dir",
+            str(tmp_path / "d3"),
+            "--cache-dir",
+            str(tmp_path / "ca3"),
+            "--log-dir",
+            str(tmp_path / "l3"),
+        ]
+    )
     assert exit_code == 1 and "bruriah: error:" in capsys.readouterr().err
 
 
 def test_cli_index_dispatch_builds_only_under_private_data_dir(tmp_path: Path) -> None:
     root, policy_path = _corpus(tmp_path)
     config_dir, data_dir = tmp_path / "config", tmp_path / "data"
-    args = cli._build_cli_parser().parse_args([
-        "index", "--config-dir", str(config_dir), "--data-dir", str(data_dir),
-        "--corpus-root", str(root), "--policy", str(policy_path),
-    ])
+    args = cli._build_cli_parser().parse_args(
+        [
+            "index",
+            "--config-dir",
+            str(config_dir),
+            "--data-dir",
+            str(data_dir),
+            "--corpus-root",
+            str(root),
+            "--policy",
+            str(policy_path),
+        ]
+    )
     exit_code = cli._cmd_index(args, embedder_factory=_fake_embedder_factory)
     assert exit_code == 0
     assert (data_dir / "active.json").is_file()
@@ -342,7 +429,8 @@ def test_cli_index_dispatch_builds_only_under_private_data_dir(tmp_path: Path) -
 
 
 def test_index_persists_absolute_paths_so_serve_survives_a_different_working_directory(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Indexing with RELATIVE `--corpus-root`/`--policy` must still produce a snapshot that opens
     from anywhere. The build descriptor is read back by `serve` in a separate process whose working
@@ -354,11 +442,19 @@ def test_index_persists_absolute_paths_so_serve_survives_a_different_working_dir
     config_dir, data_dir = tmp_path / "config", tmp_path / "data"
 
     monkeypatch.chdir(tmp_path)
-    args = cli._build_cli_parser().parse_args([
-        "index", "--config-dir", str(config_dir), "--data-dir", str(data_dir),
-        "--corpus-root", str(root.relative_to(tmp_path)),
-        "--policy", str(policy_path.relative_to(tmp_path)),
-    ])
+    args = cli._build_cli_parser().parse_args(
+        [
+            "index",
+            "--config-dir",
+            str(config_dir),
+            "--data-dir",
+            str(data_dir),
+            "--corpus-root",
+            str(root.relative_to(tmp_path)),
+            "--policy",
+            str(policy_path.relative_to(tmp_path)),
+        ]
+    )
     assert not args.corpus_root.is_absolute() and not args.policy.is_absolute()
     assert cli._cmd_index(args, embedder_factory=_fake_embedder_factory) == 0
 
@@ -387,7 +483,8 @@ def test_index_persists_absolute_paths_so_serve_survives_a_different_working_dir
 
 
 def _counting_embedder_factory(
-    *, fingerprint: str = _FINGERPRINT,
+    *,
+    fingerprint: str = _FINGERPRINT,
 ) -> tuple[cli.EmbedderFactory, list[str]]:
     """A fake embedder that records every passage it was asked to embed.
 
@@ -450,7 +547,8 @@ def test_editing_one_document_re_embeds_only_that_document(tmp_path: Path) -> No
 
     cli.run_index(paths, root, policy_path, model_name="test/minilm", embedder_factory=factory)
     (root / "public" / "other.md").write_text(
-        f"# Schema\nA rewritten python schema validation passage.\n{_FILLER}\n", encoding="utf-8",
+        f"# Schema\nA rewritten python schema validation passage.\n{_FILLER}\n",
+        encoding="utf-8",
     )
     embedded.clear()
 
@@ -470,11 +568,13 @@ def test_a_different_embedding_model_reuses_nothing_through_the_cli(tmp_path: Pa
     first_factory, _ = _counting_embedder_factory()
     cli.run_index(paths, root, policy_path, model_name="test/minilm", embedder_factory=first_factory)
 
-    other_factory, embedded = _counting_embedder_factory(
-        fingerprint=_FINGERPRINT.replace("snapshot-a", "snapshot-b")
-    )
+    other_factory, embedded = _counting_embedder_factory(fingerprint=_FINGERPRINT.replace("snapshot-a", "snapshot-b"))
     result = cli.run_index(
-        paths, root, policy_path, model_name="test/other", embedder_factory=other_factory,
+        paths,
+        root,
+        policy_path,
+        model_name="test/other",
+        embedder_factory=other_factory,
     )
 
     assert result.reused_documents == 0
@@ -482,7 +582,8 @@ def test_a_different_embedding_model_reuses_nothing_through_the_cli(tmp_path: Pa
 
 
 def test_the_index_command_reports_how_much_it_reused(
-    tmp_path: Path, capsys: pytest.CaptureFixture,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture,
 ) -> None:
     """Reuse is invisible in the result -- the snapshot is identical either way -- so the only way
     a user learns their reindex was cheap, or learns that a model change made it expensive, is if
@@ -490,8 +591,15 @@ def test_the_index_command_reports_how_much_it_reused(
     root, policy_path = _two_document_corpus(tmp_path)
     config_dir, data_dir = tmp_path / "config", tmp_path / "data"
     argv = [
-        "index", "--config-dir", str(config_dir), "--data-dir", str(data_dir),
-        "--corpus-root", str(root), "--policy", str(policy_path),
+        "index",
+        "--config-dir",
+        str(config_dir),
+        "--data-dir",
+        str(data_dir),
+        "--corpus-root",
+        str(root),
+        "--policy",
+        str(policy_path),
     ]
     args = cli._build_cli_parser().parse_args(argv)
 
@@ -516,7 +624,11 @@ def _index_with_fake_embedder(tmp_path: Path):
     root, policy_path = _corpus(tmp_path)
     paths = _paths(tmp_path)
     cli.run_index(
-        paths, root, policy_path, model_name="test/minilm", embedder_factory=_fake_embedder_factory,
+        paths,
+        root,
+        policy_path,
+        model_name="test/minilm",
+        embedder_factory=_fake_embedder_factory,
     )
     return paths
 
@@ -604,7 +716,10 @@ def test_build_serve_deps_queries_with_the_snapshots_own_model_not_the_current_d
     assert built_with_model != DEFAULT_EMBEDDING_MODEL  # the whole point of this test
 
     cli.run_index(
-        paths, root, policy_path, model_name=built_with_model,
+        paths,
+        root,
+        policy_path,
+        model_name=built_with_model,
         embedder_factory=_fake_embedder_factory,
     )
 
@@ -653,7 +768,10 @@ def test_load_deps_threads_an_explicit_embed_query_into_service_deps(tmp_path: P
 # --- skill lifecycle subcommands (Unit 9A.3) -----------------------------------------------------
 
 from bruriah.cli import (  # noqa: E402
-    run_skill_analyze, run_skill_approve, run_skill_ingest, run_skill_sign,
+    run_skill_analyze,
+    run_skill_approve,
+    run_skill_ingest,
+    run_skill_sign,
 )
 from test_skills import DIGEST as _SKILL_DIGEST  # noqa: E402
 from test_skills import _pack as _skill_pack  # noqa: E402
@@ -693,17 +811,14 @@ def test_analyze_output_carries_its_own_limits(tmp_path: Path) -> None:
 
 def test_analyze_output_has_no_verdict_key(tmp_path: Path) -> None:
     # The CLI must not reintroduce at the boundary the verdict the analysis layer refuses to express.
-    result = run_skill_analyze(_candidate_file(tmp_path, _skill_pack(
-        skills=[_skill_entry(summary=_FLAGGED)])))
-    assert set(result) == {"digest", "pack_id", "version", "skill_ids", "advisories",
-                           "analysis_limits"}
+    result = run_skill_analyze(_candidate_file(tmp_path, _skill_pack(skills=[_skill_entry(summary=_FLAGGED)])))
+    assert set(result) == {"digest", "pack_id", "version", "skill_ids", "advisories", "analysis_limits"}
     assert set(result) & {"safe", "passed", "verdict", "risk", "severity", "score", "clean"} == set()
     assert result["advisories"][0]["id"] == "design.ui-review:mentions_credential_path"
 
 
 def test_analyze_reports_findings_without_refusing(tmp_path: Path) -> None:
-    result = run_skill_analyze(_candidate_file(tmp_path, _skill_pack(
-        skills=[_skill_entry(summary=_FLAGGED)])))
+    result = run_skill_analyze(_candidate_file(tmp_path, _skill_pack(skills=[_skill_entry(summary=_FLAGGED)])))
     assert [item["code"] for item in result["advisories"]] == ["mentions_credential_path"]
     assert result["skill_ids"] == ["design.ui-review"]
 
@@ -718,15 +833,13 @@ def test_a_structurally_invalid_candidate_is_one_typed_error(tmp_path: Path) -> 
 def test_approve_refuses_without_full_acknowledgment_through_the_cli(tmp_path: Path) -> None:
     paths = _paths(tmp_path)
     candidate = _candidate_file(tmp_path, _skill_pack(skills=[_skill_entry(summary=_FLAGGED)]))
-    assert _cli_code(run_skill_approve, paths, candidate, []) == \
-        "approval_refused:unacknowledged_advisories"
+    assert _cli_code(run_skill_approve, paths, candidate, []) == "approval_refused:unacknowledged_advisories"
 
 
 def test_approve_records_the_binding_when_every_finding_is_acknowledged(tmp_path: Path) -> None:
     paths = _paths(tmp_path)
     candidate = _candidate_file(tmp_path, _skill_pack(skills=[_skill_entry(summary=_FLAGGED)]))
-    result = run_skill_approve(paths, candidate, ["design.ui-review:mentions_credential_path"],
-                               today=date(2026, 7, 25))
+    result = run_skill_approve(paths, candidate, ["design.ui-review:mentions_credential_path"], today=date(2026, 7, 25))
     record = result["approved"][0]
     assert record["skill_id"] == "design.ui-review"
     assert record["body_digest"] == _SKILL_DIGEST
@@ -751,15 +864,16 @@ def test_sign_produces_a_manifest_that_verifies_through_the_real_loader(tmp_path
     public = generate_key(key)
     pack = _candidate_file(tmp_path)
     result = run_skill_sign(key, "bruriah-release", pack, None)
-    loaded = load_skill_pack(pack, Path(result["manifest"]), {"bruriah-release": public},
-                             today=date(2026, 7, 25))
+    loaded = load_skill_pack(pack, Path(result["manifest"]), {"bruriah-release": public}, today=date(2026, 7, 25))
     assert loaded.pack_id == "bruriah.skills"
     assert "not a claim that they" in result["note"]
 
 
 def test_signing_with_a_missing_key_is_one_typed_error(tmp_path: Path) -> None:
-    assert _cli_code(run_skill_sign, tmp_path / "absent.pem", "s", _candidate_file(tmp_path), None) \
+    assert (
+        _cli_code(run_skill_sign, tmp_path / "absent.pem", "s", _candidate_file(tmp_path), None)
         == "signing_failed:key_unreadable"
+    )
 
 
 @pytest.mark.parametrize(
@@ -774,15 +888,17 @@ def test_signing_with_a_missing_key_is_one_typed_error(tmp_path: Path) -> None:
 def test_every_subcommand_is_registered_and_fails_typed(tmp_path: Path, argv, capsys) -> None:
     # Exercised through the real argv path: the subcommand parses, and a missing file surfaces as one
     # typed line on stderr rather than a traceback.
-    assert cli.bruriah_main([*argv, "--data-dir", str(tmp_path / "d"),
-                                 "--config-dir", str(tmp_path / "c")]) == 1
+    assert cli.bruriah_main([*argv, "--data-dir", str(tmp_path / "d"), "--config-dir", str(tmp_path / "c")]) == 1
     assert "bruriah: error:" in capsys.readouterr().err
 
 
 # --- skill activation subcommands (Unit 9B) -------------------------------------------------------
 
 from bruriah.cli import (  # noqa: E402
-    run_skill_activate, run_skill_prune, run_skill_rollback, run_skill_status,
+    run_skill_activate,
+    run_skill_prune,
+    run_skill_rollback,
+    run_skill_status,
 )
 
 _T3 = dict(tier="local", domains=["programming"])
@@ -802,8 +918,7 @@ def _approved(tmp_path: Path, paths, name: str = "pack", **overrides) -> Path:
 
 
 def _activate(paths, *candidates_: Path):
-    return run_skill_activate(paths, list(candidates_), allow_unsigned_local=True,
-                              today=date(2026, 7, 25))
+    return run_skill_activate(paths, list(candidates_), allow_unsigned_local=True, today=date(2026, 7, 25))
 
 
 def test_the_whole_lifecycle_runs_from_the_cli(tmp_path: Path) -> None:
@@ -819,9 +934,16 @@ def test_the_whole_lifecycle_runs_from_the_cli(tmp_path: Path) -> None:
 def test_activation_refuses_an_unapproved_candidate(tmp_path: Path) -> None:
     # The gate holds through the CLI too: approval is not implied by naming a candidate.
     paths = _paths(tmp_path)
-    assert _cli_code(run_skill_activate, paths, [_local_pack(tmp_path, "pack")],
-                     allow_unsigned_local=True, today=date(2026, 7, 25)) == \
-        "activation_refused:skill_not_approved"
+    assert (
+        _cli_code(
+            run_skill_activate,
+            paths,
+            [_local_pack(tmp_path, "pack")],
+            allow_unsigned_local=True,
+            today=date(2026, 7, 25),
+        )
+        == "activation_refused:skill_not_approved"
+    )
 
 
 def test_an_unsigned_pack_needs_the_explicit_flag(tmp_path: Path) -> None:
@@ -829,8 +951,10 @@ def test_an_unsigned_pack_needs_the_explicit_flag(tmp_path: Path) -> None:
     # one, which is the opposite of what an exception should feel like.
     paths = _paths(tmp_path)
     candidate = _approved(tmp_path, paths)
-    assert _cli_code(run_skill_activate, paths, [candidate], today=date(2026, 7, 25)) == \
-        "activation_refused:signature_required"
+    assert (
+        _cli_code(run_skill_activate, paths, [candidate], today=date(2026, 7, 25))
+        == "activation_refused:signature_required"
+    )
 
 
 def test_naming_no_candidate_is_refused_rather_than_activating_everything(tmp_path: Path) -> None:
@@ -851,8 +975,7 @@ def test_rollback_restores_the_previous_generation(tmp_path: Path) -> None:
 def test_rollback_without_history_is_one_typed_error(tmp_path: Path) -> None:
     paths = _paths(tmp_path)
     _activate(paths, _approved(tmp_path, paths))
-    assert _cli_code(run_skill_rollback, paths, today=date(2026, 7, 25)) == \
-        "rollback_refused:no_retained_skillset"
+    assert _cli_code(run_skill_rollback, paths, today=date(2026, 7, 25)) == "rollback_refused:no_retained_skillset"
 
 
 def test_status_never_raises_on_a_broken_pointer(tmp_path: Path) -> None:
@@ -869,8 +992,7 @@ def test_status_never_raises_on_a_broken_pointer(tmp_path: Path) -> None:
 
 def test_status_on_a_fresh_install_reports_inactive_not_broken(tmp_path: Path) -> None:
     status = run_skill_status(_paths(tmp_path), today=date(2026, 7, 25))
-    assert status == {"active": None, "skills": [], "warning": None,
-                      "retained": [], "unreferenced": []}
+    assert status == {"active": None, "skills": [], "warning": None, "retained": [], "unreferenced": []}
 
 
 def test_prune_removes_only_unreferenced_generations(tmp_path: Path) -> None:
@@ -890,12 +1012,10 @@ def test_prune_refuses_without_a_readable_pointer(tmp_path: Path) -> None:
 
 @pytest.mark.parametrize(
     "argv",
-    [["skill-activate", "--candidate", "x.json"], ["skill-rollback"],
-     ["skill-status"], ["skill-prune"]],
+    [["skill-activate", "--candidate", "x.json"], ["skill-rollback"], ["skill-status"], ["skill-prune"]],
 )
 def test_every_activation_subcommand_is_registered(tmp_path: Path, argv, capsys) -> None:
-    code = cli.bruriah_main([*argv, "--data-dir", str(tmp_path / "d"),
-                                 "--config-dir", str(tmp_path / "c")])
+    code = cli.bruriah_main([*argv, "--data-dir", str(tmp_path / "d"), "--config-dir", str(tmp_path / "c")])
     # skill-status succeeds on a fresh install by design; the rest fail typed rather than traceback.
     assert code == (0 if argv[0] == "skill-status" else 1)
     if code == 1:
@@ -948,7 +1068,9 @@ def test_build_serve_deps_leaves_the_reranker_dormant_unless_an_operator_names_o
         raise AssertionError(f"a reranker was constructed without being asked for: {model_name}")
 
     deps = cli.build_serve_deps(
-        paths, embedder_factory=_fake_embedder_factory, reranker_factory=never,
+        paths,
+        embedder_factory=_fake_embedder_factory,
+        reranker_factory=never,
     )
     try:
         assert deps.rerank is None
@@ -967,14 +1089,19 @@ def test_build_serve_deps_threads_a_named_reranker_through_to_the_search_stage(
         return lambda query, documents: [0.0] * len(documents)
 
     deps = cli.build_serve_deps(
-        paths, embedder_factory=_fake_embedder_factory,
-        reranker_model="example/reranker", reranker_factory=factory,
+        paths,
+        embedder_factory=_fake_embedder_factory,
+        reranker_model="example/reranker",
+        reranker_factory=factory,
     )
     try:
         assert built == ["example/reranker"]
         assert deps.rerank is not None
         outcome = router_search(
-            deps.snapshot, _TASK, embed_query=deps.embed_query, rerank=deps.rerank,
+            deps.snapshot,
+            _TASK,
+            embed_query=deps.embed_query,
+            rerank=deps.rerank,
         )
         assert any(note.startswith("reranked:") for note in outcome.degradation)
     finally:
@@ -1030,14 +1157,23 @@ def _decision_repo(tmp_path: Path) -> Path:
 
 def _init_repo_args(tmp_path: Path, repo: Path) -> "list[str]":
     return [
-        "init", "--repo", str(repo),
-        "--config-dir", str(tmp_path / "config"), "--data-dir", str(tmp_path / "data"),
-        "--cache-dir", str(tmp_path / "cache"), "--log-dir", str(tmp_path / "log"),
+        "init",
+        "--repo",
+        str(repo),
+        "--config-dir",
+        str(tmp_path / "config"),
+        "--data-dir",
+        str(tmp_path / "data"),
+        "--cache-dir",
+        str(tmp_path / "cache"),
+        "--log-dir",
+        str(tmp_path / "log"),
     ]
 
 
 def test_init_repo_bootstraps_policy_corpus_index_and_clients_in_one_command(
-    tmp_path: Path, capsys: pytest.CaptureFixture,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture,
 ) -> None:
     repo = _decision_repo(tmp_path)
     args = cli._build_cli_parser().parse_args(_init_repo_args(tmp_path, repo))
@@ -1046,8 +1182,7 @@ def test_init_repo_bootstraps_policy_corpus_index_and_clients_in_one_command(
 
     # Every artifact of the spelled-out quickstart, from one command, in the directories the
     # tool already owns -- no new location was invented.
-    assert (tmp_path / "config" / "policy.yaml").read_text(
-        encoding="utf-8") == cli._DEFAULT_BOOTSTRAP_POLICY
+    assert (tmp_path / "config" / "policy.yaml").read_text(encoding="utf-8") == cli._DEFAULT_BOOTSTRAP_POLICY
     assert len(list((tmp_path / "data" / "corpus").glob("*.md"))) == 1
     assert (tmp_path / "data" / "active.json").is_file()
     assert (tmp_path / "config" / "clients").is_dir()
@@ -1066,7 +1201,8 @@ def test_init_repo_bootstraps_policy_corpus_index_and_clients_in_one_command(
 
 
 def test_init_repo_refuses_a_directory_that_is_not_a_repository(
-    tmp_path: Path, capsys: pytest.CaptureFixture,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture,
 ) -> None:
     plain = tmp_path / "plain"
     plain.mkdir()
@@ -1076,7 +1212,8 @@ def test_init_repo_refuses_a_directory_that_is_not_a_repository(
 
 
 def test_init_repo_with_a_history_that_never_explains_stops_before_indexing(
-    tmp_path: Path, capsys: pytest.CaptureFixture,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture,
 ) -> None:
     """An index of zero documents can only return nothing; building it would dress that up as a
     completed setup, and writing client configs would point a client at it."""
@@ -1110,7 +1247,8 @@ def test_init_repo_never_touches_an_existing_policy(tmp_path: Path) -> None:
 
 
 def test_the_model_cache_is_pinned_under_the_private_cache_dir(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """fastembed's own default cache is the OS temp directory, which macOS purges on its own
     schedule -- so "the model downloads once" held only until the OS decided otherwise. Every
@@ -1119,23 +1257,42 @@ def test_the_model_cache_is_pinned_under_the_private_cache_dir(
     there, so the subdirectory sits outside its deletion control)."""
     monkeypatch.setenv("FASTEMBED_CACHE_PATH", "placeholder")  # registers the restore
     monkeypatch.delenv("FASTEMBED_CACHE_PATH")
-    args = cli._build_cli_parser().parse_args([
-        "doctor", "--config-dir", str(tmp_path / "config"), "--data-dir", str(tmp_path / "data"),
-        "--cache-dir", str(tmp_path / "cache"), "--log-dir", str(tmp_path / "log"),
-    ])
+    args = cli._build_cli_parser().parse_args(
+        [
+            "doctor",
+            "--config-dir",
+            str(tmp_path / "config"),
+            "--data-dir",
+            str(tmp_path / "data"),
+            "--cache-dir",
+            str(tmp_path / "cache"),
+            "--log-dir",
+            str(tmp_path / "log"),
+        ]
+    )
     cli._resolve_paths(args)
     assert os.environ["FASTEMBED_CACHE_PATH"] == str(tmp_path / "cache" / "models")
 
 
 def test_an_operator_pinned_model_cache_is_respected(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """FASTEMBED_CACHE_PATH is fastembed's documented knob; an operator who set it keeps it."""
     monkeypatch.setenv("FASTEMBED_CACHE_PATH", str(tmp_path / "operator-cache"))
-    args = cli._build_cli_parser().parse_args([
-        "doctor", "--config-dir", str(tmp_path / "config"), "--data-dir", str(tmp_path / "data"),
-        "--cache-dir", str(tmp_path / "cache"), "--log-dir", str(tmp_path / "log"),
-    ])
+    args = cli._build_cli_parser().parse_args(
+        [
+            "doctor",
+            "--config-dir",
+            str(tmp_path / "config"),
+            "--data-dir",
+            str(tmp_path / "data"),
+            "--cache-dir",
+            str(tmp_path / "cache"),
+            "--log-dir",
+            str(tmp_path / "log"),
+        ]
+    )
     cli._resolve_paths(args)
     assert os.environ["FASTEMBED_CACHE_PATH"] == str(tmp_path / "operator-cache")
 
@@ -1170,12 +1327,19 @@ def test_build_serve_deps_applies_query_prefix(tmp_path: Path) -> None:
 
     data_dir = tmp_path / "data"
     paths = cli.PlatformPaths(
-        config_dir=tmp_path / "cfg", data_dir=data_dir, cache_dir=tmp_path / "cache", log_dir=tmp_path / "log",
+        config_dir=tmp_path / "cfg",
+        data_dir=data_dir,
+        cache_dir=tmp_path / "cache",
+        log_dir=tmp_path / "log",
     )
     cli.run_index(
-        paths, root, policy_path, model_name="intfloat/multilingual-e5-large",
+        paths,
+        root,
+        policy_path,
+        model_name="intfloat/multilingual-e5-large",
         embedder_factory=_fake_embedder_factory,
-        query_prefix="query: ", passage_prefix="passage: ",
+        query_prefix="query: ",
+        passage_prefix="passage: ",
     )
 
     embedded_queries: list[str] = []
@@ -1198,19 +1362,37 @@ def test_build_serve_deps_applies_query_prefix(tmp_path: Path) -> None:
 
 def test_cli_parser_accepts_query_and_passage_prefix_flags(tmp_path: Path) -> None:
     parser = cli._build_cli_parser()
-    args_index = parser.parse_args([
-        "index", "--corpus-root", str(tmp_path), "--policy", str(tmp_path / "policy.yaml"),
-        "--model", "intfloat/multilingual-e5-large",
-        "--query-prefix", "ask: ", "--passage-prefix", "doc: ",
-    ])
+    args_index = parser.parse_args(
+        [
+            "index",
+            "--corpus-root",
+            str(tmp_path),
+            "--policy",
+            str(tmp_path / "policy.yaml"),
+            "--model",
+            "intfloat/multilingual-e5-large",
+            "--query-prefix",
+            "ask: ",
+            "--passage-prefix",
+            "doc: ",
+        ]
+    )
     assert args_index.query_prefix == "ask: "
     assert args_index.passage_prefix == "doc: "
 
-    args_init = parser.parse_args([
-        "init", "--repo", str(tmp_path),
-        "--model", "intfloat/multilingual-e5-large",
-        "--query-prefix", "q: ", "--passage-prefix", "p: ",
-    ])
+    args_init = parser.parse_args(
+        [
+            "init",
+            "--repo",
+            str(tmp_path),
+            "--model",
+            "intfloat/multilingual-e5-large",
+            "--query-prefix",
+            "q: ",
+            "--passage-prefix",
+            "p: ",
+        ]
+    )
     assert args_init.query_prefix == "q: "
     assert args_init.passage_prefix == "p: "
 
@@ -1228,14 +1410,22 @@ def test_cli_why_not_a_git_repository(tmp_path: Path, capsys: pytest.CaptureFixt
     non_git = tmp_path / "plain_dir"
     non_git.mkdir()
     paths = _paths(tmp_path)
-    exit_code = cli.bruriah_main([
-        "why", "file.py:1",
-        "--repo", str(non_git),
-        "--config-dir", str(paths.config_dir),
-        "--data-dir", str(paths.data_dir),
-        "--cache-dir", str(paths.cache_dir),
-        "--log-dir", str(paths.log_dir),
-    ])
+    exit_code = cli.bruriah_main(
+        [
+            "why",
+            "file.py:1",
+            "--repo",
+            str(non_git),
+            "--config-dir",
+            str(paths.config_dir),
+            "--data-dir",
+            str(paths.data_dir),
+            "--cache-dir",
+            str(paths.cache_dir),
+            "--log-dir",
+            str(paths.log_dir),
+        ]
+    )
     assert exit_code == 1
     assert "not_a_git_repository" in capsys.readouterr().err
 
@@ -1251,7 +1441,9 @@ def test_cli_why_end_to_end(tmp_path: Path, capsys: pytest.CaptureFixture) -> No
     (repo / "storage.py").write_text("def connect():\n    return 'db'\n", encoding="utf-8")
     subprocess.run(["git", "add", "storage.py"], cwd=repo, check=True)
     subprocess.run(["git", "commit", "-m", "feat: initial storage"], cwd=repo, check=True)
-    sha = subprocess.run(["git", "rev-parse", "HEAD"], cwd=repo, capture_output=True, text=True, check=True).stdout.strip()
+    sha = subprocess.run(
+        ["git", "rev-parse", "HEAD"], cwd=repo, capture_output=True, text=True, check=True
+    ).stdout.strip()
 
     # 2. Build corpus and index containing this decision
     root = tmp_path / "vault"
@@ -1276,19 +1468,31 @@ Decided to use raw sqlite3 connection pooling.
     paths = _paths(tmp_path)
     cli.run_init(paths)
     cli.run_index(
-        paths, root, policy_path, model_name="test/minilm", embedder_factory=_fake_embedder_factory,
+        paths,
+        root,
+        policy_path,
+        model_name="test/minilm",
+        embedder_factory=_fake_embedder_factory,
     )
 
     # 3. Run why command human-readable
     capsys.readouterr()  # flush
-    exit_code = cli.bruriah_main([
-        "why", "storage.py:1",
-        "--repo", str(repo),
-        "--config-dir", str(paths.config_dir),
-        "--data-dir", str(paths.data_dir),
-        "--cache-dir", str(paths.cache_dir),
-        "--log-dir", str(paths.log_dir),
-    ])
+    exit_code = cli.bruriah_main(
+        [
+            "why",
+            "storage.py:1",
+            "--repo",
+            str(repo),
+            "--config-dir",
+            str(paths.config_dir),
+            "--data-dir",
+            str(paths.data_dir),
+            "--cache-dir",
+            str(paths.cache_dir),
+            "--log-dir",
+            str(paths.log_dir),
+        ]
+    )
     assert exit_code == 0
     captured = capsys.readouterr()
     assert "Target: storage.py:1" in captured.out
@@ -1299,15 +1503,23 @@ Decided to use raw sqlite3 connection pooling.
     assert "Decided to use raw sqlite3 connection pooling" in captured.out
 
     # 4. Run why command with --json
-    exit_code = cli.bruriah_main([
-        "why", "storage.py:1",
-        "--repo", str(repo),
-        "--json",
-        "--config-dir", str(paths.config_dir),
-        "--data-dir", str(paths.data_dir),
-        "--cache-dir", str(paths.cache_dir),
-        "--log-dir", str(paths.log_dir),
-    ])
+    exit_code = cli.bruriah_main(
+        [
+            "why",
+            "storage.py:1",
+            "--repo",
+            str(repo),
+            "--json",
+            "--config-dir",
+            str(paths.config_dir),
+            "--data-dir",
+            str(paths.data_dir),
+            "--cache-dir",
+            str(paths.cache_dir),
+            "--log-dir",
+            str(paths.log_dir),
+        ]
+    )
     assert exit_code == 0
     captured_json = capsys.readouterr().out
     data = json.loads(captured_json)
@@ -1317,14 +1529,22 @@ Decided to use raw sqlite3 connection pooling.
     assert data["governing_decision"]["subject"] == "SQLite Storage Implementation"
 
     # 5. Run with line out of range
-    exit_code = cli.bruriah_main([
-        "why", "storage.py:999",
-        "--repo", str(repo),
-        "--config-dir", str(paths.config_dir),
-        "--data-dir", str(paths.data_dir),
-        "--cache-dir", str(paths.cache_dir),
-        "--log-dir", str(paths.log_dir),
-    ])
+    exit_code = cli.bruriah_main(
+        [
+            "why",
+            "storage.py:999",
+            "--repo",
+            str(repo),
+            "--config-dir",
+            str(paths.config_dir),
+            "--data-dir",
+            str(paths.data_dir),
+            "--cache-dir",
+            str(paths.cache_dir),
+            "--log-dir",
+            str(paths.log_dir),
+        ]
+    )
     assert exit_code == 1
     assert "line_out_of_range" in capsys.readouterr().err
 
@@ -1350,9 +1570,7 @@ def test_cli_corpus_pdf_single_file(tmp_path: Path, capsys: pytest.CaptureFixtur
     assert data["out"] == str(out_dir)
 
 
-def test_cli_corpus_pdf_coverage_reporting_on_skipped_pages(
-    tmp_path: Path, capsys: pytest.CaptureFixture[str]
-) -> None:
+def test_cli_corpus_pdf_coverage_reporting_on_skipped_pages(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     from test_pdfcorpus import _make_pdf
 
     pdf_path = _make_pdf(tmp_path / "mixed.pdf", ["Only page with text.", ""])
@@ -1370,9 +1588,7 @@ def test_cli_corpus_pdf_coverage_reporting_on_skipped_pages(
     assert "were empty or image-only and were skipped" in captured.err
 
 
-def test_cli_corpus_pdf_no_extractable_text(
-    tmp_path: Path, capsys: pytest.CaptureFixture[str]
-) -> None:
+def test_cli_corpus_pdf_no_extractable_text(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     from test_pdfcorpus import _make_pdf
 
     pdf_path = _make_pdf(tmp_path / "empty_doc.pdf", ["", "   "])
@@ -1388,23 +1604,21 @@ def test_cli_corpus_pdf_no_extractable_text(
     assert "No PDF page contained extractable text." in captured.err
 
 
-def test_cli_corpus_cannot_specify_both_repo_and_pdf(
-    tmp_path: Path, capsys: pytest.CaptureFixture[str]
-) -> None:
+def test_cli_corpus_cannot_specify_both_repo_and_pdf(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     from test_pdfcorpus import _make_pdf
 
     pdf_path = _make_pdf(tmp_path / "doc.pdf", ["Some text"])
     out_dir = tmp_path / "out"
 
-    exit_code = cli.bruriah_main([
-        "corpus", "--repo", ".", "--pdf", str(pdf_path), "--out", str(out_dir)
-    ])
+    exit_code = cli.bruriah_main(["corpus", "--repo", ".", "--pdf", str(pdf_path), "--out", str(out_dir)])
     assert exit_code == 1
     assert "cannot_specify_both_repo_and_pdf" in capsys.readouterr().err
 
 
 def test_init_repo_zero_config_scopes_to_user_data_and_writes_pointer(
-    tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     user_data = tmp_path / "user_data"
     user_config = tmp_path / "user_config"
@@ -1431,7 +1645,8 @@ def test_init_repo_zero_config_scopes_to_user_data_and_writes_pointer(
 
 
 def test_init_repo_local_stores_in_dot_bruriah(
-    tmp_path: Path, capsys: pytest.CaptureFixture[str],
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
 ) -> None:
     repo = _decision_repo(tmp_path)
     args = cli._build_cli_parser().parse_args(["init", "--repo", str(repo), "--local"])
@@ -1576,12 +1791,8 @@ def test_known_model_prefixes_nomic_embed_text() -> None:
     """Nomic embed-text uses search_query/search_document task-type prefixes."""
     from bruriah._cli.common import resolve_model_prefixes
 
-    assert resolve_model_prefixes("nomic-ai/nomic-embed-text-v1.5") == (
-        "search_query: ", "search_document: "
-    )
-    assert resolve_model_prefixes("nomic-ai/nomic-embed-text-v1") == (
-        "search_query: ", "search_document: "
-    )
+    assert resolve_model_prefixes("nomic-ai/nomic-embed-text-v1.5") == ("search_query: ", "search_document: ")
+    assert resolve_model_prefixes("nomic-ai/nomic-embed-text-v1") == ("search_query: ", "search_document: ")
 
 
 def test_known_model_prefixes_bge_m3_no_prefix() -> None:
@@ -1637,7 +1848,8 @@ def test_init_index_watch_parsers_share_the_default_embedding_model_constant() -
 
 @pytest.mark.parametrize("subcommand", ["init", "index", "watch"])
 def test_help_text_shows_the_default_embedding_model(
-    subcommand: str, capsys: pytest.CaptureFixture,
+    subcommand: str,
+    capsys: pytest.CaptureFixture,
 ) -> None:
     """`bruriah <subcommand> --help` must show `DEFAULT_EMBEDDING_MODEL` in its `--model` help
     text, not just as an invisible argparse default -- an operator reading `--help` should not
@@ -1682,7 +1894,8 @@ def _github_link_repo(tmp_path: Path, *, origin: str | None = None) -> Path:
 
 
 def test_cli_corpus_without_github_flag_makes_no_github_call_and_is_byte_identical(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """The acceptance criterion, literally: `bruriah corpus` without `--github` must call none of
     `github_corpus`'s entry points and must write exactly what `gitcorpus.build` alone writes."""
@@ -1709,7 +1922,9 @@ def test_cli_corpus_without_github_flag_makes_no_github_call_and_is_byte_identic
 
 
 def test_cli_corpus_github_builds_offline_from_a_warm_cache_without_a_token(
-    tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     from test_github_corpus import _seed
 
@@ -1721,12 +1936,27 @@ def test_cli_corpus_github_builds_offline_from_a_warm_cache_without_a_token(
 
     _seed(ResponseCache(cache_dir), "acme", "widget")
 
-    exit_code = cli.bruriah_main([
-        "corpus", "--repo", str(repo), "--out", str(out),
-        "--github", "acme/widget", "--github-cache", str(cache_dir),
-        "--config-dir", str(tmp_path / "config"), "--data-dir", str(tmp_path / "data"),
-        "--cache-dir", str(tmp_path / "cache"), "--log-dir", str(tmp_path / "log"),
-    ])
+    exit_code = cli.bruriah_main(
+        [
+            "corpus",
+            "--repo",
+            str(repo),
+            "--out",
+            str(out),
+            "--github",
+            "acme/widget",
+            "--github-cache",
+            str(cache_dir),
+            "--config-dir",
+            str(tmp_path / "config"),
+            "--data-dir",
+            str(tmp_path / "data"),
+            "--cache-dir",
+            str(tmp_path / "cache"),
+            "--log-dir",
+            str(tmp_path / "log"),
+        ]
+    )
     assert exit_code == 0
 
     captured = capsys.readouterr()
@@ -1739,18 +1969,33 @@ def test_cli_corpus_github_builds_offline_from_a_warm_cache_without_a_token(
 
 
 def test_cli_corpus_github_cache_defaults_under_the_tools_own_cache_dir(
-    tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.delenv("GITHUB_TOKEN", raising=False)
     repo = _github_link_repo(tmp_path)
     cache_dir = tmp_path / "cache"
 
-    exit_code = cli.bruriah_main([
-        "corpus", "--repo", str(repo), "--out", str(tmp_path / "out"),
-        "--github", "acme/widget",
-        "--config-dir", str(tmp_path / "config"), "--data-dir", str(tmp_path / "data"),
-        "--cache-dir", str(cache_dir), "--log-dir", str(tmp_path / "log"),
-    ])
+    exit_code = cli.bruriah_main(
+        [
+            "corpus",
+            "--repo",
+            str(repo),
+            "--out",
+            str(tmp_path / "out"),
+            "--github",
+            "acme/widget",
+            "--config-dir",
+            str(tmp_path / "config"),
+            "--data-dir",
+            str(tmp_path / "data"),
+            "--cache-dir",
+            str(cache_dir),
+            "--log-dir",
+            str(tmp_path / "log"),
+        ]
+    )
     assert exit_code == 0
     data = json.loads(capsys.readouterr().out)
     assert data["github"]["cache_dir"] == str(cache_dir / "github")
@@ -1764,8 +2009,11 @@ def test_cli_corpus_github_cache_defaults_under_the_tools_own_cache_dir(
     ],
 )
 def test_cli_corpus_github_bare_flag_autodetects_owner_repo_from_origin(
-    tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch,
-    origin: str, expected: str,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+    origin: str,
+    expected: str,
 ) -> None:
     from bruriah.github_corpus import GitHubCorpusResult
 
@@ -1777,37 +2025,72 @@ def test_cli_corpus_github_bare_flag_autodetects_owner_repo_from_origin(
         manifest_path = out / "github-manifest.json"
         manifest_path.write_text("{}", encoding="utf-8")
         return GitHubCorpusResult(
-            documents_written=0, commits_scanned=len(commits), issues_fetched=0,
-            issues_skipped=0, cross_repo_skipped=0, cache_hits=0, network_calls=0,
+            documents_written=0,
+            commits_scanned=len(commits),
+            issues_fetched=0,
+            issues_skipped=0,
+            cross_repo_skipped=0,
+            cache_hits=0,
+            network_calls=0,
             manifest_path=manifest_path,
         )
 
     monkeypatch.setattr(cli.github_corpus, "build_documents", _fake_build_documents)
     repo = _github_link_repo(tmp_path, origin=origin)
-    exit_code = cli.bruriah_main([
-        "corpus", "--repo", str(repo), "--out", str(tmp_path / "out"), "--github",
-        "--config-dir", str(tmp_path / "config"), "--data-dir", str(tmp_path / "data"),
-        "--cache-dir", str(tmp_path / "cache"), "--log-dir", str(tmp_path / "log"),
-    ])
+    exit_code = cli.bruriah_main(
+        [
+            "corpus",
+            "--repo",
+            str(repo),
+            "--out",
+            str(tmp_path / "out"),
+            "--github",
+            "--config-dir",
+            str(tmp_path / "config"),
+            "--data-dir",
+            str(tmp_path / "data"),
+            "--cache-dir",
+            str(tmp_path / "cache"),
+            "--log-dir",
+            str(tmp_path / "log"),
+        ]
+    )
     assert exit_code == 0
     assert seen["repo"] == expected
 
 
 def test_cli_corpus_github_rejects_a_slug_without_a_slash(
-    tmp_path: Path, capsys: pytest.CaptureFixture[str],
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
 ) -> None:
     repo = _github_link_repo(tmp_path)
-    exit_code = cli.bruriah_main([
-        "corpus", "--repo", str(repo), "--out", str(tmp_path / "out"), "--github", "not-a-slug",
-        "--config-dir", str(tmp_path / "config"), "--data-dir", str(tmp_path / "data"),
-        "--cache-dir", str(tmp_path / "cache"), "--log-dir", str(tmp_path / "log"),
-    ])
+    exit_code = cli.bruriah_main(
+        [
+            "corpus",
+            "--repo",
+            str(repo),
+            "--out",
+            str(tmp_path / "out"),
+            "--github",
+            "not-a-slug",
+            "--config-dir",
+            str(tmp_path / "config"),
+            "--data-dir",
+            str(tmp_path / "data"),
+            "--cache-dir",
+            str(tmp_path / "cache"),
+            "--log-dir",
+            str(tmp_path / "log"),
+        ]
+    )
     assert exit_code == 1
     assert "invalid_repo_slug" in capsys.readouterr().err
 
 
 def test_cli_corpus_github_network_off_empty_cache_prints_upfront_line_and_collapses_misses(
-    tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """T3b (a): with the tool-wide network switch off (the default) and no warm cache, the CLI
     must say so up front -- naming `--network-enabled` and the cache directory -- and collapse the
@@ -1817,19 +2100,32 @@ def test_cli_corpus_github_network_off_empty_cache_prints_upfront_line_and_colla
     repo = _github_link_repo(tmp_path)
     cache_dir = tmp_path / "github_cache"  # never seeded: every issue is guaranteed to miss
 
-    exit_code = cli.bruriah_main([
-        "corpus", "--repo", str(repo), "--out", str(tmp_path / "out"),
-        "--github", "acme/widget", "--github-cache", str(cache_dir),
-        "--config-dir", str(tmp_path / "config"), "--data-dir", str(tmp_path / "data"),
-        "--cache-dir", str(tmp_path / "cache"), "--log-dir", str(tmp_path / "log"),
-    ])
+    exit_code = cli.bruriah_main(
+        [
+            "corpus",
+            "--repo",
+            str(repo),
+            "--out",
+            str(tmp_path / "out"),
+            "--github",
+            "acme/widget",
+            "--github-cache",
+            str(cache_dir),
+            "--config-dir",
+            str(tmp_path / "config"),
+            "--data-dir",
+            str(tmp_path / "data"),
+            "--cache-dir",
+            str(tmp_path / "cache"),
+            "--log-dir",
+            str(tmp_path / "log"),
+        ]
+    )
     assert exit_code == 0
     err = capsys.readouterr().err
     lines = err.splitlines()
 
-    upfront = [
-        line for line in lines if "--network-enabled" in line and "disabled" in line.lower()
-    ]
+    upfront = [line for line in lines if "--network-enabled" in line and "disabled" in line.lower()]
     assert len(upfront) == 1, f"expected exactly one up-front line, got: {lines!r}"
     assert str(cache_dir) in upfront[0]
 
@@ -1841,7 +2137,9 @@ def test_cli_corpus_github_network_off_empty_cache_prints_upfront_line_and_colla
 
 
 def test_cli_corpus_github_network_off_warm_cache_has_no_offline_cache_miss_lines(
-    tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """T3b (b): with the network switch off but the cache already warm, there is nothing to
     collapse or explain -- zero offline-cache-miss warnings, per-issue or summarized."""
@@ -1854,12 +2152,27 @@ def test_cli_corpus_github_network_off_warm_cache_has_no_offline_cache_miss_line
     cache_dir = tmp_path / "github_cache"
     _seed(ResponseCache(cache_dir), "acme", "widget")
 
-    exit_code = cli.bruriah_main([
-        "corpus", "--repo", str(repo), "--out", str(tmp_path / "out"),
-        "--github", "acme/widget", "--github-cache", str(cache_dir),
-        "--config-dir", str(tmp_path / "config"), "--data-dir", str(tmp_path / "data"),
-        "--cache-dir", str(tmp_path / "cache"), "--log-dir", str(tmp_path / "log"),
-    ])
+    exit_code = cli.bruriah_main(
+        [
+            "corpus",
+            "--repo",
+            str(repo),
+            "--out",
+            str(tmp_path / "out"),
+            "--github",
+            "acme/widget",
+            "--github-cache",
+            str(cache_dir),
+            "--config-dir",
+            str(tmp_path / "config"),
+            "--data-dir",
+            str(tmp_path / "data"),
+            "--cache-dir",
+            str(tmp_path / "cache"),
+            "--log-dir",
+            str(tmp_path / "log"),
+        ]
+    )
     assert exit_code == 0
     err = capsys.readouterr().err
 
@@ -1868,7 +2181,9 @@ def test_cli_corpus_github_network_off_warm_cache_has_no_offline_cache_miss_line
 
 
 def test_cli_corpus_github_offline_collapses_only_offline_cache_miss_warnings(
-    tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """T3b (c): collapsing is specific to `github_offline_cache_miss` -- another skip reason
     (e.g. `github_not_found`) keeps its own per-issue warning line even while an offline miss in
@@ -1880,8 +2195,7 @@ def test_cli_corpus_github_offline_collapses_only_offline_cache_miss_warnings(
         manifest_path = out / "github-manifest.json"
         manifest_path.write_text("{}", encoding="utf-8")
         print(
-            f"warning: skipping issue #41 ({repo}): github_offline_cache_miss: "
-            f"/repos/{repo}/issues/41",
+            f"warning: skipping issue #41 ({repo}): github_offline_cache_miss: /repos/{repo}/issues/41",
             file=sys.stderr,
         )
         print(
@@ -1889,19 +2203,37 @@ def test_cli_corpus_github_offline_collapses_only_offline_cache_miss_warnings(
             file=sys.stderr,
         )
         return GitHubCorpusResult(
-            documents_written=0, commits_scanned=len(commits), issues_fetched=0,
-            issues_skipped=2, cross_repo_skipped=0, cache_hits=0, network_calls=0,
+            documents_written=0,
+            commits_scanned=len(commits),
+            issues_fetched=0,
+            issues_skipped=2,
+            cross_repo_skipped=0,
+            cache_hits=0,
+            network_calls=0,
             manifest_path=manifest_path,
         )
 
     monkeypatch.setattr(cli.github_corpus, "build_documents", _fake_build_documents)
     repo = _github_link_repo(tmp_path)
-    exit_code = cli.bruriah_main([
-        "corpus", "--repo", str(repo), "--out", str(tmp_path / "out"),
-        "--github", "acme/widget",
-        "--config-dir", str(tmp_path / "config"), "--data-dir", str(tmp_path / "data"),
-        "--cache-dir", str(tmp_path / "cache"), "--log-dir", str(tmp_path / "log"),
-    ])
+    exit_code = cli.bruriah_main(
+        [
+            "corpus",
+            "--repo",
+            str(repo),
+            "--out",
+            str(tmp_path / "out"),
+            "--github",
+            "acme/widget",
+            "--config-dir",
+            str(tmp_path / "config"),
+            "--data-dir",
+            str(tmp_path / "data"),
+            "--cache-dir",
+            str(tmp_path / "cache"),
+            "--log-dir",
+            str(tmp_path / "log"),
+        ]
+    )
     assert exit_code == 0
     err = capsys.readouterr().err
 
@@ -1909,9 +2241,7 @@ def test_cli_corpus_github_offline_collapses_only_offline_cache_miss_warnings(
     assert err.count("github_not_found:") == 1
     assert "warning: skipping issue #7" in err
 
-    summary_lines = [
-        line for line in err.splitlines() if line.startswith("warning:") and "cache miss" in line
-    ]
+    summary_lines = [line for line in err.splitlines() if line.startswith("warning:") and "cache miss" in line]
     assert len(summary_lines) == 1
     assert "1" in summary_lines[0]
 
@@ -1925,3 +2255,136 @@ def test_resolve_model_prefixes_jina_v2_base_es_no_prefix() -> None:
     assert resolve_model_prefixes("jinaai/jina-embeddings-v2-base-es") == ("", "")
     assert resolve_model_prefixes("jinaai/jina-embeddings-v2-base-en") == ("", "")
     assert resolve_model_prefixes("jinaai/jina-embeddings-v2-small-en") == ("", "")
+
+
+class TestAgentRenderingDegradationWarning:
+    """The stderr warning belongs to the format the operator selected, not to the renderer.
+
+    `evaluate_guard`, `evaluate_brief` and `evaluate_heal` each build their agent rendering on
+    every run, whatever output mode was asked for. The warning used to be printed from inside
+    those renderers, so a plain run or a `--json` run over a corpus with one malformed
+    frontmatter sha emitted a stderr line reading "run without `--agent` to see the raw values"
+    on a command that never passed `--agent` -- unexpected stderr on a successful exit, which a
+    CI wrapper surfaces as noise or treats as failure, carrying advice its reader had already
+    taken.
+
+    The renderers now return a flag and print nothing; `tests/test_agent_surface.py`,
+    `tests/test_guard.py`, `tests/test_brief.py` and `tests/test_heal.py` pin that half. These
+    pin the dispatch: the warning appears under `--agent` and nowhere else.
+    """
+
+    @staticmethod
+    def _degraded_guard_result():
+        from bruriah.guard import GuardResult
+
+        return GuardResult(
+            target="src/auth.py",
+            status="WARNING",
+            inspected_files=("src/auth.py",),
+            contracts=(),
+            violations=(),
+            agent_context="- decision `UNKNOWN`",
+            agent_rendering_degraded=True,
+        )
+
+    @staticmethod
+    def _degraded_brief_result():
+        from bruriah.brief import ArchitecturalBrief
+
+        return ArchitecturalBrief(
+            task_intent="Refactor auth",
+            targets=("src/auth.py",),
+            risk_level="LOW",
+            constraints=(),
+            co_governed_files=(),
+            recommendations=(),
+            supersede_protocol_instructions="Supersede instructions",
+            agent_context="- decision `UNKNOWN`",
+            agent_rendering_degraded=True,
+        )
+
+    @staticmethod
+    def _degraded_heal_result():
+        from bruriah.heal import HealingResult
+
+        return HealingResult(
+            target="src/auth.py",
+            status="HEALABLE",
+            inspected_files=("src/auth.py",),
+            blueprints=(),
+            agent_prompt="- decision `UNKNOWN`",
+            agent_rendering_degraded=True,
+        )
+
+    @pytest.mark.parametrize(
+        ("command", "argv", "patched", "result_name"),
+        [
+            ("guard", ["guard", "src/auth.py"], "bruriah.cli.run_guard", "_degraded_guard_result"),
+            ("brief", ["brief", "Refactor auth"], "bruriah.cli.run_brief", "_degraded_brief_result"),
+            ("heal", ["heal", "src/auth.py"], "bruriah.cli.run_heal", "_degraded_heal_result"),
+        ],
+    )
+    @pytest.mark.parametrize("output_mode", [[], ["--json"]])
+    def test_a_run_that_did_not_ask_for_agent_gets_no_stderr(
+        self, capsys, command, argv, patched, result_name, output_mode
+    ):
+        from unittest.mock import patch as mock_patch
+
+        result = getattr(self, result_name)()
+        capsys.readouterr()
+
+        with mock_patch(patched, return_value=result):
+            exit_code = cli.bruriah_main([*argv, *output_mode])
+
+        captured = capsys.readouterr()
+        assert exit_code == 0
+        assert captured.err == "", f"`bruriah {command} {' '.join(output_mode)}` wrote to stderr"
+
+    @pytest.mark.parametrize(
+        ("command", "argv", "patched", "result_name"),
+        [
+            ("guard", ["guard", "src/auth.py"], "bruriah.cli.run_guard", "_degraded_guard_result"),
+            ("brief", ["brief", "Refactor auth"], "bruriah.cli.run_brief", "_degraded_brief_result"),
+            ("heal", ["heal", "src/auth.py"], "bruriah.cli.run_heal", "_degraded_heal_result"),
+        ],
+    )
+    def test_an_agent_run_gets_exactly_one_warning_naming_its_command(
+        self, capsys, command, argv, patched, result_name
+    ):
+        from unittest.mock import patch as mock_patch
+
+        result = getattr(self, result_name)()
+        capsys.readouterr()
+
+        with mock_patch(patched, return_value=result):
+            exit_code = cli.bruriah_main([*argv, "--agent"])
+
+        captured = capsys.readouterr()
+        assert exit_code == 0
+        warning = captured.err.strip()
+        assert len(warning.splitlines()) == 1
+        assert warning.startswith(f"bruriah {command}:")
+        assert "could not be validated" in warning
+
+    @pytest.mark.parametrize(
+        ("argv", "patched", "result_name"),
+        [
+            (["guard", "src/auth.py"], "bruriah.cli.run_guard", "_degraded_guard_result"),
+            (["brief", "Refactor auth"], "bruriah.cli.run_brief", "_degraded_brief_result"),
+            (["heal", "src/auth.py"], "bruriah.cli.run_heal", "_degraded_heal_result"),
+        ],
+    )
+    def test_an_agent_run_over_a_clean_rendering_is_silent(self, capsys, argv, patched, result_name):
+        """The counter-assertion: a warning on every `--agent` run would be noise nobody reads."""
+        from dataclasses import replace
+        from unittest.mock import patch as mock_patch
+
+        result = replace(getattr(self, result_name)(), agent_rendering_degraded=False)
+        capsys.readouterr()
+
+        with mock_patch(patched, return_value=result):
+            exit_code = cli.bruriah_main([*argv, "--agent"])
+
+        captured = capsys.readouterr()
+        assert exit_code == 0
+        assert captured.err == ""
