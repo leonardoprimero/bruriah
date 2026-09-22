@@ -31,6 +31,7 @@ The fixture's shape is load-bearing. Drift resolves a file's governing decision 
 resolve to the active successor, nothing would be stale, and all three renderers would go
 quiet while these tests reported success.
 """
+
 from __future__ import annotations
 
 import subprocess
@@ -76,9 +77,12 @@ def _git(repo: Path, *args: str) -> str:
     other prompt appears anyway.
     """
     return subprocess.run(
-        ["git", "-c", "commit.gpgsign=false", "-c", "core.hooksPath=",
-         "-c", "init.templateDir=", *args],
-        cwd=repo, check=True, capture_output=True, text=True, timeout=60,
+        ["git", "-c", "commit.gpgsign=false", "-c", "core.hooksPath=", "-c", "init.templateDir=", *args],
+        cwd=repo,
+        check=True,
+        capture_output=True,
+        text=True,
+        timeout=60,
     ).stdout.strip()
 
 
@@ -175,8 +179,7 @@ def _run(capsys: pytest.CaptureFixture[str], argv: list[str]) -> str:
     exit_code = cli.bruriah_main(argv)
     captured = capsys.readouterr()
     assert exit_code == 0, (
-        f"`bruriah {' '.join(argv[:2])}` exited {exit_code}; its output proves nothing.\n"
-        f"stderr: {captured.err}"
+        f"`bruriah {' '.join(argv[:2])}` exited {exit_code}; its output proves nothing.\nstderr: {captured.err}"
     )
     assert captured.out.strip(), (
         f"`bruriah {' '.join(argv[:2])}` printed nothing; a marker-free empty rendering is "
@@ -211,8 +214,7 @@ def test_the_fixture_reaches_every_agent_renderer(capsys, governed) -> None:
     # exists to prevent, pointed the other way.
     guard = _run(capsys, ["guard", "storage.py", *argv, "--repo", str(repo), "--json"])
     assert '"WARNING"' in guard, (
-        f"guard found no violation, so heal short-circuits and every leak assertion below "
-        f"passes vacuously:\n{guard}"
+        f"guard found no violation, so heal short-circuits and every leak assertion below passes vacuously:\n{guard}"
     )
     # The lineage state is embedded in the violation message, not emitted as its own JSON
     # value, so this matches the phrase rather than a quoted token.
