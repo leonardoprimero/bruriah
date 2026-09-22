@@ -165,9 +165,10 @@ and no value changed. Nothing pinned those shapes, either, which is how the clai
 `test_format_heal_json_shape_is_pinned_key_by_key` now assert them key by key, including that
 the prose the agent rendering withholds is still present in full.
 
-Out of scope: the `investigate_work` boundary (2.0.0), the `alternatives`/`premises`
-contract narrowing, `evals/injection/`, splitting `cli.py`/`service.py`, the
-documentation honesty debts (egui document count, unpinned bge rows), pushing, tagging.
+Out of scope: the `investigate_work` boundary and the contract narrowing it needs (2.0.0 --
+the channel is deliberately not named here, because this file is public and the defect is
+not fixed yet), `evals/injection/`, splitting `cli.py`/`service.py`, the documentation
+honesty debts (egui document count, unpinned bge rows), pushing, tagging.
 
 ## Tasks
 
