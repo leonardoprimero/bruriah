@@ -55,14 +55,20 @@ class GuardViolation:
     decision_title: str
     decision_sha: str
     message: str
-    active_successor_title: str | None = None
-    active_successor_sha: str | None = None
     # The lineage relation, upper-cased: SUPERSEDES, DEPRECATES or AMENDS. `message` states
     # the same fact inside a sentence that also quotes the successor's subject, so the
     # agent-facing rendering needs it as its own value to say WHY a file is flagged without
     # quoting anything a decision author wrote. The vocabulary is closed in `agent_surface`,
     # which is where the agent rendering maps it through `KNOWN_LINEAGE_STATES`.
-    lineage_state: str = ""
+    #
+    # Required, with no default, and it is the second time this field's default has been the
+    # bug. It was `= ""`, which is not in the closed vocabulary -- so a construction site that
+    # simply forgot to set it rendered `UNKNOWN`, collected `DEGRADED_NOTICE`, and announced
+    # that a value "could not be validated", indistinguishable from a poisoned one. A forgotten
+    # assignment is now a `TypeError` at construction instead of a fabricated security warning.
+    lineage_state: str
+    active_successor_title: str | None = None
+    active_successor_sha: str | None = None
 
 
 @dataclass(frozen=True)
@@ -90,6 +96,15 @@ class GuardResult:
     contracts: tuple[ArchitecturalContract, ...]
     violations: tuple[GuardViolation, ...]
     agent_context: str
+    # Whether `agent_context` carries a placeholder in place of a rejected identifier. Carried
+    # rather than printed: `_generate_agent_context` runs on every guard evaluation whatever
+    # output mode was asked for, so warning from inside it put an `--agent` message on the
+    # stderr of plain and `--json` runs. `cli.py` prints `agent_surface.degradation_warning`
+    # only when `--agent` was actually selected.
+    #
+    # Unlike `GuardViolation.lineage_state` above, defaulting is safe here and so it defaults:
+    # a forgotten assignment suppresses a warning rather than fabricating one.
+    agent_rendering_degraded: bool = False
     receipt: ComplianceReceipt | None = None
     engram_synced: bool = False
 
@@ -116,7 +131,7 @@ def _compute_receipt_digest(
 def _generate_agent_context(
     contracts: Sequence[ArchitecturalContract],
     violations: Sequence[GuardViolation],
-) -> str:
+) -> tuple[str, bool]:
     """Render the agent-facing governance summary, naming decisions by reference only.
 
     Everything in this string reads as instruction to whatever consumes it, so it carries no
@@ -136,10 +151,17 @@ def _generate_agent_context(
     terminal is not an instruction-following agent.
 
     The route this prints is a shape (`bruriah why <file>`, `git show <sha>`) rather than a
-    filled-in command, so unlike `heal` there is no per-decision route line to withhold when an
-    identifier is rejected. `report_degradation` still says that a substitution happened, in
-    the rendering and once on stderr, because the raw value survives in the human and JSON
-    renderings and an operator who cannot see the disagreement cannot act on it.
+    filled-in command, and that is now the pattern all three renderers follow: `heal` briefly
+    filled its route line in and turned a git-derived path into a literal command an agent was
+    told to run. An agent has the path and the sha from the structured lines above and can
+    substitute them itself; nothing here needs to pre-build a command string around a value
+    that only `printable_path` has seen.
+
+    Returns the rendering and whether it was degraded. `annotate_degradation` says that a
+    substitution happened in the rendering itself, because the raw value survives in the human
+    and JSON renderings and an operator who cannot see the disagreement cannot act on it; the
+    boolean is how the operator-facing half of that reaches `cli.py` without this function
+    writing to stderr behind a `--json` run's back.
 
     Pinned by `tests/test_agent_prompt_boundary.py`.
     """
@@ -177,7 +199,7 @@ def _generate_agent_context(
             )
         lines.append("")
 
-    return agent_surface.report_degradation("\n".join(lines).strip(), command="guard")
+    return agent_surface.annotate_degradation("\n".join(lines).strip())
 
 
 def evaluate_guard(
@@ -253,9 +275,9 @@ def evaluate_guard(
                 decision_title=w.governing_decision,
                 decision_sha=w.decision_sha[:8],
                 message=f"Governed by {w.lineage_state} decision. {w.action_recommendation}",
+                lineage_state=w.lineage_state,
                 active_successor_title=w.current_active_decision,
                 active_successor_sha=w.current_active_sha[:8] if w.current_active_sha else None,
-                lineage_state=w.lineage_state,
             )
         )
 
@@ -268,7 +290,7 @@ def evaluate_guard(
     else:
         status = "PASSED"
 
-    agent_context = _generate_agent_context(list(contracts_map.values()), violations)
+    agent_context, agent_degraded = _generate_agent_context(list(contracts_map.values()), violations)
 
     # 5. Optional Receipt Generation (RDD)
     receipt: ComplianceReceipt | None = None
@@ -314,6 +336,7 @@ def evaluate_guard(
         contracts=tuple(contracts_map.values()),
         violations=tuple(violations),
         agent_context=agent_context,
+        agent_rendering_degraded=agent_degraded,
         receipt=receipt,
         engram_synced=engram_synced,
     )

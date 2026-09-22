@@ -82,12 +82,17 @@ Every string in an `--agent` rendering must be one of:
 
 - **(a)** a literal authored in this repository,
 - **(b)** a value from a closed vocabulary, each one a frozenset in `agent_surface`:
-  decision status (`active`/`superseded`/`deprecated`/`amended`), lineage relation
+  constraint status (`active`/`supersedes`/`deprecates`/`amends`), lineage relation
   (`supersedes`/`deprecates`/`amends`), severity (`VETO`/`WARNING`), risk level
   (`LOW`/`MEDIUM`/`HIGH`/`CRITICAL`), and the remediation actions `heal` authors, or
 - **(c)** an identifier whose **format** `agent_surface` validates: a commit sha (7–64 hex
   characters, `commit_sha`), or a value checked for **printability and markdown-code-span
   safety** (`printable_path`).
+
+No `--agent` rendering prints a **filled-in command**. Every route is a shape —
+`bruriah why <file>`, `git show <sha>` — and the path and the sha appear only as quoted
+identifiers on their own structured lines. See the round-5 note below for why that is part of
+the invariant and not merely a style.
 
 Repository-authored free text — subjects, author names, bodies, derived directive
 prose — is named by reference, never quoted. An agent that wants the text calls
@@ -441,6 +446,114 @@ iterating `bp.refactoring_steps`, so the note described an intermediate draft of
 not the history, and is gone. The README line in this candidate's diff is `1,515 -> 1,576`,
 not `1,525`. The status vocabulary in category (b) was missing `amended`. The test count is
 updated to **1,627**, the number the full run reports.
+
+### Review round 5 — corrections
+
+A four-lens review approved the round-4 candidate and raised 15 findings, 7 of them WARNING.
+One was a defect **round 4 introduced**, and it is recorded first because the fix for it is a
+revert rather than a hardening.
+
+**Round 4 turned a broken command into an attacker-shaped one, and this round reverts that
+idea.** The base `heal` renderer printed ``run `bruriah why <unprintable path>` or
+`git show UNKNOWN` `` when an identifier was rejected — a literal command naming a path that is
+not one and a revision git answers with `fatal: ambiguous argument`. Round 4 fixed that by
+printing the command **only when both halves validate**, which made ``run `bruriah why {path}`
+`` the success path: a git-derived file path interpolated into a command string after nothing
+but `printable_path`, which by its own documented contract accepts `;`, `&&`, `$(...)` and
+spaces because all it promises is printability and code-span safety. A repository can commit a
+file whose name carries any of those, and the result was a shell-shaped command inside a block
+an agent is told to act on. The round-4 fix was worse than the defect it repaired.
+
+The correction is **not** shell escaping and **not** a stricter path filter. `heal` now prints
+the un-filled shape `bruriah why <file>` / `git show <sha>` in its header, exactly as `guard`
+and `brief` always have; the path and the sha appear only where they already appeared, as
+quoted identifiers on the `Violation in` and `Governing Decision` lines. An agent has both and
+can substitute them under its own shell's quoting. The per-decision route line is gone, so the
+branch that withheld it on rejection is gone with it — there is nothing left to withhold.
+Escaping would have made the command safe for one shell and left the real question (why is a
+renderer building a command string at all?) unanswered; tightening `printable_path` would have
+rejected values that are correct everywhere else it is used.
+`test_no_filled_in_command_is_printed_around_a_path` covers `;`, `&&`, `$(...)`, a space and
+all of them at once, and asserts the path is still **present** as an identifier — so it cannot
+pass by omission. `test_no_agent_rendering_prints_a_command_with_a_value_substituted_into_it`
+holds the property for all three commands end to end.
+
+**A stderr side effect inside a rendering function.** `report_degradation` wrote the
+operator-facing warning itself, from a function `evaluate_guard`, `evaluate_brief` and
+`evaluate_heal` each call eagerly whatever output mode was requested. So a plain run or a
+`--json` run over a corpus with one malformed sha printed `run without --agent to see the raw
+values` on a command that never passed `--agent` — unexpected stderr on a successful exit,
+which a CI wrapper surfaces as noise or treats as failure, carrying advice its reader had
+already followed. It is now `annotate_degradation`, which is pure: it returns the annotated
+rendering and a boolean. That boolean is carried on `ArchitecturalBrief`, `GuardResult` and
+`HealingResult` as `agent_rendering_degraded`, and `cli.py` prints
+`agent_surface.degradation_warning(command)` only when `--agent` was the selected format. The
+message no longer tells anyone to run without a flag they did not pass. Both JSON surfaces
+gained the key, pinned in the key-by-key shape tests.
+
+**An unsafe default a maintainer could fall into.** `_generate_supersede_instructions` defaulted
+`name_subject=True` — the subject-bearing branch — on a helper both surfaces called, and
+`evaluate_brief` distinguished the two by a keyword argument on an otherwise identical call.
+Rather than making the keyword required, the agent-mode block is now **built inside**
+`_generate_agent_context` by `_agent_supersede_block`, from the constraints that renderer
+already holds. `_generate_agent_context` no longer takes a `supersede_instructions` parameter
+at all, so there is no argument through which decision prose can reach it and its docstring is
+true by construction. `SupersedeTemplate.to_markdown` and `_generate_supersede_instructions`
+lost `name_subject` entirely and are human/JSON surfaces only, unchanged in what they render.
+
+**An optional field that manufactured a fake security warning.** `lineage_state: str = ""` on
+`RemediationBlueprint` and `GuardViolation` is outside the closed vocabulary, so a construction
+site that simply forgot it rendered `UNKNOWN`, collected `DEGRADED_NOTICE` and told the
+operator a value "could not be validated" — indistinguishable from a poisoned one. Both fields
+are now **required**; a forgotten assignment is a `TypeError` at construction. Both producers
+already always set it. `GuardViolation`'s field moved above the optional successor fields,
+which is a positional-argument change on a dataclass every call site constructs by keyword.
+
+**The tests never proved the well-formed fixture renders cleanly — and it did not.** Every leak
+assertion in `tests/test_agent_prompt_boundary.py` is satisfied by `UNKNOWN`, because a
+placeholder contains no marker. So a vocabulary that had drifted from its producer would
+degrade every real run and pass every test in that module. That is not hypothetical:
+`KNOWN_DECISION_STATUSES` was `{active, superseded, deprecated, amended}`, described as the
+`status:` frontmatter vocabulary from `corpus.py` — but the badge is fed from
+`impact.DecisionImpact.status`, which is `"active"` or the **lineage relation** of the first
+alert. Three of its four members matched no producer anywhere, so every stale decision reaching
+`brief --agent` through a file target rendered `[UNKNOWN]` with the full degradation apparatus
+behind it, on a corpus with nothing wrong in it. The frontmatter key it was named for reaches
+no agent renderer at all. It is now `KNOWN_CONSTRAINT_STATUSES = {"active"} | lineage
+relations`, named for the field it closes.
+
+Closing the class properly, rather than the instance:
+
+- All three `--agent` renderings of the well-formed fixture are asserted to contain **no**
+  `DEGRADED_NOTICE` and none of the three placeholders, and to write **nothing** to stderr.
+- The fixture now also drives `brief --agent` over a **file target**, the
+  `analyze_impact` path, which is the only way to exercise the badge against a non-`active`
+  value. Verified RED: with the old vocabulary restored, that test fails on `[UNKNOWN]` plus
+  the notice.
+- `TestTheProducersAndTheVocabulariesCannotDriftApart` reads each producer's own source and
+  checks it against the frozenset the renderer uses: risk levels and severities from the
+  literals `analyze_impact` and `evaluate_guard` assign, lineage relations from the literal
+  loop in `_build_lineage_records` (the only writer of the `lineage.relation` column), and the
+  constraint statuses from `analyze_impact`, whose one non-literal assignment is pinned by name
+  as `first_alert.relation`.
+- **The limit, stated rather than papered over.** The `status:` frontmatter key cannot be
+  enumerated from the code at all — `corpus.py` does `frontmatter.get("status") or "unknown"`
+  with no validation, so its vocabulary is whatever a document says. What is pinned instead is
+  its **reach**: a test asserts no agent renderer reads that key, so if it ever starts to, the
+  vocabulary question is re-opened by a failure rather than by a fabricated warning. The
+  source-reading tests are also weaker than calling a producer: they cannot prove a branch
+  executes, only that the values it can write are in the set.
+
+**Not implemented, with reasons.** Nothing in the seven WARNING findings was judged wrong on
+inspection; all are applied above.
+
+**Verification.** Full suite **1,670 passed, 0 failed, 18 skipped**; `uv run ruff check .`
+clean; `uv run mypy src` clean. README updated to 1,670, the number the full run reports.
+
+One pre-existing lint finding is left untouched and is **not** from this work:
+`src/bruriah/guard.py:236` (`raise GuardError("git_error", err.stderr or "")`) trips an
+ast-grep heuristic about boolean expressions in `except` blocks. It is base code, no hunk in
+this candidate touches it, and `ruff` and `mypy` both pass on it.
 
 ## Next step
 

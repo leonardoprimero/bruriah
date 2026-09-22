@@ -41,9 +41,15 @@ aborts the whole command with a traceback. `UNKNOWN`, `<unprintable path>` and
 `UNRECOGNISED_ACTION` are themselves literals authored here, so a rejected value still
 satisfies case 1.
 
-A rejection is never silent. `report_degradation` appends `DEGRADED_NOTICE` to the rendering
-and writes one line to stderr, because the raw value survives in the human and JSON
-renderings and an operator who cannot see that a substitution happened cannot act on it.
+A rejection is never silent. `annotate_degradation` appends `DEGRADED_NOTICE` to the rendering
+and reports, as its second return value, that it did -- because the raw value survives in the
+human and JSON renderings and an operator who cannot see that a substitution happened cannot
+act on it. It does NOT write to stderr. It used to, and that was a side effect in a rendering
+function: the three renderers are called eagerly by `evaluate_guard`, `evaluate_brief` and
+`evaluate_heal` whatever output mode was asked for, so a plain run or a `--json` run over a
+corpus with one malformed sha emitted a stderr line telling the operator to "run without
+`--agent`" on a command that never passed `--agent`. The flag is carried on the result and
+`cli.py` prints `degradation_warning` only when the agent format was actually selected.
 
 A leaf on purpose: it imports nothing from `bruriah`, so any module can route through it
 without creating a cycle, and `tests/test_architecture.py` stays satisfied.
@@ -52,18 +58,27 @@ without creating a cycle, and `tests/test_architecture.py` stays satisfied.
 from __future__ import annotations
 
 import re
-import sys
 import unicodedata
-from typing import TextIO
 
-# The decision statuses this repository recognises. `_metadata` in `corpus.py` does
-# `frontmatter.get("status") or "unknown"` with no validation against a closed set, so the
-# value arrives from a document and is mapped here rather than quoted.
-KNOWN_DECISION_STATUSES: frozenset[str] = frozenset({"active", "superseded", "deprecated", "amended"})
-
-# The lineage relations this repository recognises. `index.py` writes exactly these three, but
-# that is enforced here rather than trusted from there.
+# The lineage relations this repository recognises. `_collect_lineage_records` in `index.py`
+# writes exactly these three into the `lineage` table's `relation` column, but that is enforced
+# here rather than trusted from there.
 KNOWN_LINEAGE_STATES: frozenset[str] = frozenset({"supersedes", "deprecates", "amends"})
+
+# The statuses a `GoverningConstraint` can carry, as `analyze_impact` really writes them:
+# `"active"`, or -- when `check_lineage_alerts` returns anything -- the lineage RELATION of the
+# first alert. So a stale decision arrives here as `supersedes`, not as `superseded`.
+#
+# This set used to be `{"active", "superseded", "deprecated", "amended"}` under the name
+# `KNOWN_DECISION_STATUSES`, described as the vocabulary of the `status:` frontmatter key that
+# `_metadata` in `corpus.py` reads. That key reaches no agent rendering; the badge in
+# `brief._generate_agent_context` is fed from `impact.DecisionImpact.status`, and three of the
+# four members were values no producer ever writes. Every stale decision therefore rendered
+# `[UNKNOWN]` plus `DEGRADED_NOTICE` on a perfectly well-formed corpus -- a fabricated security
+# warning on the most common non-trivial case there is. The name now says which field it
+# closes, and `tests/test_agent_surface.py` pins it against the producer rather than against
+# prose. `impact.format_impact_human` and `lens.py` both branch on the same four values.
+KNOWN_CONSTRAINT_STATUSES: frozenset[str] = frozenset({"active"}) | KNOWN_LINEAGE_STATES
 
 # The guard severities. `evaluate_guard` writes only these two, but `GuardViolation.severity`
 # is an untyped `str` and the agent rendering interpolated it raw while its docstring called
@@ -128,7 +143,7 @@ _FORBIDDEN_CHARS = frozenset("`")
 # invisible in a diff.
 _FORBIDDEN_CATEGORIES = frozenset({"Cc", "Cf", "Zl", "Zp"})
 
-# Every placeholder this module can substitute. `report_degradation` looks for these in a
+# Every placeholder this module can substitute. `annotate_degradation` looks for these in a
 # finished rendering: they are the only record a rejection happened, and scanning once per
 # rendering is what keeps the warning to one line however many values were rejected.
 _PLACEHOLDERS = (UNKNOWN, UNPRINTABLE_PATH, UNRECOGNISED_ACTION)
@@ -218,8 +233,8 @@ def printable_path(value: str | None) -> str:
     return value
 
 
-def report_degradation(rendering: str, *, command: str, stream: TextIO | None = None) -> str:
-    """Announce that `rendering` carries a placeholder, in the rendering and on stderr.
+def annotate_degradation(rendering: str) -> tuple[str, bool]:
+    """Return `rendering` with `DEGRADED_NOTICE` if it carries a placeholder, and whether it did.
 
     A rejection used to be silent. The rendering carried `UNKNOWN` or `<unprintable path>`,
     the human and JSON renderings still carried the raw value, and nothing told the operator
@@ -235,12 +250,26 @@ def report_degradation(rendering: str, *, command: str, stream: TextIO | None = 
     literal in the rendering, or an operator's own task intent, happens to contain one of the
     placeholder strings. That is a spurious warning about text nobody rejected, which is the
     harmless direction for this to fail in.
+
+    This function is pure, and that is the correction: it was `report_degradation` and it
+    printed the operator-facing line itself. Renderers run eagerly whatever output mode was
+    requested, so that put a `--agent` instruction on the stderr of plain and `--json` runs
+    that never asked for one. The boolean goes back on the result; `cli.py` decides.
     """
     if not any(placeholder in rendering for placeholder in _PLACEHOLDERS):
-        return rendering
-    print(
+        return rendering, False
+    return f"{rendering}\n\n{DEGRADED_NOTICE}", True
+
+
+def degradation_warning(command: str) -> str:
+    """The one line an operator sees on stderr when an `--agent` rendering was degraded.
+
+    Printed by `cli.py`, and only when the agent format was actually selected -- so unlike the
+    version this replaces it can honestly point at the run without `--agent`, because the
+    operator it is addressing did pass it.
+    """
+    return (
         f"bruriah {command}: one or more values in the --agent rendering could not be validated "
-        f"and were replaced with a placeholder; run without --agent to see the raw values.",
-        file=stream if stream is not None else sys.stderr,
+        f"and were replaced with a placeholder; the same command without --agent prints the raw "
+        f"values."
     )
-    return f"{rendering}\n\n{DEGRADED_NOTICE}"
