@@ -14,6 +14,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING, Sequence
 
+from . import agent_surface
 from .drift import analyze_architectural_drift, get_git_diff_files
 from .impact import analyze_impact
 from .repository import SnapshotRepository
@@ -56,8 +57,8 @@ class GuardViolation:
     # The lineage relation, upper-cased: SUPERSEDES, DEPRECATES or AMENDS. `message` states
     # the same fact inside a sentence that also quotes the successor's subject, so the
     # agent-facing rendering needs it as its own value to say WHY a file is flagged without
-    # quoting anything a decision author wrote. The vocabulary is closed at index time
-    # (`index.py` writes exactly those three relations), never taken from a document.
+    # quoting anything a decision author wrote. The vocabulary is closed in `agent_surface`,
+    # which is where the agent rendering maps it through `KNOWN_LINEAGE_STATES`.
     lineage_state: str = ""
 
 
@@ -123,9 +124,12 @@ def _generate_agent_context(
 
     What remains is a literal authored in this repository, a closed-vocabulary value
     (severity, lineage relation), or a format-validated identifier (commit sha, repository
-    path). The text is not unreachable -- `bruriah why` and `git show` both return it -- it
-    is simply not pre-injected. `format_guard_human` is unchanged and still prints it: a
-    person reading a terminal is not an instruction-following agent.
+    path). The last two are enforced by `agent_surface`, not assumed: every sha, path and
+    lineage state below is routed through it, so a malformed value renders as its placeholder
+    rather than being interpolated raw. The text is not unreachable -- `bruriah why` and
+    `git show` both return it -- it is simply not pre-injected. `format_guard_human` is
+    unchanged and still prints it: a person reading a terminal is not an
+    instruction-following agent.
 
     Pinned by `tests/test_agent_prompt_boundary.py`.
     """
@@ -139,8 +143,8 @@ def _generate_agent_context(
 
     if contracts:
         for c in contracts:
-            files_str = ", ".join(f"`{f}`" for f in c.governed_files)
-            lines.append(f"#### Decision `{c.decision_sha}`")
+            files_str = ", ".join(f"`{agent_surface.repo_path(f)}`" for f in c.governed_files)
+            lines.append(f"#### Decision `{agent_surface.commit_sha(c.decision_sha)}`")
             lines.append(f"- Governs: {files_str}")
             lines.append("")
     else:
@@ -150,11 +154,15 @@ def _generate_agent_context(
     if violations:
         lines.append(f"### Governance warnings ({len(violations)})")
         for v in violations:
-            succ = f", active successor `{v.active_successor_sha}`" if v.active_successor_sha else ""
-            state = v.lineage_state or "UNKNOWN"
+            succ = (
+                f", active successor `{agent_surface.commit_sha(v.active_successor_sha)}`"
+                if v.active_successor_sha
+                else ""
+            )
+            state = agent_surface.closed(v.lineage_state, agent_surface.KNOWN_LINEAGE_STATES)
             lines.append(
-                f"- [{v.severity}] `{v.file_path}` — governing decision `{v.decision_sha}` "
-                f"has lineage state {state}{succ}"
+                f"- [{v.severity}] `{agent_surface.repo_path(v.file_path)}` — governing decision "
+                f"`{agent_surface.commit_sha(v.decision_sha)}` has lineage state {state}{succ}"
             )
         lines.append("")
 

@@ -11,6 +11,7 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Sequence
 
+from . import agent_surface
 from .drift import get_git_diff_files
 from .impact import analyze_impact
 from .why import find_decision_in_database
@@ -26,11 +27,6 @@ class BriefError(ValueError):
         self.code = code
         self.detail = detail
         super().__init__(f"{code}: {detail}" if detail else code)
-
-
-# Decision statuses this module recognises. Anything outside this set renders as UNKNOWN in
-# the agent context rather than being quoted back into it.
-_KNOWN_DECISION_STATUSES = frozenset({"active", "superseded", "deprecated", "amended"})
 
 
 @dataclass(frozen=True)
@@ -167,13 +163,18 @@ def _generate_agent_context(
 
     What remains is a literal authored in this repository, the operator's own intent, a
     closed-vocabulary value (status badge, risk level), or a format-validated identifier (commit
-    sha, repository path). The text is not unreachable -- `bruriah why` and `git show` both
-    return it -- it is simply not pre-injected. `format_brief_human` is unchanged and still
-    prints all of it: a person reading a terminal is not an instruction-following agent.
+    sha, repository path). The last two are enforced by `agent_surface`, not assumed: every
+    status, sha and path below is routed through it, so a malformed value renders as its
+    placeholder rather than being interpolated raw. The text is not unreachable --
+    `bruriah why` and `git show` both return it -- it is simply not pre-injected.
+    `format_brief_human` is unchanged and still prints all of it: a person reading a terminal is
+    not an instruction-following agent.
 
     Pinned by `tests/test_agent_prompt_boundary.py`.
     """
-    target_str = ", ".join(f"`{t}`" for t in targets) if targets else "None specified (general intent)"
+    target_str = (
+        ", ".join(f"`{agent_surface.repo_path(t)}`" for t in targets) if targets else "None specified (general intent)"
+    )
     lines: list[str] = [
         "# Bruriah Pre-Flight Architectural Brief",
         f"- **Task Intent**: {intent if intent else 'Not specified'}",
@@ -190,18 +191,22 @@ def _generate_agent_context(
         lines.append("`bruriah why <file>` or `git show <sha>` to read one before changing what it governs.")
         lines.append("")
         for c in constraints:
-            # `corpus.py:128` does `frontmatter.get("status") or "unknown"` with no validation
-            # against a closed set, so the value is mapped through a known vocabulary rather
-            # than quoted into the badge.
-            status = c.status.strip().lower()
-            badge = status.upper() if status in _KNOWN_DECISION_STATUSES else "UNKNOWN"
-            succ = f", active successor `{c.active_successor_sha}`" if c.active_successor_sha else ""
-            lines.append(f"- [{badge}] decision `{c.commit_sha[:8]}`{succ}")
+            # `_metadata` in `corpus.py` takes `status` straight from document frontmatter with
+            # no validation against a closed set, so `agent_surface` maps it through a known
+            # vocabulary rather than quoting the document's value into the badge.
+            badge = agent_surface.closed(c.status, agent_surface.KNOWN_DECISION_STATUSES)
+            succ = (
+                f", active successor `{agent_surface.commit_sha(c.active_successor_sha)}`"
+                if c.active_successor_sha
+                else ""
+            )
+            lines.append(f"- [{badge}] decision `{agent_surface.commit_sha(c.commit_sha[:8])}`{succ}")
         lines.append("")
 
     if co_governed:
         lines.append("## Blast Radius / Co-Governed Files")
-        lines.append(f"Modifying targets may impact: {', '.join(f'`{f}`' for f in co_governed[:8])}")
+        impacted = ", ".join(f"`{agent_surface.repo_path(f)}`" for f in co_governed[:8])
+        lines.append(f"Modifying targets may impact: {impacted}")
         lines.append("")
 
     lines.append(supersede_instructions)
