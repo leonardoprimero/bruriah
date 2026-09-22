@@ -207,14 +207,28 @@ documentation honesty debts (egui document count, unpinned bge rows), pushing, t
     the wrong name.
   - Checks: `uv run pytest -q tests/test_heal.py tests/test_agent_prompt_boundary.py`, ruff, mypy.
 
-- [ ] T4 — Release 1.6.0 — **NOT in this candidate.** Deliberately left undone and
-  unticked: `CHANGELOG.md`, `pyproject.toml`, `src/bruriah/__init__.py` and `uv.lock` are
-  untouched, and nothing is tagged or pushed. T4 is the whole of what remains.
-  - CHANGELOG entry stating what changed and what an operator should do, factually,
-    without publishing an attack recipe for the `investigate_work` path that 2.0.0 has
-    not fixed yet. The full write-up lands with 2.0.0.
-  - Bump `pyproject.toml`, `src/bruriah/__init__.py`, `uv.lock`.
-  - Checks: full suite, ruff, mypy, `uv run python scripts/changelog_section.py 1.6.0`.
+- [x] T4 — Release 1.6.0 — prepared in the working tree, **not committed, not tagged, not
+  pushed**. Pushing a `v*` tag publishes to PyPI irreversibly, and that call is the user's.
+  - `CHANGELOG.md` gained `## [1.6.0] — 2026-09-22`: two sections, `Fixed` (the `--agent`
+    narrowing, the three-category invariant, the `bruriah why <file>` / `git show <sha>`
+    route, the commit-access threat model, human output unchanged) and `Changed` (the new
+    `--json` keys and the `--agent`-only stderr line). It says nothing about the
+    `investigate_work` path, whose write-up lands with 2.0.0.
+  - **One correction to the instruction this task carried.** It said the `--json` surfaces
+    gained one key, `lineage_state`. They gained two: `lineage_state` on `guard --json`
+    violations and `heal --json` blueprints, and a top-level `agent_rendering_degraded` on
+    `guard`, `brief` and `heal` — added by the round-5 stderr fix, and recorded above under
+    "A stderr side effect inside a rendering function". Both are pinned in the key-by-key
+    shape tests. The CHANGELOG names both, because a consumer that validates keys meets both.
+  - `pyproject.toml`, `src/bruriah/__init__.py` and `uv.lock` are at `1.6.0`; `uv lock` moved
+    exactly one line, matching the `fff2a71` precedent. `README.md` was deliberately NOT
+    touched: the collected count is unchanged at 1,670, so its self-verifying figure is
+    already correct.
+  - Checks, all green at this tree: `uv run python scripts/changelog_section.py 1.6.0`
+    exit 0, printing the new section; `tests/test_packaging.py` 13 passed (it ties
+    `__version__` to `pyproject.toml`); full suite **1,652 passed, 0 failed, 18 skipped**
+    (1,670 collected — unchanged from the tip); `uv run ruff check .` clean;
+    `uv run mypy src` clean; `uv run bruriah --version` prints `bruriah 1.6.0`.
 
 ## Acceptance criteria
 
@@ -578,13 +592,21 @@ this candidate touches it, and `ruff` and `mypy` both pass on it.
 
 ## Next step
 
-**T4 — release 1.6.0** is all that remains. The boundary work (T0–T3) is delivered and
-green; the review corrections above are applied but uncommitted. T4 needs the CHANGELOG
-entry, the version bump across `pyproject.toml` / `src/bruriah/__init__.py` / `uv.lock`, and
-`uv run python scripts/changelog_section.py 1.6.0`, with nothing pushed or tagged until
-reviewed.
+**The branch is complete.** T0–T4 are delivered and the tree is green: the boundary work,
+the five rounds of review corrections, and the 1.6.0 release preparation are all present.
+Nothing about `fix/agent-prompt-boundary` is outstanding as engineering work.
 
-One optional follow-up, recorded rather than scheduled: extend the fixture so `brief`
-receives a file target, which would exercise the blast-radius path channel that R3-001 found
-unreachable on the current fixture. It proves an invariant category end to end; it does not
-block the release.
+What remains is not engineering, it is the user's decision:
+
+- **Commit, push, merge, tag.** The release preparation sits uncommitted in the working tree
+  on purpose. Tagging `v1.6.0` publishes to PyPI irreversibly, so no automated step here goes
+  near it.
+- **The 2.0.0 work, tracked separately.** The `investigate_work` boundary defect — corpus
+  prose reaching the discovery response through the `alternatives`/`premises` front-matter
+  contract — is a different defect of the same class, needs a contract break, and needs
+  `evals/injection/` behind it. It was never in this branch's scope and this release does not
+  describe it.
+- **One optional follow-up, recorded rather than scheduled:** extend the fixture so `brief`
+  receives a file target, exercising the blast-radius path channel that R3-001 found
+  unreachable on the current fixture. It would prove an invariant category end to end; it
+  blocks nothing.

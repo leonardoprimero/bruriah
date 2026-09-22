@@ -3,6 +3,58 @@
 Notable changes, newest first. This project follows [semantic versioning](https://semver.org/),
 and the entries here name what changed for *you* rather than which files moved.
 
+## [1.6.0] — 2026-09-22
+
+A security release, and deliberately the only thing in it: `--agent` output no longer carries text
+that the repository under inspection authored.
+
+### Fixed: `--agent` output no longer carries prose the inspected repository authored
+- `bruriah brief`, `bruriah guard` and `bruriah heal` each render a prompt snippet meant to be
+  handed to a coding agent, and each one interpolated free text that the inspected repository had
+  authored: the governing decision's subject, the commit author name, and bullet lines lifted
+  verbatim from a decision body and promoted to "directives". `brief` additionally searched a
+  decision body for sentences containing `must`, `cannot`, `do not`, `require` or `prohibit` and
+  printed those under **Active Architectural Constraints** -- a sentence selected *because* it was
+  phrased as a command. `heal` was the worst of the three: a body bullet became the "Canonical
+  Design Pattern" and then an actionable refactoring step. So a commit could place its own wording
+  inside an agent's prompt, under a heading telling the agent those lines were rules to obey.
+- Every string in an `--agent` rendering is now one of three things: a literal authored in this
+  repository, a value from a closed vocabulary (constraint status, lineage relation, severity, risk
+  level, remediation action), or an identifier whose *format* is validated -- a commit sha, or a
+  path checked for printability and markdown-code-span safety. `src/bruriah/agent_surface.py`
+  enforces that as code at every call site rather than as a comment claiming it, and its tests read
+  each producing function's own source, so a vocabulary cannot drift away from the values that feed
+  it without the suite failing.
+- **The withheld text is still reachable, and the renderings say where.** They name the governing
+  decision by sha and print the route as a *shape* -- `bruriah why <file>`, `git show <sha>` -- with
+  the path and the sha appearing separately, as quoted identifiers on their own lines. No `--agent`
+  rendering prints a filled-in command any more, so a committed file name carrying `;`, `&&` or
+  `$(...)` cannot arrive inside a command string an agent was told to act on.
+- **What this needed to bite:** commit access to the repository being inspected, not the ability to
+  comment on it. A contributor whose pull request is merged authors the subject, the author name and
+  the body bullets, and all three then appeared as directives in a maintainer's agent prompt; a
+  fork's commits reach the same renderers through `--repo`.
+- **Human output is unchanged.** `bruriah brief`, `bruriah guard` and `bruriah heal` without
+  `--agent` still print subjects, author names and directive prose in full. A person reading a
+  terminal is not an instruction-following agent, and narrowing that would be a regression with no
+  threat behind it -- pinned by a test asserting the same text the agent rendering withholds is
+  still present in every human rendering.
+
+### Changed: `--json` gained keys, and a rejected identifier now announces itself
+- `--json` gained keys and lost none. `guard --json` violations and `heal --json` blueprints each
+  carry a new `lineage_state` -- why the file is flagged, as a closed value -- and `guard`, `brief`
+  and `heal` each carry a new top-level `agent_rendering_degraded` boolean. No existing key or value
+  changed, including the prose the agent rendering no longer quotes: that surface is data for a
+  program that asked for it, not a prompt. All three shapes are now pinned key by key, so the next
+  addition is recorded here instead of being discovered from your own logs.
+- **New stderr line, on `--agent` runs only.** When an identifier fails validation it renders as a
+  placeholder, the rendering itself carries a note saying values were substituted, and one line goes
+  to stderr naming the command and pointing at the same run without `--agent` for the raw values.
+  One line per rendering, not one per value, so a `guard` run with twenty violations does not repeat
+  the same fact twenty times -- and only when `--agent` was actually passed, which an earlier draft
+  of this work got wrong by writing that line from inside the renderer on plain and `--json` runs
+  too. Exit status is unchanged.
+
 ## [1.5.0] — 2026-09-21
 
 ### Added: `bruriah corpus --github` ingests linked GitHub issues and pull requests
