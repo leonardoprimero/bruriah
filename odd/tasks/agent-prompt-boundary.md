@@ -547,8 +547,29 @@ Closing the class properly, rather than the instance:
 **Not implemented, with reasons.** Nothing in the seven WARNING findings was judged wrong on
 inspection; all are applied above.
 
-**Verification.** Full suite **1,670 passed, 0 failed, 18 skipped**; `uv run ruff check .`
-clean; `uv run mypy src` clean. README updated to 1,670, the number the full run reports.
+**The candidate was split in two, and the tooling forced it.** The round-5 work is not one
+commit:
+
+- `b435399` — the source corrections above, with their `agent_surface`, `brief`, `guard` and
+  `heal` tests.
+- `6b5e0b0` — the `tests/test_cli.py` coverage of the degradation warning across every output
+  mode, pinning the dispatch half of the stderr fix.
+
+The split was not a matter of taste. `gentle-ai review` **refused** the combined 2,468-line
+candidate with `lens_context_budget_exceeded`: the change could not be reviewed at all until it
+was cut down. This repository's own 400-line work-unit rule is normally guidance a human applies
+by judgment; here it arrived as a hard stop from the tooling. Both halves were then reviewed
+separately and approved.
+
+**Which is why the README carries two different numbers across the split.** Its test count is
+**self-verifying** — a reader who checks out any commit and runs the suite must see the number
+that commit's README claims — so the count has to be correct at *every* commit, not only at the
+tip. It reads **1,658** at `b435399` and **1,670** at `6b5e0b0`. That is the split being honest
+about what each commit actually contains, not a contradiction between two documents.
+
+**Verification at the tip.** Full suite **1,652 passed, 0 failed, 18 skipped — 1,670
+collected**; the README's figure is the collected total. `uv run ruff check .` clean;
+`uv run mypy src` clean.
 
 One pre-existing lint finding is left untouched and is **not** from this work:
 `src/bruriah/guard.py:236` (`raise GuardError("git_error", err.stderr or "")`) trips an
