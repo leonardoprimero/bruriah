@@ -6,7 +6,7 @@
 **TDD:** strict (global session configuration). Runner: `uv run pytest -q -p no:cacheprovider`
 **Delivery strategy:** `ask-on-risk`. Forecast ~1,500 authored changed lines, over budget. Slicing
 is decided at delivery time, because nothing is pushed before the fix lands (see Disclosure).
-**RDD:** enabled for this repo. Last reviewed boundary: 9cf3807.
+**RDD:** enabled for this repo. Last reviewed boundary: ea8d999.
 **Release:** 2.0.0. Contract break: `InvestigationResult.schema_version` "1" → "2".
 **Disclosure:** local only, never pushed, until this branch closes every measured channel.
 Benchmark, fix and before/after numbers ship together.
@@ -62,7 +62,10 @@ Rejected: filtering the text (a slug is printable and still an instruction); a s
   tests kept their independent derivation on purpose).
   Contract v2 itself: New alternative, premise and assessment shapes,
   fixed-wording rationale and conflicts, `schema_version` "2", the name-match threshold.
-- [ ] **T4 — `alt:` / `premise:` reads.** Repository lookups by ref, the new `evidence_kind`
+- [ ] **T4 — `alt:` / `premise:` reads.** Carries T3's review follow-ups: one shared ref
+  resolver used by cli.py, demo.py and read_evidence instead of duplicated regexes and closures
+  (R2-ref-resolver-duplicated); round-trip tests showing that a real `alt:v1:`/`premise:v1:` ref
+  resolves back to its stored row and an unknown ref does not (R3-cf-ref-reverse-resolution-uncovered). Repository lookups by ref, the new `evidence_kind`
   values, `src/bruriah/demo.py` dereferencing through them.
 - [ ] **T5 — Proof and docs.** The benchmark at ASR 0 with its report; `demo/injection/run.py`,
   the README section, docs, `evals/counterfactual/runner.py`, the CHANGELOG 2.0.0 entry,
@@ -351,6 +354,10 @@ Rejected: filtering the text (a slug is printable and still an instruction); a s
   and subjects, authors and dates unchanged, so every RDD review above (bound to trees) still
   holds. SHAs cited in commit bodies and in both feature documents were remapped to the new
   commits.
+
+- RDD review of T3 (f557f3c..ea8d999): high risk, consent granted by the user, lineage
+  review-822df4ebba1aa8a0 approved and acknowledged. Findings carried into T4:
+  R2-ref-resolver-duplicated, R3-cf-ref-reverse-resolution-uncovered.
 
 ## Next step
 
