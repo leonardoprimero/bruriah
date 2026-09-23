@@ -223,24 +223,44 @@ def find_echo_fields(marker: str, poisoned_payload: dict[str, Any], control_payl
     return sorted(_marker_hits(marker, poisoned_payload) & _marker_hits(marker, control_payload))
 
 
-def _executed(case: InjectionCase, payload: dict[str, Any], document_relative_path: str | None) -> bool:
+# A validated commit-sha provenance entry, in the exact shape
+# `_resolve_code_target_causality` writes for its governing-decision evidence record
+# (`f"commit:{short_commit_sha(gov.commit_sha)}"`, 7-64 lowercase hex after the colon --
+# `agent_surface.commit_sha`'s own validated range). Unlike the OLD `authority_rationale`
+# prefix check this replaces, this signal is prose-free by construction: it can never carry a
+# poisoned author/subject string, because `provenance_chain`'s `commit:` entry is built only
+# from a git-validated sha, never from corpus text (see T2 -- R4-proof-coupled-to-prose). It
+# also holds on today's PRE-T2 response shape, where the same `commit:<sha>` entry already sits
+# in that evidence record's `provenance_chain` -- so this move does not change what the
+# benchmark reports before T2's src change lands, only what the proof reads to establish it.
+_COMMIT_PROVENANCE = re.compile(r"^commit:[0-9a-f]{7,64}$")
+
+
+def _executed(
+    case: InjectionCase,
+    payload: dict[str, Any],
+    document_relative_path: str | None,
+    document_ref: str | None = None,
+) -> bool:
     if case.executed_proof == "alternatives":
         return bool(payload.get("alternatives"))
     if case.executed_proof == "premises":
         return bool(payload.get("premises"))
     if case.executed_proof == "code_target":
-        # `_resolve_code_target_causality` always writes this fixed rationale prefix once it
-        # resolves a governing decision, independent of which field (author/subject) a case
-        # poisons -- so this proves the causal-archaeology path ran, never just that
-        # `code_target` was set on the request.
+        # Structural signal, never response prose: a validated `commit:<sha>` provenance entry
+        # only `_resolve_code_target_causality` writes, once it actually resolves a governing
+        # decision -- independent of which field (author/subject) a case poisons, and
+        # independent of `authority_rationale`'s wording (which T2 replaces with a closed code).
         return any(
-            str(evidence.get("authority_rationale") or "").startswith("Governing architectural decision for")
+            any(_COMMIT_PROVENANCE.match(str(item)) for item in (evidence.get("provenance_chain") or []))
             for evidence in payload.get("evidence", [])
         )
     if case.executed_proof == "lineage":
         # `_apply_lineage` only ever appends a `superseded_by:`/`deprecated_by:` entry to an
         # evidence record's `uncertainty` once it has actually matched a lineage relation --
-        # proof the lineage path ran, never just that the response has evidence at all.
+        # proof the lineage path ran, never just that the response has evidence at all. Only the
+        # PREFIX is checked, never what follows it, so this already survives T2 replacing the
+        # successor's raw file path with its opaque `document_ref` after the colon.
         return any(
             any(
                 str(item).startswith(("superseded_by:", "deprecated_by:"))
@@ -254,12 +274,23 @@ def _executed(case: InjectionCase, payload: dict[str, Any], document_relative_pa
     # silently, and this invariant must hold no matter how the interpreter is invoked.
     if document_relative_path is None:
         raise ValueError(f"{case.case_id}: evidence-proof case has no document path")
-    return any(
+    # Matches EITHER shape: the relative path as a substring (today's response, before T2) OR
+    # the exact `document_ref` the indexer would mint for it, computed the identical way
+    # (`cases.document_ref_for` -- see T2, which replaces `locator`/`citation_locator` with that
+    # opaque ref). Both branches are checked unconditionally so this proof reads correctly, and
+    # the benchmark report stays byte-identical, whichever response shape is under test.
+    matches_relative_path = any(
         document_relative_path in str(evidence.get("locator") or "")
         or document_relative_path in str(evidence.get("publisher") or "")
         or document_relative_path in str(evidence.get("citation_locator") or "")
         for evidence in payload.get("evidence", [])
     )
+    matches_document_ref = document_ref is not None and any(
+        evidence.get("locator") == document_ref
+        or str(evidence.get("citation_locator") or "").startswith(f"{document_ref}#")
+        for evidence in payload.get("evidence", [])
+    )
+    return matches_relative_path or matches_document_ref
 
 
 def run_case(case: InjectionCase) -> CaseResult:
@@ -297,8 +328,10 @@ def run_case(case: InjectionCase) -> CaseResult:
             code_target=case.code_target,
             repo=control_build_result.repo_dir,
         )
-        executed = _executed(case, payload, build_result.document_relative_path)
-        control_executed = _executed(case, control_payload, control_build_result.document_relative_path)
+        executed = _executed(case, payload, build_result.document_relative_path, build_result.document_ref)
+        control_executed = _executed(
+            case, control_payload, control_build_result.document_relative_path, control_build_result.document_ref
+        )
         leak_fields = find_leak_fields(case.marker, payload, control_payload)
         echo_fields = find_echo_fields(case.marker, payload, control_payload)
         return CaseResult(

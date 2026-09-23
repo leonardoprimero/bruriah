@@ -225,18 +225,42 @@ def test_executed_raises_a_value_error_not_an_assertion_for_a_missing_document_p
         _executed(case, {}, None)
 
 
-def test_executed_code_target_proof_requires_the_governing_decision_rationale() -> None:
+def test_executed_code_target_proof_requires_a_validated_commit_provenance_entry() -> None:
     """The `code_target` executed-proof must prove the causal-archaeology path actually resolved
-    a governing decision -- the fixed rationale prefix `_resolve_code_target_causality` always
-    writes, independent of which field (author/subject) a case poisons -- never just that
-    `code_target` was set on the request."""
+    a governing decision -- a validated `commit:<sha>` entry `_resolve_code_target_causality`
+    always writes to that evidence record's `provenance_chain`, independent of which field
+    (author/subject) a case poisons and independent of `authority_rationale`'s wording (a closed
+    code as of T2, never response prose) -- never just that `code_target` was set on the
+    request. R4-proof-coupled-to-prose: the OLD version of this proof read
+    `authority_rationale`'s prefix, which T2 replaces with a closed code; this structural signal
+    survives that change untouched."""
     case = next(c for c in CASES if c.executed_proof == "code_target")
-    resolved = {"evidence": [{"authority_rationale": "Governing architectural decision for code.py:1 decided by X."}]}
-    unresolved = {"evidence": [{"authority_rationale": "Evaluated alternative 'X' (rejected)."}]}
+    resolved = {"evidence": [{"provenance_chain": ["commit:7c90800fab12", "target:code.py:1"]}]}
+    unresolved = {"evidence": [{"provenance_chain": ["target:code.py:1"]}]}
+    not_a_sha = {"evidence": [{"provenance_chain": ["commit:not-hex!!"]}]}
     empty = {"evidence": []}
     assert _executed(case, resolved, None) is True
     assert _executed(case, unresolved, None) is False
+    assert _executed(case, not_a_sha, None) is False
     assert _executed(case, empty, None) is False
+
+
+def test_executed_evidence_proof_also_matches_by_document_ref() -> None:
+    """Forward-compatibility for T2: once `locator`/`citation_locator` carry the opaque
+    `document_ref` instead of the raw relative path, the evidence executed-proof must still
+    recognize the carrying document -- by matching the exact ref the indexer would mint for it
+    (`cases.document_ref_for`), never by guessing. The relative-path branch (today's response
+    shape) keeps working unchanged; this is strictly an additional way to match, which is why
+    this proof stays byte-identical against the CURRENT response shape (see the docstring on
+    `_executed`)."""
+    from cases import document_ref_for
+
+    case = next(c for c in CASES if c.executed_proof == "evidence")
+    ref = document_ref_for("adr-1.md")
+    opaque_payload = {"evidence": [{"locator": ref, "publisher": "local-corpus", "citation_locator": f"{ref}#L1-L4"}]}
+    assert _executed(case, opaque_payload, "adr-1.md", ref) is True
+    unrelated_payload = {"evidence": [{"locator": document_ref_for("other.md"), "publisher": "local-corpus"}]}
+    assert _executed(case, unrelated_payload, "adr-1.md", ref) is False
 
 
 def test_executed_lineage_proof_requires_a_superseded_by_uncertainty_entry() -> None:

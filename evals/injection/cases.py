@@ -23,6 +23,7 @@ Carriers:
 
 from __future__ import annotations
 
+import hashlib
 import os
 import shutil
 import subprocess
@@ -53,17 +54,31 @@ _GIT_DATE = "2026-01-01T09:00:00+00:00"
 _GIT_EMAIL = "eval@bruriah.invalid"
 
 
+def document_ref_for(relative_path: str) -> str:
+    """The `doc:v1:<sha256>` ref `corpus.parse_document` mints for a document at
+    `relative_path`, computed the identical way (see `corpus.py::parse_document`,
+    `document_ref = f"doc:v1:{_digest(relative)}"` where `_digest` is a plain sha256 of the
+    relative posix path). Exposed here, rather than re-derived in `run.py`, so both the
+    evidence executed-proof and any test that needs it share one source of truth for "the ref
+    the indexer would have minted for this fixture's document" -- never guessed from a
+    response."""
+    return f"doc:v1:{hashlib.sha256(relative_path.encode('utf-8')).hexdigest()}"
+
+
 @dataclass(frozen=True)
 class BuildResult:
     """What one case's `build` produced: the corpus directory to index, and, for an
     `executed_proof == "evidence"` case, the corpus-relative filename the carrying document was
-    written under -- known at build time, never guessed from the response. `repo_dir`, for a
-    `code_target`-carrying case (`carrier == "markdown+git"`), is the real, temporary git
-    repository `InvestigationRequest.code_target` resolves against; `run.py` wires it into
-    `ServiceDeps.repo`."""
+    written under -- known at build time, never guessed from the response -- plus the
+    `document_ref` the indexer will mint for it (`document_ref_for`), so the evidence
+    executed-proof can match structurally once the response carries that opaque ref instead of
+    the raw relative path. `repo_dir`, for a `code_target`-carrying case (`carrier ==
+    "markdown+git"`), is the real, temporary git repository `InvestigationRequest.code_target`
+    resolves against; `run.py` wires it into `ServiceDeps.repo`."""
 
     corpus_dir: Path
     document_relative_path: str | None = None
+    document_ref: str | None = None
     repo_dir: Path | None = None
 
 
@@ -225,7 +240,7 @@ def _build_markdown(filename: str, doc: str) -> Callable[[Path], BuildResult]:
         corpus = work_dir / "corpus"
         corpus.mkdir()
         (corpus / filename).write_text(doc, encoding="utf-8")
-        return BuildResult(corpus_dir=corpus, document_relative_path=filename)
+        return BuildResult(corpus_dir=corpus, document_relative_path=filename, document_ref=document_ref_for(filename))
 
     return build
 
@@ -490,7 +505,9 @@ def _build_git(*, subject: str, body: str, author: str) -> Callable[[Path], Buil
         docs = sorted(out.glob("*.md"))
         if len(docs) != 1:
             raise RuntimeError(f"expected exactly one document from gitcorpus.build, got {len(docs)}")
-        return BuildResult(corpus_dir=out, document_relative_path=docs[0].name)
+        return BuildResult(
+            corpus_dir=out, document_relative_path=docs[0].name, document_ref=document_ref_for(docs[0].name)
+        )
 
     return build
 
@@ -649,7 +666,7 @@ def _build_github_closing_comment_with(work_dir: Path, comment_body: str) -> Bui
     docs = sorted(out.glob("*.md"))
     if len(docs) != 1:
         raise RuntimeError(f"expected exactly one document from github_corpus.build_documents, got {len(docs)}")
-    return BuildResult(corpus_dir=out, document_relative_path=docs[0].name)
+    return BuildResult(corpus_dir=out, document_relative_path=docs[0].name, document_ref=document_ref_for(docs[0].name))
 
 
 GITHUB_CASES: tuple[InjectionCase, ...] = (
