@@ -61,6 +61,14 @@ Out of scope: fixing any boundary. That is the next branch, and it breaks a cont
   (no inherited identity or config); skip cleanly when git is missing; explicit errors instead
   of `assert` as runtime guards; accurate test names; drop the dead constant; avoid re-running
   the full benchmark per test.
+- [x] **T1.2 — Second review advisories.** (e8b3e3c, reports refreshed in 6534c5a) Address the non-blocking findings of
+  review lineage review-6ba2405fbc1642c2 (listed under Progress): pass Windows-essential env vars
+  through the hermetic git env and use `os.devnull` for `GIT_CONFIG_GLOBAL`; enforce
+  `control_executed` with the same force as `executed`; record `echo_fields` so a path excluded
+  from `leak_fields` because it also hits in the control run is observable, not silent; plus
+  readability fixes (named clean-baseline constants for the git and GitHub control builds, an
+  updated `control_executed` docstring, and a retraction note on the T1.1 Progress bullet whose
+  claim about `.alternatives[0].name` was later superseded).
 - [x] **T2 — Baseline report.** (9ae5a3d) Commit the regenerated report. Per-case tests already
   assert the current outcome as a record of behavior, so the fixing branch flips them loudly;
   strict xfail markers were dropped as redundant.
@@ -107,7 +115,9 @@ Out of scope: fixing any boundary. That is the next branch, and it breaks a cont
   failure for the git-env hermeticity spy, both before the corresponding fix). All ten advisory
   findings addressed: leak_fields attribution with a task-echo drop rule (md-alt-name stays
   leaked via `.evidence[0].authority_rationale`, `.conflicts[0]`, and
-  `.counterfactual_assessment.rationale`, not via the task-echoing `.alternatives[0].name`);
+  `.counterfactual_assessment.rationale`, not via the task-echoing `.alternatives[0].name` --
+  this specific claim was found unsound and retracted by the correction bullet below:
+  `.alternatives[0].name` DOES leak, it is md-alt-name's own corpus-authored surface);
   hermetic git subprocess env (HOME redirected, GIT_CONFIG_NOSYSTEM=1,
   GIT_CONFIG_GLOBAL=/dev/null, explicit author/committer identity+dates, no `os.environ`
   merge); `GitUnavailableError` + `pytest.skip`/`skipif` for a missing `git`, reported as not
@@ -131,6 +141,32 @@ Out of scope: fixing any boundary. That is the next branch, and it breaks a cont
   `.alternatives[0].name` and `.counterfactual_assessment.matched_alternative` now correctly
   leak. All 11 cases' control runs executed their carrying path (`control_executed` true
   throughout, none affected). ASR unchanged at 7/11, same leak/hold set.
+- 2026-09-23: T1.2 (e8b3e3c, reports refreshed in 6534c5a), second native review. RDD: assessed
+  high risk (subprocess use). Consent granted by the user. Review lineage
+  review-6ba2405fbc1642c2 approved and acknowledged (authority burned) on 30ae3b9..506ada9;
+  reviewed boundary is now 506ada9. Nine non-blocking findings: R3-windows-minimal-git-env,
+  R4-hermetic-env-drops-windows-essentials, R3-control-executed-not-enforced,
+  R4-control-executed-not-enforced-in-runner, R3-path-subtraction-can-mask-coincident-leak,
+  R2-001, R2-002, R2-003, R2-004. TDD strict (RED observed on the intended assertion each time:
+  `KeyError: 'SYSTEMROOT'`/`'USERPROFILE'` for the Windows env vars before `_hermetic_git_env`
+  passed them through; `Failed: DID NOT RAISE NotExecutedError` for `control_executed` before
+  `_require_all_executed` enforced it). Fixed: `_hermetic_git_env` now passes through
+  SYSTEMROOT/WINDIR/COMSPEC/PATHEXT/TEMP/TMP when present, sets USERPROFILE to the redirected
+  home on Windows (`os.name == "nt"`), and uses `os.devnull` instead of a hard-coded `/dev/null`
+  for `GIT_CONFIG_GLOBAL`; `_require_all_executed` enforces `control_executed` with the same
+  force as `executed`, so a case whose control run did not execute fails the run rather than
+  reaching the report as held or leaked; `find_echo_fields`/`CaseResult.echo_fields` record every
+  path `find_leak_fields` excludes because it also hits in the control run, so an excluded path
+  is observable, not silent (none of the current 11 cases have one). Readability: R2-001/R2-002
+  replaced literal strings duplicated across the git/GitHub poisoned and control builds with
+  named clean-baseline constants (`_GIT_CLEAN_SUBJECT`/`_BODY`/`_AUTHOR`,
+  `_GH_CLEAN_CLOSING_COMMENT`); R2-003's `control_executed` field comment now describes the
+  enforced invariant; R2-004's contradiction (an earlier Progress bullet claiming
+  `.alternatives[0].name` does not leak, superseded by the task-echo correction) got a retraction
+  note in place. Checks: full suite 1688 passed / 0 failed / 18 skipped (README's pinned count
+  moved 1,697 -> 1,706); ruff and mypy clean; `evals/injection/run.py` run twice is
+  byte-identical. Baseline unchanged: ASR 7/11 (0.636), same leak/hold set; echo_fields empty and
+  control_executed true for all 11 cases.
 
 ## Next step
 
