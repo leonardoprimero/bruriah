@@ -6,7 +6,7 @@
 **TDD:** strict (global session configuration). Runner: `uv run pytest -q -p no:cacheprovider`
 **Delivery strategy:** `ask-on-risk`. Forecast ~1,500 authored changed lines, over budget. Slicing
 is decided at delivery time, because nothing is pushed before the fix lands (see Disclosure).
-**RDD:** enabled for this repo. Last reviewed boundary: 214097c.
+**RDD:** enabled for this repo. Last reviewed boundary: 9c40e46.
 **Release:** 2.0.0. Contract break: `InvestigationResult.schema_version` "1" → "2".
 **Disclosure:** local only, never pushed, until this branch closes every measured channel.
 Benchmark, fix and before/after numbers ship together.
@@ -58,7 +58,9 @@ Rejected: filtering the text (a slug is printable and still an instruction); a s
   values, `src/bruriah/demo.py` dereferencing through them.
 - [ ] **T5 — Proof and docs.** The benchmark at ASR 0 with its report; `demo/injection/run.py`,
   the README section, docs, `evals/counterfactual/runner.py`, the CHANGELOG 2.0.0 entry,
-  `evals/injection/README.md` with the before/after numbers.
+  `evals/injection/README.md` with the before/after numbers. The CHANGELOG carries a migration
+  note: user-authored packs with `max_router_version` "1.9.9" are rejected by a 2.x router
+  (`incompatible_pack`) until their authors widen the window and re-sign (R4-001).
 
 ## Acceptance criteria
 
@@ -145,6 +147,15 @@ Rejected: filtering the text (a slug is printable and still an instruction); a s
   README's pinned test count moved 1,708 -> 1,709 (`tests/test_readme_claims.py` requires it, not
   otherwise touched).
 
+- RDD review of T1 (2a18eee..9c40e46): high risk, consent granted by the user, lineage
+  review-4aadc7204a4ef3b9 approved and acknowledged. Findings: R3-001 and
+  R2-dates-beat-router-probe-stale (the date-over-router precedence test had gone vacuous;
+  the parent fixed it and proved it by reversing the checks, which turns it red);
+  R4-001 (user packs pinned to 1.9.9 break on upgrade; carried into T5's migration note);
+  R2-format-churn-mixed-with-version-bump (noted; later tasks keep formatting-only changes
+  in their own commits).
+
 ## Next step
 
-T2 via one bounded writer.
+T2 via one bounded writer. It first moves the code-target executed-proof off
+`authority_rationale` wording (R4-proof-coupled-to-prose).
