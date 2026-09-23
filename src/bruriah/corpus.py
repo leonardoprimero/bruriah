@@ -103,6 +103,24 @@ def document_ref_for(relative_path: str) -> str:
     return f"doc:v1:{_digest(relative_path)}"
 
 
+def alternative_ref_for(document_ref: str, name: str) -> str:
+    """The `alt:v1:<sha256>` ref for an evaluated alternative (T3, investigate-boundary-v2):
+    the hash of `document_ref + "\\x00" + name`, unique because `alternatives`' own PRIMARY KEY
+    is `(name, document_ref)` (`index.py`). Opaque and deterministic -- no index migration, no
+    new column -- so both `service.py::_evaluate_counterfactual` (minting it) and
+    `repository.py`'s local resolver (recomputing it over a stored row to look one back up)
+    share this one formula rather than re-deriving it."""
+    return f"alt:v1:{_digest(document_ref, name)}"
+
+
+def premise_ref_for(premise_id: str) -> str:
+    """The `premise:v1:<sha256>` ref for a premise (T3, investigate-boundary-v2): the hash of
+    `premise_id` alone, unique because `premises.premise_id` is the table's own PRIMARY KEY
+    (`index.py`) -- globally unique across every document. Opaque and deterministic, the same
+    one-formula pattern as `document_ref_for`/`alternative_ref_for`."""
+    return f"premise:v1:{_digest(premise_id)}"
+
+
 def _frontmatter(lines: list[str]) -> tuple[dict[str, Any], int]:
     if not lines or lines[0].rstrip("\r\n") != "---":
         return {}, 0

@@ -52,6 +52,7 @@ from .contracts import (
     InvestigationRequest, InvestigationResult, PermissionDisclosure, PremiseRecord,
     ReadItem, ReadRange, ReadRequest, ReadResult,
 )
+from .corpus import alternative_ref_for, premise_ref_for
 from .dispatch import DEFAULT_SKILL_CEILING, SkillDispatch, dispatch
 from .index import ActiveSnapshot
 from .lookup import LookupResult, SkillMatch, discover, resolve_capability
@@ -758,6 +759,16 @@ def _evaluate_counterfactual(
         if pid not in premises_map or premises_map[pid].status not in ("active", "invalidated")
     ]
 
+    # T3 (investigate-boundary-v2): the opaque ref this match is reported under everywhere below
+    # -- never `matched_alt.name` itself. Same formula the local resolver
+    # (`repository.resolve_alternative_ref`) recomputes to look the row back up.
+    alt_ref = alternative_ref_for(matched_alt.document_ref, matched_alt.name)
+    disposition_val: Literal["rejected", "deferred", "superseded"] = (
+        matched_alt.disposition  # type: ignore[assignment]
+        if matched_alt.disposition in ("rejected", "deferred", "superseded")
+        else "rejected"
+    )
+
     supporting_refs: list[str] = []
     cf_evidence: list[EvidenceRecord] = []
 
@@ -787,14 +798,27 @@ def _evaluate_counterfactual(
             "unassessed_premise",
         ] = "premise_changed_requires_reevaluation"
         inv_p = invalidated_premises[0]
-        inv_by = f"commit {inv_p.invalidated_by[:12]}" if inv_p.invalidated_by else "subsequent decision"
+        inv_p_ref = premise_ref_for(inv_p.premise_id)
+        # T3: `invalidated_by` was never validated as a real sha (`md-premise-invalidated-by`
+        # -- a document's own `commit:` frontmatter, fully attacker-controlled). Routed through
+        # `agent_surface.commit_sha` here too, exactly like `PremiseRecord.invalidated_by` below,
+        # so the rationale/conflict text can never carry the raw, unvalidated value.
+        validated_sha = agent_surface.commit_sha(inv_p.invalidated_by)
+        inv_by_display = (
+            validated_sha if validated_sha != agent_surface.UNKNOWN else "an unvalidated decision"
+        )
+        # T3 (investigate-boundary-v2): fixed wording built only from refs, counts, the verdict
+        # and a validated sha -- never from `matched_alt.name`/`.reason` or a premise's own
+        # statement, closing `md-alt-name`/`md-alt-reason`/`md-premise-*` as conflict/rationale
+        # channels.
         rationale = (
-            f"Alternative '{matched_alt.name}' was evaluated and {matched_alt.disposition} "
-            f"because: {matched_alt.reason}. However, premise '{inv_p.premise_id}' was "
-            f"invalidated by {inv_by}. The decision requires reevaluation under current conditions."
+            f"Alternative {alt_ref} ({disposition_val}) is contested: premise {inv_p_ref} was "
+            f"invalidated by {inv_by_display}. {len(invalidated_premises)} of its premise(s) are "
+            "now invalidated; the decision requires reevaluation under current conditions."
         )
         cf_conflicts.append(
-            f"Historical rejection of '{matched_alt.name}' questioned: premise '{inv_p.premise_id}' was invalidated by {inv_by}"
+            f"Historical rejection of {alt_ref} questioned: premise {inv_p_ref} was invalidated "
+            f"by {inv_by_display}"
         )
 
         inv_doc = inv_p.invalidation_document_ref or inv_p.document_ref
@@ -818,28 +842,19 @@ def _evaluate_counterfactual(
     elif active_premises and not unassessed_premises:
         verdict = "repeat_of_rejected_architecture"
         rationale = (
-            f"Alternative '{matched_alt.name}' was evaluated and {matched_alt.disposition} "
-            f"because: {matched_alt.reason}. All supporting premises "
-            f"({', '.join(matched_alt.premises)}) remain active."
+            f"Alternative {alt_ref} ({disposition_val}) matches the task. All "
+            f"{len(active_premises)} supporting premise(s) remain active."
         )
-        cf_conflicts.append(
-            f"Task matches rejected architecture '{matched_alt.name}' under active premises: {matched_alt.reason}"
-        )
+        cf_conflicts.append(f"Task matches rejected architecture {alt_ref} under active premises")
     else:
         verdict = "unassessed_premise"
         rationale = (
-            f"Alternative '{matched_alt.name}' was evaluated and {matched_alt.disposition} "
-            f"({matched_alt.reason}), but supporting premises have no current verification record."
+            f"Alternative {alt_ref} ({disposition_val}) matches the task, but its "
+            f"{len(unassessed_premises)} premise(s) have no current verification record."
         )
 
-    disposition_val: Literal["rejected", "deferred", "superseded"] = (
-        matched_alt.disposition  # type: ignore[assignment]
-        if matched_alt.disposition in ("rejected", "deferred", "superseded")
-        else "rejected"
-    )
-
     assessment = CounterfactualAssessment(
-        matched_alternative=matched_alt.name,
+        matched_alternative_ref=alt_ref,
         decision_ref=matched_alt.document_ref,
         verdict=verdict,
         supporting_evidence=supporting_refs,
@@ -848,10 +863,10 @@ def _evaluate_counterfactual(
 
     alt_records = [
         AlternativeRecord(
-            name=matched_alt.name,
+            ref=alt_ref,
             disposition=disposition_val,
-            reason=matched_alt.reason,
-            premises=list(matched_alt.premises),
+            decision_ref=matched_alt.document_ref,
+            premise_refs=[premise_ref_for(pid) for pid in matched_alt.premises],
         )
     ]
 
@@ -864,13 +879,16 @@ def _evaluate_counterfactual(
                 if p_row.status in ("active", "invalidated", "uncertain")
                 else "uncertain"
             )
+            p_validated_sha = agent_surface.commit_sha(p_row.invalidated_by)
             premise_records.append(
                 PremiseRecord(
-                    id=p_row.premise_id,
-                    statement=p_row.statement,
+                    ref=premise_ref_for(p_row.premise_id),
                     status=p_status,
-                    invalidated_by=p_row.invalidated_by,
-                    rationale=p_row.rationale,
+                    decision_ref=p_row.document_ref,
+                    invalidated_by=(
+                        p_validated_sha if p_validated_sha != agent_surface.UNKNOWN else None
+                    ),
+                    invalidated_in=p_row.invalidation_document_ref,
                 )
             )
 
@@ -1048,7 +1066,7 @@ class InvestigateService:
                 host_actions = host_actions + [drafting]
 
         result = InvestigationResult(
-            schema_version="1", status=status, request_id=request_id, evidence=evidence,
+            schema_version="2", status=status, request_id=request_id, evidence=evidence,
             claims=lineage_claims, conflicts=lineage_conflicts, gaps=list(decision.gaps) + extra_gaps, host_actions=host_actions,
             warnings=warnings, degradation=degradation, budgets=request.budgets, next_cursor=next_cursor,
             alternatives=cf_alts, premises=cf_premises, counterfactual_assessment=cf_assessment,

@@ -9,6 +9,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from . import language, ranking
+from .corpus import alternative_ref_for, premise_ref_for
 
 
 class RepositoryError(Exception):
@@ -426,3 +427,24 @@ class SnapshotRepository:
             }
         except sqlite3.DatabaseError as error:
             raise RepositoryError("premises_unreadable") from error
+
+    def resolve_alternative_ref(self, ref: str) -> AlternativeRow | None:
+        """Resolve an opaque `alt:v1:<hash>` ref back to its stored row, for a human view or an
+        explicit `read_evidence` request (T3/T4, investigate-boundary-v2) -- never carried by the
+        wire contract itself. The ref is RECOMPUTED over each row with `alternative_ref_for`
+        (the same formula `_evaluate_counterfactual` used to mint it), not stored: no index
+        migration, no new column. `None` for a ref that does not resolve, exactly like
+        `get_document_path`."""
+        for row in self.get_alternatives():
+            if alternative_ref_for(row.document_ref, row.name) == ref:
+                return row
+        return None
+
+    def resolve_premise_ref(self, ref: str) -> PremiseRow | None:
+        """Resolve an opaque `premise:v1:<hash>` ref back to its stored row -- the premise
+        analogue of `resolve_alternative_ref`. `premise_id` is the table's own PRIMARY KEY, so
+        the ref is unique across every document without a document_ref component."""
+        for row in self.get_premises().values():
+            if premise_ref_for(row.premise_id) == ref:
+                return row
+        return None

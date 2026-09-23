@@ -429,7 +429,7 @@ def test_compact_to_budget_is_noop_when_already_within_budget() -> None:
     record = _evidence_record("only:1")
     claim = ClaimRecord(text="claim text", state="supported", supporting_refs=["only:1"], conflicting_refs=[])
     result = InvestigationResult(
-        schema_version="1", status="complete", request_id=f"sha256:{'a' * 64}", evidence=[record],
+        schema_version="2", status="complete", request_id=f"sha256:{'a' * 64}", evidence=[record],
         claims=[claim], conflicts=[], gaps=[], host_actions=[], warnings=[], degradation=[],
         budgets=Budgets(), next_cursor=None,
     )
@@ -446,7 +446,7 @@ def test_compact_to_budget_drops_only_unprotected_evidence_keeps_refs_conflicts_
     claim = ClaimRecord(text="claim referencing protected evidence", state="conflicted",
                          supporting_refs=["keep:cited"], conflicting_refs=[])
     full = InvestigationResult(
-        schema_version="1", status="complete", request_id=f"sha256:{'b' * 64}",
+        schema_version="2", status="complete", request_id=f"sha256:{'b' * 64}",
         evidence=[protected, *padding], claims=[claim],
         conflicts=["Claim 'claim referencing protected evidence' has conflicting evidence (time)."],
         gaps=["evidence_disagrees"], host_actions=[], warnings=["unverified_authority_evidence_present"],
@@ -475,7 +475,7 @@ def test_compact_to_budget_never_drops_protected_evidence_even_if_still_over_bud
     protected = _evidence_record("keep:only", digest_content="the only evidence, and it is claim-cited")
     claim = ClaimRecord(text="claim", state="supported", supporting_refs=["keep:only"], conflicting_refs=[])
     result = InvestigationResult(
-        schema_version="1", status="complete", request_id=f"sha256:{'c' * 64}", evidence=[protected],
+        schema_version="2", status="complete", request_id=f"sha256:{'c' * 64}", evidence=[protected],
         claims=[claim], conflicts=[], gaps=[], host_actions=[], warnings=["a safety warning"],
         degradation=[], budgets=Budgets(), next_cursor=None,
     )
@@ -733,7 +733,7 @@ def test_compaction_measures_the_payload_it_actually_returns() -> None:
         for i in range(6)
     ]
     result = InvestigationResult(
-        schema_version="1", status="complete", request_id=f"sha256:{'d' * 64}", evidence=records,
+        schema_version="2", status="complete", request_id=f"sha256:{'d' * 64}", evidence=records,
         claims=[], conflicts=[], gaps=[], host_actions=[], warnings=[], degradation=[],
         budgets=Budgets(), next_cursor=None,
     )

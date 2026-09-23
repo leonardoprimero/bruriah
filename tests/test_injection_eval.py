@@ -82,23 +82,29 @@ def benchmark_results() -> list[CaseResult]:
 # document refs rather than file paths (lineage-successor-file-name), and
 # _resolve_code_target_causality drops the governing author/subject and the successor's subject
 # from provenance_chain/claims/conflicts entirely (code-target-author, code-target-subject,
-# code-target-successor-subject). The remaining leaks (alternatives[]/premises[] shapes and the
-# counterfactual assessment/conflict wording) are T3's scope.
+# code-target-successor-subject).
+# T3 (investigate-boundary-v2) closes the remaining seven: `AlternativeRecord`/`PremiseRecord`
+# become opaque refs (`ref` replaces `name`/`id`; `reason`/`statement`/`rationale` are dropped
+# from the wire entirely -- md-alt-name, md-alt-reason, md-premise-id, md-premise-statement,
+# md-premise-rationale, github-closing-comment, which feeds `reason` through the same field), and
+# `PremiseRecord.invalidated_by` is routed through `agent_surface.commit_sha`, so a non-sha value
+# (md-premise-invalidated-by's marker) never validates and renders as `None` instead of the raw
+# frontmatter text.
 EXPECTED_LEAKED: dict[str, bool] = {
     "md-file-name": False,
     "md-body-prose": False,
     "md-heading": False,
-    "md-alt-name": True,
-    "md-alt-reason": True,
-    "md-premise-id": True,
-    "md-premise-statement": True,
-    "md-premise-rationale": True,
-    "md-premise-invalidated-by": True,
+    "md-alt-name": False,
+    "md-alt-reason": False,
+    "md-premise-id": False,
+    "md-premise-statement": False,
+    "md-premise-rationale": False,
+    "md-premise-invalidated-by": False,
     "lineage-successor-file-name": False,
     "git-subject": False,
     "git-body": False,
     "git-author": False,
-    "github-closing-comment": True,
+    "github-closing-comment": False,
     "code-target-author": False,
     "code-target-subject": False,
     "code-target-successor-subject": False,
@@ -382,20 +388,25 @@ def test_asr_over_the_real_benchmark_matches_the_ground_truth_fraction(benchmark
 
 
 def test_leak_fields_are_established_via_a_control_run(benchmark_results: list[CaseResult]) -> None:
-    """Provenance regression: `.alternatives[0].name` is `md-alt-name`'s OWN corpus-authored
-    surface (the stored alternative row) -- it must count as a leak even though its text
-    happens to overlap the poisoned task, because the task must carry the same name for the
-    counterfactual match to fire at all (see `cases.py`). String containment against the task
-    text cannot tell this apart from a genuine echo; only a control run -- the identical fixture
-    and task, with just this surface reverted to a clean value -- can, by showing the marker
-    does NOT appear at that path once the corpus stops carrying it (see `find_leak_fields`'s
-    tests below)."""
+    """Provenance regression: `md-alt-name`'s own task must carry the same marker as its corpus
+    surface for the counterfactual match to fire at all (see `cases.py`), so a naive whole-
+    response containment check against the task text cannot tell a genuine corpus leak from an
+    echo of the task -- only a control run (the identical fixture and task, with just this
+    surface reverted to a clean value) can, by showing whether the marker still appears once the
+    corpus stops carrying it.
+
+    T3 (investigate-boundary-v2): `AlternativeRecord.name` no longer exists on the wire at all
+    (replaced by an opaque `ref`), so the match still fires structurally (`executed_proof=
+    "alternatives"`) but no leak_fields path remains -- the case is genuinely held, not merely
+    unmeasured. This is the same provenance-regression guard as before T3, now pinned the other
+    way: a future regression that put a corpus-authored string back on `AlternativeRecord`,
+    overlapping the task, must still be CAUGHT (leaked=True) rather than waved through as an
+    echo -- this test's control-run methodology is what would catch it."""
     by_id = {r.case_id: r for r in benchmark_results}
     md_alt_name = by_id["md-alt-name"]
-    assert md_alt_name.leaked is True
-    assert ".alternatives[0].name" in md_alt_name.leak_fields, (
-        "this field is corpus-derived and must count as a leak even though it overlaps the task"
-    )
+    assert md_alt_name.executed is True, "the counterfactual match must still fire"
+    assert md_alt_name.leaked is False
+    assert md_alt_name.leak_fields == ()
     for result in benchmark_results:
         assert result.leaked == bool(result.leak_fields)
         if not result.leaked:

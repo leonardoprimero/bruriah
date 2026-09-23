@@ -8,6 +8,15 @@ class ClosedModel(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
 ShortText = Annotated[str, Field(min_length=1, max_length=4096)]
 Ref = Annotated[str, Field(min_length=1, max_length=256)]
+# T3 (investigate-boundary-v2): opaque, deterministic refs for counterfactual records -- the
+# hash, never the author-chosen name/id itself (see `corpus.alternative_ref_for`/
+# `premise_ref_for`). Pattern-constrained so a producer that ever tried to smuggle free text
+# through one of these fields fails validation instead of shipping it.
+DocRef = Annotated[str, Field(pattern=r"^doc:v1:[0-9a-f]{64}$")]
+AlternativeRef = Annotated[str, Field(pattern=r"^alt:v1:[0-9a-f]{64}$")]
+PremiseRef = Annotated[str, Field(pattern=r"^premise:v1:[0-9a-f]{64}$")]
+# A validated commit sha, never free text -- the same range `agent_surface.commit_sha` accepts.
+CommitSha = Annotated[str, Field(pattern=r"^[0-9a-f]{7,64}$")]
 # T2 (investigate-boundary-v2): the closed set of authority-rationale codes every EvidenceRecord
 # producer may report. Each code names the KIND of authority assessed and how, never its
 # content -- before this was `ShortText`, and several producers built the sentence straight from
@@ -157,25 +166,39 @@ class ClaimRecord(ClosedModel):
     supporting_refs: list[Ref] = []
     conflicting_refs: list[Ref] = []
 class PremiseRecord(ClosedModel):
-    id: ShortText
-    statement: ShortText
+    """T3 (investigate-boundary-v2): opaque by construction -- `id`/`statement`/`rationale` were
+    corpus-authored free text (`md-premise-id`/`md-premise-statement`/`md-premise-rationale`);
+    `invalidated_by` was never validated as a real sha (`md-premise-invalidated-by`). `ref`
+    replaces `id`; `statement`/`rationale` are dropped from the wire entirely (a human view or an
+    explicit `read_evidence` request resolves `ref` locally, T4); `invalidated_by` is now the
+    validated sha or nothing, never the raw frontmatter value."""
+    ref: PremiseRef
     status: Literal["active", "invalidated", "uncertain"]
-    invalidated_by: ShortText | None = None
-    rationale: ShortText | None = None
+    decision_ref: DocRef
+    invalidated_by: CommitSha | None = None
+    invalidated_in: DocRef | None = None
 class AlternativeRecord(ClosedModel):
-    name: ShortText
+    """T3: `name`/`reason` were corpus-authored free text (`md-alt-name`/`md-alt-reason`,
+    `github-closing-comment`). `ref` replaces `name`; `reason` is dropped from the wire entirely
+    (resolved locally, T4); `premises` becomes `premise_refs` -- opaque refs, never the raw
+    premise ids a document's frontmatter lists."""
+    ref: AlternativeRef
     disposition: Literal["rejected", "deferred", "superseded"]
-    reason: ShortText
-    premises: list[ShortText] = []
+    decision_ref: DocRef
+    premise_refs: list[PremiseRef] = []
 class CounterfactualAssessment(ClosedModel):
-    matched_alternative: ShortText
-    decision_ref: ShortText
+    matched_alternative_ref: AlternativeRef
+    decision_ref: DocRef
     verdict: Literal[
         "repeat_of_rejected_architecture",
         "premise_changed_requires_reevaluation",
         "unassessed_premise",
     ]
     supporting_evidence: list[Ref] = []
+    # T3: fixed wording built only from the verdict, refs, counts and a validated sha -- never
+    # from the alternative's name/reason or a premise's statement (see
+    # `service.py::_counterfactual_rationale`). Still `ShortText` on the wire (a template result,
+    # not a closed enum): pinned in the `test_contracts.py` schema-regression allowlist.
     rationale: ShortText
 class HostAction(ClosedModel):
     kind: Literal["web_search", "fetch_public_url", "inspect_capability", "request_jurisdiction",
@@ -183,7 +206,9 @@ class HostAction(ClosedModel):
     reason: ShortText
     target: ShortText | None = None
 class InvestigationResult(ClosedModel):
-    schema_version: Literal["1"]
+    # T3 (investigate-boundary-v2): "1" -> "2" -- a breaking change to `alternatives`/
+    # `premises`/`counterfactual_assessment` (opaque refs replace corpus-authored free text).
+    schema_version: Literal["2"]
     status: Literal["complete", "partial", "route_only", "abstained"]
     request_id: Ref
     evidence: list[EvidenceRecord]

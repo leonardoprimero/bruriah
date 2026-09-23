@@ -129,7 +129,7 @@ def _route_gated_result(
         if _CONSEQUENTIAL_ACTION_HOST_ACTION not in host_actions:
             host_actions.append(_CONSEQUENTIAL_ACTION_HOST_ACTION)
     result = InvestigationResult(
-        schema_version="1", status=status, request_id=request_id, evidence=[], claims=[],
+        schema_version="2", status=status, request_id=request_id, evidence=[], claims=[],
         conflicts=[], gaps=[*route_decision.gaps, *extra_gaps], host_actions=host_actions,
         warnings=warnings, degradation=degradation, budgets=request.budgets, next_cursor=None,
     )
@@ -214,7 +214,7 @@ def _assembled_result(
     )
 
     result = InvestigationResult(
-        schema_version="1", status=status, request_id=request_id, evidence=evidence, claims=claims,
+        schema_version="2", status=status, request_id=request_id, evidence=evidence, claims=claims,
         conflicts=conflicts, gaps=gaps, host_actions=host_actions, warnings=warnings,
         degradation=degradation, budgets=request.budgets, next_cursor=None,
     )
@@ -309,7 +309,7 @@ def _fallback_result(request: object, code: str) -> InvestigationResult:
         except Exception:
             request_id, budgets = _FALLBACK_REQUEST_ID, Budgets()
     return InvestigationResult(
-        schema_version="1", status="abstained", request_id=request_id, evidence=[], claims=[],
+        schema_version="2", status="abstained", request_id=request_id, evidence=[], claims=[],
         conflicts=[], gaps=["assembly_failed"], host_actions=[], warnings=[code], degradation=[],
         budgets=budgets, next_cursor=None,
     )

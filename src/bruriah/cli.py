@@ -787,14 +787,30 @@ def _cmd_serve(args: argparse.Namespace) -> int:
 # never has to run `--read` just to learn which file a conflict or claim is about. `--json` is
 # untouched: it stays exactly the prose-free payload the MCP surface returns.
 _DOC_REF_PATTERN = re.compile(r"doc:v1:[0-9a-f]{64}")
+# T3 (investigate-boundary-v2): the counterfactual contract's opaque refs -- resolved back to a
+# name/id for the human view exactly like `doc:v1:` resolves back to a path. `--json` and the MCP
+# surface never call this function, so they stay ref-only regardless.
+_ALT_REF_PATTERN = re.compile(r"alt:v1:[0-9a-f]{64}")
+_PREMISE_REF_PATTERN = re.compile(r"premise:v1:[0-9a-f]{64}")
 
 
 def _resolve_doc_refs_for_humans(text: str, repo: SnapshotRepository) -> str:
-    def _resolve_one(match: "re.Match[str]") -> str:
+    def _resolve_doc(match: "re.Match[str]") -> str:
         path = repo.get_document_path(match.group(0))
         return path if path is not None else match.group(0)
 
-    return _DOC_REF_PATTERN.sub(_resolve_one, text)
+    def _resolve_alt(match: "re.Match[str]") -> str:
+        row = repo.resolve_alternative_ref(match.group(0))
+        return row.name if row is not None else match.group(0)
+
+    def _resolve_premise(match: "re.Match[str]") -> str:
+        row = repo.resolve_premise_ref(match.group(0))
+        return row.premise_id if row is not None else match.group(0)
+
+    text = _DOC_REF_PATTERN.sub(_resolve_doc, text)
+    text = _ALT_REF_PATTERN.sub(_resolve_alt, text)
+    text = _PREMISE_REF_PATTERN.sub(_resolve_premise, text)
+    return text
 
 
 def _cmd_ask(

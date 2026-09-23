@@ -10,7 +10,7 @@ from pathlib import Path
 import pytest
 
 from bruriah.contracts import InvestigationRequest
-from bruriah.corpus import CorpusPolicy, parse_document
+from bruriah.corpus import CorpusPolicy, alternative_ref_for, parse_document, premise_ref_for
 from bruriah.gitcorpus import build as build_gitcorpus
 from bruriah.index import BuildConfig, build_candidate, promote_candidate, snapshot_active
 from bruriah.packs import load_pack
@@ -173,25 +173,43 @@ We evaluated FastMCP and rejected it due to schema derivation dropping fields wi
             InvestigationRequest(task="migrate server to FastMCP framework")
         )
 
+        adr_ref = _doc_ref("public/adr-01.md")
+        alt_ref = alternative_ref_for(adr_ref, "FastMCP")
+        premise_ref = premise_ref_for("fastmcp-no-forbid")
+
         assert result.counterfactual_assessment is not None
-        assert result.counterfactual_assessment.matched_alternative == "FastMCP"
+        assert result.counterfactual_assessment.matched_alternative_ref == alt_ref
+        assert result.counterfactual_assessment.decision_ref == adr_ref
         assert result.counterfactual_assessment.verdict == "repeat_of_rejected_architecture"
         assert len(result.counterfactual_assessment.supporting_evidence) > 0
         assert any(
-            "Task matches rejected architecture 'FastMCP' under active premises" in c
+            f"Task matches rejected architecture {alt_ref} under active premises" in c
             for c in result.conflicts
         )
         assert len(result.alternatives) == 1
-        assert result.alternatives[0].name == "FastMCP"
+        assert result.alternatives[0].ref == alt_ref
+        assert result.alternatives[0].disposition == "rejected"
+        assert result.alternatives[0].decision_ref == adr_ref
+        assert result.alternatives[0].premise_refs == [premise_ref]
         assert len(result.premises) == 1
-        assert result.premises[0].id == "fastmcp-no-forbid"
+        assert result.premises[0].ref == premise_ref
         assert result.premises[0].status == "active"
+        assert result.premises[0].decision_ref == adr_ref
+        assert result.premises[0].invalidated_by is None
+        assert result.premises[0].invalidated_in is None
+
+        # T3 (investigate-boundary-v2): the alternative's name/reason and the premise's own id/
+        # statement never reach the wire -- neither the closed models above nor the free-text
+        # surfaces (rationale, conflicts) carry them.
+        wire = result.model_dump_json()
+        assert "FastMCP" not in wire
+        assert "fastmcp-no-forbid" not in wire
 
         # T2 (investigate-boundary-v2): the counterfactual evidence record for the matched
         # alternative's own document carries the opaque document_ref and a closed
         # authority_rationale code -- never the file path or a sentence built from the
         # alternative's name/disposition.
-        cf_evidence = next(e for e in result.evidence if e.locator == _doc_ref("public/adr-01.md"))
+        cf_evidence = next(e for e in result.evidence if e.locator == adr_ref)
         assert cf_evidence.authority_rationale == "counterfactual_alternative_evidence"
         assert "adr-01.md" not in cf_evidence.citation_locator
         assert "FastMCP" not in cf_evidence.authority_rationale
@@ -261,22 +279,35 @@ Upstream released FastMCP 2.0 with strict schema forbid support.
             InvestigationRequest(task="migrate server to FastMCP framework")
         )
 
+        adr_ref = _doc_ref("public/adr-01.md")
+        invalidator_ref = _doc_ref("public/adr-02.md")
+        alt_ref = alternative_ref_for(adr_ref, "FastMCP")
+        premise_ref = premise_ref_for("fastmcp-no-forbid")
+
         assert result.counterfactual_assessment is not None
-        assert result.counterfactual_assessment.matched_alternative == "FastMCP"
+        assert result.counterfactual_assessment.matched_alternative_ref == alt_ref
         assert result.counterfactual_assessment.verdict == "premise_changed_requires_reevaluation"
         assert len(result.counterfactual_assessment.supporting_evidence) >= 1
         assert any(
-            "Historical rejection of 'FastMCP' questioned: premise 'fastmcp-no-forbid' was invalidated" in c
+            f"Historical rejection of {alt_ref} questioned: premise {premise_ref} was invalidated "
+            "by f6e5d4c3b2a1" in c
             for c in result.conflicts
         )
         assert len(result.premises) == 1
-        assert result.premises[0].id == "fastmcp-no-forbid"
+        assert result.premises[0].ref == premise_ref
         assert result.premises[0].status == "invalidated"
+        # `commit: f6e5d4c3b2a1` (adr-02.md's frontmatter) is a valid, if short, hex sha, so it
+        # passes `agent_surface.commit_sha` validation unchanged.
         assert result.premises[0].invalidated_by == "f6e5d4c3b2a1"
+        assert result.premises[0].invalidated_in == invalidator_ref
+
+        wire = result.model_dump_json()
+        assert "FastMCP" not in wire
+        assert "fastmcp-no-forbid" not in wire
 
         # T2: the invalidating document's own evidence record carries its opaque document_ref
         # and the closed "counterfactual_invalidated_premise_evidence" code.
-        invalidation_evidence = next(e for e in result.evidence if e.locator == _doc_ref("public/adr-02.md"))
+        invalidation_evidence = next(e for e in result.evidence if e.locator == invalidator_ref)
         assert invalidation_evidence.authority_rationale == "counterfactual_invalidated_premise_evidence"
         assert "adr-02.md" not in invalidation_evidence.citation_locator
         assert "fastmcp-no-forbid" not in invalidation_evidence.authority_rationale
@@ -389,7 +420,11 @@ Decision content.
         )
 
         assert result.counterfactual_assessment is not None
-        assert result.counterfactual_assessment.matched_alternative == "Kubernetes"
+        kubernetes_ref = _doc_ref("public/adr-kubernetes.md")
+        assert result.counterfactual_assessment.matched_alternative_ref == (
+            alternative_ref_for(kubernetes_ref, "Kubernetes")
+        )
+        assert result.counterfactual_assessment.decision_ref == kubernetes_ref
 
 
 def test_investigate_counterfactual_unmatched(tmp_path: Path):

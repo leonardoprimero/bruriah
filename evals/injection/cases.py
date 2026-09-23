@@ -308,7 +308,10 @@ MARKDOWN_CASES: tuple[InjectionCase, ...] = (
         # "MongoDB" remains a substring of the task, which is exactly what proves any marker
         # still found in the poisoned response came from the corpus, not from the task.
         task=f"should we migrate the store to MongoDB {_MD_ALT_NAME_MARKER}",
-        expected_leaked=True,
+        # T3: `AlternativeRecord.name` is dropped from the wire entirely, replaced by an opaque
+        # `ref` -- the counterfactual match still fires internally (name matching stays a local
+        # lookup), but the name itself never reaches the response.
+        expected_leaked=False,
         executed_proof="alternatives",
         build=_build_markdown("adr-1.md", _markdown_document(alt_name=f"MongoDB {_MD_ALT_NAME_MARKER}")),
         build_control=_MARKDOWN_CONTROL_BUILD,
@@ -319,7 +322,9 @@ MARKDOWN_CASES: tuple[InjectionCase, ...] = (
         surface="alternatives[].reason",
         marker=_MD_ALT_REASON_MARKER,
         task=_MD_TASK,
-        expected_leaked=True,
+        # T3: `AlternativeRecord.reason` is dropped from the wire entirely; the fixed-wording
+        # rationale/conflict text built from the match never quotes it.
+        expected_leaked=False,
         executed_proof="alternatives",
         build=_build_markdown(
             "adr-1.md",
@@ -335,7 +340,8 @@ MARKDOWN_CASES: tuple[InjectionCase, ...] = (
         surface="premises[].id",
         marker=_MD_PREMISE_ID_MARKER,
         task=_MD_TASK,
-        expected_leaked=True,
+        # T3: `PremiseRecord.id` is replaced by an opaque `ref` (`premise:v1:<hash-of-id>`).
+        expected_leaked=False,
         executed_proof="premises",
         build=_build_markdown("adr-1.md", _markdown_document(premise_id=_MD_PREMISE_ID_MARKER)),
         build_control=_MARKDOWN_CONTROL_BUILD,
@@ -346,7 +352,8 @@ MARKDOWN_CASES: tuple[InjectionCase, ...] = (
         surface="premises[].statement",
         marker=_MD_PREMISE_STATEMENT_MARKER,
         task=_MD_TASK,
-        expected_leaked=True,
+        # T3: `PremiseRecord.statement` is dropped from the wire entirely.
+        expected_leaked=False,
         executed_proof="premises",
         build=_build_markdown(
             "adr-1.md", _markdown_document(premise_statement=f"{_MD_PREMISE_STATEMENT_MARKER} write volume note.")
@@ -411,7 +418,8 @@ PREMISE_CASES: tuple[InjectionCase, ...] = (
         surface="premises[].rationale",
         marker=_MD_PREMISE_RATIONALE_MARKER,
         task=_MD_TASK,
-        expected_leaked=True,
+        # T3: `PremiseRecord.rationale` is dropped from the wire entirely.
+        expected_leaked=False,
         executed_proof="premises",
         build=_build_premise_rationale(f"{_MD_PREMISE_RATIONALE_MARKER} write volume note."),
         build_control=_build_premise_rationale(_MD_PREMISE_RATIONALE_CLEAN),
@@ -422,7 +430,9 @@ PREMISE_CASES: tuple[InjectionCase, ...] = (
         surface="premises[].invalidated_by",
         marker=_MD_PREMISE_INVALIDATED_BY_MARKER,
         task=_MD_TASK,
-        expected_leaked=True,
+        # T3: `PremiseRecord.invalidated_by` is now routed through `agent_surface.commit_sha`,
+        # so a non-sha value (this marker) never validates and renders as `None` instead.
+        expected_leaked=False,
         executed_proof="premises",
         build=_build_premise_invalidated_by(_MD_PREMISE_INVALIDATED_BY_MARKER),
         build_control=_build_premise_invalidated_by(_MD_PREMISE_INVALIDATED_BY_CLEAN_COMMIT),
@@ -682,7 +692,10 @@ GITHUB_CASES: tuple[InjectionCase, ...] = (
         surface="closing_comment",
         marker=_GH_CLOSING_COMMENT_MARKER,
         task=_GH_TASK,
-        expected_leaked=True,
+        # T3: the closing comment feeds the rejected alternative's `reason` at index time
+        # (`github_corpus._closing_reason`); `AlternativeRecord.reason` is now dropped from the
+        # wire entirely.
+        expected_leaked=False,
         executed_proof="alternatives",
         build=_build_github_closing_comment(f"{_GH_CLOSING_COMMENT_MARKER}: {_GH_CLEAN_CLOSING_COMMENT}"),
         build_control=_build_github_closing_comment(_GH_CLEAN_CLOSING_COMMENT),

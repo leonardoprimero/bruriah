@@ -23,6 +23,7 @@ from bruriah.corpus import CorpusPolicy
 from bruriah.index import BuildConfig, build_candidate, promote_candidate, snapshot_active
 from bruriah.platform import load_registry
 from bruriah.registries import Registry
+from bruriah.repository import SnapshotRepository
 from bruriah.service import InvestigateService, ServiceDeps
 
 FINGERPRINT = (
@@ -138,7 +139,15 @@ def run_benchmark() -> list[ScenarioResult]:
 
                 cf = inv_res.counterfactual_assessment
                 actual_verdict = cf.verdict if cf else None
-                matched_alt = cf.matched_alternative if cf else None
+                # T3 (investigate-boundary-v2): `CounterfactualAssessment.matched_alternative`
+                # was replaced by an opaque `matched_alternative_ref` -- resolved back to the
+                # alternative's name locally (the same resolver `bruriah ask`'s human view and
+                # `demo.py` use), so this report's output is unchanged.
+                matched_alt = None
+                if cf:
+                    repo = SnapshotRepository(active.database)
+                    row = repo.resolve_alternative_ref(cf.matched_alternative_ref)
+                    matched_alt = row.name if row is not None else cf.matched_alternative_ref
                 evidence_count = len(cf.supporting_evidence) if cf else 0
                 success = (actual_verdict == sc["expected_verdict"])
 
