@@ -168,6 +168,14 @@ Out of scope: fixing any boundary. That is the next branch, and it breaks a cont
   byte-identical. Baseline unchanged: ASR 7/11 (0.636), same leak/hold set; echo_fields empty and
   control_executed true for all 11 cases.
 
+- RDD third review (T1.2 range 506ada9..aca5c9e): high risk, consent granted by the user,
+  lineage review-91fb63dc5012067b approved and acknowledged (authority burned). Boundary now
+  aca5c9e. Advisory findings, all on test quality, recorded as follow-ups rather than another
+  round: R2-001 (tests:505), R2-002 (tests:339-345), R2-003 (tests:472), R2-004 (run.py:206-213),
+  R3-echo-fields-integration-test-tautological (tests:339-345), R3-partition-test-flat-only
+  (tests:459-477). Parent spot check at aca5c9e: 36 passed.
+- Windows is covered only by the monkeypatched env tests until CI runs on windows-latest.
+
 ## Next step
 
 T4 (docs).
