@@ -19,9 +19,17 @@ from bruriah.index import BuildConfig, build_candidate, promote_candidate
 from bruriah.mcp_server import build_server
 from bruriah.dispatch import DEFAULT_SKILL_CEILING
 from bruriah.platform import (
-    PlatformError, ensure_private_dirs, find_project_root, load_build_descriptor, load_deps,
-    load_registry, open_snapshot, project_id_for_repo, project_scoped_paths,
-    resolve_paths, write_build_descriptor,
+    PlatformError,
+    ensure_private_dirs,
+    find_project_root,
+    load_build_descriptor,
+    load_deps,
+    load_registry,
+    open_snapshot,
+    project_id_for_repo,
+    project_scoped_paths,
+    resolve_paths,
+    write_build_descriptor,
 )
 from mcp.shared.memory import create_connected_server_and_client_session
 
@@ -31,7 +39,8 @@ from mcp.shared.memory import create_connected_server_and_client_session
 _TODAY = date(2026, 7, 25)
 
 FINGERPRINT = (
-    '{"artifact":"model.onnx","artifact_sha256":"' + "a" * 64
+    '{"artifact":"model.onnx","artifact_sha256":"'
+    + "a" * 64
     + '","pooling":"mean","runtime":"fastembed==0.8.0","snapshot":"snapshot-a","source":"example/model"}'
 )
 _FILLER = "Unrelated filler sentence for padding purposes only. " * 6
@@ -53,9 +62,16 @@ def _build_and_promote(tmp_path: Path, data_dir: Path) -> BuildConfig:
     policy_path.write_text("version: 1\ninclude: ['public/**']\nexclude: []\n", encoding="utf-8")
     policy = CorpusPolicy.load(policy_path)
     config = BuildConfig(
-        root=tmp_path / "vault", policy_path=policy_path, schema_version=1, parser_version="corpus-v2",
-        service_version="0.1.0", mcp_range=">=1.28.1,<2", embedding_model="test/minilm",
-        embedding_revision="snapshot-a", embedding_dimensions=3, embedding_fingerprint=FINGERPRINT,
+        root=tmp_path / "vault",
+        policy_path=policy_path,
+        schema_version=1,
+        parser_version="corpus-v2",
+        service_version="0.1.0",
+        mcp_range=">=1.28.1,<2",
+        embedding_model="test/minilm",
+        embedding_revision="snapshot-a",
+        embedding_dimensions=3,
+        embedding_fingerprint=FINGERPRINT,
         ranking_config="rrf-v1",
     )
     data_dir.mkdir(parents=True, exist_ok=True)
@@ -71,13 +87,15 @@ def test_precedence_cli_over_env_over_config_file_over_default(tmp_path: Path) -
     (config_dir / "config.json").write_text(json.dumps({"data_dir": str(file_dir)}), encoding="utf-8")
 
     assert resolve_paths(cli_config_dir=config_dir, env={}).data_dir == file_dir
-    assert resolve_paths(
-        cli_config_dir=config_dir, env={"BRURIAH_DATA_DIR": str(env_dir)}
-    ).data_dir == env_dir
-    assert resolve_paths(
-        cli_config_dir=config_dir, cli_data_dir=cli_dir,
-        env={"BRURIAH_DATA_DIR": str(env_dir)},
-    ).data_dir == cli_dir
+    assert resolve_paths(cli_config_dir=config_dir, env={"BRURIAH_DATA_DIR": str(env_dir)}).data_dir == env_dir
+    assert (
+        resolve_paths(
+            cli_config_dir=config_dir,
+            cli_data_dir=cli_dir,
+            env={"BRURIAH_DATA_DIR": str(env_dir)},
+        ).data_dir
+        == cli_dir
+    )
 
 
 def test_default_paths_are_never_auto_created(tmp_path: Path) -> None:
@@ -106,20 +124,17 @@ def test_skill_ceiling_follows_the_same_precedence_as_every_other_setting(tmp_pa
 
     assert resolve_paths(env={}).skill_ceiling == DEFAULT_SKILL_CEILING
     assert resolve_paths(cli_config_dir=config_dir, env={}).skill_ceiling == 6
-    assert resolve_paths(
-        cli_config_dir=config_dir, env={"BRURIAH_SKILL_CEILING": "7"}
-    ).skill_ceiling == 7
-    assert resolve_paths(
-        cli_config_dir=config_dir, cli_skill_ceiling=9, env={"BRURIAH_SKILL_CEILING": "7"}
-    ).skill_ceiling == 9
+    assert resolve_paths(cli_config_dir=config_dir, env={"BRURIAH_SKILL_CEILING": "7"}).skill_ceiling == 7
+    assert (
+        resolve_paths(cli_config_dir=config_dir, cli_skill_ceiling=9, env={"BRURIAH_SKILL_CEILING": "7"}).skill_ceiling
+        == 9
+    )
     # Zero is legal and means something: dispatch nothing, and report everything dropped as a gap.
     assert resolve_paths(cli_skill_ceiling=0, env={}).skill_ceiling == 0
 
 
 @pytest.mark.parametrize("bad", [-1, True, 1.5, None])
-def test_an_invalid_skill_ceiling_is_refused_identically_wherever_it_came_from(
-    tmp_path: Path, bad: object
-) -> None:
+def test_an_invalid_skill_ceiling_is_refused_identically_wherever_it_came_from(tmp_path: Path, bad: object) -> None:
     """`True` is the one worth naming: `isinstance(True, int)` holds in Python, so a config saying
     `{"skill_ceiling": true}` would sail through a plain int check and silently mean 1. A setting
     that quietly becomes a different number is worse than one that refuses."""
@@ -180,8 +195,11 @@ def test_a_bad_ceiling_fails_the_same_way_whichever_door_it_came_through(tmp_pat
 def test_ensure_private_dirs_creates_only_the_resolved_base(tmp_path: Path) -> None:
     base = tmp_path / "private"
     paths = resolve_paths(
-        cli_config_dir=base / "config", cli_data_dir=base / "data",
-        cli_cache_dir=base / "cache", cli_log_dir=base / "log", env={},
+        cli_config_dir=base / "config",
+        cli_data_dir=base / "data",
+        cli_cache_dir=base / "cache",
+        cli_log_dir=base / "log",
+        env={},
     )
     ensure_private_dirs(paths)
     assert paths.data_dir.is_dir() and paths.config_dir.is_dir()
@@ -269,8 +287,7 @@ def test_real_index_then_load_deps_produces_a_working_service_deps(tmp_path: Pat
     finally:
         deps.snapshot.database.close()
 
-    raised = resolve_paths(cli_data_dir=data_dir, cli_config_dir=tmp_path / "config",
-                           cli_skill_ceiling=6, env={})
+    raised = resolve_paths(cli_data_dir=data_dir, cli_config_dir=tmp_path / "config", cli_skill_ceiling=6, env={})
     deps = load_deps(raised, today=_TODAY)
     try:
         assert deps.skill_ceiling == 6
@@ -351,8 +368,9 @@ def test_the_bundled_registry_resolves_only_the_domains_it_should() -> None:
         domain
         for domain in typing.get_args(Domain)
         if discover(
-            RequestClassification(intent="investigate", domain=domain, claim_type="factual",
-                                  risk="low", jurisdiction="unknown"),
+            RequestClassification(
+                intent="investigate", domain=domain, claim_type="factual", risk="low", jurisdiction="unknown"
+            ),
             registry,
         ).domain_supported
     }
@@ -378,8 +396,9 @@ def test_an_expired_pack_stops_registering_its_domains_and_names_itself(tmp_path
             domain
             for domain in typing.get_args(Domain)
             if discover(
-                RequestClassification(intent="investigate", domain=domain, claim_type="factual",
-                                      risk="low", jurisdiction="unknown"),
+                RequestClassification(
+                    intent="investigate", domain=domain, claim_type="factual", risk="low", jurisdiction="unknown"
+                ),
                 registry,
             ).domain_supported
         }
@@ -389,8 +408,9 @@ def test_an_expired_pack_stops_registering_its_domains_and_names_itself(tmp_path
     expired = load_registry(today=date(2027, 8, 1))
     assert _supported(expired) == set()
     lookup = discover(
-        RequestClassification(intent="investigate", domain="programming", claim_type="factual",
-                              risk="low", jurisdiction="unknown"),
+        RequestClassification(
+            intent="investigate", domain="programming", claim_type="factual", risk="low", jurisdiction="unknown"
+        ),
         expired,
     )
     assert lookup.expired_pack_ids == ("programming.minimal", "project.memory")
@@ -413,8 +433,7 @@ def test_load_deps_still_assembles_a_working_service_after_every_pack_expires(
 
     deps = load_deps(paths, today=date(2027, 8, 1))
     try:
-        assert deps.registry.pack_ids == (
-            "programming.minimal", "project.memory", "research.minimal")
+        assert deps.registry.pack_ids == ("programming.minimal", "project.memory", "research.minimal")
         assert deps.snapshot.build_id
         assert deps.skill_ceiling == DEFAULT_SKILL_CEILING
     finally:
@@ -455,12 +474,19 @@ def test_every_bundled_pack_ships_with_a_verifiable_manifest() -> None:
 
     data = Path(__file__).parents[1] / "src/bruriah/data"
     roots = json.loads((data / "trust-roots.json").read_text())
-    packs = sorted(item for item in data.glob("*.json")
-                   if not item.name.endswith(".manifest.json") and item.name != "trust-roots.json")
+    packs = sorted(
+        item
+        for item in data.glob("*.json")
+        if not item.name.endswith(".manifest.json") and item.name != "trust-roots.json"
+    )
     # Three bundled packs now: two domain policies and the first-party skill pack. Asserted as an
     # exact list so a pack added without a manifest fails here rather than at a user's first startup.
     assert [item.stem for item in packs] == [
-        "practices-pack", "programming-policy", "project-memory-policy", "research-policy"]
+        "practices-pack",
+        "programming-policy",
+        "project-memory-policy",
+        "research-policy",
+    ]
     for pack in packs:
         manifest = pack.with_suffix(".manifest.json")
         assert manifest.is_file(), pack.name
@@ -472,6 +498,37 @@ def test_every_bundled_pack_ships_with_a_verifiable_manifest() -> None:
         assert loader(pack, manifest, roots, today=_TODAY).version == expected
 
 
+def test_every_bundled_pack_accepts_a_2_0_0_router() -> None:
+    """2.0.0 is the release that moves the investigation-boundary contract to v2, and every bundled
+    pack's `max_router_version` window has to widen to admit it -- exactly what `241a1c9` did to
+    reach the 1.x window. `router_version` is pinned explicitly here rather than defaulted to
+    `bruriah.__version__`, so this test states the requirement independently of whatever version
+    happens to be installed, and fails on the compatibility window rather than by accident once the
+    package is actually at 2.0.0."""
+    from bruriah.packs import load_pack
+    from bruriah.skills import load_skill_pack
+
+    data = Path(__file__).parents[1] / "src/bruriah/data"
+    roots = json.loads((data / "trust-roots.json").read_text())
+    for stem in ("programming-policy", "project-memory-policy", "research-policy"):
+        pack = load_pack(
+            data / f"{stem}.json",
+            data / f"{stem}.manifest.json",
+            roots,
+            today=_TODAY,
+            router_version="2.0.0",
+        )
+        assert pack.pack_id
+    skill_pack = load_skill_pack(
+        data / "practices-pack.json",
+        data / "practices-pack.manifest.json",
+        roots,
+        today=_TODAY,
+        router_version="2.0.0",
+    )
+    assert skill_pack.pack_id == "bruriah.practices"
+
+
 # --- the user's own skills have to reach serve (or the CLI lifecycle is ceremony) ------------------
 
 
@@ -481,18 +538,33 @@ def _local_pack(tmp_path: Path, skill_id: str = "leo.deploy") -> Path:
     body = tmp_path / "body.md"
     body.write_text("# Deploy\nNever on a Friday.\n")
     pack = {
-        "schema_version": "1", "pack_id": f"{skill_id}.pack", "version": "1.0.0",
-        "maintainer": "Leo", "min_router_version": "0.1.0", "max_router_version": "1.9.9",
-        "reviewed_at": "2026-07-25", "expires_at": "2027-07-25", "freshness_days": 365,
-        "license": "private", "provenance": "internal conventions",
-        "skills": [{
-            "skill_id": skill_id, "version": "1.0.0", "tier": "local", "payload": "prose",
-            "summary": "How deploys work on this project, written by the person who runs them.",
-            "domains": ["programming"], "body_locator": "body.md",
-            "body_digest": "sha256:" + hashlib.sha256(body.read_bytes()).hexdigest(),
-            "provenance": "internal", "license": "private", "advisories": [],
-            "limitations": ["Specific to this project."],
-        }],
+        "schema_version": "1",
+        "pack_id": f"{skill_id}.pack",
+        "version": "1.0.0",
+        "maintainer": "Leo",
+        "min_router_version": "0.1.0",
+        "max_router_version": "2.9.9",
+        "reviewed_at": "2026-07-25",
+        "expires_at": "2027-07-25",
+        "freshness_days": 365,
+        "license": "private",
+        "provenance": "internal conventions",
+        "skills": [
+            {
+                "skill_id": skill_id,
+                "version": "1.0.0",
+                "tier": "local",
+                "payload": "prose",
+                "summary": "How deploys work on this project, written by the person who runs them.",
+                "domains": ["programming"],
+                "body_locator": "body.md",
+                "body_digest": "sha256:" + hashlib.sha256(body.read_bytes()).hexdigest(),
+                "provenance": "internal",
+                "license": "private",
+                "advisories": [],
+                "limitations": ["Specific to this project."],
+            }
+        ],
     }
     path = tmp_path / f"{skill_id}.json"
     path.write_text(json.dumps(pack))
@@ -535,8 +607,7 @@ def test_a_broken_user_pointer_leaves_the_shipped_skills_working(tmp_path: Path)
     paths = resolve_paths(cli_data_dir=tmp_path / "data", cli_config_dir=tmp_path / "cfg", env={})
     _activate_local(tmp_path, paths)
     (paths.data_dir / "skills" / "active.json").write_text("{not json")
-    assert load_active_skills(paths, today=_TODAY).skill_ids == \
-        load_bundled_skills(today=_TODAY).skill_ids
+    assert load_active_skills(paths, today=_TODAY).skill_ids == load_bundled_skills(today=_TODAY).skill_ids
 
 
 def test_a_local_skill_cannot_silently_shadow_a_first_party_one(tmp_path: Path) -> None:
@@ -559,10 +630,19 @@ def test_build_descriptor_roundtrip_with_asymmetric_prefixes(tmp_path: Path) -> 
     policy_path.write_text("version: 1\n", encoding="utf-8")
 
     cfg = BuildConfig(
-        root=tmp_path, policy_path=policy_path, schema_version=1, parser_version="corpus-v2",
-        service_version="0.1.0", mcp_range=">=1.28.1,<2", embedding_model="intfloat/multilingual-e5-large",
-        embedding_revision="snapshot-a", embedding_dimensions=3, embedding_fingerprint=FINGERPRINT,
-        ranking_config="rrf-v1", query_prefix="query: ", passage_prefix="passage: ",
+        root=tmp_path,
+        policy_path=policy_path,
+        schema_version=1,
+        parser_version="corpus-v2",
+        service_version="0.1.0",
+        mcp_range=">=1.28.1,<2",
+        embedding_model="intfloat/multilingual-e5-large",
+        embedding_revision="snapshot-a",
+        embedding_dimensions=3,
+        embedding_fingerprint=FINGERPRINT,
+        ranking_config="rrf-v1",
+        query_prefix="query: ",
+        passage_prefix="passage: ",
     )
     write_build_descriptor(paths, cfg)
     loaded = load_build_descriptor(paths)
@@ -580,10 +660,17 @@ def test_build_descriptor_defaults_missing_prefixes_to_empty(tmp_path: Path) -> 
 
     # Simulate legacy build-config.json written before query_prefix/passage_prefix existed
     legacy_payload = {
-        "root": str(tmp_path), "policy_path": str(policy_path), "schema_version": 1,
-        "parser_version": "corpus-v2", "service_version": "0.1.0", "mcp_range": ">=1.28.1,<2",
-        "embedding_model": "test/minilm", "embedding_revision": "snapshot-a",
-        "embedding_dimensions": 3, "embedding_fingerprint": FINGERPRINT, "ranking_config": "rrf-v1",
+        "root": str(tmp_path),
+        "policy_path": str(policy_path),
+        "schema_version": 1,
+        "parser_version": "corpus-v2",
+        "service_version": "0.1.0",
+        "mcp_range": ">=1.28.1,<2",
+        "embedding_model": "test/minilm",
+        "embedding_revision": "snapshot-a",
+        "embedding_dimensions": 3,
+        "embedding_fingerprint": FINGERPRINT,
+        "ranking_config": "rrf-v1",
     }
     (data_dir / "build-config.json").write_text(json.dumps(legacy_payload), encoding="utf-8")
     loaded = load_build_descriptor(paths)

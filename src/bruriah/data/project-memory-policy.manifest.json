@@ -1,8 +1,8 @@
 {
   "pack_id": "project.memory",
   "schema_version": "1",
-  "sha256": "59467e8cf4069c03402684c6fce8a99d9b35b82474e28034b08246ba58dc5468",
-  "signature": "KLLZNmeDh9As8768dHHJ1ErUbRaGYOOiPIIl3GRoUfmLi7SM4zN/vKsNzd3h00QeraKNQYQccx0kt7VI2RYFBQ==",
+  "sha256": "023219b27e733d46672b2921ccb8be8207acf5e1daa3ab2cd9fd8d86a0562e03",
+  "signature": "CBNBPRxUF1ZQIyPfDNfMN7nqKIaVad4p17YfAjGRq8ubJlzbNnueCxAUaKbTfYrLzy+E+U7xuojLmTK2oKVICA==",
   "signer": "bruriah-release",
   "version": "1.0.0"
 }

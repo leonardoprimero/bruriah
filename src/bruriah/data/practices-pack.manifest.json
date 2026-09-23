@@ -1,8 +1,8 @@
 {
   "pack_id": "bruriah.practices",
   "schema_version": "1",
-  "sha256": "63e55ed048129a6a69cee8c1eecce8d88f16ae30870f390a13fb55a21621b783",
-  "signature": "hgYKgmn4TSRSy4Kw/83e5lkhnnsMyh7hCGhAONioQp9f4l43FStOrrUMSIVrlvXYzSpnPqJ2CPbsQXkIUdGjAA==",
+  "sha256": "aca6648a24a9dfb25190c616b53c4e70f8f9a1d127f45d0df64def8247c8d45a",
+  "signature": "mZhn1rRFFhnh8srfl/Ua9dPZ70VttQF2uYGt5eR3A0+3v11Ax8hAdkU5pxzbmvoHXXMKq3fw8xxlZvMHKZ7vCg==",
   "signer": "bruriah-release",
   "version": "1.1.0"
 }
