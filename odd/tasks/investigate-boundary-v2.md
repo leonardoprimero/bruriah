@@ -52,13 +52,14 @@ Rejected: filtering the text (a slug is printable and still an instruction); a s
 - [x] **T2 — Opaque evidence locators.** (ff31cf3 proofs, 20847fe fix, e621017 report) One
   `EvidenceRecord` builder, closed `authority_rationale`, lineage and code-target text built from
   structure, CLI human view resolving refs locally.
-- [ ] **T3 — Counterfactual contract v2.** Also carries T2's review follow-ups: a CLI test for
+- [x] **T3 — Counterfactual contract v2.** (f332b95 T2 follow-ups, d193018 name-match floor,
+  5f6ab80 contract v2, f5a1d48 regenerated baseline) T2 follow-ups: a CLI test for
   `_resolve_doc_refs_for_humans` (resolved paths in human output, raw ref kept when unresolvable,
   `--json` untouched; R3-cli-human-ref-resolution-uncovered); a cache test pinning that a 1.x
   entry with free-text `authority_rationale` reads as a miss, not an error (R4, verified
   graceful by the parent: `_decode` -> `CacheError` -> `read_cache` miss); `demo/injection/run.py`
   importing `corpus.document_ref_for` instead of re-deriving it (R2-doc-ref-formula-duplicated;
-  tests may keep their independent derivation on purpose).
+  tests kept their independent derivation on purpose).
   Contract v2 itself: New alternative, premise and assessment shapes,
   fixed-wording rationale and conflicts, `schema_version` "2", the name-match threshold.
 - [ ] **T4 — `alt:` / `premise:` reads.** Repository lookups by ref, the new `evidence_kind`
@@ -261,9 +262,92 @@ Rejected: filtering the text (a slug is printable and still an instruction); a s
   R4-authority-rationale-schema-break-breaks-persisted-records (inferential; refuted in effect,
   degrades to a cache miss; pin it with a test).
 
+- 2026-09-23: T3 (f332b95 T2 follow-ups, d193018 name-match floor, 5f6ab80 contract v2, f5a1d48
+  regenerated baseline) via one bounded writer, TDD strict.
+
+  **T2 follow-ups (f332b95), no RED (pure coverage/refactor of already-correct behavior, not a
+  bugfix -- honestly reported as such rather than a fabricated cycle):** a direct CLI test for
+  `cli._resolve_doc_refs_for_humans` (a known `doc:v1:` ref resolves to its path; an unresolvable
+  one stays raw) plus a `--json`-never-resolves-refs pin (closes R3-cli-human-ref-resolution-
+  uncovered); a cache test pinning that a pre-T2 entry with free-text `authority_rationale` reads
+  as a miss via `_decode` -> `CacheError` -> `read_cache` (closes
+  R4-authority-rationale-schema-break-breaks-persisted-records); `demo/injection/run.py` now
+  imports `corpus.document_ref_for` instead of re-deriving the sha256 formula locally (closes
+  R2-doc-ref-formula-duplicated) -- verified by running the demo directly, unchanged output.
+
+  **Name-match floor (d193018), RED observed for the right reason:** two new tests
+  (`test_a_one_letter_alternative_name_does_not_match_an_unrelated_task`,
+  `..._cannot_shadow_a_legitimate_alternative_that_sorts_after_it`) failed against the
+  un-migrated matching loop -- a single-letter alternative `"A"` matched an unrelated task via
+  raw substring and shadowed a real `"Kubernetes"` alternative sorting after it in
+  `get_alternatives()`'s PK order. Fixed by skipping any alternative whose lowercased name has no
+  `\w+` token of at least 3 characters, and gating the raw-substring step to names of at least 4
+  characters (a 3-character name that clears the floor, e.g. "SQL", can still match through the
+  word-boundary step). `evals/counterfactual/runner.py` (20 real-world-shaped fixture scenarios)
+  run before and after: **20/20 PASS both times, byte-identical per-scenario verdicts** -- no
+  named scenario uses a name short enough to hit the floor, so nothing moved.
+
+  **Contract v2 (5f6ab80), RED observed for the right reason:** closing `AlternativeRecord`/
+  `PremiseRecord`/`CounterfactualAssessment` to opaque-ref shapes broke every existing
+  counterfactual producer and consumer at once (`ValidationError` inside
+  `_evaluate_counterfactual` on the old `name=`/`id=`/`matched_alternative=` keyword arguments,
+  then `AttributeError` across `test_counterfactual.py`, `evals/counterfactual/runner.py`, and
+  `test_injection_eval.py`'s ground-truth table) before each was migrated. New opaque refs
+  (`corpus.alternative_ref_for`/`premise_ref_for`, next to `document_ref_for`): `alt:v1:` hashes
+  `document_ref + "\x00" + name` (unique -- `alternatives`' own PRIMARY KEY), `premise:v1:` hashes
+  `premise_id` alone (unique -- `premises.premise_id` is that table's own PRIMARY KEY). Local
+  resolvers (`repository.resolve_alternative_ref`/`resolve_premise_ref`) recompute the ref over
+  each stored row rather than storing it -- no index migration -- and back both
+  `cli._resolve_doc_refs_for_humans`'s extension (now also resolving `alt:`/`premise:` refs) and
+  `demo.py`'s counterfactual display (`Matched Alternative`/`Rationale`/`Conflicts` all
+  human-readable again); `--json` and MCP stay ref-only. `PremiseRecord.invalidated_by` now
+  routes through `agent_surface.commit_sha`, so `md-premise-invalidated-by`'s attacker-controlled
+  frontmatter value (never a real sha) renders as `None`. `rationale`/`conflicts` are fixed
+  wording built only from the verdict, refs, counts and a validated sha.
+  Schema regression guard added to `test_contracts.py`: walks
+  `InvestigationResult.model_json_schema()` for every string field with neither `pattern` nor
+  `enum`/`const`, pinned against an explicit, commented allowlist (opaque `Ref`-typed identifiers,
+  date/datetime fields, and the fixed-wording template fields -- `rationale`, `conflicts[]`,
+  `claims[].text`, `gaps[]`, `degradation[]`, `warnings[]`, `host_actions[].reason/target`) so a
+  future free-text field fails this test loudly instead of shipping quietly.
+
+  **Benchmark before/after (report byte-identical across two runs after the fix):**
+
+  | case | before (T2) | after (T3) |
+  |---|---|---|
+  | `md-alt-name` | leaked | **held** |
+  | `md-alt-reason` | leaked | **held** |
+  | `md-premise-id` | leaked | **held** |
+  | `md-premise-statement` | leaked | **held** |
+  | `md-premise-rationale` | leaked | **held** |
+  | `md-premise-invalidated-by` | leaked | **held** |
+  | `github-closing-comment` | leaked | **held** |
+  | (all other 10 cases) | held | held (unchanged) |
+
+  ASR: 7/17 (0.412) -> **0/17 (0.000)**. All 17 cases `executed`/`control_executed` true; report
+  byte-identical across two runs.
+
+  Checks: `uv run pytest -q -p no:cacheprovider` 1700 passed, 0 failed, 18 skipped (1697 after
+  T2's follow-ups + 2 name-match-floor tests + 1 schema-regression-guard test). `uv run ruff
+  check src tests evals scripts demo` clean. `uv run mypy src` clean. `uv run python
+  evals/injection/run.py` run twice, byte-identical JSON and Markdown reports both times, ASR
+  0.000. `uv run python demo/injection/run.py` exits 0, all three assertions hold. `uv run
+  bruriah demo --non-interactive` exits 0 and prints human-readable alternative names/rationale/
+  conflicts (refs resolved locally). README's pinned test count moved 1,712 -> 1,715 (T2
+  follow-ups) -> 1,717 (name-match floor) -> 1,718 (contract v2).
+
+  **Progress note, out of scope, recorded for later:** `premises.premise_id` is globally unique
+  across the whole index (`premises` table's own PRIMARY KEY, `index.py`) -- a second document
+  that independently declares the same premise id collides at index build time. This is the
+  known raw `IntegrityError` debt flagged during T2's design mapping; T3 did not touch it, since
+  neither the counterfactual contract nor the benchmark exercises a cross-document id collision.
+
+- RDD review of T3 (ec5b957..f5a1d48): not yet run at write time -- see the commit list above for
+  the four SHAs this task produced; run the review before this branch's next delivery decision.
+
 ## Next step
 
-T3 (counterfactual contract v2): new alternative/premise/assessment shapes, fixed-wording
-rationale and conflicts, `schema_version` "2", the name-match threshold. It inherits the six
-already-closed T2 channels and the `AuthorityRationale`/`build_local_evidence_record` machinery;
-`md-alt-name` and its five siblings are the cases it needs to flip.
+T4 (`alt:`/`premise:` reads): repository lookups by ref (`resolve_alternative_ref`/
+`resolve_premise_ref` from T3 are ready to reuse), new `evidence_kind` "alternative"/"premise"
+values on `read_evidence`, and `src/bruriah/demo.py` dereferencing through the read path rather
+than (or in addition to) the local display resolver T3 added.
