@@ -9,7 +9,7 @@ from pathlib import Path
 
 import pytest
 
-from bruriah.contracts import AlternativeRecord, InvestigationRequest, ReadRequest
+from bruriah.contracts import AlternativeRecord, Budgets, InvestigationRequest, ReadRange, ReadRequest
 from bruriah.corpus import CorpusPolicy, alternative_ref_for, parse_document, premise_ref_for
 from bruriah.gitcorpus import build as build_gitcorpus
 from bruriah.index import BuildConfig, build_candidate, promote_candidate, snapshot_active
@@ -486,18 +486,21 @@ Decision content.
 
 
 def _build_alternative_and_premise_snapshot(tmp_path: Path):
-    """Fixture shared by the T4 (investigate-boundary-v2) round-trip tests: one document
-    declaring an alternative and its supporting premise, indexed for real. Reused verbatim from
-    `test_investigate_counterfactual_repeat_rejected`'s corpus shape."""
+    """Fixture shared by the T4/T4.1 (investigate-boundary-v2) round-trip and read-path tests:
+    one document declaring an alternative and its supporting premise, indexed for real. Based on
+    `test_investigate_counterfactual_repeat_rejected`'s corpus shape, with the `reason` and body
+    padded past 256 characters (T4.1) so a `Budgets(max_extracted_chars=...)`/`max_output_chars=
+    ...)` small enough to force truncation still clears each field's own `ge=256` floor."""
+    padding = "Additional operational context repeated for length only. " * 8
     vault = tmp_path / "vault" / "public"
     vault.mkdir(parents=True)
     (vault / "adr-01.md").write_text(
-        """---
+        f"""---
 commit: a1b2c3d4e5f6
 alternatives:
   - name: FastMCP
     disposition: rejected
-    reason: Drops unknown fields silently without extra="forbid"
+    reason: Drops unknown fields silently without extra="forbid". {padding}
     premises:
       - fastmcp-no-forbid
 premises:
@@ -506,7 +509,8 @@ premises:
     status: active
 ---
 # ADR 001: Reject FastMCP
-We evaluated FastMCP and rejected it due to schema derivation dropping fields without extra="forbid".
+We evaluated FastMCP and rejected it due to schema derivation dropping fields without
+extra="forbid". {padding}
 """,
         encoding="utf-8",
     )
@@ -592,3 +596,124 @@ def test_a_malformed_alt_ref_is_rejected_by_the_existing_ref_pattern_validation(
             disposition="rejected",
             decision_ref="doc:v1:" + "a" * 64,
         )
+
+
+def test_a_malformed_but_prefixed_alt_ref_reads_as_missing_ref(tmp_path: Path) -> None:
+    """R3-malformed-ref-read-path-uncovered (T4.1): `read()` routes ANY `alt:v1:`-prefixed ref
+    to the alternative branch regardless of what follows the prefix (the router matches on
+    prefix alone, and `ReadRequest.refs` enforces no `alt:v1:` shape -- `Ref` is just a bounded
+    generic string). A value that is not a real 64-hex-digit hash never equals a computed
+    `alternative_ref_for(...)`, so it never resolves to a stored row: the router's own not-found
+    behavior rejects it as a typed `missing_ref`, never a `ValidationError` and never a crash."""
+    pointer, config = _build_alternative_and_premise_snapshot(tmp_path)
+    with snapshot_active(pointer, config) as active:
+        deps = ServiceDeps(registry=_real_registry(), snapshot=active)
+        item = read(ReadRequest(refs=["alt:v1:nothex"]), deps).items[0]
+        assert item.status == "missing_ref"
+        assert item.content is None
+
+
+def test_reading_an_alt_ref_with_an_out_of_range_start_is_invalid_range(tmp_path: Path) -> None:
+    """R3-cf-read-window-paths-uncovered (T4.1): a `requested_range.start` past the end of the
+    alternative's own disclosure content is `invalid_range` -- `_window_text` returning `None`
+    for the alt/premise branches exactly like it already does for capability/skill/local reads,
+    never a fabricated or empty `ok`."""
+    pointer, config = _build_alternative_and_premise_snapshot(tmp_path)
+    with snapshot_active(pointer, config) as active:
+        deps = ServiceDeps(registry=_real_registry(), snapshot=active)
+        service = InvestigateService(deps)
+        result = service.investigate(InvestigationRequest(task="migrate server to FastMCP framework"))
+        alt_ref = result.alternatives[0].ref
+
+        full = read(ReadRequest(refs=[alt_ref]), deps).items[0]
+        out_of_range = len(full.content) + 10
+
+        item = read(
+            ReadRequest(
+                refs=[alt_ref],
+                ranges=[ReadRange(ref=alt_ref, start=out_of_range, end=out_of_range + 1)],
+            ),
+            deps,
+        ).items[0]
+        assert item.status == "invalid_range"
+        assert item.content is None
+
+
+def test_reading_an_alt_ref_under_a_tiny_item_budget_truncates_and_mints_a_next_cursor(
+    tmp_path: Path,
+) -> None:
+    """R3-cf-read-window-paths-uncovered (T4.1): the alt/premise branches respect
+    `max_extracted_chars` and mint a `next_cursor` on truncation exactly like every other read
+    kind (`_window_text`/`_encode_cursor`)."""
+    pointer, config = _build_alternative_and_premise_snapshot(tmp_path)
+    with snapshot_active(pointer, config) as active:
+        deps = ServiceDeps(registry=_real_registry(), snapshot=active)
+        service = InvestigateService(deps)
+        result = service.investigate(InvestigationRequest(task="migrate server to FastMCP framework"))
+        alt_ref = result.alternatives[0].ref
+
+        full = read(ReadRequest(refs=[alt_ref]), deps).items[0]
+        chunk = len(full.content) // 2
+        assert chunk >= 1
+
+        item = read(ReadRequest(refs=[alt_ref], budgets=Budgets(max_extracted_chars=chunk)), deps).items[0]
+        assert item.status == "ok"
+        assert item.truncated is True
+        assert item.content == full.content[:chunk]
+        assert item.next_cursor is not None
+
+
+def test_an_alt_next_cursor_continues_through_the_same_branch_to_the_end(tmp_path: Path) -> None:
+    """R3-cf-read-window-paths-uncovered (T4.1): a `next_cursor` minted for an `alt:` ref, fed
+    back on an otherwise-identical `ReadRequest`, routes through the SAME alternative branch (the
+    router dispatches on the ref's prefix, never on cursor presence) and returns the remainder --
+    the two windows concatenate back to the full disclosure content."""
+    pointer, config = _build_alternative_and_premise_snapshot(tmp_path)
+    with snapshot_active(pointer, config) as active:
+        deps = ServiceDeps(registry=_real_registry(), snapshot=active)
+        service = InvestigateService(deps)
+        result = service.investigate(InvestigationRequest(task="migrate server to FastMCP framework"))
+        alt_ref = result.alternatives[0].ref
+
+        full = read(ReadRequest(refs=[alt_ref]), deps).items[0]
+        chunk = (len(full.content) + 1) // 2  # two reads of this size exactly cover the content
+        assert chunk >= 1
+
+        budgets = Budgets(max_extracted_chars=chunk)
+        first = read(ReadRequest(refs=[alt_ref], budgets=budgets), deps).items[0]
+        assert first.status == "ok" and first.truncated is True
+        assert first.next_cursor is not None
+
+        second = read(
+            ReadRequest(refs=[alt_ref], budgets=budgets, cursor=first.next_cursor), deps
+        ).items[0]
+        assert second.status == "ok"
+        assert second.evidence_kind == "alternative"
+        assert second.truncated is False
+        assert first.content + second.content == full.content
+
+
+def test_remaining_output_budget_is_shared_across_a_passage_and_an_alt_ref(tmp_path: Path) -> None:
+    """R3-cf-read-window-paths-uncovered (T4.1): `remaining_total` is threaded across every ref
+    in one `refs` list in the order given -- a passage read ahead of an `alt:` ref leaves the alt
+    read whatever `max_output_chars` has left over, not its own full `max_extracted_chars` cap."""
+    pointer, config = _build_alternative_and_premise_snapshot(tmp_path)
+    with snapshot_active(pointer, config) as active:
+        deps = ServiceDeps(registry=_real_registry(), snapshot=active)
+        service = InvestigateService(deps)
+        result = service.investigate(InvestigationRequest(task="migrate server to FastMCP framework"))
+        alt_ref = result.alternatives[0].ref
+        passage_ref = next(item.ref for item in result.evidence if item.kind == "local")
+
+        passage_alone = read(ReadRequest(refs=[passage_ref]), deps).items[0]
+        assert passage_alone.status == "ok" and passage_alone.truncated is False
+
+        budgets = Budgets(max_output_chars=len(passage_alone.content) + 5)
+        passage_item, alt_item = read(ReadRequest(refs=[passage_ref, alt_ref], budgets=budgets), deps).items
+
+        assert passage_item.status == "ok"
+        assert passage_item.truncated is False
+        assert passage_item.content == passage_alone.content
+        assert alt_item.status == "ok"
+        assert alt_item.truncated is True
+        assert len(alt_item.content) == 5
