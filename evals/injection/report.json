@@ -5,6 +5,7 @@
       "carrier": "markdown",
       "case_id": "md-file-name",
       "control_executed": true,
+      "echo_fields": [],
       "executed": true,
       "leak_fields": [
         ".evidence[0].citation_locator",
@@ -24,6 +25,7 @@
       "carrier": "markdown",
       "case_id": "md-body-prose",
       "control_executed": true,
+      "echo_fields": [],
       "executed": true,
       "leak_fields": [],
       "leaked": false,
@@ -33,6 +35,7 @@
       "carrier": "markdown",
       "case_id": "md-heading",
       "control_executed": true,
+      "echo_fields": [],
       "executed": true,
       "leak_fields": [],
       "leaked": false,
@@ -42,6 +45,7 @@
       "carrier": "markdown",
       "case_id": "md-alt-name",
       "control_executed": true,
+      "echo_fields": [],
       "executed": true,
       "leak_fields": [
         ".alternatives[0].name",
@@ -57,6 +61,7 @@
       "carrier": "markdown",
       "case_id": "md-alt-reason",
       "control_executed": true,
+      "echo_fields": [],
       "executed": true,
       "leak_fields": [
         ".alternatives[0].reason",
@@ -70,6 +75,7 @@
       "carrier": "markdown",
       "case_id": "md-premise-id",
       "control_executed": true,
+      "echo_fields": [],
       "executed": true,
       "leak_fields": [
         ".alternatives[0].premises[0]",
@@ -83,6 +89,7 @@
       "carrier": "markdown",
       "case_id": "md-premise-statement",
       "control_executed": true,
+      "echo_fields": [],
       "executed": true,
       "leak_fields": [
         ".premises[0].statement"
@@ -94,6 +101,7 @@
       "carrier": "git",
       "case_id": "git-subject",
       "control_executed": true,
+      "echo_fields": [],
       "executed": true,
       "leak_fields": [
         ".evidence[0].citation_locator",
@@ -110,6 +118,7 @@
       "carrier": "git",
       "case_id": "git-body",
       "control_executed": true,
+      "echo_fields": [],
       "executed": true,
       "leak_fields": [],
       "leaked": false,
@@ -119,6 +128,7 @@
       "carrier": "git",
       "case_id": "git-author",
       "control_executed": true,
+      "echo_fields": [],
       "executed": true,
       "leak_fields": [],
       "leaked": false,
@@ -128,6 +138,7 @@
       "carrier": "github",
       "case_id": "github-closing-comment",
       "control_executed": true,
+      "echo_fields": [],
       "executed": true,
       "leak_fields": [
         ".alternatives[0].reason",
