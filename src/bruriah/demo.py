@@ -23,11 +23,19 @@ def _alternative_name(ref: str, deps: ServiceDeps) -> str:
     (T4, investigate-boundary-v2) -- the natural seam for a single bare ref, unlike
     `resolve_counterfactual_refs_for_humans`'s regex substitution over refs embedded inside
     larger template text (`rationale`, `conflicts`) below. Falls back to the raw ref on anything
-    but an `ok` read, matching that resolver's own not-found behavior."""
+    but an `ok`, COMPLETE read (T4.1, R3-demo-alt-name-truncated-json): a `truncated` item's
+    `content` is a byte-exact prefix, never a complete document, so it is not necessarily valid
+    JSON at all -- e.g. a `reason` long enough to exceed the default output budget cuts off
+    mid-string. Matching that resolver's not-found behavior, any of "not ok", truncated,
+    unparseable, not an object, or missing `name` falls back to the raw ref rather than raise."""
     item = read(ReadRequest(refs=[ref]), deps).items[0]
-    if item.status != "ok" or item.content is None:
+    if item.status != "ok" or item.content is None or item.truncated:
         return ref
-    name = json.loads(item.content).get("name")
+    try:
+        disclosure = json.loads(item.content)
+    except json.JSONDecodeError:
+        return ref
+    name = disclosure.get("name") if isinstance(disclosure, dict) else None
     return name if isinstance(name, str) else ref
 
 _SRC = Path(__file__).resolve().parent
