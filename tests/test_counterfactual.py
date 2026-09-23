@@ -9,13 +9,14 @@ from pathlib import Path
 
 import pytest
 
-from bruriah.contracts import InvestigationRequest
+from bruriah.contracts import AlternativeRecord, InvestigationRequest, ReadRequest
 from bruriah.corpus import CorpusPolicy, alternative_ref_for, parse_document, premise_ref_for
 from bruriah.gitcorpus import build as build_gitcorpus
 from bruriah.index import BuildConfig, build_candidate, promote_candidate, snapshot_active
 from bruriah.packs import load_pack
 from bruriah.registries import Registry
-from bruriah.service import InvestigateService, ServiceDeps
+from bruriah.service import InvestigateService, ServiceDeps, read
+from pydantic import ValidationError
 
 FINGERPRINT = (
     '{"artifact":"model.onnx","artifact_sha256":"' + "a" * 64
@@ -482,3 +483,112 @@ Decision content.
         assert result.counterfactual_assessment is None
         assert result.alternatives == []
         assert result.premises == []
+
+
+def _build_alternative_and_premise_snapshot(tmp_path: Path):
+    """Fixture shared by the T4 (investigate-boundary-v2) round-trip tests: one document
+    declaring an alternative and its supporting premise, indexed for real. Reused verbatim from
+    `test_investigate_counterfactual_repeat_rejected`'s corpus shape."""
+    vault = tmp_path / "vault" / "public"
+    vault.mkdir(parents=True)
+    (vault / "adr-01.md").write_text(
+        """---
+commit: a1b2c3d4e5f6
+alternatives:
+  - name: FastMCP
+    disposition: rejected
+    reason: Drops unknown fields silently without extra="forbid"
+    premises:
+      - fastmcp-no-forbid
+premises:
+  - id: fastmcp-no-forbid
+    statement: FastMCP lacks extra="forbid"
+    status: active
+---
+# ADR 001: Reject FastMCP
+We evaluated FastMCP and rejected it due to schema derivation dropping fields without extra="forbid".
+""",
+        encoding="utf-8",
+    )
+
+    policy_path = tmp_path / "policy.yaml"
+    policy_path.write_text("version: 1\ninclude: ['public/**']\nexclude: []\n", encoding="utf-8")
+    policy = CorpusPolicy.load(policy_path)
+    config = BuildConfig(
+        root=tmp_path / "vault", policy_path=policy_path, schema_version=1, parser_version="corpus-v2",
+        service_version="0.1.0", mcp_range=">=1.28.1,<2", embedding_model="test/minilm",
+        embedding_revision="snapshot-a", embedding_dimensions=3, embedding_fingerprint=FINGERPRINT,
+        ranking_config="rrf-v1",
+    )
+    candidate = tmp_path / "candidate.sqlite3"
+    pointer = tmp_path / "active.json"
+    build_candidate(config, candidate, policy, _embed)
+    promote_candidate(candidate, pointer, config, policy)
+    return pointer, config
+
+
+def test_the_alt_and_premise_refs_investigate_returns_round_trip_through_read_evidence(
+    tmp_path: Path,
+) -> None:
+    """T4 (investigate-boundary-v2): the real `alt:v1:`/`premise:v1:` refs an actual
+    `investigate()` response carries -- never guessed from the ref formula -- resolve back
+    through `read_evidence` to the stored name/reason/statement, closing
+    R3-cf-ref-reverse-resolution-uncovered."""
+    pointer, config = _build_alternative_and_premise_snapshot(tmp_path)
+
+    with snapshot_active(pointer, config) as active:
+        deps = ServiceDeps(registry=_real_registry(), snapshot=active)
+        service = InvestigateService(deps)
+        result = service.investigate(InvestigationRequest(task="migrate server to FastMCP framework"))
+        assert result.counterfactual_assessment is not None
+        alt_ref = result.alternatives[0].ref
+        premise_ref = result.premises[0].ref
+        adr_ref = _doc_ref("public/adr-01.md")
+
+        read_result = read(ReadRequest(refs=[alt_ref, premise_ref]), deps)
+        alt_item, premise_item = read_result.items
+
+        assert alt_item.status == "ok"
+        assert alt_item.evidence_kind == "alternative"
+        alt_content = json.loads(alt_item.content)
+        assert alt_content["name"] == "FastMCP"
+        assert alt_content["disposition"] == "rejected"
+        assert "extra=\"forbid\"" in alt_content["reason"]
+        assert alt_content["decision_ref"] == adr_ref
+        assert alt_content["premise_refs"] == [premise_ref]
+
+        assert premise_item.status == "ok"
+        assert premise_item.evidence_kind == "premise"
+        premise_content = json.loads(premise_item.content)
+        assert premise_content["id"] == "fastmcp-no-forbid"
+        assert premise_content["statement"] == 'FastMCP lacks extra="forbid"'
+        assert premise_content["status"] == "active"
+        assert premise_content["invalidated_by"] is None
+        assert premise_content["invalidated_in"] is None
+
+
+def test_an_unknown_well_formed_alt_or_premise_ref_reads_as_missing_ref(tmp_path: Path) -> None:
+    """A well-formed `alt:v1:`/`premise:v1:` ref that resolves to no stored row is a typed
+    `missing_ref`, never a fabricated or nearest-match record -- the same not-found contract
+    `_read_capability_one`/`_read_skill_one` already keep."""
+    pointer, config = _build_alternative_and_premise_snapshot(tmp_path)
+    unknown_alt = "alt:v1:" + "0" * 64
+    unknown_premise = "premise:v1:" + "0" * 64
+
+    with snapshot_active(pointer, config) as active:
+        deps = ServiceDeps(registry=_real_registry(), snapshot=active)
+        items = read(ReadRequest(refs=[unknown_alt, unknown_premise]), deps).items
+        assert [item.status for item in items] == ["missing_ref", "missing_ref"]
+        assert all(item.content is None for item in items)
+
+
+def test_a_malformed_alt_ref_is_rejected_by_the_existing_ref_pattern_validation() -> None:
+    """`AlternativeRecord.ref`'s `alt:v1:[0-9a-f]{64}` pattern (T3, investigate-boundary-v2)
+    already rejects anything not shaped like a real ref -- exercised here as the malformed-ref
+    half of T4's round-trip coverage, not a new validation this task adds."""
+    with pytest.raises(ValidationError):
+        AlternativeRecord(
+            ref="alt:v1:not-a-hex-digest",
+            disposition="rejected",
+            decision_ref="doc:v1:" + "a" * 64,
+        )

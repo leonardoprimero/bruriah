@@ -261,7 +261,11 @@ class ReadItem(ClosedModel):
     truncated: bool = False
     next_cursor: str | None = None
     captured_at: datetime | None = None
-    evidence_kind: Literal["local", "captured_live", "source", "capability", "skill"] | None = None
+    # T4 (investigate-boundary-v2): "alternative"/"premise" resolve `alt:v1:`/`premise:v1:` refs
+    # -- additive, so `ReadResult.schema_version` stays "1" (no existing kind changed shape).
+    evidence_kind: Literal[
+        "local", "captured_live", "source", "capability", "skill", "alternative", "premise"
+    ] | None = None
     locator: ShortText | None = None
     citation_locator: ShortText | None = None
     provenance_chain: Annotated[list[ShortText], Field(max_length=10)] = []

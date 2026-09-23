@@ -395,3 +395,45 @@ def test_investigate_tool_with_code_target_over_mcp(tmp_path: Path) -> None:
         anyio.run(_drive, deps, body)
 
 
+def test_an_alt_ref_dereferences_over_mcp_and_the_published_schema_names_the_new_kinds(
+    tmp_path: Path,
+) -> None:
+    """T4 (investigate-boundary-v2): `read_evidence`'s published `outputSchema` advertises the
+    two new `evidence_kind` values, and a real `alt:v1:` ref an actual `investigate_work` call
+    returned dereferences to its stored name over the real MCP protocol session."""
+    notes = {
+        "adr-01.md": (
+            "---\ncommit: a1b2c3d4e5f6\nalternatives:\n  - name: FastMCP\n"
+            "    disposition: rejected\n    reason: Drops unknown fields silently.\n"
+            "    premises:\n      - fastmcp-no-forbid\n"
+            "premises:\n  - id: fastmcp-no-forbid\n"
+            "    statement: FastMCP lacks extra=\"forbid\"\n    status: active\n---\n"
+            "# ADR 001: Reject FastMCP\nWe evaluated FastMCP and rejected it.\n"
+        ),
+    }
+
+    async def body(session) -> None:
+        listed = await session.list_tools()
+        read_tool = next(tool for tool in listed.tools if tool.name == READ_TOOL)
+        evidence_kind_enum = (
+            read_tool.outputSchema["$defs"]["ReadItem"]["properties"]["evidence_kind"]["anyOf"][0]["enum"]
+        )
+        assert {"alternative", "premise"} <= set(evidence_kind_enum)
+
+        investigated = await session.call_tool(
+            INVESTIGATE_TOOL, {"task": "migrate server to FastMCP framework"}
+        )
+        assert investigated.isError is False
+        alt_ref = investigated.structuredContent["alternatives"][0]["ref"]
+
+        result = await session.call_tool(READ_TOOL, {"refs": [alt_ref]})
+        assert result.isError is False
+        item = result.structuredContent["items"][0]
+        assert item["status"] == "ok"
+        assert item["evidence_kind"] == "alternative"
+        assert json.loads(item["content"])["name"] == "FastMCP"
+
+    with _deps_for(tmp_path, notes) as deps:
+        anyio.run(_drive, deps, body)
+
+

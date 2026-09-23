@@ -73,6 +73,12 @@ _SKILL_REF_PREFIX = "skill:"
 # as a constant, next to the two it joins, so the routing table in `read()` reads as one list of
 # ref kinds rather than two named prefixes and a literal.
 _LIVE_REF_PREFIX = "live:"
+# T4 (investigate-boundary-v2): the counterfactual contract's opaque refs (`corpus.py`'s
+# `alternative_ref_for`/`premise_ref_for`), now dereferenceable through `read_evidence` too --
+# `investigate_work` mints them, `read_evidence` is the explicit, caller-requested channel
+# allowed to disclose the stored corpus prose behind them.
+_ALTERNATIVE_REF_PREFIX = "alt:v1:"
+_PREMISE_REF_PREFIX = "premise:v1:"
 
 
 class ServiceError(ValueError):
@@ -1242,6 +1248,78 @@ def _read_live_one(
     return item, remaining_total - len(window)
 
 
+def _read_alternative_one(
+    repo: SnapshotRepository, ref: str, requested_range: ReadRange | None, cursor_start: int | None,
+    item_cap: int, remaining_total: int, request_id: str,
+) -> tuple[ReadItem, int]:
+    # Resolves an `alt:v1:<hash>` ref back to its stored row (T4, investigate-boundary-v2),
+    # mirroring `_read_capability_one`/`_read_skill_one`: not-found is a typed `missing_ref`,
+    # never a fabricated or nearest-match record. Content is the row's own corpus-authored
+    # `name`/`reason` as canonical JSON -- both were dropped from `investigate_work`'s wire
+    # contract in T3 (`AlternativeRecord.ref` replaces them), and `read_evidence` is the
+    # explicit, caller-requested channel allowed to disclose them on request. `premise_refs` are
+    # opaque `premise:v1:` refs, never the raw premise ids `alternatives.premises_json` stores.
+    row = repo.resolve_alternative_ref(ref)
+    if row is None:
+        return ReadItem(ref=ref, status="missing_ref"), remaining_total
+    disclosure = _canonical_json({
+        "name": row.name, "disposition": row.disposition, "reason": row.reason,
+        "decision_ref": row.document_ref,
+        "premise_refs": [premise_ref_for(pid) for pid in row.premises],
+    })
+
+    windowed = _window_text(disclosure, requested_range, cursor_start, item_cap, remaining_total)
+    if windowed is None:
+        return ReadItem(ref=ref, status="invalid_range"), remaining_total
+    window, start, actual_end, truncated = windowed
+    next_cursor = _encode_cursor(request_id, ref, actual_end + 1) if truncated else None
+
+    item = ReadItem(
+        ref=ref, status="ok", content=window, start=start, end=actual_end,
+        digest=f"sha256:{hashlib.sha256(disclosure.encode('utf-8')).hexdigest()}",
+        truncated=truncated, next_cursor=next_cursor,
+        evidence_kind="alternative", locator=row.document_ref,
+        citation_locator=f"{row.document_ref}#{row.name}",
+        authority="unknown", freshness="unknown", license="unknown", conflict="unknown",
+    )
+    return item, remaining_total - len(window)
+
+
+def _read_premise_one(
+    repo: SnapshotRepository, ref: str, requested_range: ReadRange | None, cursor_start: int | None,
+    item_cap: int, remaining_total: int, request_id: str,
+) -> tuple[ReadItem, int]:
+    # Premise analogue of `_read_alternative_one`. `invalidated_by` is the row's raw stored
+    # value -- the same corpus-authored value `_evaluate_counterfactual` validates through
+    # `agent_surface.commit_sha` before it ever reaches `PremiseRecord.invalidated_by` on the
+    # wire -- disclosed here verbatim because this is the explicit, caller-requested read, never
+    # the implicit `investigate_work` response.
+    row = repo.resolve_premise_ref(ref)
+    if row is None:
+        return ReadItem(ref=ref, status="missing_ref"), remaining_total
+    disclosure = _canonical_json({
+        "id": row.premise_id, "statement": row.statement, "status": row.status,
+        "rationale": row.rationale, "invalidated_by": row.invalidated_by,
+        "invalidated_in": row.invalidation_document_ref,
+    })
+
+    windowed = _window_text(disclosure, requested_range, cursor_start, item_cap, remaining_total)
+    if windowed is None:
+        return ReadItem(ref=ref, status="invalid_range"), remaining_total
+    window, start, actual_end, truncated = windowed
+    next_cursor = _encode_cursor(request_id, ref, actual_end + 1) if truncated else None
+
+    item = ReadItem(
+        ref=ref, status="ok", content=window, start=start, end=actual_end,
+        digest=f"sha256:{hashlib.sha256(disclosure.encode('utf-8')).hexdigest()}",
+        truncated=truncated, next_cursor=next_cursor,
+        evidence_kind="premise", locator=row.document_ref,
+        citation_locator=f"{row.document_ref}#{row.premise_id}",
+        authority="unknown", freshness="unknown", license="unknown", conflict="unknown",
+    )
+    return item, remaining_total - len(window)
+
+
 class ReadService:
     """Application use case for resolving immutable evidence references across sources.
 
@@ -1249,6 +1327,7 @@ class ReadService:
     - `skill:<id>@<version>` via SkillSet
     - `capability:<id>` via Registry
     - `live:sha256:<hash>` via ResearchDeps cache
+    - `alt:v1:<hash>` / `premise:v1:<hash>` via SnapshotRepository (T4, investigate-boundary-v2)
     - `<passage_ref>` via SnapshotRepository
     """
 
@@ -1304,6 +1383,10 @@ class ReadService:
                     item, remaining = self._read_capability(ref, rng, pos, cap, remaining, request_id)
                 elif ref.startswith(_LIVE_REF_PREFIX):
                     item, remaining = self._read_live(ref, rng, pos, cap, remaining, request_id)
+                elif ref.startswith(_ALTERNATIVE_REF_PREFIX):
+                    item, remaining = self._read_alternative(ref, rng, pos, cap, remaining, request_id)
+                elif ref.startswith(_PREMISE_REF_PREFIX):
+                    item, remaining = self._read_premise(ref, rng, pos, cap, remaining, request_id)
                 else:
                     item, remaining = self._read_passage(ref, rng, pos, cap, remaining, request_id)
                 items.append(item)
@@ -1327,6 +1410,32 @@ class ReadService:
         request_id: str,
     ) -> tuple[ReadItem, int]:
         return _read_one(self._repo, ref, requested_range, cursor_start, item_cap, remaining_total, request_id)
+
+    def _read_alternative(
+        self,
+        ref: str,
+        requested_range: ReadRange | None,
+        cursor_start: int | None,
+        item_cap: int,
+        remaining_total: int,
+        request_id: str,
+    ) -> tuple[ReadItem, int]:
+        return _read_alternative_one(
+            self._repo, ref, requested_range, cursor_start, item_cap, remaining_total, request_id
+        )
+
+    def _read_premise(
+        self,
+        ref: str,
+        requested_range: ReadRange | None,
+        cursor_start: int | None,
+        item_cap: int,
+        remaining_total: int,
+        request_id: str,
+    ) -> tuple[ReadItem, int]:
+        return _read_premise_one(
+            self._repo, ref, requested_range, cursor_start, item_cap, remaining_total, request_id
+        )
 
     def _read_capability(
         self,
