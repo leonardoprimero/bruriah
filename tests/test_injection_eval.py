@@ -6,6 +6,7 @@ Every scenario runs fully offline: a fake constant-vector embedder (no fastembed
 network) and a real, temporary git repository per git/github case (git itself is offline). No
 case reaches `cli.bruriah_main`'s real embedder.
 """
+
 from __future__ import annotations
 
 import json
@@ -151,8 +152,7 @@ def test_every_case_executes_and_matches_the_pinned_ground_truth() -> None:
 
     not_executed = [case_id for case_id, r in by_id.items() if not r.executed]
     assert not not_executed, (
-        f"the following cases never exercised their carrying code path (harness failure, not "
-        f"'held'): {not_executed}"
+        f"the following cases never exercised their carrying code path (harness failure, not 'held'): {not_executed}"
     )
 
     mismatched = [
