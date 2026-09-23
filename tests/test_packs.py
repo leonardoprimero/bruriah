@@ -287,7 +287,10 @@ def test_precedence_expired_beats_stale(tmp_path: Path) -> None:
 
 
 def test_precedence_dates_beat_router_compatibility(tmp_path: Path) -> None:
-    assert _code(tmp_path, None, today=date(2030, 1, 1), router_version="2.0.0") == "expired_pack"
+    # Both conditions must fail on their own, or the precedence is not being exercised.
+    assert _code(tmp_path, None, router_version="3.0.0") == "incompatible_pack"
+    assert _code(tmp_path, None, today=date(2030, 1, 1)) == "expired_pack"
+    assert _code(tmp_path, None, today=date(2030, 1, 1), router_version="3.0.0") == "expired_pack"
 
 
 def test_precedence_router_compatibility_beats_version_floor(tmp_path: Path) -> None:
