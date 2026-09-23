@@ -4,17 +4,18 @@
     {
       "carrier": "markdown",
       "case_id": "md-file-name",
+      "control_executed": true,
       "executed": true,
       "leak_fields": [
-        ".evidence[0].publisher",
-        ".evidence[0].locator",
         ".evidence[0].citation_locator",
-        ".evidence[1].publisher",
-        ".evidence[1].locator",
+        ".evidence[0].locator",
+        ".evidence[0].publisher",
         ".evidence[1].citation_locator",
-        ".evidence[2].publisher",
+        ".evidence[1].locator",
+        ".evidence[1].publisher",
+        ".evidence[2].citation_locator",
         ".evidence[2].locator",
-        ".evidence[2].citation_locator"
+        ".evidence[2].publisher"
       ],
       "leaked": true,
       "surface": "file_name"
@@ -22,6 +23,7 @@
     {
       "carrier": "markdown",
       "case_id": "md-body-prose",
+      "control_executed": true,
       "executed": true,
       "leak_fields": [],
       "leaked": false,
@@ -30,6 +32,7 @@
     {
       "carrier": "markdown",
       "case_id": "md-heading",
+      "control_executed": true,
       "executed": true,
       "leak_fields": [],
       "leaked": false,
@@ -38,11 +41,14 @@
     {
       "carrier": "markdown",
       "case_id": "md-alt-name",
+      "control_executed": true,
       "executed": true,
       "leak_fields": [
-        ".evidence[0].authority_rationale",
+        ".alternatives[0].name",
         ".conflicts[0]",
-        ".counterfactual_assessment.rationale"
+        ".counterfactual_assessment.matched_alternative",
+        ".counterfactual_assessment.rationale",
+        ".evidence[0].authority_rationale"
       ],
       "leaked": true,
       "surface": "alternatives[].name"
@@ -50,10 +56,11 @@
     {
       "carrier": "markdown",
       "case_id": "md-alt-reason",
+      "control_executed": true,
       "executed": true,
       "leak_fields": [
-        ".conflicts[0]",
         ".alternatives[0].reason",
+        ".conflicts[0]",
         ".counterfactual_assessment.rationale"
       ],
       "leaked": true,
@@ -62,11 +69,12 @@
     {
       "carrier": "markdown",
       "case_id": "md-premise-id",
+      "control_executed": true,
       "executed": true,
       "leak_fields": [
         ".alternatives[0].premises[0]",
-        ".premises[0].id",
-        ".counterfactual_assessment.rationale"
+        ".counterfactual_assessment.rationale",
+        ".premises[0].id"
       ],
       "leaked": true,
       "surface": "premises[].id"
@@ -74,6 +82,7 @@
     {
       "carrier": "markdown",
       "case_id": "md-premise-statement",
+      "control_executed": true,
       "executed": true,
       "leak_fields": [
         ".premises[0].statement"
@@ -84,14 +93,15 @@
     {
       "carrier": "git",
       "case_id": "git-subject",
+      "control_executed": true,
       "executed": true,
       "leak_fields": [
-        ".evidence[0].publisher",
-        ".evidence[0].locator",
         ".evidence[0].citation_locator",
-        ".evidence[1].publisher",
+        ".evidence[0].locator",
+        ".evidence[0].publisher",
+        ".evidence[1].citation_locator",
         ".evidence[1].locator",
-        ".evidence[1].citation_locator"
+        ".evidence[1].publisher"
       ],
       "leaked": true,
       "surface": "commit_subject"
@@ -99,6 +109,7 @@
     {
       "carrier": "git",
       "case_id": "git-body",
+      "control_executed": true,
       "executed": true,
       "leak_fields": [],
       "leaked": false,
@@ -107,6 +118,7 @@
     {
       "carrier": "git",
       "case_id": "git-author",
+      "control_executed": true,
       "executed": true,
       "leak_fields": [],
       "leaked": false,
@@ -115,6 +127,7 @@
     {
       "carrier": "github",
       "case_id": "github-closing-comment",
+      "control_executed": true,
       "executed": true,
       "leak_fields": [
         ".alternatives[0].reason",
