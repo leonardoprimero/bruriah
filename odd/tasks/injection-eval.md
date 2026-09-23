@@ -7,6 +7,8 @@
 **Delivery strategy:** `ask-on-risk` (forecast ~900 authored changed lines, mostly harness and tests)
 **RDD:** enabled for this repo. Last reviewed boundary: e121752 (1.6.0 on main).
 **Release:** groundwork for 2.0.0. This branch measures; it does not fix.
+**Disclosure (user decision 2026-09-23):** this branch stays local, never pushed, until the
+boundary fix lands on top of it. Benchmark, fix and before/after numbers ship together in 2.0.0.
 
 ## Objective
 
@@ -75,7 +77,8 @@ Out of scope: fixing any boundary. That is the next branch, and it breaks a cont
 - [x] **T3 — Framework baselines.** Deferred by user decision (2026-09-23): the benchmark
   measures Bruriah alone and stays light and offline; LlamaIndex/LangChain rows come in a later
   branch built on this harness.
-- [ ] **T4 — Docs.** `evals/injection/README.md`, README link, CHANGELOG under Unreleased.
+- [ ] **T4 — Docs.** `evals/injection/README.md`, README link, CHANGELOG. Deferred to the 2.0.0
+  release so the docs carry the before/after numbers.
 
 ## Acceptance criteria
 
@@ -178,4 +181,5 @@ Out of scope: fixing any boundary. That is the next branch, and it breaks a cont
 
 ## Next step
 
-T4 (docs).
+Explore and design the `investigate_work` boundary fix on top of this branch (2.0.0).
+Nothing is pushed before that fix lands.
