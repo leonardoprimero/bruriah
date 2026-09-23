@@ -62,10 +62,11 @@ Rejected: filtering the text (a slug is printable and still an instruction); a s
   tests kept their independent derivation on purpose).
   Contract v2 itself: New alternative, premise and assessment shapes,
   fixed-wording rationale and conflicts, `schema_version` "2", the name-match threshold.
-- [ ] **T4 — `alt:` / `premise:` reads.** Carries T3's review follow-ups: one shared ref
-  resolver used by cli.py, demo.py and read_evidence instead of duplicated regexes and closures
-  (R2-ref-resolver-duplicated); round-trip tests showing that a real `alt:v1:`/`premise:v1:` ref
-  resolves back to its stored row and an unknown ref does not (R3-cf-ref-reverse-resolution-uncovered). Repository lookups by ref, the new `evidence_kind`
+- [x] **T4 — `alt:` / `premise:` reads.** (704df89 shared resolver, f427eea reads) Carried T3's
+  review follow-ups: one shared ref resolver used by cli.py, demo.py and read_evidence instead of
+  duplicated regexes and closures (R2-ref-resolver-duplicated); round-trip tests showing that a
+  real `alt:v1:`/`premise:v1:` ref resolves back to its stored row and an unknown ref does not
+  (R3-cf-ref-reverse-resolution-uncovered). Repository lookups by ref, the new `evidence_kind`
   values, `src/bruriah/demo.py` dereferencing through them.
 - [ ] **T5 — Proof and docs.** The benchmark at ASR 0 with its report; `demo/injection/run.py`,
   the README section, docs, `evals/counterfactual/runner.py`, the CHANGELOG 2.0.0 entry,
@@ -359,9 +360,63 @@ Rejected: filtering the text (a slug is printable and still an instruction); a s
   review-822df4ebba1aa8a0 approved and acknowledged. Findings carried into T4:
   R2-ref-resolver-duplicated, R3-cf-ref-reverse-resolution-uncovered.
 
+- 2026-09-23: T4 (704df89 shared resolver, f427eea reads) via one bounded writer, TDD strict.
+
+  **Shared resolver (704df89), no RED (pure dedup of already-correct behavior, honestly reported
+  as such rather than a fabricated cycle):** the `alt:v1:`/`premise:v1:` match regexes and
+  resolve closures that `cli._resolve_doc_refs_for_humans` and `demo.py`'s counterfactual display
+  each defined separately are now one function, `repository.resolve_counterfactual_refs_for_humans`,
+  next to `resolve_alternative_ref`/`resolve_premise_ref`. Both callers route through it; `cli.py`
+  keeps its own `doc:v1:` resolution (a different ref kind, not part of this duplication).
+  Verified behavior-identical: `bruriah demo --non-interactive` and `demo/injection/run.py`
+  output byte-diffed against the pre-change baseline (identical), `tests/test_ask.py` unmodified
+  and green. Closes R2-ref-resolver-duplicated.
+
+  **Reads (f427eea), RED observed for the right reason:** a new test asserted
+  `read(ReadRequest(refs=[<real alt ref from an actual investigate() response>]), deps).items[0]`
+  is `status="ok"`; before this commit `alt:v1:`/`premise:v1:` refs fell through `read()`'s
+  routing table to the passage branch, which found no such passage and returned `missing_ref` --
+  RED for the intended reason, not a crash. Added `_read_alternative_one`/`_read_premise_one` to
+  `service.py`, mirroring `_read_capability_one`/`_read_skill_one`: `repository.resolve_alternative_ref`/
+  `resolve_premise_ref` (from T3) resolve the row, a not-found row is a typed `missing_ref`
+  (never fabricated), and the content is the row's own fields as canonical JSON -- `name`/
+  `disposition`/`reason`/`decision_ref`/`premise_refs` for an alternative,
+  `id`/`statement`/`status`/`rationale`/`invalidated_by`/`invalidated_in` for a premise -- with
+  the same `authority="unknown"`/`freshness="unknown"`/`license="unknown"`/`conflict="unknown"`
+  trust labels, `_window_text` budget/truncation and `_encode_cursor` pagination every other read
+  kind already uses. `ReadItem.evidence_kind` gained `"alternative"`/`"premise"` (additive;
+  `ReadResult.schema_version` stayed `"1"`, confirmed by reading the schema before and after).
+  `demo.py`'s counterfactual display now dereferences the bare `matched_alternative_ref` through
+  `read_evidence` itself (a new `_alternative_name` helper) rather than only through the local
+  resolver -- the natural seam for a single bare ref, as distinct from `rationale`/`conflicts`'
+  refs embedded in template text, which still go through the shared resolver. Human output
+  verified byte-identical against the pre-T4 baseline.
+
+  Round-trip tests (`tests/test_counterfactual.py`): a real index built from a fixture with one
+  alternative and its supporting premise; the actual `alt:v1:`/`premise:v1:` refs an
+  `investigate()` response returned (never guessed from the ref formula) resolve through
+  `read_evidence` to the stored name/reason/statement; a well-formed but unresolvable ref on
+  either kind reads as `missing_ref` with `content=None`; a malformed ref is already rejected by
+  `AlternativeRef`'s existing `alt:v1:[0-9a-f]{64}` pattern (T3), exercised here as coverage
+  rather than a new validation. One MCP-level test (`tests/test_mcp_contract.py`) checks the
+  published `read_evidence` `outputSchema`'s `evidence_kind` enum names both new kinds and that a
+  real `alt:` ref resolves over an actual protocol session. Closes
+  R3-cf-ref-reverse-resolution-uncovered.
+
+  Checks: `uv run pytest -q -p no:cacheprovider` 1704 passed, 0 failed, 18 skipped (1700 baseline
+  + 4 round-trip tests + 1 MCP test — the shared-resolver commit added none). `uv run ruff check
+  src tests evals scripts demo` clean. `uv run mypy src` clean. `uv run python
+  evals/injection/run.py` run twice, byte-identical JSON and Markdown reports both times, ASR
+  0.000, all 17 cases executed/control_executed. `uv run python demo/injection/run.py` exits 0,
+  all three assertions hold. `uv run bruriah demo --non-interactive` exits 0, output byte-identical
+  to the pre-T4 baseline. README's pinned test count moved 1,718 -> 1,722. Attribution check
+  (`git log --format=%B 08de47b..HEAD | rg "Co-Authored-By|Claude-Session"`) printed nothing.
+
+- RDD review of T4 (ea8d999..f427eea): not yet run at write time -- run it before this branch's
+  next delivery decision, per this repo's enabled RDD.
+
 ## Next step
 
-T4 (`alt:`/`premise:` reads): repository lookups by ref (`resolve_alternative_ref`/
-`resolve_premise_ref` from T3 are ready to reuse), new `evidence_kind` "alternative"/"premise"
-values on `read_evidence`, and `src/bruriah/demo.py` dereferencing through the read path rather
-than (or in addition to) the local display resolver T3 added.
+T5 (proof and docs): the benchmark at ASR 0 with its report, `demo/injection/run.py`, the README
+section, docs, `evals/counterfactual/runner.py`, and the CHANGELOG 2.0.0 entry with its
+`max_router_version` migration note (R4-001) — see the Tasks section for the full T5 scope.
