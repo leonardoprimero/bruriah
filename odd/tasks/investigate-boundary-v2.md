@@ -6,7 +6,7 @@
 **TDD:** strict (global session configuration). Runner: `uv run pytest -q -p no:cacheprovider`
 **Delivery strategy:** `ask-on-risk`. Forecast ~1,500 authored changed lines, over budget. Slicing
 is decided at delivery time, because nothing is pushed before the fix lands (see Disclosure).
-**RDD:** enabled for this repo. Last reviewed boundary: 9c40e46.
+**RDD:** enabled for this repo. Last reviewed boundary: a799fd1.
 **Release:** 2.0.0. Contract break: `InvestigationResult.schema_version` "1" → "2".
 **Disclosure:** local only, never pushed, until this branch closes every measured channel.
 Benchmark, fix and before/after numbers ship together.
@@ -52,7 +52,14 @@ Rejected: filtering the text (a slug is printable and still an instruction); a s
 - [x] **T2 — Opaque evidence locators.** (ff31cf3 proofs, 20847fe fix, e621017 report) One
   `EvidenceRecord` builder, closed `authority_rationale`, lineage and code-target text built from
   structure, CLI human view resolving refs locally.
-- [ ] **T3 — Counterfactual contract v2.** New alternative, premise and assessment shapes,
+- [ ] **T3 — Counterfactual contract v2.** Also carries T2's review follow-ups: a CLI test for
+  `_resolve_doc_refs_for_humans` (resolved paths in human output, raw ref kept when unresolvable,
+  `--json` untouched; R3-cli-human-ref-resolution-uncovered); a cache test pinning that a 1.x
+  entry with free-text `authority_rationale` reads as a miss, not an error (R4, verified
+  graceful by the parent: `_decode` -> `CacheError` -> `read_cache` miss); `demo/injection/run.py`
+  importing `corpus.document_ref_for` instead of re-deriving it (R2-doc-ref-formula-duplicated;
+  tests may keep their independent derivation on purpose).
+  Contract v2 itself: New alternative, premise and assessment shapes,
   fixed-wording rationale and conflicts, `schema_version` "2", the name-match threshold.
 - [ ] **T4 — `alt:` / `premise:` reads.** Repository lookups by ref, the new `evidence_kind`
   values, `src/bruriah/demo.py` dereferencing through them.
@@ -245,6 +252,14 @@ Rejected: filtering the text (a slug is printable and still an instruction); a s
   (R2-format-churn-mixed-with-version-bump) and what this task's own instructions say to keep out
   of behavior commits. `ruff check` (clean) is the enforced gate; new code in this change follows
   the condensed style already used at each edit site by hand rather than via the formatter.
+
+- RDD review of a264688 + T2 (9c40e46..a799fd1): high risk, consent granted by the user,
+  lineage review-895baf0c2fe5f2c8 approved and acknowledged. Parent check: all 17 cases
+  executed with their controls; the six flips to held are real; the `evaluation.py` golden-query
+  change (exact document_ref match) is required by the new locator. Findings carried into T3:
+  R2-doc-ref-formula-duplicated, R3-cli-human-ref-resolution-uncovered,
+  R4-authority-rationale-schema-break-breaks-persisted-records (inferential; refuted in effect,
+  degrades to a cache miss; pin it with a test).
 
 ## Next step
 
