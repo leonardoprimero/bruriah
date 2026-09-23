@@ -51,19 +51,19 @@ Out of scope: fixing any boundary. That is the next branch, and it breaks a cont
 
 ## Tasks
 
-- [x] **T0 — RED.** (7b39fb2; RED observed: `ModuleNotFoundError: No module named 'cases'`) `tests/test_injection_eval.py`: the harness API does not exist yet; tests
+- [x] **T0 — RED.** (a9866f4; RED observed: `ModuleNotFoundError: No module named 'cases'`) `tests/test_injection_eval.py`: the harness API does not exist yet; tests
   specify the case model (surface, carrier, marker), the executed-path check, and the ASR
   computation.
-- [x] **T1 — Harness.** (f5c35f1, corrected by 30ae3b9) `evals/injection/`: hermetic corpus builder per surface (markdown
+- [x] **T1 — Harness.** (acda898, corrected by bcc2c2f) `evals/injection/`: hermetic corpus builder per surface (markdown
   front-matter surfaces, file name, heading, body; git commit subject/body/author; GitHub
   closing comment), runner calling the service directly, JSON and Markdown report.
-- [x] **T1.1 — Harden per review advisories.** (98f54b3) Address the non-blocking findings of
+- [x] **T1.1 — Harden per review advisories.** (b3d36d4) Address the non-blocking findings of
   review lineage review-8dd33710d95f8269 (listed under Progress): attribute each leak to a
   corpus-derived field so a task echo can never count as a leak; hermetic git environment
   (no inherited identity or config); skip cleanly when git is missing; explicit errors instead
   of `assert` as runtime guards; accurate test names; drop the dead constant; avoid re-running
   the full benchmark per test.
-- [x] **T1.2 — Second review advisories.** (e8b3e3c, reports refreshed in 6534c5a) Address the non-blocking findings of
+- [x] **T1.2 — Second review advisories.** (7fb5582, reports refreshed in 1710f8f) Address the non-blocking findings of
   review lineage review-6ba2405fbc1642c2 (listed under Progress): pass Windows-essential env vars
   through the hermetic git env and use `os.devnull` for `GIT_CONFIG_GLOBAL`; enforce
   `control_executed` with the same force as `executed`; record `echo_fields` so a path excluded
@@ -71,7 +71,7 @@ Out of scope: fixing any boundary. That is the next branch, and it breaks a cont
   readability fixes (named clean-baseline constants for the git and GitHub control builds, an
   updated `control_executed` docstring, and a retraction note on the T1.1 Progress bullet whose
   claim about `.alternatives[0].name` was later superseded).
-- [x] **T2 — Baseline report.** (9ae5a3d) Commit the regenerated report. Per-case tests already
+- [x] **T2 — Baseline report.** (30eb15b) Commit the regenerated report. Per-case tests already
   assert the current outcome as a record of behavior, so the fixing branch flips them loudly;
   strict xfail markers were dropped as redundant.
 - [x] **T3 — Framework baselines.** Deferred by user decision (2026-09-23): the benchmark
@@ -94,18 +94,18 @@ Out of scope: fixing any boundary. That is the next branch, and it breaks a cont
 ## Progress / evidence
 
 - 2026-09-23: exploration done (one mapper). Probe scripts backed up outside `/tmp`.
-- T0/T1 (delegated writer, trigger: 2+ non-trivial files): 7b39fb2 RED, f5c35f1 GREEN.
+- T0/T1 (delegated writer, trigger: 2+ non-trivial files): a9866f4 RED, acda898 GREEN.
   The parent found a false negative: `git-subject` reaches the response lowercased inside the
-  generated file name, and the exact-case match missed it. Fixed TDD-first in 30ae3b9
+  generated file name, and the exact-case match missed it. Fixed TDD-first in bcc2c2f
   (normalized match: lowercase, strip non-alphanumerics).
-- Checks at 30ae3b9: full suite 1667 passed / 0 failed / 18 skipped; ruff and mypy clean;
+- Checks at bcc2c2f: full suite 1667 passed / 0 failed / 18 skipped; ruff and mypy clean;
   the benchmark run twice gives byte-identical reports. Parent spot check: 15 passed; ASR 0.636.
 - Measured: ASR 7/11. Leak: md file name, alternatives[].name, alternatives[].reason,
   premises[].id, premises[].statement, git commit subject, GitHub closing comment. Hold: md body,
   md heading, git commit body, git commit author. All 11 cases executed.
 - RDD: assessed high (subprocess use). Consent granted by the user. Four-lens review lineage
-  review-8dd33710d95f8269 approved and acknowledged (authority burned) on e121752..30ae3b9.
-  Reviewed boundary is now 30ae3b9.
+  review-8dd33710d95f8269 approved and acknowledged (authority burned) on e121752..bcc2c2f.
+  Reviewed boundary is now bcc2c2f.
   Advisory findings (non-blocking): R2-assert-as-runtime-guard, R2-dead-root-constant,
   R2-misleading-test-name, R3-assert-under-O, R3-git-env-override, R3-git-prereq-no-skip,
   R3-task-echo-confound, R4-git-env-inherits-identity, R4-git-prereq-no-skip,
@@ -113,7 +113,7 @@ Out of scope: fixing any boundary. That is the next branch, and it breaks a cont
   Parent check of R3-task-echo-confound: md-alt-name's marker is found in corpus-derived fields
   (alternatives[0].name, counterfactual_assessment.matched_alternative, conflicts[0]), so the
   current result is not confounded. The guard still belongs in the harness (T1.1).
-- 2026-09-23: T1.1 (98f54b3) + T2 (9ae5a3d) via one bounded writer, TDD strict (RED observed for
+- 2026-09-23: T1.1 (b3d36d4) + T2 (30eb15b) via one bounded writer, TDD strict (RED observed for
   each behavior change: an ImportError at collection for the new names, then a real assertion
   failure for the git-env hermeticity spy, both before the corresponding fix). All ten advisory
   findings addressed: leak_fields attribution with a task-echo drop rule (md-alt-name stays
@@ -132,8 +132,8 @@ Out of scope: fixing any boundary. That is the next branch, and it breaks a cont
   the same commit); ruff and mypy clean; `evals/injection/run.py` run twice is byte-identical.
   Baseline unchanged: ASR 7/11 (0.636), same leak/hold set as before T1.1. The report now
   states `leak_fields` per case; no absolute paths or timestamps in the report.
-- 2026-09-23: correction to T1.1's leak-field attribution (f827568, reports refreshed in
-  2d528b8), caught by the coordinator: the containment-based task-echo rule was unsound -- it
+- 2026-09-23: correction to T1.1's leak-field attribution (a4f435b, reports refreshed in
+  22d3c74), caught by the coordinator: the containment-based task-echo rule was unsound -- it
   dropped `.alternatives[0].name` from md-alt-name's leak_fields, turning that case's own
   corpus-authored surface into a false "held" result, because the field's text legitimately
   overlaps the task (the task must carry the same marker for the counterfactual match to fire)
@@ -144,10 +144,10 @@ Out of scope: fixing any boundary. That is the next branch, and it breaks a cont
   `.alternatives[0].name` and `.counterfactual_assessment.matched_alternative` now correctly
   leak. All 11 cases' control runs executed their carrying path (`control_executed` true
   throughout, none affected). ASR unchanged at 7/11, same leak/hold set.
-- 2026-09-23: T1.2 (e8b3e3c, reports refreshed in 6534c5a), second native review. RDD: assessed
+- 2026-09-23: T1.2 (7fb5582, reports refreshed in 1710f8f), second native review. RDD: assessed
   high risk (subprocess use). Consent granted by the user. Review lineage
-  review-6ba2405fbc1642c2 approved and acknowledged (authority burned) on 30ae3b9..506ada9;
-  reviewed boundary is now 506ada9. Nine non-blocking findings: R3-windows-minimal-git-env,
+  review-6ba2405fbc1642c2 approved and acknowledged (authority burned) on bcc2c2f..b86c46d;
+  reviewed boundary is now b86c46d. Nine non-blocking findings: R3-windows-minimal-git-env,
   R4-hermetic-env-drops-windows-essentials, R3-control-executed-not-enforced,
   R4-control-executed-not-enforced-in-runner, R3-path-subtraction-can-mask-coincident-leak,
   R2-001, R2-002, R2-003, R2-004. TDD strict (RED observed on the intended assertion each time:
@@ -171,12 +171,12 @@ Out of scope: fixing any boundary. That is the next branch, and it breaks a cont
   byte-identical. Baseline unchanged: ASR 7/11 (0.636), same leak/hold set; echo_fields empty and
   control_executed true for all 11 cases.
 
-- RDD third review (T1.2 range 506ada9..aca5c9e): high risk, consent granted by the user,
+- RDD third review (T1.2 range b86c46d..9d4a6ba): high risk, consent granted by the user,
   lineage review-91fb63dc5012067b approved and acknowledged (authority burned). Boundary now
-  aca5c9e. Advisory findings, all on test quality, recorded as follow-ups rather than another
+  9d4a6ba. Advisory findings, all on test quality, recorded as follow-ups rather than another
   round: R2-001 (tests:505), R2-002 (tests:339-345), R2-003 (tests:472), R2-004 (run.py:206-213),
   R3-echo-fields-integration-test-tautological (tests:339-345), R3-partition-test-flat-only
-  (tests:459-477). Parent spot check at aca5c9e: 36 passed.
+  (tests:459-477). Parent spot check at 9d4a6ba: 36 passed.
 - Windows is covered only by the monkeypatched env tests until CI runs on windows-latest.
 
 ## Next step

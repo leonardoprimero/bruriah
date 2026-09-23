@@ -1,12 +1,12 @@
 # Feature: investigate-boundary-v2
 
-**Branch:** `feat/investigate-boundary-v2` (on top of `feat/injection-eval` at bdfdbaa)
+**Branch:** `feat/investigate-boundary-v2` (on top of `feat/injection-eval` at f6f77f8)
 **Created:** 2026-09-23
 **Route:** delegated direct (one bounded writer per task)
 **TDD:** strict (global session configuration). Runner: `uv run pytest -q -p no:cacheprovider`
 **Delivery strategy:** `ask-on-risk`. Forecast ~1,500 authored changed lines, over budget. Slicing
 is decided at delivery time, because nothing is pushed before the fix lands (see Disclosure).
-**RDD:** enabled for this repo. Last reviewed boundary: a799fd1.
+**RDD:** enabled for this repo. Last reviewed boundary: 9cf3807.
 **Release:** 2.0.0. Contract break: `InvestigationResult.schema_version` "1" → "2".
 **Disclosure:** local only, never pushed, until this branch closes every measured channel.
 Benchmark, fix and before/after numbers ship together.
@@ -44,16 +44,16 @@ Rejected: filtering the text (a slug is printable and still an instruction); a s
 
 ## Tasks
 
-- [x] **T0 — RED: widen the benchmark.** (b35bd6b RED+harness, 3743b13 baseline) Added cases for
+- [x] **T0 — RED: widen the benchmark.** (a59f5e3 RED+harness, 84a6b67 baseline) Added cases for
   the `code_target` path (commit author, subject, successor subject), the lineage path (file
   paths), and `premises[].rationale` / `invalidated_by`. Real baseline recorded.
-- [x] **T1 — Version and packs.** (1c2e31f) 2.0.0; `max_router_version` → 2.9.9 in the four packs
+- [x] **T1 — Version and packs.** (815e3a2) 2.0.0; `max_router_version` → 2.9.9 in the four packs
   in `src/bruriah/data/`, re-signed with `scripts/sign_pack.py`; the version-pinned tests.
-- [x] **T2 — Opaque evidence locators.** (ff31cf3 proofs, 20847fe fix, e621017 report) One
+- [x] **T2 — Opaque evidence locators.** (2fa324d proofs, 6a14e4d fix, dfbf448 report) One
   `EvidenceRecord` builder, closed `authority_rationale`, lineage and code-target text built from
   structure, CLI human view resolving refs locally.
-- [x] **T3 — Counterfactual contract v2.** (f332b95 T2 follow-ups, d193018 name-match floor,
-  5f6ab80 contract v2, f5a1d48 regenerated baseline) T2 follow-ups: a CLI test for
+- [x] **T3 — Counterfactual contract v2.** (7902906 T2 follow-ups, 56cac6f name-match floor,
+  79e8c72 contract v2, 6860180 regenerated baseline) T2 follow-ups: a CLI test for
   `_resolve_doc_refs_for_humans` (resolved paths in human output, raw ref kept when unresolvable,
   `--json` untouched; R3-cli-human-ref-resolution-uncovered); a cache test pinning that a 1.x
   entry with free-text `authority_rationale` reads as a miss, not an error (R4, verified
@@ -85,7 +85,7 @@ Rejected: filtering the text (a slug is printable and still an instruction); a s
 
 - 2026-09-23: design mapped by one read-only agent (Engram topic
   `bruriah/2.0.0-boundary-design`); option B accepted by the user.
-- 2026-09-23: T0 (b35bd6b harness+RED, 3743b13 baseline) via one bounded writer, TDD strict (RED
+- 2026-09-23: T0 (a59f5e3 harness+RED, 84a6b67 baseline) via one bounded writer, TDD strict (RED
   observed for the right reason: `len(CASES) == 17` failing at 11, `StopIteration` on
   `next(c for c in CASES if c.executed_proof == "code_target"/"lineage")` -- both before cases.py
   had the new proof kinds). Six new cases added, all executed, all leaked:
@@ -105,7 +105,7 @@ Rejected: filtering the text (a slug is printable and still an instruction); a s
   passed / 0 failed / 18 skipped (README's pinned count moved 1706 -> 1708 with the new
   `_executed` proof-kind unit tests); ruff and mypy clean.
 
-- RDD review of T0 (bdfdbaa..214097c): high risk, consent granted by the user, lineage
+- RDD review of T0 (f6f77f8..aeed21d): high risk, consent granted by the user, lineage
   review-40dcc42b98248072 approved and acknowledged (authority burned). Advisory findings:
   R2-001 (cases.py:417-422), R2-002 and R4-proof-coupled-to-prose (run.py:231-239),
   R3-lineage-channel-conflation (cases.py:454-464), R3-markdown-git-git-unavailable
@@ -113,7 +113,7 @@ Rejected: filtering the text (a slug is printable and still an instruction); a s
   executed-proof reads `authority_rationale` wording, which T2 replaces with closed codes, so the
   proof has to move to a structural signal first or T2 would report a false "held".
 
-- 2026-09-23: T1 (1c2e31f) via one bounded writer, TDD strict (RED observed for the right reason:
+- 2026-09-23: T1 (815e3a2) via one bounded writer, TDD strict (RED observed for the right reason:
   `test_every_bundled_pack_accepts_a_2_0_0_router` pinned `router_version="2.0.0"` explicitly and
   failed with `PackError("incompatible_pack")` inside `check_router_compatibility`, against all
   four bundled packs still windowed to `max_router_version: "1.9.9"`).
@@ -150,12 +150,12 @@ Rejected: filtering the text (a slug is printable and still an instruction); a s
   Checks: `uv run pytest -q -p no:cacheprovider` 1691 passed, 0 failed, 18 skipped (1690 baseline +
   1 new test). `uv run ruff check src tests evals scripts` clean; `uv run ruff format` applied to
   the four touched `.py` files (wrap-only reformatting, re-verified green after). `uv run mypy src`
-  clean. `uv run bruriah --version` -> `bruriah 2.0.0`. `git diff 2a18eee -- uv.lock`: only
+  clean. `uv run bruriah --version` -> `bruriah 2.0.0`. `git diff dca3f41 -- uv.lock`: only
   `bruriah`'s own `version` entry changed (`uv lock` did not touch any other dependency).
   README's pinned test count moved 1,708 -> 1,709 (`tests/test_readme_claims.py` requires it, not
   otherwise touched).
 
-- RDD review of T1 (2a18eee..9c40e46): high risk, consent granted by the user, lineage
+- RDD review of T1 (dca3f41..5474515): high risk, consent granted by the user, lineage
   review-4aadc7204a4ef3b9 approved and acknowledged. Findings: R3-001 and
   R2-dates-beat-router-probe-stale (the date-over-router precedence test had gone vacuous;
   the parent fixed it and proved it by reversing the checks, which turns it red);
@@ -163,9 +163,9 @@ Rejected: filtering the text (a slug is printable and still an instruction); a s
   R2-format-churn-mixed-with-version-bump (noted; later tasks keep formatting-only changes
   in their own commits).
 
-- 2026-09-23: T2 (ff31cf3 proofs, 20847fe fix, e621017 report) via one bounded writer, TDD strict.
+- 2026-09-23: T2 (2fa324d proofs, 6a14e4d fix, dfbf448 report) via one bounded writer, TDD strict.
 
-  **Proofs first (ff31cf3), RED observed for the right reason:** the code_target proof's OLD
+  **Proofs first (2fa324d), RED observed for the right reason:** the code_target proof's OLD
   assertion (`authority_rationale.startswith("Governing architectural decision for")`) was
   replaced by `test_executed_code_target_proof_requires_a_validated_commit_provenance_entry`,
   which fails on `ImportError`/assertion mismatch against the un-migrated proof until `run.py`
@@ -175,7 +175,7 @@ Rejected: filtering the text (a slug is printable and still an instruction); a s
   Benchmark report byte-identical before/after this commit: 13/17 executed, ASR 0.765 -- proves
   the proof migration alone changed nothing observable.
 
-  **Src fix (20847fe), RED then GREEN:** closing `contracts.EvidenceRecord.authority_rationale`
+  **Src fix (6a14e4d), RED then GREEN:** closing `contracts.EvidenceRecord.authority_rationale`
   to the ten-code `AuthorityRationale` Literal broke EVERY existing free-text producer at once
   (`test_authority_rationale_is_a_closed_set_of_codes_never_free_text` RED via
   `ImportError: cannot import name 'AuthorityRationale'`; then the full `investigate()` pipeline
@@ -254,7 +254,7 @@ Rejected: filtering the text (a slug is printable and still an instruction); a s
   of behavior commits. `ruff check` (clean) is the enforced gate; new code in this change follows
   the condensed style already used at each edit site by hand rather than via the formatter.
 
-- RDD review of a264688 + T2 (9c40e46..a799fd1): high risk, consent granted by the user,
+- RDD review of fdcec4a + T2 (5474515..9cf3807): high risk, consent granted by the user,
   lineage review-895baf0c2fe5f2c8 approved and acknowledged. Parent check: all 17 cases
   executed with their controls; the six flips to held are real; the `evaluation.py` golden-query
   change (exact document_ref match) is required by the new locator. Findings carried into T3:
@@ -262,10 +262,10 @@ Rejected: filtering the text (a slug is printable and still an instruction); a s
   R4-authority-rationale-schema-break-breaks-persisted-records (inferential; refuted in effect,
   degrades to a cache miss; pin it with a test).
 
-- 2026-09-23: T3 (f332b95 T2 follow-ups, d193018 name-match floor, 5f6ab80 contract v2, f5a1d48
+- 2026-09-23: T3 (7902906 T2 follow-ups, 56cac6f name-match floor, 79e8c72 contract v2, 6860180
   regenerated baseline) via one bounded writer, TDD strict.
 
-  **T2 follow-ups (f332b95), no RED (pure coverage/refactor of already-correct behavior, not a
+  **T2 follow-ups (7902906), no RED (pure coverage/refactor of already-correct behavior, not a
   bugfix -- honestly reported as such rather than a fabricated cycle):** a direct CLI test for
   `cli._resolve_doc_refs_for_humans` (a known `doc:v1:` ref resolves to its path; an unresolvable
   one stays raw) plus a `--json`-never-resolves-refs pin (closes R3-cli-human-ref-resolution-
@@ -275,7 +275,7 @@ Rejected: filtering the text (a slug is printable and still an instruction); a s
   imports `corpus.document_ref_for` instead of re-deriving the sha256 formula locally (closes
   R2-doc-ref-formula-duplicated) -- verified by running the demo directly, unchanged output.
 
-  **Name-match floor (d193018), RED observed for the right reason:** two new tests
+  **Name-match floor (56cac6f), RED observed for the right reason:** two new tests
   (`test_a_one_letter_alternative_name_does_not_match_an_unrelated_task`,
   `..._cannot_shadow_a_legitimate_alternative_that_sorts_after_it`) failed against the
   un-migrated matching loop -- a single-letter alternative `"A"` matched an unrelated task via
@@ -287,7 +287,7 @@ Rejected: filtering the text (a slug is printable and still an instruction); a s
   run before and after: **20/20 PASS both times, byte-identical per-scenario verdicts** -- no
   named scenario uses a name short enough to hit the floor, so nothing moved.
 
-  **Contract v2 (5f6ab80), RED observed for the right reason:** closing `AlternativeRecord`/
+  **Contract v2 (79e8c72), RED observed for the right reason:** closing `AlternativeRecord`/
   `PremiseRecord`/`CounterfactualAssessment` to opaque-ref shapes broke every existing
   counterfactual producer and consumer at once (`ValidationError` inside
   `_evaluate_counterfactual` on the old `name=`/`id=`/`matched_alternative=` keyword arguments,
@@ -342,8 +342,15 @@ Rejected: filtering the text (a slug is printable and still an instruction); a s
   known raw `IntegrityError` debt flagged during T2's design mapping; T3 did not touch it, since
   neither the counterfactual contract nor the benchmark exercises a cross-document id collision.
 
-- RDD review of T3 (ec5b957..f5a1d48): not yet run at write time -- see the commit list above for
+- RDD review of T3 (f557f3c..6860180): not yet run at write time -- see the commit list above for
   the four SHAs this task produced; run the review before this branch's next delivery decision.
+
+- 2026-09-23: commit messages rewritten on both feature branches (nothing had been pushed) to
+  remove AI attribution trailers that delegated writers had added against the repository's
+  commit rules, and one agent-internal phrase. Message-only rewrite: all 32 trees are identical
+  and subjects, authors and dates unchanged, so every RDD review above (bound to trees) still
+  holds. SHAs cited in commit bodies and in both feature documents were remapped to the new
+  commits.
 
 ## Next step
 
