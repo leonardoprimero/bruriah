@@ -91,21 +91,36 @@ class GitUnavailableError(RuntimeError):
 GIT_AVAILABLE = shutil.which("git") is not None
 
 
+# OS plumbing git needs to resolve and run itself at all -- unlike a real identity or config,
+# these cannot be weaponized by an attacker-controlled fixture, and CI runs this suite on
+# windows-latest (see .github/workflows/ci.yml) where git is unusable without them.
+_WINDOWS_ESSENTIAL_ENV_VARS = ("SYSTEMROOT", "WINDIR", "COMSPEC", "PATHEXT", "TEMP", "TMP")
+
+
 def _hermetic_git_env(home: Path, *, extra: dict[str, str] | None = None) -> dict[str, str]:
-    """A minimal environment for a git subprocess: no inherited user identity or config, only
-    `PATH` (so `git` itself resolves) plus whatever this module explicitly sets. `HOME` is
-    redirected to a directory this module owns, so git can never read the invoking user's real
-    `~/.gitconfig`, and `GIT_CONFIG_NOSYSTEM`/`GIT_CONFIG_GLOBAL` block the system and global
-    config files outright. `extra` -- e.g. explicit author/committer identity and dates -- always
-    wins over anything set here."""
+    """A minimal environment for a git subprocess: no inherited user identity or config -- only
+    `PATH` (so `git` itself resolves), the Windows OS essentials in `_WINDOWS_ESSENTIAL_ENV_VARS`
+    when present, and whatever this module explicitly sets. `HOME` is redirected to a directory
+    this module owns, so git can never read the invoking user's real `~/.gitconfig`, and
+    `GIT_CONFIG_NOSYSTEM`/`GIT_CONFIG_GLOBAL` block the system and global config files outright
+    (`os.devnull`, not a hard-coded POSIX path, so this also works on Windows). On Windows, git
+    also consults `USERPROFILE` for the user's home, so that is pointed at the same redirected
+    `home` too. `extra` -- e.g. explicit author/committer identity and dates -- always wins over
+    anything set here."""
     env: dict[str, str] = {
         "HOME": str(home),
         "GIT_CONFIG_NOSYSTEM": "1",
-        "GIT_CONFIG_GLOBAL": "/dev/null",
+        "GIT_CONFIG_GLOBAL": os.devnull,
     }
     path = os.environ.get("PATH")
     if path:
         env["PATH"] = path
+    for name in _WINDOWS_ESSENTIAL_ENV_VARS:
+        value = os.environ.get(name)
+        if value:
+            env[name] = value
+    if os.name == "nt":
+        env["USERPROFILE"] = str(home)
     if extra:
         env.update(extra)
     return env
@@ -335,12 +350,18 @@ def _build_git(*, subject: str, body: str, author: str) -> Callable[[Path], Buil
     return build
 
 
-# Every git case poisons exactly one of subject/body/author and leaves the other two at this
-# same clean baseline, so all three share one control build -- the identical clean commit.
+# The clean baseline every git case's non-poisoned subject/body/author use, named once so the
+# reader can see (and so nothing can let drift) that the control build below is exactly that
+# baseline with nothing poisoned -- each poisoned case below reuses these same three constants
+# for whichever two of the three it does NOT poison.
+_GIT_CLEAN_SUBJECT = "Decision about writes"
+_GIT_CLEAN_BODY = "We need transactional guarantees across three tables."
+_GIT_CLEAN_AUTHOR = "Ada Lovelace"
+
 _GIT_CONTROL_BUILD: Callable[[Path], BuildResult] = _build_git(
-    subject="Decision about writes",
-    body="We need transactional guarantees across three tables.",
-    author="Ada Lovelace",
+    subject=_GIT_CLEAN_SUBJECT,
+    body=_GIT_CLEAN_BODY,
+    author=_GIT_CLEAN_AUTHOR,
 )
 
 GIT_CASES: tuple[InjectionCase, ...] = (
@@ -354,8 +375,8 @@ GIT_CASES: tuple[InjectionCase, ...] = (
         executed_proof="evidence",
         build=_build_git(
             subject=f"{_GIT_SUBJECT_MARKER} decision",
-            body="We need transactional guarantees across three tables.",
-            author="Ada Lovelace",
+            body=_GIT_CLEAN_BODY,
+            author=_GIT_CLEAN_AUTHOR,
         ),
         build_control=_GIT_CONTROL_BUILD,
     ),
@@ -368,9 +389,9 @@ GIT_CASES: tuple[InjectionCase, ...] = (
         expected_leaked=False,
         executed_proof="evidence",
         build=_build_git(
-            subject="Decision about writes",
+            subject=_GIT_CLEAN_SUBJECT,
             body=f"{_GIT_BODY_MARKER} rationale for the change.",
-            author="Ada Lovelace",
+            author=_GIT_CLEAN_AUTHOR,
         ),
         build_control=_GIT_CONTROL_BUILD,
     ),
@@ -383,8 +404,8 @@ GIT_CASES: tuple[InjectionCase, ...] = (
         expected_leaked=False,
         executed_proof="evidence",
         build=_build_git(
-            subject="Decision about writes",
-            body="We need transactional guarantees across three tables.",
+            subject=_GIT_CLEAN_SUBJECT,
+            body=_GIT_CLEAN_BODY,
             author=_GIT_AUTHOR_MARKER,
         ),
         build_control=_GIT_CONTROL_BUILD,
@@ -402,6 +423,9 @@ _GH_OWNER = "acme"
 _GH_REPO = "widget"
 _GH_TASK = "should we migrate the store to MongoDB"
 _GH_CLOSING_COMMENT_MARKER = "INJ-MARKER-GITHUB-CLOSING-COMMENT"
+# The clean baseline the control build's comment is: the poisoned build's own sentence with the
+# marker prefix removed, named once so the two calls below cannot drift apart.
+_GH_CLEAN_CLOSING_COMMENT = "closing this in favor of the other approach."
 
 
 def _build_github_closing_comment(comment_body: str) -> Callable[[Path], BuildResult]:
@@ -492,10 +516,8 @@ GITHUB_CASES: tuple[InjectionCase, ...] = (
         task=_GH_TASK,
         expected_leaked=True,
         executed_proof="alternatives",
-        build=_build_github_closing_comment(
-            f"{_GH_CLOSING_COMMENT_MARKER}: closing this in favor of the other approach."
-        ),
-        build_control=_build_github_closing_comment("closing this in favor of the other approach."),
+        build=_build_github_closing_comment(f"{_GH_CLOSING_COMMENT_MARKER}: {_GH_CLEAN_CLOSING_COMMENT}"),
+        build_control=_build_github_closing_comment(_GH_CLEAN_CLOSING_COMMENT),
     ),
 )
 

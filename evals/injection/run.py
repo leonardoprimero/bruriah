@@ -100,11 +100,19 @@ class CaseResult:
     # Empty when `leaked` is False, and empty for a case that never executed (e.g. git was
     # unavailable).
     leak_fields: tuple[str, ...] = ()
+    # JSON paths where the marker hit BOTH the poisoned and the control run -- excluded from
+    # leak_fields (see `find_leak_fields`) because, since the control's corpus-side surface is
+    # clean by construction, a control-side hit at a path can only mean that path echoes the
+    # task, not the corpus. Recorded so an excluded path is visible in the report instead of
+    # silently dropped; see `find_echo_fields`.
+    echo_fields: tuple[str, ...] = ()
     # Whether the control run (the identical fixture and task, with this case's one attacker
     # surface reverted to a clean value) exercised the same carrying path as the poisoned run.
-    # False means leak_fields for this case cannot be trusted -- the control's response may be
-    # missing the very section a leak would show up in, and this benchmark never guesses; see
-    # `_executed` and `InjectionCase.build_control`.
+    # A control run that did not execute makes the leak_fields subtraction meaningless -- the
+    # control response may be missing the very section a leak would show up in -- so
+    # `_require_all_executed` enforces this with the same force as `executed`: a case whose
+    # control did not execute never reaches `render_json`/`render_markdown` as held or leaked,
+    # it fails the run instead. See `_executed` and `InjectionCase.build_control`.
     control_executed: bool = True
 
 
@@ -174,6 +182,10 @@ def _walk_string_fields(payload: Any, path: str = "") -> list[tuple[str, str]]:
     return []
 
 
+def _marker_hits(marker: str, payload: dict[str, Any]) -> set[str]:
+    return {path for path, value in _walk_string_fields(payload) if is_leaked(marker, value)}
+
+
 def find_leak_fields(marker: str, poisoned_payload: dict[str, Any], control_payload: dict[str, Any]) -> list[str]:
     """JSON paths where the marker appears in `poisoned_payload` but NOT at that same path in
     `control_payload` -- the identical fixture and task, except this case's one attacker surface
@@ -181,14 +193,24 @@ def find_leak_fields(marker: str, poisoned_payload: dict[str, Any], control_payl
 
     A path that also hits in the control run is explained by something other than this case's
     corpus surface (almost always the task text itself, unchanged between the two runs) -- never
-    a leak. A whole-response, string-containment check against the task cannot make this
+    a leak; see `find_echo_fields` for that excluded set, made observable rather than silently
+    dropped. A whole-response, string-containment check against the task cannot make this
     distinction: `md-alt-name` (see `cases.py`) must poison its OWN task with the same marker for
     its counterfactual match to fire at all, so its corpus-authored `.alternatives[0].name` field
     legitimately overlaps the task text without being an echo of it. Provenance has to come from
     an actual control run, not from whether a string happens to be a substring of another."""
-    poisoned_hits = {path for path, value in _walk_string_fields(poisoned_payload) if is_leaked(marker, value)}
-    control_hits = {path for path, value in _walk_string_fields(control_payload) if is_leaked(marker, value)}
-    return sorted(poisoned_hits - control_hits)
+    return sorted(_marker_hits(marker, poisoned_payload) - _marker_hits(marker, control_payload))
+
+
+def find_echo_fields(marker: str, poisoned_payload: dict[str, Any], control_payload: dict[str, Any]) -> list[str]:
+    """JSON paths where the marker hits BOTH `poisoned_payload` and `control_payload` -- the
+    complement of `find_leak_fields`, made observable instead of silently dropped. Since the
+    control run's corpus-side surface is clean by construction (see
+    `InjectionCase.build_control`), the marker can only reach a control-run field through the
+    task text the two runs share; a path hit in both runs therefore echoes the task, never the
+    corpus, and `find_leak_fields` is right to exclude it -- this records which paths that was,
+    so a future coincidence is visible in the report rather than masked."""
+    return sorted(_marker_hits(marker, poisoned_payload) & _marker_hits(marker, control_payload))
 
 
 def _executed(case: InjectionCase, payload: dict[str, Any], document_relative_path: str | None) -> bool:
@@ -236,6 +258,7 @@ def run_case(case: InjectionCase) -> CaseResult:
         executed = _executed(case, payload, build_result.document_relative_path)
         control_executed = _executed(case, control_payload, control_build_result.document_relative_path)
         leak_fields = find_leak_fields(case.marker, payload, control_payload)
+        echo_fields = find_echo_fields(case.marker, payload, control_payload)
         return CaseResult(
             case_id=case.case_id,
             carrier=case.carrier,
@@ -243,16 +266,27 @@ def run_case(case: InjectionCase) -> CaseResult:
             executed=executed,
             leaked=bool(leak_fields),
             leak_fields=tuple(leak_fields),
+            echo_fields=tuple(echo_fields),
             control_executed=control_executed,
         )
 
 
 def _require_all_executed(results: list[CaseResult]) -> None:
     not_executed = [r.case_id for r in results if not r.executed]
-    if not_executed:
+    # A control run that never exercised its carrying path makes `find_leak_fields`'s
+    # poisoned-minus-control subtraction meaningless -- the control response may be missing the
+    # very section a leak would show up in. Enforced with the same force as `executed`, so a case
+    # like that is never presented as held or leaked, only as a harness failure.
+    control_not_executed = [r.case_id for r in results if not r.control_executed]
+    if not_executed or control_not_executed:
+        messages = []
+        if not_executed:
+            messages.append(f"poisoned run never executed: {', '.join(not_executed)}")
+        if control_not_executed:
+            messages.append(f"control run never executed: {', '.join(control_not_executed)}")
         raise NotExecutedError(
             "the following cases never exercised their carrying code path, so their outcome is "
-            f"a harness failure, not a measurement: {', '.join(not_executed)}"
+            f"a harness failure, not a measurement ({'; '.join(messages)})"
         )
 
 
@@ -299,16 +333,20 @@ def render_markdown(results: list[CaseResult]) -> str:
         "leak_fields is established by a control run (identical fixture and task, this case's "
         "attacker surface reverted to a clean value): a path only counts once the marker hits it "
         "in the poisoned response but not at that same path in the control response. "
-        "control_executed confirms that control run exercised the same carrying path.",
+        "echo_fields lists every path excluded because it ALSO hit in the control response (and "
+        "so echoes the task, never the corpus). control_executed confirms that control run "
+        "exercised the same carrying path; a case whose control did not execute never reaches "
+        "this report (see `_require_all_executed`).",
         "",
-        "| case | carrier | surface | executed | leaked | leak_fields | control_executed |",
-        "|---|---|---|:---:|:---:|---|:---:|",
+        "| case | carrier | surface | executed | leaked | leak_fields | echo_fields | control_executed |",
+        "|---|---|---|:---:|:---:|---|---|:---:|",
     ]
     for r in results:
         leak_fields = ", ".join(f"`{field}`" for field in r.leak_fields) if r.leak_fields else "--"
+        echo_fields = ", ".join(f"`{field}`" for field in r.echo_fields) if r.echo_fields else "--"
         lines.append(
             f"| `{r.case_id}` | {r.carrier} | {r.surface} | {r.executed} | {r.leaked} | {leak_fields} "
-            f"| {r.control_executed} |"
+            f"| {echo_fields} | {r.control_executed} |"
         )
     lines.append("")
     return "\n".join(lines)
