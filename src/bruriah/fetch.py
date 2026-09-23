@@ -402,7 +402,7 @@ def _fetch_inner(
             citation_locator=canonical, digest=f"sha256:{digest_hex}",
             extraction_method=_extraction_method(content_type), redirect_chain=redirect_chain[:-1],
             retrieved_at=retrieved_at, authority="unknown",
-            authority_rationale="Live HTTP fetch; authority/pack context not assessed by fetch.py.",
+            authority_rationale="live_fetch_unassessed",
             freshness="unknown", license="unknown", conflict="unknown",
         )
         return FetchResult(

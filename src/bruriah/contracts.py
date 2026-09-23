@@ -8,6 +8,23 @@ class ClosedModel(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
 ShortText = Annotated[str, Field(min_length=1, max_length=4096)]
 Ref = Annotated[str, Field(min_length=1, max_length=256)]
+# T2 (investigate-boundary-v2): the closed set of authority-rationale codes every EvidenceRecord
+# producer may report. Each code names the KIND of authority assessed and how, never its
+# content -- before this was `ShortText`, and several producers built the sentence straight from
+# corpus/git text an attacker could author (a governing decision's author, an evaluated
+# alternative's name), so that free text was itself an investigation-boundary leak channel.
+AuthorityRationale = Literal[
+    "not_assessed_by_retrieval",
+    "capability_identity_only",
+    "skill_dispatch_declared",
+    "live_fetch_unassessed",
+    "raw_capture_unassessed",
+    "code_target_governing_decision",
+    "code_target_active_successor",
+    "code_target_intermediate_successor",
+    "counterfactual_alternative_evidence",
+    "counterfactual_invalidated_premise_evidence",
+]
 class Budgets(ClosedModel):
     max_evidence: Annotated[int, Field(ge=1, le=100)] = 20
     max_claims: Annotated[int, Field(ge=1, le=100)] = 20
@@ -107,7 +124,7 @@ class EvidenceRecord(ClosedModel):
     effective_at: date | None = None
     expires_at: date | None = None
     authority: Literal["primary", "official", "standard", "contextual", "unknown"]
-    authority_rationale: ShortText
+    authority_rationale: AuthorityRationale
     freshness: Literal["current", "stale", "expired", "unknown"]
     license: Literal["permitted", "restricted", "prohibited", "unknown"]
     reuse: Literal["permitted", "restricted", "prohibited", "unknown"] = "unknown"

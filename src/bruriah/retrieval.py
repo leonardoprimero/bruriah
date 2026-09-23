@@ -16,10 +16,18 @@ import time
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 
+from typing import Literal
+
 from . import language, ranking
-from .contracts import Budgets, EvidenceRecord
+from .contracts import AuthorityRationale, Budgets, EvidenceRecord
 from .index import ActiveSnapshot
 from .repository import PassageRecord, RepositoryError, SnapshotRepository, parse_heading_path
+
+# T2 (investigate-boundary-v2): the fixed literal every local-corpus EvidenceRecord reports as
+# its publisher. Never the author-chosen relative path -- that channel is closed; `publisher`
+# says WHERE the record comes from in the abstract (this installation's local corpus), which is
+# never author-controlled, unlike a file name or a commit-derived slug.
+LOCAL_EVIDENCE_PUBLISHER = "local-corpus"
 
 EmbedQuery = Callable[[str], bytes]
 # A reranker scores whole documents against the query and returns one number each, higher first.
@@ -684,16 +692,53 @@ def search(
     return service.search(query, budgets, offset=offset)
 
 
+def build_local_evidence_record(
+    *,
+    ref: str,
+    document_ref: str,
+    start_line: int,
+    end_line: int,
+    source_hash: str,
+    authority: Literal["primary", "official", "standard", "contextual", "unknown"],
+    authority_rationale: AuthorityRationale,
+    extraction_method: Literal[
+        "raw_lines", "markdown_section", "html_text", "pdf_text", "api_json", "unknown"
+    ] = "markdown_section",
+    provenance_chain: Sequence[str] = (),
+    uncertainty: Sequence[str] = (),
+    freshness: Literal["current", "stale", "expired", "unknown"] = "unknown",
+    license: Literal["permitted", "restricted", "prohibited", "unknown"] = "unknown",
+    reuse: Literal["permitted", "restricted", "prohibited", "unknown"] = "unknown",
+    conflict: Literal["none", "declared", "unknown"] = "unknown",
+) -> EvidenceRecord:
+    """The ONE place every local-corpus `EvidenceRecord` is built (T2, investigate-boundary-v2:
+    opaque evidence locators). `locator` is the passage's own `document_ref`
+    (`doc:v1:<hash>`, see `corpus.py::parse_document`), never the author-chosen relative path;
+    `citation_locator` is `f"{document_ref}#L{start}-{end}"`; `publisher` is the fixed
+    `LOCAL_EVIDENCE_PUBLISHER` literal. `authority_rationale` is one of the closed
+    `AuthorityRationale` codes the schema enforces -- never free corpus text. Every producer of a
+    local `EvidenceRecord` (`to_evidence_records` below, `service.py::_apply_lineage`,
+    `_resolve_code_target_causality`, `_evaluate_counterfactual`) routes through this builder, so
+    the boundary is enforced once rather than asserted per call site."""
+    return EvidenceRecord(
+        ref=ref, kind="local", publisher=LOCAL_EVIDENCE_PUBLISHER,
+        locator=document_ref, citation_locator=f"{document_ref}#L{start_line}-{end_line}",
+        digest=f"sha256:{source_hash}", extraction_method=extraction_method,
+        provenance_chain=list(provenance_chain),
+        authority=authority, authority_rationale=authority_rationale,
+        freshness=freshness, license=license, reuse=reuse, conflict=conflict,
+        uncertainty=list(uncertainty),
+    )
+
+
 def to_evidence_records(outcome: RetrievalOutcome) -> list[EvidenceRecord]:
     """Show the output is expressible in the closed evidence model; every assessment field is
     this slice's conservative "unknown" -- never inferred from rank."""
     return [
-        EvidenceRecord(
-            ref=match.ref, kind="local", publisher=match.relative_path, locator=match.relative_path,
-            citation_locator=f"{match.relative_path}#{match.start_line}-{match.end_line}",
-            digest=f"sha256:{match.source_hash}", extraction_method="markdown_section",
+        build_local_evidence_record(
+            ref=match.ref, document_ref=match.document_ref,
+            start_line=match.start_line, end_line=match.end_line, source_hash=match.source_hash,
             authority="unknown", authority_rationale="not_assessed_by_retrieval",
-            freshness="unknown", license="unknown", conflict="unknown",
         )
         for match in outcome.matches
     ]

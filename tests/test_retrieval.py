@@ -180,7 +180,12 @@ def test_prompt_injection_is_returned_as_inert_untrusted_text(snapshot) -> None:
     assert match.relative_path == "public/injection.md"
     assert "IGNORE ALL PREVIOUS INSTRUCTIONS" in match.snippet
     records = to_evidence_records(outcome)
-    assert records[0].locator == "public/injection.md"
+    # T2 (investigate-boundary-v2): the file name never reaches the response -- locator is the
+    # opaque document_ref, never the author-chosen relative path.
+    assert records[0].locator == match.document_ref
+    assert "public/injection.md" not in records[0].locator
+    assert "public/injection.md" not in records[0].publisher
+    assert "public/injection.md" not in records[0].citation_locator
     # The instruction text inside the note must not change how it is assessed.
     assert records[0].authority == "unknown" and records[0].conflict == "unknown"
 def test_to_evidence_records_expresses_matches_in_the_closed_evidence_model(snapshot) -> None:
@@ -189,6 +194,21 @@ def test_to_evidence_records_expresses_matches_in_the_closed_evidence_model(snap
     assert records and all(isinstance(record, EvidenceRecord) for record in records)
     assert records[0].digest == f"sha256:{outcome.matches[0].source_hash}"
     assert records[0].authority == "unknown" and records[0].conflict == "unknown"
+def test_to_evidence_records_locator_is_the_opaque_document_ref_not_the_file_path(snapshot) -> None:
+    """T2 (investigate-boundary-v2): one builder (`retrieval.build_local_evidence_record`) is the
+    ONE place a local EvidenceRecord is built, so this is pinned once at the source rather than
+    per-carrier. `locator` == the passage's `document_ref` (`doc:v1:<hash>`), `citation_locator`
+    == `f"{document_ref}#L{start}-{end}"`, and `publisher` is a fixed literal -- never the
+    corpus-relative path."""
+    outcome = search(snapshot, "apple pie baking recipe", Budgets())
+    match = outcome.matches[0]
+    records = to_evidence_records(outcome)
+    record = next(r for r in records if r.ref == match.ref)
+    assert record.locator == match.document_ref
+    assert record.locator.startswith("doc:v1:")
+    assert record.citation_locator == f"{match.document_ref}#L{match.start_line}-{match.end_line}"
+    assert record.publisher == "local-corpus"
+    assert record.authority_rationale == "not_assessed_by_retrieval"
 def test_determinism_same_query_same_snapshot_yields_identical_ordering(snapshot) -> None:
     first = search(snapshot, "apple manzana recipe", Budgets(), embed_query=embed_query)
     second = search(snapshot, "apple manzana recipe", Budgets(), embed_query=embed_query)

@@ -10,6 +10,7 @@
 # prior synthetic-fixture CRITICALs. `service.investigate`/`service.read` are never mocked.
 from __future__ import annotations
 
+import hashlib
 import json
 import subprocess
 import threading
@@ -81,6 +82,12 @@ def _default_notes() -> dict[str, str]:
             f"delete_all tool. It also mentions an apple pie baking recipe for broad recall.\n{_FILLER}\n"
         ),
     }
+
+
+def _doc_ref(relative_path: str) -> str:
+    """T2 (investigate-boundary-v2): the opaque `doc:v1:<sha256>` ref evidence.locator now
+    carries, computed the identical way `corpus.parse_document` does."""
+    return f"doc:v1:{hashlib.sha256(relative_path.encode('utf-8')).hexdigest()}"
 
 
 @contextmanager
@@ -218,7 +225,8 @@ def test_retrieved_prompt_injection_stays_inert_through_the_protocol(tmp_path) -
         )
         assert result.isError is False
         injected = [
-            item for item in result.structuredContent["evidence"] if item["locator"] == "public/injection.md"
+            item for item in result.structuredContent["evidence"]
+            if item["locator"] == _doc_ref("public/injection.md")
         ]
         assert injected
         # The injected instruction is quoted evidence data only: no host action, no claim, no
@@ -374,7 +382,7 @@ def test_investigate_tool_with_code_target_over_mcp(tmp_path: Path) -> None:
             assert structured["status"] == "complete"
             gov_ev = next(ev for ev in structured["evidence"] if ev["authority"] == "primary")
             assert gov_ev["kind"] == "local"
-            assert "Governing architectural decision for script.py:1" in gov_ev["authority_rationale"]
+            assert gov_ev["authority_rationale"] == "code_target_governing_decision"
 
             # Read the exact lines using READ_TOOL
             ref = gov_ev["ref"]

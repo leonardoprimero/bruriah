@@ -94,6 +94,15 @@ def _digest(*parts: str) -> str:
     return hashlib.sha256("\0".join(parts).encode()).hexdigest()
 
 
+def document_ref_for(relative_path: str) -> str:
+    """The `doc:v1:<sha256>` ref `parse_document` mints for a document at `relative_path`
+    (posix, relative to the corpus root) -- the single source of truth for computing it, so a
+    caller that needs to recognize a document by its ref (e.g. `evaluation.py`'s golden-query
+    gate, since T2/investigate-boundary-v2 made `EvidenceRecord.locator` this opaque ref rather
+    than the raw path) never re-derives the hash formula itself."""
+    return f"doc:v1:{_digest(relative_path)}"
+
+
 def _frontmatter(lines: list[str]) -> tuple[dict[str, Any], int]:
     if not lines or lines[0].rstrip("\r\n") != "---":
         return {}, 0
@@ -252,7 +261,7 @@ def parse_document(path: Path, root: Path, policy: CorpusPolicy) -> Document:
     frontmatter, body_start = _frontmatter(lines)
     relative = resolved.relative_to(root.resolve(strict=True)).as_posix()
     source_hash = hashlib.sha256(raw).hexdigest()
-    document_ref = f"doc:v1:{_digest(relative)}"
+    document_ref = document_ref_for(relative)
     metadata = _metadata(frontmatter)
     tokens = MarkdownIt("commonmark").parse("".join(lines[body_start:]))
     headings: list[tuple[int, int, str]] = []

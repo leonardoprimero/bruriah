@@ -70,7 +70,7 @@ BASE_EVIDENCE = {
     "citation_locator": "https://example.test/doc#section-2",
     "digest": "sha256:" + "0" * 64,
     "authority": "official",
-    "authority_rationale": "Canonical publisher documentation.",
+    "authority_rationale": "not_assessed_by_retrieval",
     "freshness": "current",
     "license": "permitted",
     "conflict": "none",
@@ -159,7 +159,7 @@ from bruriah.contracts import HostAction, HostSkill, PermissionDisclosure  # noq
 
 _EVIDENCE_FIELDS = dict(
     ref="local:a#1", kind="local", publisher="p", locator="l", citation_locator="c",
-    digest="sha256:" + "a" * 64, authority="official", authority_rationale="r",
+    digest="sha256:" + "a" * 64, authority="official", authority_rationale="not_assessed_by_retrieval",
     freshness="current", license="permitted", conflict="none",
 )
 
@@ -230,6 +230,33 @@ def test_the_new_enum_members_are_the_only_ones_added() -> None:
     assert set(typing.get_args(HostAction.model_fields["kind"].annotation)) == {
         "web_search", "fetch_public_url", "inspect_capability", "request_jurisdiction",
         "consult_professional", "draft_skill_candidate", "install_skill"}
+
+
+def test_authority_rationale_is_a_closed_set_of_codes_never_free_text() -> None:
+    """T2 (investigate-boundary-v2): `authority_rationale` used to be free `ShortText`, and every
+    producer wrote a sentence -- several built straight from corpus/git text (the governing
+    decision's author, an evaluated alternative's name). Closing it to a `Literal` makes every
+    one of those a fixed, content-free code instead: it describes the KIND of authority, never
+    quotes anything an attacker-controlled document or commit could have written."""
+    import typing
+
+    from bruriah.contracts import AuthorityRationale
+
+    assert set(typing.get_args(AuthorityRationale)) == {
+        "not_assessed_by_retrieval",
+        "capability_identity_only",
+        "skill_dispatch_declared",
+        "live_fetch_unassessed",
+        "raw_capture_unassessed",
+        "code_target_governing_decision",
+        "code_target_active_successor",
+        "code_target_intermediate_successor",
+        "counterfactual_alternative_evidence",
+        "counterfactual_invalidated_premise_evidence",
+    }
+    assert EvidenceRecord.model_fields["authority_rationale"].annotation == AuthorityRationale
+    with pytest.raises(ValidationError):
+        EvidenceRecord.model_validate({**BASE_EVIDENCE, "authority_rationale": "free text is no longer accepted"})
 
 
 def test_the_disclosure_covers_every_dimension_the_signed_envelope_can_express() -> None:

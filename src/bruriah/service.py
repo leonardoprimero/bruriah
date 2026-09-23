@@ -43,6 +43,7 @@ from dataclasses import dataclass
 from typing import Any, Literal
 from urllib.parse import urlsplit
 
+from . import agent_surface
 from .cache import find_by_ref
 from .classify import classify
 from .context import assemble_context, compact_to_budget
@@ -59,7 +60,9 @@ from .skills import PermissionEnvelope, SkillSet
 from .registries import Registry
 from .repository import RepositoryError, SnapshotRepository
 from .research import NetworkLedger, ResearchDeps, ResearchOutcome, research
-from .retrieval import EmbedQuery, Rerank, SearchService, is_shortfall, to_evidence_records
+from .retrieval import (
+    EmbedQuery, Rerank, SearchService, build_local_evidence_record, is_shortfall, to_evidence_records,
+)
 from .route import route
 from .why import WhyError, trace_causal_archaeology
 
@@ -195,7 +198,7 @@ def _capability_evidence_record(capability: CapabilityPolicy) -> EvidenceRecord:
         citation_locator=f"{capability.capability_id}@{capability.version}",
         digest=_capability_digest(capability),
         authority="unknown",
-        authority_rationale="Capability identity only; permissions and limitations are disclosed on read.",
+        authority_rationale="capability_identity_only",
         freshness="unknown", license="unknown", conflict="unknown",
     )
 
@@ -244,7 +247,10 @@ def _skill_evidence_record(entry: SkillDispatch) -> EvidenceRecord:
             f"currency:{entry.currency}", f"trusted:{str(entry.trusted).lower()}",
         ],
         authority="unknown",
-        authority_rationale=skill.summary,
+        # T2 (investigate-boundary-v2): a closed code, never `skill.summary` (author-declared
+        # pack text). A caller who wants the summary reads it via `read_evidence`'s
+        # `skill:<id>@<version>` disclosure, which still carries it verbatim on explicit request.
+        authority_rationale="skill_dispatch_declared",
         # `freshness` speaks the contract's existing three words. A demoted skill says so HERE,
         # in the field a client already reads, rather than in a new channel nobody parses.
         freshness=entry.currency, license="unknown", conflict="unknown",
@@ -445,21 +451,22 @@ def _apply_lineage(
         rel = rel_item.relation
 
         if pred_ref and pred_ref in doc_to_refs:
-            succ_path = repo.get_document_path(succ_ref) or succ_ref
-
+            # T2 (investigate-boundary-v2): `pred_ref`/`succ_ref` ARE already the document_refs
+            # -- never resolve them to a file path (`repo.get_document_path`) or read one out of
+            # `ref_to_doc`'s passage-metadata tuple, which is exactly what `lineage-successor-
+            # file-name` and its sibling cases measured leaking.
             for target_ref in doc_to_refs[pred_ref]:
                 overrides = ref_overrides.setdefault(target_ref, {})
                 if rel == "supersedes":
                     overrides["freshness"] = "stale"
                     overrides["conflict"] = "declared"
-                    overrides.setdefault("uncertainty", []).append(f"superseded_by:{succ_path}")
+                    overrides.setdefault("uncertainty", []).append(f"superseded_by:{succ_ref}")
                 elif rel == "deprecates":
                     overrides["freshness"] = "stale"
-                    overrides.setdefault("uncertainty", []).append(f"deprecated_by:{succ_path}")
+                    overrides.setdefault("uncertainty", []).append(f"deprecated_by:{succ_ref}")
 
             if rel == "supersedes":
-                pred_path = ref_to_doc[doc_to_refs[pred_ref][0]][1]
-                conflicts.append(f"Decision in {pred_path} was superseded by {succ_path}")
+                conflicts.append(f"Decision {pred_ref} was superseded by {succ_ref}")
 
                 succ_passages = repo.get_passages_by_document(succ_ref, limit=1)
                 supporting_refs: list[str] = []
@@ -468,24 +475,16 @@ def _apply_lineage(
                     if p.ref not in existing_refs:
                         existing_refs.add(p.ref)
                         additional_evidence.append(
-                            EvidenceRecord(
-                                ref=p.ref,
-                                kind="local",
-                                publisher=p.relative_path,
-                                locator=p.relative_path,
-                                citation_locator=f"{p.relative_path}#{p.start_line}-{p.end_line}",
-                                digest=f"sha256:{p.source_hash}",
-                                extraction_method="markdown_section",
-                                authority="unknown",
-                                authority_rationale="not_assessed_by_retrieval",
-                                freshness="current",
-                                license="unknown",
-                                conflict="none",
+                            build_local_evidence_record(
+                                ref=p.ref, document_ref=p.document_ref,
+                                start_line=p.start_line, end_line=p.end_line, source_hash=p.source_hash,
+                                authority="unknown", authority_rationale="not_assessed_by_retrieval",
+                                freshness="current", conflict="none",
                             )
                         )
                 claims.append(
                     ClaimRecord(
-                        text=f"Decision in {pred_path} was superseded by {succ_path}",
+                        text=f"Decision {pred_ref} was superseded by {succ_ref}",
                         state="conflicted",
                         supporting_refs=supporting_refs,
                         conflicting_refs=doc_to_refs[pred_ref],
@@ -564,7 +563,6 @@ def _resolve_code_target_causality(
 
     p_first = passages_rows[0]
     p_ref = p_first.ref
-    p_path = p_first.relative_path
     p_start = p_first.start_line
     p_end = p_first.end_line
     p_hash = p_first.source_hash
@@ -577,27 +575,19 @@ def _resolve_code_target_causality(
         for a in alerts
     ]
 
-    rationale = (
-        f"Governing architectural decision for {code_target} decided by {gov.author} "
-        f"on {gov.date} (commit {gov.commit_sha[:12]})."
-    )
-
-    ev_record = EvidenceRecord(
-        ref=p_ref,
-        kind="local",
-        publisher=p_path,
-        locator=p_path,
-        citation_locator=f"{p_path}#{p_start}-{p_end}",
-        digest=f"sha256:{p_hash}",
-        extraction_method="markdown_section",
+    # T2 (investigate-boundary-v2): `commit_sha`/`line_commit.sha` are validated shas
+    # (`agent_surface.short_commit_sha`), never the raw markdown-parsed author -- the governing
+    # author is dropped from provenance_chain entirely, closing `code-target-author`.
+    ev_record = build_local_evidence_record(
+        ref=p_ref, document_ref=gov.document_ref,
+        start_line=p_start, end_line=p_end, source_hash=p_hash,
         provenance_chain=[
-            f"commit:{gov.commit_sha[:12]}",
-            f"line_commit:{res.line_commit.sha[:12]}",
-            f"author:{gov.author}",
+            f"commit:{agent_surface.short_commit_sha(gov.commit_sha)}",
+            f"line_commit:{agent_surface.short_commit_sha(res.line_commit.sha)}",
             f"target:{code_target}",
         ][:10],
         authority="primary",
-        authority_rationale=rationale,
+        authority_rationale="code_target_governing_decision",
         freshness=freshness,
         license="permitted",
         reuse="permitted",
@@ -609,18 +599,28 @@ def _resolve_code_target_causality(
     conflicting_refs: list[str] = []
     if alerts:
         for alert in alerts:
+            # T2: rebuilt from structure -- the document, the relation (a closed vocabulary --
+            # `agent_surface.KNOWN_LINEAGE_STATES`), and a validated sha or, failing that, the
+            # bare successor ref. Neither `alert.successor_subject` nor
+            # `alert.active_successor_subject` (both markdown-parsed, author-controlled text)
+            # reach this message -- closing `code-target-successor-subject`.
+            succ_sha = agent_surface.short_commit_sha(alert.successor_commit) if alert.successor_commit else None
+            succ_identifier = succ_sha if succ_sha and succ_sha != agent_surface.UNKNOWN else alert.successor_ref
             conf_msg = (
-                f"Decision in {p_path} governing {code_target} has been {alert.relation} "
-                f"by {alert.successor_commit[:8] if alert.successor_commit else alert.successor_ref}: "
-                f"{alert.successor_subject or 'successor'}"
+                f"Decision {agent_surface.short_commit_sha(gov.commit_sha)} governing {code_target} "
+                f"has been {alert.relation} by {succ_identifier}"
             )
             if alert.depth > 1 and alert.active_successor_ref:
-                act_str = (
-                    alert.active_successor_commit[:8]
+                active_sha = (
+                    agent_surface.short_commit_sha(alert.active_successor_commit)
                     if alert.active_successor_commit
+                    else None
+                )
+                active_identifier = (
+                    active_sha if active_sha and active_sha != agent_surface.UNKNOWN
                     else alert.active_successor_ref
                 )
-                conf_msg += f" (evolved to active leaf {act_str}: {alert.active_successor_subject or 'active'})"
+                conf_msg += f" (evolved to active leaf {active_identifier})"
             conflicts.append(conf_msg)
 
             try:
@@ -634,19 +634,14 @@ def _resolve_code_target_causality(
                     for s in succ_passages:
                         conflicting_refs.append(s.ref)
                         evidence.append(
-                            EvidenceRecord(
-                                ref=s.ref,
-                                kind="local",
-                                publisher=s.relative_path,
-                                locator=s.relative_path,
-                                citation_locator=f"{s.relative_path}#{s.start_line}-{s.end_line}",
-                                digest=f"sha256:{s.source_hash}",
-                                extraction_method="markdown_section",
+                            build_local_evidence_record(
+                                ref=s.ref, document_ref=s.document_ref,
+                                start_line=s.start_line, end_line=s.end_line, source_hash=s.source_hash,
                                 authority="primary",
                                 authority_rationale=(
-                                    f"Active successor decision for {code_target}"
+                                    "code_target_active_successor"
                                     if is_active_leaf
-                                    else f"Intermediate successor decision ({alert.relation}) for {code_target}"
+                                    else "code_target_intermediate_successor"
                                 ),
                                 freshness="current" if is_active_leaf else "stale",
                                 license="permitted",
@@ -658,16 +653,20 @@ def _resolve_code_target_causality(
 
         claims.append(
             ClaimRecord(
-                text=f"Governing decision {gov.commit_sha[:8]} for {code_target} is {alerts[0].relation}",
+                text=(
+                    f"Governing decision {agent_surface.short_commit_sha(gov.commit_sha)} "
+                    f"for {code_target} is {alerts[0].relation}"
+                ),
                 state="conflicted",
                 supporting_refs=[p_ref],
                 conflicting_refs=conflicting_refs,
             )
         )
     else:
+        # T2: the governing decision's subject is dropped -- closing `code-target-subject`.
         claims.append(
             ClaimRecord(
-                text=f"Decision {gov.commit_sha[:8]} ({gov.subject}) governs {code_target}",
+                text=f"Decision {agent_surface.short_commit_sha(gov.commit_sha)} governs {code_target}",
                 state="supported",
                 supporting_refs=[p_ref],
                 conflicting_refs=[],
@@ -753,21 +752,15 @@ def _evaluate_counterfactual(
         doc_passages = snapshot_repo.get_passages_by_document(matched_alt.document_ref, limit=1)
         for p in doc_passages:
             supporting_refs.append(p.ref)
+            # T2 (investigate-boundary-v2): a closed code, never a sentence built from the
+            # alternative's name/disposition -- part of `md-alt-name`'s
+            # `.evidence[0].authority_rationale` leak_fields entry.
             cf_evidence.append(
-                EvidenceRecord(
-                    ref=p.ref,
-                    kind="local",
-                    publisher=p.relative_path,
-                    locator=p.relative_path,
-                    citation_locator=f"{p.relative_path}#{p.start_line}-{p.end_line}",
-                    digest=f"sha256:{p.source_hash}",
-                    extraction_method="markdown_section",
-                    authority="primary",
-                    authority_rationale=f"Evaluated alternative '{matched_alt.name}' ({matched_alt.disposition}).",
-                    freshness="current",
-                    license="permitted",
-                    reuse="permitted",
-                    conflict="none",
+                build_local_evidence_record(
+                    ref=p.ref, document_ref=p.document_ref,
+                    start_line=p.start_line, end_line=p.end_line, source_hash=p.source_hash,
+                    authority="primary", authority_rationale="counterfactual_alternative_evidence",
+                    freshness="current", license="permitted", reuse="permitted", conflict="none",
                 )
             )
     except RepositoryError:
@@ -799,20 +792,12 @@ def _evaluate_counterfactual(
                     if p.ref not in supporting_refs:
                         supporting_refs.append(p.ref)
                         cf_evidence.append(
-                            EvidenceRecord(
-                                ref=p.ref,
-                                kind="local",
-                                publisher=p.relative_path,
-                                locator=p.relative_path,
-                                citation_locator=f"{p.relative_path}#{p.start_line}-{p.end_line}",
-                                digest=f"sha256:{p.source_hash}",
-                                extraction_method="markdown_section",
+                            build_local_evidence_record(
+                                ref=p.ref, document_ref=p.document_ref,
+                                start_line=p.start_line, end_line=p.end_line, source_hash=p.source_hash,
                                 authority="primary",
-                                authority_rationale=f"Invalidated premise '{inv_p.premise_id}'.",
-                                freshness="current",
-                                license="permitted",
-                                reuse="permitted",
-                                conflict="none",
+                                authority_rationale="counterfactual_invalidated_premise_evidence",
+                                freshness="current", license="permitted", reuse="permitted", conflict="none",
                             )
                         )
             except RepositoryError:

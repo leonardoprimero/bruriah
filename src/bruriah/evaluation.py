@@ -49,6 +49,7 @@ from mcp.shared.memory import create_connected_server_and_client_session
 from pydantic import Field
 
 from .clients import CLIENT_CAPABILITIES, ClientId
+from .corpus import document_ref_for
 from .contracts import (
     Budgets, CandidateMaterial, ClosedModel, EvidenceRecord, InvestigationRequest, ReadRequest, ShortText,
 )
@@ -603,10 +604,14 @@ def _measure_read_latency(deps: ServiceDeps, task: str) -> tuple[GateStatus, str
 
 def _check_golden_query(deps: ServiceDeps, case: InvestigationCase) -> tuple[GateStatus, str]:
     result = investigate(InvestigationRequest(task=case.task), deps)
+    # T2 (investigate-boundary-v2): `EvidenceRecord.locator` is the opaque `document_ref`, never
+    # the corpus-relative path, so `expect_locator_contains` (still the corpus-relative path
+    # this golden query names in the fixture) is matched by computing the exact ref the indexer
+    # would mint for it -- the identical way `corpus.parse_document` does -- never by substring.
     if case.expect_locator_contains and not any(
-        case.expect_locator_contains in item.locator for item in result.evidence
+        item.locator == document_ref_for(case.expect_locator_contains) for item in result.evidence
     ):
-        return "fail", f"no evidence locator contained {case.expect_locator_contains!r}"
+        return "fail", f"no evidence locator matched the document_ref for {case.expect_locator_contains!r}"
     return "pass", f"golden query returned evidence matching {case.expect_locator_contains!r}"
 
 

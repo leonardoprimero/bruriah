@@ -266,7 +266,9 @@ MARKDOWN_CASES: tuple[InjectionCase, ...] = (
         surface="file_name",
         marker=_MD_FILE_NAME_MARKER,
         task=_MD_TASK,
-        expected_leaked=True,
+        # T2: EvidenceRecord.locator/publisher/citation_locator now carry the opaque
+        # document_ref, never the corpus-relative file name, so this channel is closed.
+        expected_leaked=False,
         executed_proof="evidence",
         build=_build_markdown(f"{_MD_FILE_NAME_MARKER}.md", _markdown_document()),
         build_control=_MARKDOWN_CONTROL_BUILD,
@@ -472,7 +474,9 @@ LINEAGE_CASES: tuple[InjectionCase, ...] = (
         surface="lineage.successor_document_path",
         marker=_LINEAGE_SUCCESSOR_FILE_MARKER,
         task=_MD_TASK,
-        expected_leaked=True,
+        # T2: `_apply_lineage` now puts the successor's document_ref, never its file path, into
+        # conflicts/claims/uncertainty.
+        expected_leaked=False,
         executed_proof="lineage",
         build=_build_lineage(f"{_LINEAGE_SUCCESSOR_FILE_MARKER}.md"),
         build_control=_build_lineage(_LINEAGE_CLEAN_SUCCESSOR_FILE),
@@ -533,7 +537,9 @@ GIT_CASES: tuple[InjectionCase, ...] = (
         surface="commit_subject",
         marker=_GIT_SUBJECT_MARKER,
         task=_GIT_TASK,
-        expected_leaked=True,
+        # T2: the slugged file name `gitcorpus.build` derives from the subject no longer reaches
+        # locator/publisher/citation_locator -- those now carry the opaque document_ref.
+        expected_leaked=False,
         executed_proof="evidence",
         build=_build_git(
             subject=f"{_GIT_SUBJECT_MARKER} decision",
@@ -799,7 +805,8 @@ CODE_TARGET_CASES: tuple[InjectionCase, ...] = (
         surface="code_target.governing_author",
         marker=_CT_AUTHOR_MARKER,
         task=_CT_TASK,
-        expected_leaked=True,
+        # T2: the governing author is dropped from provenance_chain/authority_rationale entirely.
+        expected_leaked=False,
         executed_proof="code_target",
         code_target=_CT_CODE_TARGET,
         build=_build_code_target_single(author=_CT_AUTHOR_MARKER, subject=_CT_CLEAN_SUBJECT),
@@ -811,7 +818,8 @@ CODE_TARGET_CASES: tuple[InjectionCase, ...] = (
         surface="code_target.governing_subject",
         marker=_CT_SUBJECT_MARKER,
         task=_CT_TASK,
-        expected_leaked=True,
+        # T2: the governing decision's claim text drops the subject entirely.
+        expected_leaked=False,
         executed_proof="code_target",
         code_target=_CT_CODE_TARGET,
         build=_build_code_target_single(author=_CT_CLEAN_AUTHOR, subject=_CT_SUBJECT_MARKER),
@@ -823,7 +831,9 @@ CODE_TARGET_CASES: tuple[InjectionCase, ...] = (
         surface="code_target.successor_subject",
         marker=_CT_SUCCESSOR_SUBJECT_MARKER,
         task=_CT_TASK,
-        expected_leaked=True,
+        # T2: the conflict message is rebuilt from refs and validated shas; the successor's
+        # subject is dropped entirely.
+        expected_leaked=False,
         executed_proof="code_target",
         code_target=_CT_CODE_TARGET,
         build=_build_code_target_superseded(successor_subject=_CT_SUCCESSOR_SUBJECT_MARKER),

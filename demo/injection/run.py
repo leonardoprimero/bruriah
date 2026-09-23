@@ -17,6 +17,7 @@ from this project's own `read_evidence`, so the comparison cannot be rigged.
 """
 from __future__ import annotations
 
+import hashlib
 import io
 import json
 import os
@@ -41,6 +42,10 @@ from bruriah.service import investigate, read  # noqa: E402
 TASK = "what is our deployment policy for production"
 POISON_MARKERS = ("id_rsa", "Ignore all previous", "deploy directly to", "supersedes every other")
 POISONED_NOTE = "onboarding-notes.md"
+# T2 (investigate-boundary-v2): `EvidenceRecord.locator` is now the opaque document_ref
+# (`doc:v1:<sha256>`), never the corpus-relative file name -- computed the identical way
+# `corpus.parse_document` does, since `POISONED_NOTE` sits at the corpus root.
+POISONED_NOTE_REF = f"doc:v1:{hashlib.sha256(POISONED_NOTE.encode('utf-8')).hexdigest()}"
 
 
 def rule(title: str) -> None:
@@ -80,7 +85,7 @@ def main() -> int:
 
         # --- what a text-returning pipeline would have handed over ------------------------
         rule("1. The baseline: a pipeline that returns passage TEXT")
-        ref = next(e["ref"] for e in payload["evidence"] if e["locator"] == POISONED_NOTE)
+        ref = next(e["ref"] for e in payload["evidence"] if e["locator"] == POISONED_NOTE_REF)
         body = read(ReadRequest(refs=[ref]), poisoned).model_dump(mode="json")["items"][0]["content"]
         print("These bytes reach the model's context, indistinguishable from your own prompt:\n")
         for line in body.splitlines():
@@ -93,7 +98,7 @@ def main() -> int:
         found = [marker for marker in POISON_MARKERS if marker in wire]
         print(f"Whole response: {len(wire)} bytes. Payload fragments present: {found or 'none'}")
         print("\nThe poisoned note is still FOUND. This is what is said about it:\n")
-        record = next(e for e in payload["evidence"] if e["locator"] == POISONED_NOTE)
+        record = next(e for e in payload["evidence"] if e["locator"] == POISONED_NOTE_REF)
         for key in ("locator", "citation_locator", "digest", "authority", "authority_rationale"):
             print(f"  {key:22} {record[key]}")
         assert not found, f"corpus prose reached the response: {found}"

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import subprocess
 from array import array
@@ -37,6 +38,13 @@ def _real_registry() -> Registry:
 
 def _embed(texts: list[str]) -> list[bytes]:
     return [array("f", (1.0, 0.0, 0.0)).tobytes() for _ in texts]
+
+
+def _doc_ref(relative_path: str) -> str:
+    """The `doc:v1:<sha256>` ref `corpus.parse_document` mints for `relative_path`, computed the
+    identical way. T2 (investigate-boundary-v2): the counterfactual evidence records
+    `_evaluate_counterfactual` builds carry this opaque ref, never the corpus-relative path."""
+    return f"doc:v1:{hashlib.sha256(relative_path.encode('utf-8')).hexdigest()}"
 
 
 def test_corpus_frontmatter_parsing(tmp_path: Path):
@@ -179,6 +187,15 @@ We evaluated FastMCP and rejected it due to schema derivation dropping fields wi
         assert result.premises[0].id == "fastmcp-no-forbid"
         assert result.premises[0].status == "active"
 
+        # T2 (investigate-boundary-v2): the counterfactual evidence record for the matched
+        # alternative's own document carries the opaque document_ref and a closed
+        # authority_rationale code -- never the file path or a sentence built from the
+        # alternative's name/disposition.
+        cf_evidence = next(e for e in result.evidence if e.locator == _doc_ref("public/adr-01.md"))
+        assert cf_evidence.authority_rationale == "counterfactual_alternative_evidence"
+        assert "adr-01.md" not in cf_evidence.citation_locator
+        assert "FastMCP" not in cf_evidence.authority_rationale
+
 
 def test_investigate_counterfactual_premise_changed(tmp_path: Path):
     vault = tmp_path / "vault" / "public"
@@ -256,6 +273,13 @@ Upstream released FastMCP 2.0 with strict schema forbid support.
         assert result.premises[0].id == "fastmcp-no-forbid"
         assert result.premises[0].status == "invalidated"
         assert result.premises[0].invalidated_by == "f6e5d4c3b2a1"
+
+        # T2: the invalidating document's own evidence record carries its opaque document_ref
+        # and the closed "counterfactual_invalidated_premise_evidence" code.
+        invalidation_evidence = next(e for e in result.evidence if e.locator == _doc_ref("public/adr-02.md"))
+        assert invalidation_evidence.authority_rationale == "counterfactual_invalidated_premise_evidence"
+        assert "adr-02.md" not in invalidation_evidence.citation_locator
+        assert "fastmcp-no-forbid" not in invalidation_evidence.authority_rationale
 
 
 def test_investigate_counterfactual_unmatched(tmp_path: Path):

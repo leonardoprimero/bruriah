@@ -26,7 +26,7 @@ def _evidence(**overrides: object) -> EvidenceRecord:
         ref="live:sha256:" + "a" * 32, kind="captured_live", publisher="example.test",
         locator="https://example.test:443/page", citation_locator="https://example.test:443/page",
         digest="sha256:" + "b" * 64, extraction_method="raw_lines", authority="unknown",
-        authority_rationale="Live HTTP fetch.", freshness="unknown", license="unknown",
+        authority_rationale="live_fetch_unassessed", freshness="unknown", license="unknown",
         reuse="unknown", conflict="unknown", retrieved_at=_RETRIEVED_AT,
     )
     payload.update(overrides)

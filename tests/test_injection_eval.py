@@ -76,8 +76,16 @@ def benchmark_results() -> list[CaseResult]:
 # (`service.py::_resolve_code_target_causality`, sourced from `why.find_decision_in_database`'s
 # markdown text parsing, never from git identity itself). Values below are recorded from the
 # actual benchmark run, not assumed.
+# T2 (investigate-boundary-v2) closes six of these channels: EvidenceRecord.locator/publisher/
+# citation_locator now carry the opaque document_ref rather than any author-chosen file path
+# (md-file-name, git-subject), _apply_lineage rebuilds conflicts/claims/uncertainty from
+# document refs rather than file paths (lineage-successor-file-name), and
+# _resolve_code_target_causality drops the governing author/subject and the successor's subject
+# from provenance_chain/claims/conflicts entirely (code-target-author, code-target-subject,
+# code-target-successor-subject). The remaining leaks (alternatives[]/premises[] shapes and the
+# counterfactual assessment/conflict wording) are T3's scope.
 EXPECTED_LEAKED: dict[str, bool] = {
-    "md-file-name": True,
+    "md-file-name": False,
     "md-body-prose": False,
     "md-heading": False,
     "md-alt-name": True,
@@ -86,14 +94,14 @@ EXPECTED_LEAKED: dict[str, bool] = {
     "md-premise-statement": True,
     "md-premise-rationale": True,
     "md-premise-invalidated-by": True,
-    "lineage-successor-file-name": True,
-    "git-subject": True,
+    "lineage-successor-file-name": False,
+    "git-subject": False,
     "git-body": False,
     "git-author": False,
     "github-closing-comment": True,
-    "code-target-author": True,
-    "code-target-subject": True,
-    "code-target-successor-subject": True,
+    "code-target-author": False,
+    "code-target-subject": False,
+    "code-target-successor-subject": False,
 }
 
 
