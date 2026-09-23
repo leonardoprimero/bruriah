@@ -24,6 +24,7 @@ Carriers:
 from __future__ import annotations
 
 import os
+import shutil
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
@@ -72,23 +73,70 @@ class InjectionCase:
     build: Callable[[Path], BuildResult]
 
 
-def _run_git(repo: Path, *args: str, env: dict[str, str] | None = None) -> None:
+class GitUnavailableError(RuntimeError):
+    """Raised when `git` is not on PATH. Every git-carrying case surfaces this instead of letting
+    a bare `FileNotFoundError` propagate from deep inside `subprocess.run` -- so callers (the
+    pytest suite and `evals/injection/run.py`) can respond cleanly: skip, or report the case as
+    not executed, never crash on an opaque low-level error, and never silently count an
+    un-run case as held."""
+
+
+GIT_AVAILABLE = shutil.which("git") is not None
+
+
+def _hermetic_git_env(home: Path, *, extra: dict[str, str] | None = None) -> dict[str, str]:
+    """A minimal environment for a git subprocess: no inherited user identity or config, only
+    `PATH` (so `git` itself resolves) plus whatever this module explicitly sets. `HOME` is
+    redirected to a directory this module owns, so git can never read the invoking user's real
+    `~/.gitconfig`, and `GIT_CONFIG_NOSYSTEM`/`GIT_CONFIG_GLOBAL` block the system and global
+    config files outright. `extra` -- e.g. explicit author/committer identity and dates -- always
+    wins over anything set here."""
+    env: dict[str, str] = {
+        "HOME": str(home),
+        "GIT_CONFIG_NOSYSTEM": "1",
+        "GIT_CONFIG_GLOBAL": "/dev/null",
+    }
+    path = os.environ.get("PATH")
+    if path:
+        env["PATH"] = path
+    if extra:
+        env.update(extra)
+    return env
+
+
+def _run_git(repo: Path, *args: str, env: dict[str, str]) -> None:
+    if shutil.which("git") is None:
+        raise GitUnavailableError("git is not available on PATH")
     subprocess.run(["git", *args], cwd=repo, check=True, capture_output=True, env=env)
 
 
-def _init_repo(repo: Path, author: str) -> None:
+def _init_repo(repo: Path, author: str) -> dict[str, str]:
     repo.mkdir(parents=True, exist_ok=True)
-    _run_git(repo, "init", "-q")
-    _run_git(repo, "config", "user.email", _GIT_EMAIL)
-    _run_git(repo, "config", "user.name", author)
-    _run_git(repo, "config", "commit.gpgsign", "false")
+    home = repo.parent / "git-home"
+    home.mkdir(parents=True, exist_ok=True)
+    env = _hermetic_git_env(home)
+    _run_git(repo, "init", "-q", env=env)
+    _run_git(repo, "config", "user.email", _GIT_EMAIL, env=env)
+    _run_git(repo, "config", "user.name", author, env=env)
+    _run_git(repo, "config", "commit.gpgsign", "false", env=env)
+    return env
 
 
-def _commit(repo: Path, message: str) -> None:
+def _commit(repo: Path, message: str, *, author: str, env: dict[str, str]) -> None:
     (repo / "notes.txt").write_text("placeholder\n", encoding="utf-8")
-    _run_git(repo, "add", "-A")
-    env = {**os.environ, "GIT_AUTHOR_DATE": _GIT_DATE, "GIT_COMMITTER_DATE": _GIT_DATE}
-    _run_git(repo, "commit", "-q", "-m", message, env=env)
+    _run_git(repo, "add", "-A", env=env)
+    commit_env = _hermetic_git_env(
+        Path(env["HOME"]),
+        extra={
+            "GIT_AUTHOR_NAME": author,
+            "GIT_AUTHOR_EMAIL": _GIT_EMAIL,
+            "GIT_AUTHOR_DATE": _GIT_DATE,
+            "GIT_COMMITTER_NAME": author,
+            "GIT_COMMITTER_EMAIL": _GIT_EMAIL,
+            "GIT_COMMITTER_DATE": _GIT_DATE,
+        },
+    )
+    _run_git(repo, "commit", "-q", "-m", message, env=commit_env)
 
 
 # ---------------------------------------------------------------------------------------------
@@ -251,8 +299,8 @@ _GIT_AUTHOR_MARKER = "INJ-MARKER-GIT-AUTHOR"
 def _build_git(*, subject: str, body: str, author: str) -> Callable[[Path], BuildResult]:
     def build(work_dir: Path) -> BuildResult:
         repo = work_dir / "repo"
-        _init_repo(repo, author)
-        _commit(repo, f"{subject}\n\n{body}")
+        env = _init_repo(repo, author)
+        _commit(repo, f"{subject}\n\n{body}", author=author, env=env)
         out = work_dir / "corpus"
         gitcorpus_build(repo, out)
         docs = sorted(out.glob("*.md"))
@@ -323,8 +371,8 @@ _GH_CLOSING_COMMENT_MARKER = "INJ-MARKER-GITHUB-CLOSING-COMMENT"
 
 def _build_github_closing_comment(work_dir: Path) -> BuildResult:
     repo = work_dir / "repo"
-    _init_repo(repo, "Eval Bot")
-    _commit(repo, "fix: address the tracked issue\n\nCloses #1.")
+    env = _init_repo(repo, "Eval Bot")
+    _commit(repo, "fix: address the tracked issue\n\nCloses #1.", author="Eval Bot", env=env)
     commits = walk_commits(repo)
 
     cache = ResponseCache(work_dir / "gh-cache")
