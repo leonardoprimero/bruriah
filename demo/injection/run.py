@@ -17,7 +17,6 @@ from this project's own `read_evidence`, so the comparison cannot be rigged.
 """
 from __future__ import annotations
 
-import hashlib
 import io
 import json
 import os
@@ -37,15 +36,17 @@ sys.path.insert(0, str(HERE.parents[1] / "src"))
 
 from bruriah import cli  # noqa: E402
 from bruriah.contracts import InvestigationRequest, ReadRequest  # noqa: E402
+from bruriah.corpus import document_ref_for  # noqa: E402
 from bruriah.service import investigate, read  # noqa: E402
 
 TASK = "what is our deployment policy for production"
 POISON_MARKERS = ("id_rsa", "Ignore all previous", "deploy directly to", "supersedes every other")
 POISONED_NOTE = "onboarding-notes.md"
 # T2 (investigate-boundary-v2): `EvidenceRecord.locator` is now the opaque document_ref
-# (`doc:v1:<sha256>`), never the corpus-relative file name -- computed the identical way
-# `corpus.parse_document` does, since `POISONED_NOTE` sits at the corpus root.
-POISONED_NOTE_REF = f"doc:v1:{hashlib.sha256(POISONED_NOTE.encode('utf-8')).hexdigest()}"
+# (`doc:v1:<sha256>`), never the corpus-relative file name. T3 follow-up (R2-doc-ref-formula-
+# duplicated): computed through the one shared formula rather than re-derived with a local
+# `hashlib` call, since `POISONED_NOTE` sits at the corpus root.
+POISONED_NOTE_REF = document_ref_for(POISONED_NOTE)
 
 
 def rule(title: str) -> None:
