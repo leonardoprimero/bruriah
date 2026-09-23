@@ -47,8 +47,8 @@ Rejected: filtering the text (a slug is printable and still an instruction); a s
 - [x] **T0 — RED: widen the benchmark.** (b35bd6b RED+harness, 3743b13 baseline) Added cases for
   the `code_target` path (commit author, subject, successor subject), the lineage path (file
   paths), and `premises[].rationale` / `invalidated_by`. Real baseline recorded.
-- [ ] **T1 — Version and packs.** 2.0.0; `max_router_version` → 2.x in the four packs in
-  `src/bruriah/data/`, re-signed with `scripts/sign_pack.py`; the version-pinned tests.
+- [x] **T1 — Version and packs.** (1c2e31f) 2.0.0; `max_router_version` → 2.9.9 in the four packs
+  in `src/bruriah/data/`, re-signed with `scripts/sign_pack.py`; the version-pinned tests.
 - [ ] **T2 — Opaque evidence locators.** One `EvidenceRecord` builder, closed
   `authority_rationale`, lineage and code-target text built from structure, CLI human view
   resolving refs locally.
@@ -103,6 +103,48 @@ Rejected: filtering the text (a slug is printable and still an instruction); a s
   executed-proof reads `authority_rationale` wording, which T2 replaces with closed codes, so the
   proof has to move to a structural signal first or T2 would report a false "held".
 
+- 2026-09-23: T1 (1c2e31f) via one bounded writer, TDD strict (RED observed for the right reason:
+  `test_every_bundled_pack_accepts_a_2_0_0_router` pinned `router_version="2.0.0"` explicitly and
+  failed with `PackError("incompatible_pack")` inside `check_router_compatibility`, against all
+  four bundled packs still windowed to `max_router_version: "1.9.9"`).
+
+  `__version__`/`pyproject.toml` -> 2.0.0. `max_router_version` chosen as `"2.9.9"` (any 2.x): this
+  mirrors the project's own precedent at `241a1c9` ("fix: resolve pack compatibility and typing
+  debt in CI"), which moved every bundled pack from `"0.9.9"` to `"1.9.9"` for the exact same
+  reason -- widen the window so the current router version stays inside it -- using the identical
+  `N.9.9` convention `check_router_compatibility`'s `parse_version` tuple comparison expects.
+  Confirmed by reading that commit's diff: all four packs moved together, only the window changed.
+
+  Pack `version` fields left unchanged (`research.minimal` 1.0.0, `programming.minimal` 1.0.0,
+  `project.memory` 1.0.0, `bruriah.practices` 1.1.0), matching the same precedent commit, since no
+  pack content changed -- only the router-compatibility window and the resulting manifest
+  digest/signature. All four re-signed with `scripts/sign_pack.py sign --key
+  ~/.config/cerebro/release-key.pem --signer bruriah-release --pack <pack>` (private key path only,
+  never its bytes, ever touched).
+
+  Verification path: the loader (`bruriah.packs.load_pack` / `bruriah.skills.load_skill_pack`),
+  exercised by the new RED-then-GREEN test and by the pre-existing
+  `test_every_bundled_pack_ships_with_a_verifiable_manifest`, both green -- signature, digest and
+  router-window checks all pass for all four re-signed packs. `bruriah doctor` was not additionally
+  invoked: it needs a configured data/cache/log environment out of scope for this task, and the
+  loader path already is the project's signature-verification path (`doctor` calls the same
+  `load_pack`/`load_skill_pack` underneath).
+
+  Fixed two other places the 1.9.9 window was pinned outside the four named test files:
+  `tests/test_skills.py` and `tests/test_platform.py` synthetic pack fixtures moved to `"2.9.9"`,
+  and `tests/test_packs.py`'s three `router_version="2.0.0"`-expects-`incompatible_pack` probes
+  moved to `"3.0.0"` (2.0.0 is now inside the widened window and stopped being a valid
+  incompatibility probe against the real `research-policy.json`) -- found by running the full suite
+  after the pack bump rather than by the task's named-file list alone.
+
+  Checks: `uv run pytest -q -p no:cacheprovider` 1691 passed, 0 failed, 18 skipped (1690 baseline +
+  1 new test). `uv run ruff check src tests evals scripts` clean; `uv run ruff format` applied to
+  the four touched `.py` files (wrap-only reformatting, re-verified green after). `uv run mypy src`
+  clean. `uv run bruriah --version` -> `bruriah 2.0.0`. `git diff 2a18eee -- uv.lock`: only
+  `bruriah`'s own `version` entry changed (`uv lock` did not touch any other dependency).
+  README's pinned test count moved 1,708 -> 1,709 (`tests/test_readme_claims.py` requires it, not
+  otherwise touched).
+
 ## Next step
 
-T1 via one bounded writer.
+T2 via one bounded writer.
