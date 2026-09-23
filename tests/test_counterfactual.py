@@ -282,6 +282,116 @@ Upstream released FastMCP 2.0 with strict schema forbid support.
         assert "fastmcp-no-forbid" not in invalidation_evidence.authority_rationale
 
 
+def test_a_one_letter_alternative_name_does_not_match_an_unrelated_task(tmp_path: Path):
+    """T3 (investigate-boundary-v2), the name-match floor: a name with no token of at least 3
+    characters (here, a single letter) is not specific enough to identify a task. Before the
+    floor, step 1's raw substring check ('a' in task_text) matched almost any English sentence,
+    so this alternative fired a counterfactual assessment against a task that has nothing to do
+    with it."""
+    vault = tmp_path / "vault" / "public"
+    vault.mkdir(parents=True)
+    (vault / "adr-a.md").write_text(
+        """---
+commit: a1b2c3d4e5f6
+alternatives:
+  - name: "A"
+    disposition: rejected
+    reason: Too vague a name to ever mean anything.
+---
+# ADR: reject A
+Decision content.
+""",
+        encoding="utf-8",
+    )
+
+    policy_path = tmp_path / "policy.yaml"
+    policy_path.write_text("version: 1\ninclude: ['public/**']\nexclude: []\n", encoding="utf-8")
+    policy = CorpusPolicy.load(policy_path)
+    config = BuildConfig(
+        root=tmp_path / "vault", policy_path=policy_path, schema_version=1, parser_version="corpus-v2",
+        service_version="0.1.0", mcp_range=">=1.28.1,<2", embedding_model="test/minilm",
+        embedding_revision="snapshot-a", embedding_dimensions=3, embedding_fingerprint=FINGERPRINT,
+        ranking_config="rrf-v1",
+    )
+    candidate = tmp_path / "candidate.sqlite3"
+    pointer = tmp_path / "active.json"
+    build_candidate(config, candidate, policy, _embed)
+    promote_candidate(candidate, pointer, config, policy)
+
+    with snapshot_active(pointer, config) as active:
+        deps = ServiceDeps(registry=_real_registry(), snapshot=active)
+        service = InvestigateService(deps)
+        result = service.investigate(
+            InvestigationRequest(task="migrate server to a completely different framework")
+        )
+
+        assert result.counterfactual_assessment is None
+        assert result.alternatives == []
+
+
+def test_a_one_letter_alternative_name_cannot_shadow_a_legitimate_alternative_that_sorts_after_it(
+    tmp_path: Path,
+):
+    """The same floor, proven against the exact shadowing shape it closes: `alternatives`' PRIMARY
+    KEY is `(name, document_ref)` and `get_alternatives()` has no ORDER BY, so rows come back in
+    PK order -- "A" sorts before "Kubernetes" and is tried FIRST. Before the floor, "A" matched
+    step 1's raw substring against virtually any task (it is a substring of "managed", "platform",
+    ...) and `break`ed the loop, so the real, specific "Kubernetes" alternative -- which sorts
+    after it -- was never even tried."""
+    vault = tmp_path / "vault" / "public"
+    vault.mkdir(parents=True)
+    (vault / "adr-a.md").write_text(
+        """---
+commit: a1b2c3d4e5f6
+alternatives:
+  - name: "A"
+    disposition: rejected
+    reason: Too vague a name to ever mean anything.
+---
+# ADR: reject A
+Decision content.
+""",
+        encoding="utf-8",
+    )
+    (vault / "adr-kubernetes.md").write_text(
+        """---
+commit: b1c2d3e4f5a6
+alternatives:
+  - name: Kubernetes
+    disposition: rejected
+    reason: Operational overhead too high for our team size.
+---
+# ADR: reject Kubernetes
+Decision content.
+""",
+        encoding="utf-8",
+    )
+
+    policy_path = tmp_path / "policy.yaml"
+    policy_path.write_text("version: 1\ninclude: ['public/**']\nexclude: []\n", encoding="utf-8")
+    policy = CorpusPolicy.load(policy_path)
+    config = BuildConfig(
+        root=tmp_path / "vault", policy_path=policy_path, schema_version=1, parser_version="corpus-v2",
+        service_version="0.1.0", mcp_range=">=1.28.1,<2", embedding_model="test/minilm",
+        embedding_revision="snapshot-a", embedding_dimensions=3, embedding_fingerprint=FINGERPRINT,
+        ranking_config="rrf-v1",
+    )
+    candidate = tmp_path / "candidate.sqlite3"
+    pointer = tmp_path / "active.json"
+    build_candidate(config, candidate, policy, _embed)
+    promote_candidate(candidate, pointer, config, policy)
+
+    with snapshot_active(pointer, config) as active:
+        deps = ServiceDeps(registry=_real_registry(), snapshot=active)
+        service = InvestigateService(deps)
+        result = service.investigate(
+            InvestigationRequest(task="migrate server to Kubernetes framework")
+        )
+
+        assert result.counterfactual_assessment is not None
+        assert result.counterfactual_assessment.matched_alternative == "Kubernetes"
+
+
 def test_investigate_counterfactual_unmatched(tmp_path: Path):
     vault = tmp_path / "vault" / "public"
     vault.mkdir(parents=True)

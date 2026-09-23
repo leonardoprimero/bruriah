@@ -705,10 +705,23 @@ def _evaluate_counterfactual(
 
     for alt in alt_rows:
         alt_name_lower = alt.name.lower()
-        # 1. Exact substring
-        if alt_name_lower in task_text or (target_text and alt_name_lower in target_text):
-            matched_alt = alt
-            break
+        alt_all_tokens = re.findall(r"\w+", alt_name_lower)
+        # T3 (investigate-boundary-v2): the name-match floor. A name with no token of at least 3
+        # characters (e.g. "A", "Go", "Q") is not specific enough to identify a task -- under the
+        # old code it fell straight into step 1's raw substring check, which a 1-2 character name
+        # satisfies against almost any English text, silently shadowing every alternative that
+        # sorts after it in `get_alternatives()`'s PK order. Skipped entirely, never even tried
+        # against steps 2/3.
+        if not any(len(tok) >= 3 for tok in alt_all_tokens):
+            continue
+
+        # 1. Exact substring -- only once the name itself is long enough (>= 4 chars) to identify
+        # a task unambiguously. A name that clears the floor above but is still only 3 characters
+        # (e.g. "SQL") can match ONLY through the anchored word-boundary step below.
+        if len(alt_name_lower) >= 4:
+            if alt_name_lower in task_text or (target_text and alt_name_lower in target_text):
+                matched_alt = alt
+                break
 
         # 2. Word boundary regex
         try:
@@ -720,7 +733,7 @@ def _evaluate_counterfactual(
             pass
 
         # 3. Token-set match: all distinct keywords (len >= 3) of the alternative appear in the text
-        alt_tokens = [tok for tok in re.findall(r"\w+", alt_name_lower) if len(tok) >= 3]
+        alt_tokens = [tok for tok in alt_all_tokens if len(tok) >= 3]
         if len(alt_tokens) >= 2:
             if all(tok in task_text or any(w.startswith(tok[:4]) for w in all_words) for tok in alt_tokens):
                 matched_alt = alt
