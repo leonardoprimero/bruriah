@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import json
-import re
 import sys
 import tempfile
 from array import array
@@ -15,31 +14,8 @@ from .corpus import CorpusPolicy
 from .index import BuildConfig, build_candidate, promote_candidate, snapshot_active
 from .packs import DomainPack
 from .registries import Registry
-from .repository import SnapshotRepository
+from .repository import SnapshotRepository, resolve_counterfactual_refs_for_humans
 from .service import InvestigateService, ServiceDeps
-
-_DEMO_ALT_REF_PATTERN = re.compile(r"alt:v1:[0-9a-f]{64}")
-_DEMO_PREMISE_REF_PATTERN = re.compile(r"premise:v1:[0-9a-f]{64}")
-
-
-def _resolve_counterfactual_refs(text: str, repo: SnapshotRepository) -> str:
-    """Resolve `alt:v1:`/`premise:v1:` refs embedded in `CounterfactualAssessment` text back to
-    a name/id for this human-facing demo (T3, investigate-boundary-v2) -- the same local-resolver
-    pattern `cli._resolve_doc_refs_for_humans` uses for `bruriah ask`'s human view. Applies to the
-    whole string, so it resolves a bare ref (`matched_alternative_ref`) just as well as a ref
-    embedded inside the fixed-wording `rationale` template."""
-
-    def _resolve_alt(match: "re.Match[str]") -> str:
-        row = repo.resolve_alternative_ref(match.group(0))
-        return row.name if row is not None else match.group(0)
-
-    def _resolve_premise(match: "re.Match[str]") -> str:
-        row = repo.resolve_premise_ref(match.group(0))
-        return row.premise_id if row is not None else match.group(0)
-
-    text = _DEMO_ALT_REF_PATTERN.sub(_resolve_alt, text)
-    text = _DEMO_PREMISE_REF_PATTERN.sub(_resolve_premise, text)
-    return text
 
 _SRC = Path(__file__).resolve().parent
 _DATA = _SRC / "data"
@@ -179,9 +155,9 @@ We evaluated FastMCP and rejected it. Supporting premise: fastmcp-no-forbid.
             if cf1:
                 repo1 = SnapshotRepository(active1.database)
                 out.write("  " + _format_red(f"🛑 VERDICT: {cf1.verdict}", use_color) + "\n")
-                out.write(f"  Matched Alternative: {_resolve_counterfactual_refs(cf1.matched_alternative_ref, repo1)}\n")
-                out.write(f"  Rationale: {_resolve_counterfactual_refs(cf1.rationale, repo1)}\n")
-                out.write(f"  Conflicts: {[_resolve_counterfactual_refs(c, repo1) for c in res1.conflicts]}\n\n")
+                out.write(f"  Matched Alternative: {resolve_counterfactual_refs_for_humans(cf1.matched_alternative_ref, repo1)}\n")
+                out.write(f"  Rationale: {resolve_counterfactual_refs_for_humans(cf1.rationale, repo1)}\n")
+                out.write(f"  Conflicts: {[resolve_counterfactual_refs_for_humans(c, repo1) for c in res1.conflicts]}\n\n")
                 out.write(_format_green("RESULT: Agent is warned and flagged with an architectural conflict!", use_color) + "\n")
             else:
                 out.write("  No counterfactual assessment generated.\n")
@@ -224,9 +200,9 @@ FastMCP v2.0 added strict extra='forbid' validation. Premise fastmcp-no-forbid i
             if cf2:
                 repo2 = SnapshotRepository(active2.database)
                 out.write("  " + _format_yellow(f"🔄 VERDICT: {cf2.verdict}", use_color) + "\n")
-                out.write(f"  Matched Alternative: {_resolve_counterfactual_refs(cf2.matched_alternative_ref, repo2)}\n")
-                out.write(f"  Rationale: {_resolve_counterfactual_refs(cf2.rationale, repo2)}\n")
-                out.write(f"  Conflicts: {[_resolve_counterfactual_refs(c, repo2) for c in res2.conflicts]}\n\n")
+                out.write(f"  Matched Alternative: {resolve_counterfactual_refs_for_humans(cf2.matched_alternative_ref, repo2)}\n")
+                out.write(f"  Rationale: {resolve_counterfactual_refs_for_humans(cf2.rationale, repo2)}\n")
+                out.write(f"  Conflicts: {[resolve_counterfactual_refs_for_humans(c, repo2) for c in res2.conflicts]}\n\n")
                 out.write(_format_green("RESULT: Bruriah tracks premise invalidation and signals that FastMCP now requires reevaluation!", use_color) + "\n")
             else:
                 out.write("  No counterfactual assessment generated.\n")

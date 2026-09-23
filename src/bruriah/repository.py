@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 import sqlite3
 from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass
@@ -448,3 +449,33 @@ class SnapshotRepository:
             if premise_ref_for(row.premise_id) == ref:
                 return row
         return None
+
+
+_ALTERNATIVE_REF_PATTERN = re.compile(r"alt:v1:[0-9a-f]{64}")
+_PREMISE_REF_PATTERN = re.compile(r"premise:v1:[0-9a-f]{64}")
+
+
+def resolve_counterfactual_refs_for_humans(text: str, repo: SnapshotRepository) -> str:
+    """Resolve every `alt:v1:`/`premise:v1:` ref embedded anywhere in `text` back to its stored
+    name/premise_id, for a human-facing view only (T4, investigate-boundary-v2; carries T3's
+    review follow-up R2-ref-resolver-duplicated). `cli._resolve_doc_refs_for_humans` and
+    `demo.py`'s counterfactual display used to each define their own copy of this pattern-and-
+    closure pair; this is now the one place it lives, next to the resolver methods above it
+    already reuses. Recomputes each ref over the stored row via `resolve_alternative_ref`/
+    `resolve_premise_ref` rather than storing it -- the same "never carried by the wire contract"
+    rule those two methods already document. An unresolvable ref is left exactly as it was,
+    matching `get_document_path`'s and both resolver methods' not-found behavior. Applies to the
+    whole string, so it resolves a bare ref (e.g. `CounterfactualAssessment.matched_alternative_ref`)
+    just as well as a ref embedded inside fixed-wording template text (`rationale`, `conflicts`)."""
+
+    def _resolve_alt(match: "re.Match[str]") -> str:
+        row = repo.resolve_alternative_ref(match.group(0))
+        return row.name if row is not None else match.group(0)
+
+    def _resolve_premise(match: "re.Match[str]") -> str:
+        row = repo.resolve_premise_ref(match.group(0))
+        return row.premise_id if row is not None else match.group(0)
+
+    text = _ALTERNATIVE_REF_PATTERN.sub(_resolve_alt, text)
+    text = _PREMISE_REF_PATTERN.sub(_resolve_premise, text)
+    return text

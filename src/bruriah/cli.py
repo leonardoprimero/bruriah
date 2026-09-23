@@ -50,7 +50,7 @@ from .corpus import CorpusPolicy, CorpusPolicyError
 from .index import BuildConfig, BuildResult, Embedder, IndexLifecycleError, build_candidate, prune_generations
 from .index_runner import EmbedderFactory, _default_embedder_factory, _embedding_fingerprint, run_index
 from .mcp_server import build_server
-from .repository import SnapshotRepository
+from .repository import SnapshotRepository, resolve_counterfactual_refs_for_humans
 from .platform import (
     PlatformError,
     PlatformPaths,
@@ -787,11 +787,6 @@ def _cmd_serve(args: argparse.Namespace) -> int:
 # never has to run `--read` just to learn which file a conflict or claim is about. `--json` is
 # untouched: it stays exactly the prose-free payload the MCP surface returns.
 _DOC_REF_PATTERN = re.compile(r"doc:v1:[0-9a-f]{64}")
-# T3 (investigate-boundary-v2): the counterfactual contract's opaque refs -- resolved back to a
-# name/id for the human view exactly like `doc:v1:` resolves back to a path. `--json` and the MCP
-# surface never call this function, so they stay ref-only regardless.
-_ALT_REF_PATTERN = re.compile(r"alt:v1:[0-9a-f]{64}")
-_PREMISE_REF_PATTERN = re.compile(r"premise:v1:[0-9a-f]{64}")
 
 
 def _resolve_doc_refs_for_humans(text: str, repo: SnapshotRepository) -> str:
@@ -799,18 +794,13 @@ def _resolve_doc_refs_for_humans(text: str, repo: SnapshotRepository) -> str:
         path = repo.get_document_path(match.group(0))
         return path if path is not None else match.group(0)
 
-    def _resolve_alt(match: "re.Match[str]") -> str:
-        row = repo.resolve_alternative_ref(match.group(0))
-        return row.name if row is not None else match.group(0)
-
-    def _resolve_premise(match: "re.Match[str]") -> str:
-        row = repo.resolve_premise_ref(match.group(0))
-        return row.premise_id if row is not None else match.group(0)
-
     text = _DOC_REF_PATTERN.sub(_resolve_doc, text)
-    text = _ALT_REF_PATTERN.sub(_resolve_alt, text)
-    text = _PREMISE_REF_PATTERN.sub(_resolve_premise, text)
-    return text
+    # T3/T4 (investigate-boundary-v2): the counterfactual contract's opaque `alt:`/`premise:`
+    # refs -- resolved back to a name/id for the human view exactly like `doc:v1:` resolves back
+    # to a path, via the one shared resolver both this function and `demo.py` use (T4 closes
+    # R2-ref-resolver-duplicated). `--json` and the MCP surface never call this function, so they
+    # stay ref-only regardless.
+    return resolve_counterfactual_refs_for_humans(text, repo)
 
 
 def _cmd_ask(
