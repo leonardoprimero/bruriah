@@ -44,9 +44,9 @@ Rejected: filtering the text (a slug is printable and still an instruction); a s
 
 ## Tasks
 
-- [ ] **T0 — RED: widen the benchmark.** Add cases for the `code_target` path (commit author,
-  subject, successor subject), the lineage path (file paths), and `premises[].rationale` /
-  `invalidated_by`. Record the real baseline.
+- [x] **T0 — RED: widen the benchmark.** (b35bd6b RED+harness, 3743b13 baseline) Added cases for
+  the `code_target` path (commit author, subject, successor subject), the lineage path (file
+  paths), and `premises[].rationale` / `invalidated_by`. Real baseline recorded.
 - [ ] **T1 — Version and packs.** 2.0.0; `max_router_version` → 2.x in the four packs in
   `src/bruriah/data/`, re-signed with `scripts/sign_pack.py`; the version-pinned tests.
 - [ ] **T2 — Opaque evidence locators.** One `EvidenceRecord` builder, closed
@@ -75,7 +75,26 @@ Rejected: filtering the text (a slug is printable and still an instruction); a s
 
 - 2026-09-23: design mapped by one read-only agent (Engram topic
   `bruriah/2.0.0-boundary-design`); option B accepted by the user.
+- 2026-09-23: T0 (b35bd6b harness+RED, 3743b13 baseline) via one bounded writer, TDD strict (RED
+  observed for the right reason: `len(CASES) == 17` failing at 11, `StopIteration` on
+  `next(c for c in CASES if c.executed_proof == "code_target"/"lineage")` -- both before cases.py
+  had the new proof kinds). Six new cases added, all executed, all leaked:
+
+  | case | carrier | surface | leak_fields (JSON paths) |
+  |---|---|---|---|
+  | `md-premise-rationale` | markdown | `premises[].rationale` | `.premises[0].rationale` |
+  | `md-premise-invalidated-by` | markdown | `premises[].invalidated_by` | `.premises[0].invalidated_by` |
+  | `lineage-successor-file-name` | markdown | successor document path via `_apply_lineage` | `.claims[0].text`, `.conflicts[1]`, `.evidence[1].{locator,publisher,citation_locator}`, `.evidence[2].uncertainty[0]`, `.evidence[3].uncertainty[0]` |
+  | `code-target-author` | markdown+git | governing decision's author | `.evidence[0].authority_rationale`, `.evidence[0].provenance_chain[2]` |
+  | `code-target-subject` | markdown+git | governing decision's subject (claim text) | `.claims[0].text` |
+  | `code-target-successor-subject` | markdown+git | superseding decision's subject | `.conflicts[0]` |
+
+  Real ASR: 13/17 (0.765), up from 7/11 (0.636) -- every newly measured channel leaks, confirming
+  the design mapping's hypothesis on all three unmeasured surfaces. All 17 cases (old + new)
+  `executed`/`control_executed` true; report byte-identical across two runs. Full suite 1690
+  passed / 0 failed / 18 skipped (README's pinned count moved 1706 -> 1708 with the new
+  `_executed` proof-kind unit tests); ruff and mypy clean.
 
 ## Next step
 
-T0 via one bounded writer.
+T1 via one bounded writer.
