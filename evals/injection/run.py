@@ -116,7 +116,14 @@ class CaseResult:
     control_executed: bool = True
 
 
-def _investigate(corpus_dir: Path, task: str, work_dir: Path) -> dict[str, Any]:
+def _investigate(
+    corpus_dir: Path,
+    task: str,
+    work_dir: Path,
+    *,
+    code_target: str | None = None,
+    repo: Path | None = None,
+) -> dict[str, Any]:
     work_dir.mkdir(parents=True, exist_ok=True)
     policy_path = work_dir / "policy.yaml"
     policy_path.write_text("version: 1\ninclude: ['**']\nexclude: []\n", encoding="utf-8")
@@ -139,9 +146,12 @@ def _investigate(corpus_dir: Path, task: str, work_dir: Path) -> dict[str, Any]:
     build_candidate(config, candidate, policy, _fake_embed)
     promote_candidate(candidate, pointer, config, policy)
     with snapshot_active(pointer, config) as active:
-        deps = ServiceDeps(registry=_registry(), snapshot=active)
+        deps_kwargs: dict[str, Any] = {"registry": _registry(), "snapshot": active}
+        if repo is not None:
+            deps_kwargs["repo"] = repo
+        deps = ServiceDeps(**deps_kwargs)
         service = InvestigateService(deps)
-        request = InvestigationRequest(task=task, host_skills=[])
+        request = InvestigationRequest(task=task, host_skills=[], code_target=code_target)
         result = service.investigate(request)
         return result.model_dump(mode="json")
 
@@ -218,6 +228,26 @@ def _executed(case: InjectionCase, payload: dict[str, Any], document_relative_pa
         return bool(payload.get("alternatives"))
     if case.executed_proof == "premises":
         return bool(payload.get("premises"))
+    if case.executed_proof == "code_target":
+        # `_resolve_code_target_causality` always writes this fixed rationale prefix once it
+        # resolves a governing decision, independent of which field (author/subject) a case
+        # poisons -- so this proves the causal-archaeology path ran, never just that
+        # `code_target` was set on the request.
+        return any(
+            str(evidence.get("authority_rationale") or "").startswith("Governing architectural decision for")
+            for evidence in payload.get("evidence", [])
+        )
+    if case.executed_proof == "lineage":
+        # `_apply_lineage` only ever appends a `superseded_by:`/`deprecated_by:` entry to an
+        # evidence record's `uncertainty` once it has actually matched a lineage relation --
+        # proof the lineage path ran, never just that the response has evidence at all.
+        return any(
+            any(
+                str(item).startswith(("superseded_by:", "deprecated_by:"))
+                for item in (evidence.get("uncertainty") or [])
+            )
+            for evidence in payload.get("evidence", [])
+        )
     # "evidence": the document carrying the surface must actually have been retrieved -- proven
     # by an evidence record whose locator/publisher/citation_locator names it, never guessed.
     # An explicit exception, not `assert`: `assert` is a runtime guard that `python -O` strips
@@ -253,8 +283,20 @@ def run_case(case: InjectionCase) -> CaseResult:
                 leaked=False,
                 control_executed=False,
             )
-        payload = _investigate(build_result.corpus_dir, case.task, work_dir / "svc")
-        control_payload = _investigate(control_build_result.corpus_dir, case.task, work_dir / "svc-control")
+        payload = _investigate(
+            build_result.corpus_dir,
+            case.task,
+            work_dir / "svc",
+            code_target=case.code_target,
+            repo=build_result.repo_dir,
+        )
+        control_payload = _investigate(
+            control_build_result.corpus_dir,
+            case.task,
+            work_dir / "svc-control",
+            code_target=case.code_target,
+            repo=control_build_result.repo_dir,
+        )
         executed = _executed(case, payload, build_result.document_relative_path)
         control_executed = _executed(case, control_payload, control_build_result.document_relative_path)
         leak_fields = find_leak_fields(case.marker, payload, control_payload)

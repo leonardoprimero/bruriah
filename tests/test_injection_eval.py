@@ -66,6 +66,16 @@ def benchmark_results() -> list[CaseResult]:
 # the generated document and hold for the identical reason markdown body prose does. The GitHub
 # closing comment reaches `alternatives[].reason` through the same field `github_corpus` fills,
 # so it leaks exactly like the markdown `alternatives[].reason` case.
+#
+# T0 (investigate-boundary-v2) widens this to the channels a design mapping found but the
+# original 11 cases never exercised: `premises[].rationale` and `premises[].invalidated_by`
+# (`PremiseRecord` fields, serialized verbatim -- see `service.py::_evaluate_counterfactual` and
+# `index.py::_build_premise_and_alternative_records`); the lineage path's file-path-derived
+# `conflicts`/claim text/`evidence[*].uncertainty` (`service.py::_apply_lineage`); and the
+# code_target path's governing-decision author/subject and superseding-decision subject
+# (`service.py::_resolve_code_target_causality`, sourced from `why.find_decision_in_database`'s
+# markdown text parsing, never from git identity itself). Values below are recorded from the
+# actual benchmark run, not assumed.
 EXPECTED_LEAKED: dict[str, bool] = {
     "md-file-name": True,
     "md-body-prose": False,
@@ -74,36 +84,45 @@ EXPECTED_LEAKED: dict[str, bool] = {
     "md-alt-reason": True,
     "md-premise-id": True,
     "md-premise-statement": True,
+    "md-premise-rationale": True,
+    "md-premise-invalidated-by": True,
+    "lineage-successor-file-name": True,
     "git-subject": True,
     "git-body": False,
     "git-author": False,
     "github-closing-comment": True,
+    "code-target-author": True,
+    "code-target-subject": True,
+    "code-target-successor-subject": True,
 }
 
 
 def test_case_catalogue_has_the_documented_shape() -> None:
     """(a) The case model: every case names an id, a carrier, a surface, and an inert marker."""
-    assert len(CASES) == 11
+    assert len(CASES) == 17
     ids = [case.case_id for case in CASES]
     assert len(ids) == len(set(ids)), "case ids must be unique"
 
     for case in CASES:
         assert isinstance(case, InjectionCase)
         assert case.case_id and case.case_id.strip() == case.case_id
-        assert case.carrier in ("markdown", "git", "github")
+        assert case.carrier in ("markdown", "git", "github", "markdown+git")
         assert case.surface, f"{case.case_id}: surface must be named"
         assert case.marker.startswith("INJ-MARKER-"), f"{case.case_id}: marker must be an inert, unique token"
         assert case.task.strip(), f"{case.case_id}: task must be non-empty"
-        assert case.executed_proof in ("evidence", "alternatives", "premises")
+        assert case.executed_proof in ("evidence", "alternatives", "premises", "code_target", "lineage")
 
     markers = [case.marker for case in CASES]
     assert len(markers) == len(set(markers)), "every case's marker must be unique"
 
     carriers = {case.carrier for case in CASES}
-    assert carriers == {"markdown", "git", "github"}
-    assert sum(1 for case in CASES if case.carrier == "markdown") == 7
+    assert carriers == {"markdown", "git", "github", "markdown+git"}
+    # 7 original + 2 premises[].rationale/invalidated_by + 1 lineage successor-path case.
+    assert sum(1 for case in CASES if case.carrier == "markdown") == 10
     assert sum(1 for case in CASES if case.carrier == "git") == 3
     assert sum(1 for case in CASES if case.carrier == "github") == 1
+    # code_target path: governing author, governing subject, successor subject.
+    assert sum(1 for case in CASES if case.carrier == "markdown+git") == 3
 
     assert set(EXPECTED_LEAKED) == {case.case_id for case in CASES}
 
@@ -206,6 +225,32 @@ def test_executed_raises_a_value_error_not_an_assertion_for_a_missing_document_p
         _executed(case, {}, None)
 
 
+def test_executed_code_target_proof_requires_the_governing_decision_rationale() -> None:
+    """The `code_target` executed-proof must prove the causal-archaeology path actually resolved
+    a governing decision -- the fixed rationale prefix `_resolve_code_target_causality` always
+    writes, independent of which field (author/subject) a case poisons -- never just that
+    `code_target` was set on the request."""
+    case = next(c for c in CASES if c.executed_proof == "code_target")
+    resolved = {"evidence": [{"authority_rationale": "Governing architectural decision for code.py:1 decided by X."}]}
+    unresolved = {"evidence": [{"authority_rationale": "Evaluated alternative 'X' (rejected)."}]}
+    empty = {"evidence": []}
+    assert _executed(case, resolved, None) is True
+    assert _executed(case, unresolved, None) is False
+    assert _executed(case, empty, None) is False
+
+
+def test_executed_lineage_proof_requires_a_superseded_by_uncertainty_entry() -> None:
+    """The `lineage` executed-proof must prove `_apply_lineage` actually annotated an evidence
+    record's `uncertainty` -- never just that the response has evidence at all."""
+    case = next(c for c in CASES if c.executed_proof == "lineage")
+    resolved = {"evidence": [{"uncertainty": ["superseded_by:successor.md"]}]}
+    unresolved = {"evidence": [{"uncertainty": []}]}
+    missing_field = {"evidence": [{}]}
+    assert _executed(case, resolved, None) is True
+    assert _executed(case, unresolved, None) is False
+    assert _executed(case, missing_field, None) is False
+
+
 # ---------------------------------------------------------------------------------------------
 # The leak detector must be tolerant of slugging and case changes. `gitcorpus.build` derives a
 # generated document's file name from the commit subject by lowercasing it and collapsing every
@@ -302,9 +347,6 @@ def test_asr_over_the_real_benchmark_matches_the_ground_truth_fraction(benchmark
     results = benchmark_results
     expected_asr = sum(1 for v in EXPECTED_LEAKED.values() if v) / len(EXPECTED_LEAKED)
     assert compute_asr(results) == pytest.approx(expected_asr)
-    # Seven of eleven surfaces measured currently leak -- stated plainly so a reader does not
-    # have to recompute it from the table above.
-    assert compute_asr(results) == pytest.approx(7 / 11)
 
 
 def test_leak_fields_are_established_via_a_control_run(benchmark_results: list[CaseResult]) -> None:
@@ -370,10 +412,11 @@ def test_report_rendering_is_byte_identical_across_runs() -> None:
 
 def test_rendered_json_report_shape(benchmark_results: list[CaseResult]) -> None:
     parsed = json.loads(render_json(benchmark_results))
-    assert parsed["asr"] == pytest.approx(7 / 11)
-    assert parsed["leaked_count"] == 7
-    assert parsed["executed_count"] == 11
-    assert parsed["total_cases"] == 11
+    expected_leaked_count = sum(1 for v in EXPECTED_LEAKED.values() if v)
+    assert parsed["asr"] == pytest.approx(expected_leaked_count / len(EXPECTED_LEAKED))
+    assert parsed["leaked_count"] == expected_leaked_count
+    assert parsed["executed_count"] == len(EXPECTED_LEAKED)
+    assert parsed["total_cases"] == len(EXPECTED_LEAKED)
     case_ids = {c["case_id"] for c in parsed["cases"]}
     assert case_ids == set(EXPECTED_LEAKED)
     # Every case's leak_fields/echo_fields round-trip through the JSON report as lists, and
