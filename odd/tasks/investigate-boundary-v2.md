@@ -6,7 +6,7 @@
 **TDD:** strict (global session configuration). Runner: `uv run pytest -q -p no:cacheprovider`
 **Delivery strategy:** `ask-on-risk`. Forecast ~1,500 authored changed lines, over budget. Slicing
 is decided at delivery time, because nothing is pushed before the fix lands (see Disclosure).
-**RDD:** enabled for this repo. Last reviewed boundary: aca5c9e (later commits passive).
+**RDD:** enabled for this repo. Last reviewed boundary: 214097c.
 **Release:** 2.0.0. Contract break: `InvestigationResult.schema_version` "1" → "2".
 **Disclosure:** local only, never pushed, until this branch closes every measured channel.
 Benchmark, fix and before/after numbers ship together.
@@ -94,6 +94,14 @@ Rejected: filtering the text (a slug is printable and still an instruction); a s
   `executed`/`control_executed` true; report byte-identical across two runs. Full suite 1690
   passed / 0 failed / 18 skipped (README's pinned count moved 1706 -> 1708 with the new
   `_executed` proof-kind unit tests); ruff and mypy clean.
+
+- RDD review of T0 (bdfdbaa..214097c): high risk, consent granted by the user, lineage
+  review-40dcc42b98248072 approved and acknowledged (authority burned). Advisory findings:
+  R2-001 (cases.py:417-422), R2-002 and R4-proof-coupled-to-prose (run.py:231-239),
+  R3-lineage-channel-conflation (cases.py:454-464), R3-markdown-git-git-unavailable
+  (cases.py:696-701). **R4-proof-coupled-to-prose must be handled in T2:** the code-target
+  executed-proof reads `authority_rationale` wording, which T2 replaces with closed codes, so the
+  proof has to move to a structural signal first or T2 would report a false "held".
 
 ## Next step
 
