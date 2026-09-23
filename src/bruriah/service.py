@@ -1248,6 +1248,32 @@ def _read_live_one(
     return item, remaining_total - len(window)
 
 
+def _read_disclosure_one(
+    disclosure: str, evidence_kind: Literal["alternative", "premise"], locator: str, citation_locator: str,
+    ref: str, requested_range: ReadRange | None, cursor_start: int | None,
+    item_cap: int, remaining_total: int, request_id: str,
+) -> tuple[ReadItem, int]:
+    # T4.1 (investigate-boundary-v2, R2-t4-read-alt-premise-duplicated-body): the windowing,
+    # cursor-minting, digesting and `ReadItem` construction that `_read_alternative_one` and
+    # `_read_premise_one` used to each write out in full -- identical past the point where a row
+    # resolves. The caller still owns resolving the ref to a row (`missing_ref` on a miss) and
+    # building `disclosure`/`locator`/`citation_locator`, since those differ by kind.
+    windowed = _window_text(disclosure, requested_range, cursor_start, item_cap, remaining_total)
+    if windowed is None:
+        return ReadItem(ref=ref, status="invalid_range"), remaining_total
+    window, start, actual_end, truncated = windowed
+    next_cursor = _encode_cursor(request_id, ref, actual_end + 1) if truncated else None
+
+    item = ReadItem(
+        ref=ref, status="ok", content=window, start=start, end=actual_end,
+        digest=f"sha256:{hashlib.sha256(disclosure.encode('utf-8')).hexdigest()}",
+        truncated=truncated, next_cursor=next_cursor,
+        evidence_kind=evidence_kind, locator=locator, citation_locator=citation_locator,
+        authority="unknown", freshness="unknown", license="unknown", conflict="unknown",
+    )
+    return item, remaining_total - len(window)
+
+
 def _read_alternative_one(
     repo: SnapshotRepository, ref: str, requested_range: ReadRange | None, cursor_start: int | None,
     item_cap: int, remaining_total: int, request_id: str,
@@ -1267,22 +1293,10 @@ def _read_alternative_one(
         "decision_ref": row.document_ref,
         "premise_refs": [premise_ref_for(pid) for pid in row.premises],
     })
-
-    windowed = _window_text(disclosure, requested_range, cursor_start, item_cap, remaining_total)
-    if windowed is None:
-        return ReadItem(ref=ref, status="invalid_range"), remaining_total
-    window, start, actual_end, truncated = windowed
-    next_cursor = _encode_cursor(request_id, ref, actual_end + 1) if truncated else None
-
-    item = ReadItem(
-        ref=ref, status="ok", content=window, start=start, end=actual_end,
-        digest=f"sha256:{hashlib.sha256(disclosure.encode('utf-8')).hexdigest()}",
-        truncated=truncated, next_cursor=next_cursor,
-        evidence_kind="alternative", locator=row.document_ref,
-        citation_locator=f"{row.document_ref}#{row.name}",
-        authority="unknown", freshness="unknown", license="unknown", conflict="unknown",
+    return _read_disclosure_one(
+        disclosure, "alternative", row.document_ref, f"{row.document_ref}#{row.name}",
+        ref, requested_range, cursor_start, item_cap, remaining_total, request_id,
     )
-    return item, remaining_total - len(window)
 
 
 def _read_premise_one(
@@ -1302,22 +1316,10 @@ def _read_premise_one(
         "rationale": row.rationale, "invalidated_by": row.invalidated_by,
         "invalidated_in": row.invalidation_document_ref,
     })
-
-    windowed = _window_text(disclosure, requested_range, cursor_start, item_cap, remaining_total)
-    if windowed is None:
-        return ReadItem(ref=ref, status="invalid_range"), remaining_total
-    window, start, actual_end, truncated = windowed
-    next_cursor = _encode_cursor(request_id, ref, actual_end + 1) if truncated else None
-
-    item = ReadItem(
-        ref=ref, status="ok", content=window, start=start, end=actual_end,
-        digest=f"sha256:{hashlib.sha256(disclosure.encode('utf-8')).hexdigest()}",
-        truncated=truncated, next_cursor=next_cursor,
-        evidence_kind="premise", locator=row.document_ref,
-        citation_locator=f"{row.document_ref}#{row.premise_id}",
-        authority="unknown", freshness="unknown", license="unknown", conflict="unknown",
+    return _read_disclosure_one(
+        disclosure, "premise", row.document_ref, f"{row.document_ref}#{row.premise_id}",
+        ref, requested_range, cursor_start, item_cap, remaining_total, request_id,
     )
-    return item, remaining_total - len(window)
 
 
 class ReadService:
