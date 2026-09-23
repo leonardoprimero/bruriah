@@ -49,9 +49,9 @@ Rejected: filtering the text (a slug is printable and still an instruction); a s
   paths), and `premises[].rationale` / `invalidated_by`. Real baseline recorded.
 - [x] **T1 — Version and packs.** (1c2e31f) 2.0.0; `max_router_version` → 2.9.9 in the four packs
   in `src/bruriah/data/`, re-signed with `scripts/sign_pack.py`; the version-pinned tests.
-- [ ] **T2 — Opaque evidence locators.** One `EvidenceRecord` builder, closed
-  `authority_rationale`, lineage and code-target text built from structure, CLI human view
-  resolving refs locally.
+- [x] **T2 — Opaque evidence locators.** (ff31cf3 proofs, 20847fe fix, e621017 report) One
+  `EvidenceRecord` builder, closed `authority_rationale`, lineage and code-target text built from
+  structure, CLI human view resolving refs locally.
 - [ ] **T3 — Counterfactual contract v2.** New alternative, premise and assessment shapes,
   fixed-wording rationale and conflicts, `schema_version` "2", the name-match threshold.
 - [ ] **T4 — `alt:` / `premise:` reads.** Repository lookups by ref, the new `evidence_kind`
@@ -155,7 +155,100 @@ Rejected: filtering the text (a slug is printable and still an instruction); a s
   R2-format-churn-mixed-with-version-bump (noted; later tasks keep formatting-only changes
   in their own commits).
 
+- 2026-09-23: T2 (ff31cf3 proofs, 20847fe fix, e621017 report) via one bounded writer, TDD strict.
+
+  **Proofs first (ff31cf3), RED observed for the right reason:** the code_target proof's OLD
+  assertion (`authority_rationale.startswith("Governing architectural decision for")`) was
+  replaced by `test_executed_code_target_proof_requires_a_validated_commit_provenance_entry`,
+  which fails on `ImportError`/assertion mismatch against the un-migrated proof until `run.py`
+  reads `provenance_chain`'s `commit:<sha>` entry instead. Moved the evidence proof to match
+  either the relative path (today) or the case's `document_ref` (computed by the new
+  `evals/injection/cases.py::document_ref_for`, the same formula `corpus.parse_document` uses).
+  Benchmark report byte-identical before/after this commit: 13/17 executed, ASR 0.765 -- proves
+  the proof migration alone changed nothing observable.
+
+  **Src fix (20847fe), RED then GREEN:** closing `contracts.EvidenceRecord.authority_rationale`
+  to the ten-code `AuthorityRationale` Literal broke EVERY existing free-text producer at once
+  (`test_authority_rationale_is_a_closed_set_of_codes_never_free_text` RED via
+  `ImportError: cannot import name 'AuthorityRationale'`; then the full `investigate()` pipeline
+  RED via `ValidationError` on the very first call, since capability/skill/lineage/code-target/
+  counterfactual producers all still wrote free sentences). One builder
+  (`retrieval.build_local_evidence_record`) is now the only place a local `EvidenceRecord` is
+  constructed; `retrieval.to_evidence_records`, `service._apply_lineage`,
+  `_resolve_code_target_causality`, and `_evaluate_counterfactual` all route through it.
+  `corpus.document_ref_for` is the one formula for the ref, reused by `evaluation.py`'s
+  golden-query gate (previously a substring match on the raw file name -- fixed as a caught
+  dependent, `evals/investigation_cases.jsonl`'s fixture path corrected to `public/en.md`), by
+  the benchmark, and by `demo/injection/run.py`'s record selection. `cli.py`'s `ask` command
+  resolves document refs back to real paths locally (`SnapshotRepository.get_document_path`) for
+  the human view only, via a new `_resolve_doc_refs_for_humans` regex substitution over
+  conflicts/claims/citation_locator text -- `--json` and the MCP surface stay exactly the
+  prose-free payload.
+
+  Closed `authority_rationale` codes (10): `not_assessed_by_retrieval`,
+  `capability_identity_only`, `skill_dispatch_declared`, `live_fetch_unassessed`,
+  `raw_capture_unassessed`, `code_target_governing_decision`, `code_target_active_successor`,
+  `code_target_intermediate_successor`, `counterfactual_alternative_evidence`,
+  `counterfactual_invalidated_premise_evidence`.
+
+  **Benchmark before/after (report byte-identical across two runs after the fix):**
+
+  | case | before (T0) | after (T2) |
+  |---|---|---|
+  | `md-file-name` | leaked | **held** |
+  | `git-subject` | leaked | **held** |
+  | `lineage-successor-file-name` | leaked | **held** |
+  | `code-target-author` | leaked | **held** |
+  | `code-target-subject` | leaked | **held** |
+  | `code-target-successor-subject` | leaked | **held** |
+  | `md-alt-name` | leaked | leaked (T3 scope; `.evidence[0].authority_rationale` dropped out of its leak_fields, closed by this task) |
+  | `md-alt-reason`, `md-premise-id`, `md-premise-statement`, `md-premise-rationale`, `md-premise-invalidated-by`, `github-closing-comment` | leaked | leaked (unchanged, T3 scope) |
+  | `md-body-prose`, `md-heading`, `git-body`, `git-author` | held | held (unchanged) |
+
+  ASR: 13/17 (0.765) -> **7/17 (0.412)**.
+
+  All case flips verified by running the actual benchmark, not assumed -- every one of the six
+  flipped as predicted; no case needed an expectation correction that wasn't already the intended
+  fix.
+
+  **Known dependents fixed as the full suite caught them** (as anticipated in the task brief):
+  `tests/test_service.py` (`:1236`, `:1396`, `:1401` authority_rationale text assertions, plus
+  locator/conflict/claim text assertions across the lineage and code_target tests),
+  `tests/test_counterfactual.py` (new assertions for the two counterfactual evidence codes),
+  `tests/test_retrieval.py`, `tests/test_contracts.py`, `tests/test_evidence.py`,
+  `tests/test_cache.py`, `tests/test_cli.py`, `tests/test_mcp_contract.py` (a
+  `@contextmanager`-placement slip introduced while inserting a helper was caught by the run and
+  fixed immediately), `tests/test_ask.py` (not modified -- it already asserted the human view
+  keeps names, which the CLI fix now satisfies), `demo/injection/run.py:83,97` (record selection
+  by `document_ref` instead of `locator == POISONED_NOTE`), `tests/test_injection_demo.py` (green
+  unmodified), and `evals/investigation_cases.jsonl` (fixture path fixed to `public/en.md`,
+  `evaluation.py::_check_golden_query` moved off substring matching).
+
+  **Out of scope, confirmed still leaking (T3's job):** `alternatives[]`/`premises[]` shapes,
+  `counterfactual_assessment`, counterfactual conflict/rationale wording, `schema_version`.
+
+  Checks: `uv run pytest -q -p no:cacheprovider` 1694 passed, 0 failed, 18 skipped (1691 baseline
+  + 3 new tests: the closed-authority-rationale-set contract test, the opaque-document-ref
+  retrieval test, and the evidence-proof-matches-by-document-ref eval unit test). `uv run ruff
+  check src tests evals scripts` clean. `uv run mypy src` clean. `uv run python
+  evals/injection/run.py` run twice, byte-identical JSON and Markdown reports both times. `uv run
+  python demo/injection/run.py` exits 0, all three assertions still hold, and now visibly prints
+  the opaque `doc:v1:<hash>` locator and the closed `not_assessed_by_retrieval` code instead of a
+  file name and a sentence. `tests/test_injection_demo.py` green. README's pinned test count
+  moved 1,709 -> 1,712.
+
+  **`uv run ruff format` was NOT run on the touched files.** `ruff format --diff` on every touched
+  file shows this codebase is already widely divergent from ruff's default style (no blank lines
+  between top-level defs/classes across large stretches of `contracts.py`, `demo/injection/run.py`,
+  and others, predating this task). Applying the formatter would rewrite hundreds of untouched
+  lines as pure style churn mixed into a behavior commit -- exactly what T1's review flagged
+  (R2-format-churn-mixed-with-version-bump) and what this task's own instructions say to keep out
+  of behavior commits. `ruff check` (clean) is the enforced gate; new code in this change follows
+  the condensed style already used at each edit site by hand rather than via the formatter.
+
 ## Next step
 
-T2 via one bounded writer. It first moves the code-target executed-proof off
-`authority_rationale` wording (R4-proof-coupled-to-prose).
+T3 (counterfactual contract v2): new alternative/premise/assessment shapes, fixed-wording
+rationale and conflicts, `schema_version` "2", the name-match threshold. It inherits the six
+already-closed T2 channels and the `AuthorityRationale`/`build_local_evidence_record` machinery;
+`md-alt-name` and its five siblings are the cases it needs to flip.
