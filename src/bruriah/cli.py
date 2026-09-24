@@ -6,6 +6,7 @@ import io
 import json
 import os
 import re
+import sqlite3
 import sys
 from array import array
 from collections.abc import Callable, Sequence
@@ -200,11 +201,18 @@ def _index_summary_line(result: BuildResult) -> str:
     The split is counted in DOCUMENTS because that is the unit reuse is decided in:
     `_stored_document` accepts or rejects a file's entire passage set, so a per-passage figure would
     be arithmetic the build never performs."""
-    return (
+    line = (
         f"Index: {result.passages} passage(s) from {result.documents} document(s) "
         f"({result.reused_documents} reused, {result.documents - result.reused_documents} embedded)"
         f", build {result.build_id[:8]} is active"
     )
+    if result.dropped_premises:
+        ids = ", ".join(dropped.premise_id for dropped in result.dropped_premises)
+        line += (
+            f". Dropped {len(result.dropped_premises)} GitHub premise declaration(s) that lost to "
+            f"a higher-trust or lower-numbered source: {ids}"
+        )
+    return line
 
 
 def run_init(paths: PlatformPaths) -> Path:
@@ -745,8 +753,13 @@ def _cmd_index(
             query_prefix=getattr(args, "query_prefix", None),
             passage_prefix=getattr(args, "passage_prefix", None),
         )
-    except (CorpusPolicyError, IndexLifecycleError, FileExistsError, ValueError, OSError, yaml.YAMLError) as error:
+    except (
+        CorpusPolicyError, IndexLifecycleError, FileExistsError, ValueError, OSError, yaml.YAMLError,
+        sqlite3.Error,
+    ) as error:
         # yaml.YAMLError (a malformed --policy that exists) is neither ValueError nor OSError.
+        # sqlite3.Error (a corrupt or locked database file) is neither: without it here, a build
+        # failing at that layer reached the terminal as a raw traceback instead of a typed error.
         raise CliError(f"index_failed:{getattr(error, 'code', type(error).__name__)}") from error
     summary = {
         "build_id": result.build_id,
@@ -758,6 +771,17 @@ def _cmd_index(
         # they find out when it was not: a full re-embed after a model or parser change shows up
         # here as zero, on the run that took the time.
         "reused_documents": result.reused_documents,
+        # A GitHub-sourced premise declaration that lost to a higher-trust or lower-issue-number
+        # one (`index._build_premise_and_alternative_records`) is dropped rather than merged in --
+        # reported here, by id and source document, so the drop is visible instead of silent.
+        "dropped_premises": [
+            {
+                "premise_id": dropped.premise_id,
+                "document": dropped.relative_path,
+                "reason": dropped.reason,
+            }
+            for dropped in result.dropped_premises
+        ],
     }
     print(json.dumps(summary, sort_keys=True))
     print(_index_summary_line(result), file=sys.stderr)

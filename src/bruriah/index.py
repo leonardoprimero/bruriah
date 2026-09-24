@@ -13,7 +13,7 @@ from contextlib import closing
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from . import language
 from .corpus import CorpusPolicy, parse_document
@@ -99,6 +99,18 @@ class BuildResult:
     documents: int
     passages: int
     reused_documents: int
+    dropped_premises: tuple[DroppedPremise, ...] = ()
+
+
+@dataclass(frozen=True)
+class DroppedPremise:
+    """A GitHub-sourced premise declaration `_build_premise_and_alternative_records` refused to
+    let win, surfaced so the drop is visible in the index report instead of a silent loss."""
+
+    premise_id: str
+    document_ref: str
+    relative_path: str
+    reason: Literal["shadowed_by_repository_premise", "shadowed_by_lower_github_issue"]
 
 
 @dataclass
@@ -779,14 +791,30 @@ def _detect_lineage_cycles(lineage_records: list[tuple[str, str, str | None, str
 
 def _build_premise_and_alternative_records(
     documents: Sequence[Document],
-) -> tuple[list[tuple[str, str, str, str | None, str | None, str, str | None]], list[tuple[str, str, str, str, str]]]:
-    premises_map: dict[str, dict[str, Any]] = {}
+) -> tuple[
+    list[tuple[str, str, str, str | None, str | None, str, str | None]],
+    list[tuple[str, str, str, str, str]],
+    list[DroppedPremise],
+]:
+    # Trust tiers (accepted design, premise-id-collision): a repository-authored document (the
+    # ordinary corpus tree, or a document `gitcorpus` derives from a commit) outranks a GitHub
+    # document, because a GitHub issue/PR body is text whoever opened it chose, not text the
+    # repository owner wrote (`SourceMetadata.source`, set only by `corpus._metadata` from the
+    # `bruriah_source` marker `github_corpus._render_document` writes). A GitHub declaration for an
+    # id a repository document already claims is dropped, never merged in -- see `DroppedPremise`
+    # for how that drop is reported. Two repository documents declaring the same id is instead a
+    # corpus authoring mistake with no safe automatic resolution, so it fails the build.
+    repo_premises: dict[str, dict[str, Any]] = {}
+    repo_declaring_path: dict[str, str] = {}
+    github_candidates: dict[str, list[dict[str, Any]]] = {}
+
     for doc in documents:
+        tier = "github" if doc.metadata.source == "github" else "repository"
         for p in doc.metadata.premises:
             pid = p.get("id")
             if not pid:
                 continue
-            premises_map[pid] = {
+            record = {
                 "premise_id": pid,
                 "statement": p.get("statement", ""),
                 "status": p.get("status", "active"),
@@ -794,7 +822,53 @@ def _build_premise_and_alternative_records(
                 "rationale": p.get("rationale"),
                 "document_ref": doc.document_ref,
                 "invalidation_document_ref": None,
+                "relative_path": doc.relative_path,
             }
+            if tier == "repository":
+                if pid in repo_premises:
+                    raise IndexLifecycleError(
+                        f"duplicate_premise_id:{pid}:{repo_declaring_path[pid]}:{doc.relative_path}"
+                    )
+                repo_premises[pid] = record
+                repo_declaring_path[pid] = doc.relative_path
+            else:
+                record["github_issue"] = doc.metadata.github_issue
+                github_candidates.setdefault(pid, []).append(record)
+
+    premises_map: dict[str, dict[str, Any]] = dict(repo_premises)
+    dropped: list[DroppedPremise] = []
+
+    for pid, candidates in github_candidates.items():
+        # Deterministic "lowest issue number wins": documents are already in corpus path order
+        # (`corpus.CorpusPolicy.discover`), which is the tie-break for two candidates that somehow
+        # carry the same (or no) issue number -- never left to dict/insertion order alone.
+        ranked = sorted(
+            range(len(candidates)),
+            key=lambda i: (
+                candidates[i]["github_issue"]
+                if candidates[i]["github_issue"] is not None
+                else float("inf"),
+                i,
+            ),
+        )
+        winner = candidates[ranked[0]]
+        for loser_index in ranked[1:]:
+            loser = candidates[loser_index]
+            dropped.append(DroppedPremise(
+                premise_id=pid,
+                document_ref=loser["document_ref"],
+                relative_path=loser["relative_path"],
+                reason="shadowed_by_lower_github_issue",
+            ))
+        if pid in premises_map:
+            dropped.append(DroppedPremise(
+                premise_id=pid,
+                document_ref=winner["document_ref"],
+                relative_path=winner["relative_path"],
+                reason="shadowed_by_repository_premise",
+            ))
+        else:
+            premises_map[pid] = winner
 
     for doc in documents:
         for inv_id in doc.metadata.invalidated_premises:
@@ -830,10 +904,14 @@ def _build_premise_and_alternative_records(
 
     alt_rows = []
     for doc in documents:
+        seen_names: set[str] = set()
         for alt in doc.metadata.alternatives:
             name = alt.get("name")
             if not name:
                 continue
+            if name in seen_names:
+                raise IndexLifecycleError(f"duplicate_alternative_name:{name}:{doc.relative_path}")
+            seen_names.add(name)
             disposition = alt.get("disposition", "rejected")
             reason = alt.get("reason", "")
             premises_list = alt.get("premises", [])
@@ -845,7 +923,7 @@ def _build_premise_and_alternative_records(
                 doc.document_ref,
             ))
 
-    return premise_rows, alt_rows
+    return premise_rows, alt_rows, dropped
 
 
 def _build_lexical_index(database: sqlite3.Connection) -> None:
@@ -990,7 +1068,7 @@ def build_candidate(
         lineage_records = _build_lineage_records(documents)
         _detect_lineage_cycles(lineage_records)
         database.executemany("INSERT INTO lineage VALUES (?, ?, ?, ?)", lineage_records)
-        premise_records, alternative_records = _build_premise_and_alternative_records(documents)
+        premise_records, alternative_records, dropped_premises = _build_premise_and_alternative_records(documents)
         if premise_records:
             database.executemany("INSERT INTO premises VALUES (?, ?, ?, ?, ?, ?, ?)", premise_records)
         if alternative_records:
@@ -1003,7 +1081,10 @@ def build_candidate(
         database.close()
         database = None
         os.replace(temporary, destination)
-        return BuildResult(destination, build_id, manifest_hash, len(documents), passage_count, reused)
+        return BuildResult(
+            destination, build_id, manifest_hash, len(documents), passage_count, reused,
+            tuple(dropped_premises),
+        )
     except BaseException:
         if database is not None:
             database.close()
