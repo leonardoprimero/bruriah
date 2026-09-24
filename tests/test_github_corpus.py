@@ -157,6 +157,8 @@ class TestBuildDocumentsIssue41:
         document = parse_document(doc_path, out, policy)
         metadata = document.metadata
         assert metadata.commit == "a" * 40
+        assert metadata.source == "github"
+        assert metadata.github_issue == 41
         assert len(metadata.alternatives) == 1
         alt = metadata.alternatives[0]
         assert alt["name"] == "Attempt: retry on lock contention instead of locking"
@@ -182,6 +184,7 @@ class TestBuildDocumentsIssue41:
         out, _ = self._build(tmp_path)
         text = next(out.glob("*.md")).read_text(encoding="utf-8")
         frontmatter = text.split("---\n", 2)[1]
+        assert "bruriah_source: github" in frontmatter
         assert "commit:" in frontmatter
         assert "issue: 41" in frontmatter
         assert "github_url:" in frontmatter

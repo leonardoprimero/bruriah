@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import json
 import os
+import sqlite3
 import stat
 import subprocess
 import sys
@@ -426,6 +427,37 @@ def test_cli_index_dispatch_builds_only_under_private_data_dir(tmp_path: Path) -
     assert exit_code == 0
     assert (data_dir / "active.json").is_file()
     assert all(path.parent == data_dir for path in data_dir.rglob("candidate-*.sqlite3"))
+
+
+def test_a_sqlite_error_during_index_is_a_typed_message_never_a_raw_traceback(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture,
+) -> None:
+    """premise-id-collision: `_cmd_index`'s except tuple did not include `sqlite3.Error`, so a
+    corrupt or locked database file reaching that layer surfaced as a raw traceback instead of the
+    typed `index_failed:...` message every other build failure already gets."""
+    root, policy_path = _corpus(tmp_path)
+
+    def _boom(*args: object, **kwargs: object) -> None:
+        raise sqlite3.OperationalError("disk I/O error")
+
+    monkeypatch.setattr(cli, "run_index", _boom)
+    exit_code = cli.bruriah_main(
+        [
+            "index",
+            "--config-dir",
+            str(tmp_path / "config"),
+            "--data-dir",
+            str(tmp_path / "data"),
+            "--corpus-root",
+            str(root),
+            "--policy",
+            str(policy_path),
+        ]
+    )
+    captured = capsys.readouterr()
+    assert exit_code == 1
+    assert "bruriah: error: index_failed:OperationalError" in captured.err
+    assert "Traceback" not in captured.err
 
 
 def test_index_persists_absolute_paths_so_serve_survives_a_different_working_directory(
