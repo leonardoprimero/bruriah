@@ -5,7 +5,7 @@ from __future__ import annotations
 import importlib.util
 import os
 
-__version__ = "2.0.1"
+__version__ = "2.1.0"
 
 # Bruriah needs a platform that can promote a snapshot ATOMICALLY: take an exclusive lock, open a
 # validated file in a way that cannot be swapped underneath it, and publish a pointer while readers

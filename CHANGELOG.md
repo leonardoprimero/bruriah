@@ -3,7 +3,7 @@
 Notable changes, newest first. This project follows [semantic versioning](https://semver.org/),
 and the entries here name what changed for *you* rather than which files moved.
 
-## [Unreleased]
+## [2.1.0] — 2026-09-24
 
 ### Added: framework comparison rows on the injection benchmark
 - The same 17 attacker surfaces now also run through the typical agent retrieval-as-tool pattern
