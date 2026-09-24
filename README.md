@@ -217,7 +217,7 @@ We evaluate Bruriah against real codebases and publish negative results alongsid
 | **Rejected alternatives from GitHub (236 questions)** | **115 recovered** from `square/leakcanary` (17) and `emilk/egui` (98); 34 of 236 questions carry a counterfactual | Opt-in via `bruriah corpus --github`, measured 2026-09-21; see [Issue ingestion, measured 2026-09-21](evals/project-memory/README.md#issue-ingestion-measured-2026-09-21) |
 | **Query Latency** | **≈46µs per passage** (linear) | 1,000 passages in 45ms, 16,000 in 734ms on M4 Pro |
 | **Index Size** | **≈5 KB per passage** | 16k passages ≈ 79 MB SQLite database |
-| **Test Suite** | **1,766 tests** · 0 failures · skips only when an environment prerequisite is absent | Full matrix on Python 3.12, 3.13, 3.14 across Linux, macOS, and Windows |
+| **Test Suite** | **1,770 tests** · 0 failures · skips only when an environment prerequisite is absent | Full matrix on Python 3.12, 3.13, 3.14 across Linux, macOS, and Windows |
 
 > **Want the full methodology and ablations?**  
 > Read our in-depth evaluation report: [**Evaluation Methodology & Benchmarks (`evals/project-memory/README.md`)**](evals/project-memory/README.md).

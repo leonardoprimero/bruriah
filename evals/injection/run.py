@@ -35,6 +35,7 @@ Usage:
 from __future__ import annotations
 
 import json
+import os
 import re
 import sys
 import tempfile
@@ -59,6 +60,31 @@ from bruriah.service import InvestigateService, ServiceDeps  # noqa: E402
 
 REPORT_JSON_PATH = _HERE / "report.json"
 REPORT_MD_PATH = _HERE / "report.md"
+
+
+def write_report(path: Path, text: str) -> None:
+    """Publish a committed report whole or not at all.
+
+    The reports under `evals/injection` are committed artifacts that tests and the README pin
+    against, so a crash halfway through `write_text` must never leave a truncated file in the
+    tree. The bytes go to a temporary in the same directory, are flushed and fsynced, and only
+    then replace the destination in one `os.replace`; on any failure the temporary is removed
+    and the previous report is untouched. Shared by the core runner and the framework comparison.
+    """
+    handle = tempfile.NamedTemporaryFile(
+        mode="w", encoding="utf-8", prefix=f".{path.name}.", suffix=".tmp", dir=path.parent, delete=False
+    )
+    temporary = Path(handle.name)
+    try:
+        handle.write(text)
+        handle.flush()
+        os.fsync(handle.fileno())
+        handle.close()
+        os.replace(temporary, path)
+    except BaseException:
+        handle.close()
+        temporary.unlink(missing_ok=True)
+        raise
 
 # Deterministic across every case, and across every run of this module: no fastembed download,
 # no real vector, so the "fingerprint" is a fixture value like `evals/counterfactual/runner.py`'s.
@@ -429,8 +455,8 @@ def render_markdown(results: list[CaseResult]) -> str:
 
 def main() -> int:
     results = run_benchmark()
-    REPORT_JSON_PATH.write_text(render_json(results), encoding="utf-8")
-    REPORT_MD_PATH.write_text(render_markdown(results), encoding="utf-8")
+    write_report(REPORT_JSON_PATH, render_json(results))
+    write_report(REPORT_MD_PATH, render_markdown(results))
     print(render_markdown(results))
     return 0
 

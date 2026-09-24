@@ -30,8 +30,8 @@ granularity:
   and a quiet "held" would be a lie.
 
 This module imports no framework: the pinned `llama-index-core`/`langchain-core` adapters live
-in `adapters.py` (the optional `frameworks-compare` dependency group, which CI never installs)
-and are imported only by `main()`.
+in `framework_adapters.py` (the optional `frameworks-compare` dependency group, which CI never
+installs) and are imported only by `main()`.
 
 Usage:
     uv run --group frameworks-compare python evals/injection/frameworks/compare.py
@@ -53,7 +53,7 @@ for _path in (_INJECTION_DIR, _HERE):
         sys.path.insert(0, str(_path))
 
 from cases import CASES, GitUnavailableError, InjectionCase  # noqa: E402
-from run import NotExecutedError, is_leaked  # noqa: E402
+from run import NotExecutedError, is_leaked, write_report  # noqa: E402
 
 # The cost side of the comparison, in the same table as the boundary side: an agent on Bruriah
 # needs `investigate_work` and then an explicit `read_evidence` call to see retrieved content
@@ -333,8 +333,8 @@ def main() -> int:
     from framework_adapters import ADAPTERS  # pyright: ignore[reportMissingImports]
 
     results = run_comparison(ADAPTERS)
-    REPORT_JSON_PATH.write_text(render_json(results), encoding="utf-8")
-    REPORT_MD_PATH.write_text(render_markdown(results), encoding="utf-8")
+    write_report(REPORT_JSON_PATH, render_json(results))
+    write_report(REPORT_MD_PATH, render_markdown(results))
     print(render_markdown(results))
     return 0
 
