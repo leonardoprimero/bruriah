@@ -7,7 +7,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from types import MappingProxyType
-from typing import Any
+from typing import Any, Literal
 
 import yaml
 from markdown_it import MarkdownIt
@@ -221,7 +221,7 @@ def _metadata(frontmatter: dict[str, Any]) -> SourceMetadata:
     # from a path or file name, both of which a repository-authored document is free to reuse. Any
     # other value (including its absence, the ordinary case for a corpus document) is "repository".
     raw_bruriah_source = frontmatter.get("bruriah_source")
-    source = (
+    source: Literal["repository", "github"] = (
         "github"
         if isinstance(raw_bruriah_source, str) and raw_bruriah_source.strip().lower() == "github"
         else "repository"

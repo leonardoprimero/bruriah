@@ -816,7 +816,7 @@ def _build_premise_and_alternative_records(
     github_candidates: dict[str, list[dict[str, Any]]] = {}
 
     for doc in documents:
-        tier = "github" if doc.metadata.source == "github" else "repository"
+        tier = doc.metadata.source
         for p in doc.metadata.premises:
             pid = p.get("id")
             if not pid:

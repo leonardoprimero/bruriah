@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Literal
 
 
 @dataclass(frozen=True)
@@ -24,7 +24,7 @@ class SourceMetadata:
     # Set from the `bruriah_source` frontmatter key, which only `github_corpus._render_document`
     # writes; never inferred from a document's path or file name, both of which a repository
     # document is free to reuse.
-    source: str = "repository"
+    source: Literal["repository", "github"] = "repository"
     # The GitHub issue/PR number a `source: "github"` document was generated from, carried for the
     # deterministic "lowest number wins" tie-break between two GitHub documents that redeclare the
     # same premise id. `None` for a repository document, where it plays no role.
