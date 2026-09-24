@@ -143,13 +143,15 @@ def test_alternative_name_falls_back_to_the_ref_when_the_disclosure_is_not_an_ob
     assert _alternative_name(ref, deps=None) == ref  # type: ignore[arg-type]
 
 
-def test_alternative_name_falls_back_to_the_ref_when_the_object_has_no_string_name(monkeypatch) -> None:
-    """T5: a well-formed JSON object missing a string `name` field (either absent entirely or
-    present with a non-string value) falls back to the raw ref rather than returning a non-string
-    or `None`."""
+@pytest.mark.parametrize(
+    "payload",
+    [{"disposition": "rejected"}, {"name": 42}, {"name": None}, {"name": ["MongoDB"]}],
+    ids=["absent", "int", "null", "list"],
+)
+def test_alternative_name_falls_back_to_the_ref_when_the_object_has_no_string_name(monkeypatch, payload) -> None:
+    """A well-formed JSON object without a string `name` -- absent, or present with a non-string
+    value -- falls back to the raw ref rather than returning a non-string or `None`."""
     ref = "alt:v1:" + "c" * 64
-    monkeypatch.setattr(
-        "bruriah.demo.read", lambda request, deps: _ok_read_result(ref, json.dumps({"disposition": "rejected"}))
-    )
+    monkeypatch.setattr("bruriah.demo.read", lambda request, deps: _ok_read_result(ref, json.dumps(payload)))
 
     assert _alternative_name(ref, deps=None) == ref  # type: ignore[arg-type]
