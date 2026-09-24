@@ -87,6 +87,41 @@ Bruriah MUST extract alternatives, rejection reasons, and premise declarations f
 
 ---
 
+### Requirement: Premise Identifier Conflicts (2.0.1)
+`premise_id` is the `premises` table's PRIMARY KEY and MUST stay globally unique across the whole
+corpus, but two documents declaring the same id are not equally trustworthy: a repository-authored
+document (the corpus tree, or a document `gitcorpus` derives from a commit) MUST always outrank a
+document `github_corpus` generated from an issue or pull request, because that body's text is
+chosen by whoever opened it, not by the repository owner.
+
+- A GitHub-tier declaration for an id a repository-tier document already claims MUST be dropped,
+  never merged into `premises_map`, and the drop MUST be reported (premise id and source document)
+  in `bruriah index`'s summary line and its JSON output.
+- Two repository-tier documents declaring the same id have no safe automatic resolution: `bruriah
+  index` MUST fail with a typed `duplicate_premise_id` error naming both documents, rather than
+  letting whichever one happens to parse last silently win.
+- Two GitHub-tier documents declaring the same id MUST resolve deterministically: the lower
+  issue/PR number wins, and the other is dropped and reported the same way.
+- `invalidated_premises` is unaffected: an existing premise's `status`/`invalidated_by` can still
+  be changed by a later document's `Premise-Invalidated`/`invalidated_premises` declaration,
+  regardless of trust tier.
+
+#### Scenario: A GitHub issue redeclares a repository premise
+- GIVEN a repository-authored ADR declaring `id: fastmcp-no-forbid` with `status: active`, and a
+  GitHub issue body declaring `Premise: fastmcp-no-forbid | ...` with a different statement
+- WHEN `bruriah index` builds the premise table
+- THEN the repository declaration's statement and status are stored unchanged, the GitHub
+  declaration is dropped and reported, and `investigate_work`'s counterfactual verdict for that
+  premise is unaffected.
+
+#### Scenario: Two repository documents declare the same premise id
+- GIVEN two repository-authored documents each declaring `id: scale-premise`
+- WHEN `bruriah index` builds the premise table
+- THEN the build fails with a typed `duplicate_premise_id` error naming both documents, and no
+  candidate index is promoted.
+
+---
+
 ### Requirement: Counterfactual Assessment during Investigation
 `investigate_work` MUST evaluate candidate matches against historical alternatives and active premises without expanding the two-tool public contract:
 

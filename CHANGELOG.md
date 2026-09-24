@@ -3,6 +3,43 @@
 Notable changes, newest first. This project follows [semantic versioning](https://semver.org/),
 and the entries here name what changed for *you* rather than which files moved.
 
+## [2.0.1] — 2026-09-23
+
+### Fixed: a conflicting premise declaration can no longer replace another silently
+- `bruriah index` collected premises in a dict keyed by `premise_id`; when two documents declared
+  the same id, whichever one `index.py` happened to parse last silently won -- its statement,
+  status, and document reference replaced the first one's. Because a declaration can set `status`,
+  the winning document could flip an `investigate_work` counterfactual verdict from
+  `repeat_of_rejected_architecture` to `premise_changed_requires_reevaluation` (or back) with no
+  build error and no report. A GitHub issue or pull request body can declare a premise through
+  `Premise: <id> | <statement>` (`github_corpus._extract_premises`), so whoever opens one chooses
+  the id and could redeclare a premise the repository itself authored.
+- `bruriah index` now trust-tiers every premise declaration. A repository-authored source (the
+  corpus tree, or a document `gitcorpus` derives from a commit) always outranks a GitHub-sourced
+  document: a GitHub declaration for an id a repository document already claims is dropped, never
+  merged in, and the drop is reported -- by premise id and source document -- in `bruriah index`'s
+  summary line and its JSON output (`dropped_premises`). Two repository documents declaring the
+  same id is a corpus authoring mistake with no safe automatic resolution: the build now fails
+  with a typed `duplicate_premise_id` error naming both documents, rather than silently picking
+  one. Two GitHub documents declaring the same id resolve deterministically: the lower issue/PR
+  number wins, and the other is dropped and reported the same way.
+- A document that lists the same alternative name twice used to crash the build with a raw
+  `sqlite3.IntegrityError` at the `alternatives` table's `(name, document_ref)` insert. It now
+  fails with a typed `duplicate_alternative_name` error naming the document, before any insert is
+  attempted. `bruriah index` also now wraps `sqlite3.Error` in a typed `CliError`, so a corrupt or
+  locked database file reaching that layer surfaces as `index_failed:...`, never a raw traceback.
+- `invalidated_premises` keeps its existing semantics; this release changes only how a *new*
+  premise declaration is allowed to win, never how an existing one is invalidated.
+
+### Migration
+- **A corpus that already has two repository documents declaring the same premise id** stops
+  indexing until the ids are made unique or the duplicate declaration is removed. Before this
+  release, `bruriah index` accepted it and silently used whichever document parsed last.
+- **A corpus that relies on a GitHub-sourced document redeclaring a repository premise** (to
+  change its statement or flip its status) no longer has that redeclaration take effect. The
+  repository declaration wins; the GitHub one is dropped and reported. Redeclare the premise in a
+  repository-authored document instead.
+
 ## [2.0.0] — 2026-09-23
 
 A security release and a breaking one: `investigate_work` now holds, measurably, the boundary its

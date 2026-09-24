@@ -122,6 +122,17 @@ CREATE TABLE alternatives (
 ) WITHOUT ROWID;
 ```
 
+`premise_id` being the PRIMARY KEY means it is globally unique across the whole corpus, not just
+within one document -- so two documents declaring the same id must be reconciled at index time,
+not left to whichever row happens to be inserted last. As of 2.0.1, `bruriah index` reconciles them
+by trust tier: a repository-authored document always outranks a document `github_corpus` generated
+from a GitHub issue or pull request, since that body's text is chosen by whoever opened it. A
+losing GitHub declaration is dropped and reported (never merged in); two repository documents
+declaring the same id instead fail the build with a typed `duplicate_premise_id` error naming
+both, since there is no safe automatic way to pick between them. See the CHANGELOG's `[2.0.1]`
+entry and `openspec/specs/counterfactual-premise-tracking/spec.md`'s "Premise Identifier
+Conflicts" requirement.
+
 ---
 
 ## 4. System Architecture: Two-Tool Contract Purity
