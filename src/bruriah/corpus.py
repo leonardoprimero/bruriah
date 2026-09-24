@@ -7,7 +7,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from types import MappingProxyType
-from typing import Any
+from typing import Any, Literal
 
 import yaml
 from markdown_it import MarkdownIt
@@ -217,6 +217,21 @@ def _metadata(frontmatter: dict[str, Any]) -> SourceMetadata:
                 if sub.strip():
                     inv_clean.append(sub.strip())
 
+    # `bruriah_source` is written only by `github_corpus._render_document`; it is never inferred
+    # from a path or file name, both of which a repository-authored document is free to reuse. Any
+    # other value (including its absence, the ordinary case for a corpus document) is "repository".
+    raw_bruriah_source = frontmatter.get("bruriah_source")
+    source: Literal["repository", "github"] = (
+        "github"
+        if isinstance(raw_bruriah_source, str) and raw_bruriah_source.strip().lower() == "github"
+        else "repository"
+    )
+    github_issue: int | None = None
+    if source == "github":
+        raw_issue = frontmatter.get("issue")
+        if isinstance(raw_issue, int) and not isinstance(raw_issue, bool):
+            github_issue = raw_issue
+
     return SourceMetadata(
         provenance=tuple(dict.fromkeys(provenance)),
         provenance_urls=tuple(dict.fromkeys(urls)),
@@ -229,6 +244,8 @@ def _metadata(frontmatter: dict[str, Any]) -> SourceMetadata:
         alternatives=tuple(alts),
         premises=tuple(premises),
         invalidated_premises=tuple(dict.fromkeys(inv_clean)),
+        source=source,
+        github_issue=github_issue,
     )
 
 

@@ -6,6 +6,7 @@ import io
 import json
 import os
 import re
+import sqlite3
 import sys
 from array import array
 from collections.abc import Callable, Sequence
@@ -47,7 +48,15 @@ from ._cli.skills import (
     run_skill_status,
 )
 from .corpus import CorpusPolicy, CorpusPolicyError
-from .index import BuildConfig, BuildResult, Embedder, IndexLifecycleError, build_candidate, prune_generations
+from .index import (
+    BuildConfig,
+    BuildResult,
+    DroppedPremise,
+    Embedder,
+    IndexLifecycleError,
+    build_candidate,
+    prune_generations,
+)
 from .index_runner import EmbedderFactory, _default_embedder_factory, _embedding_fingerprint, run_index
 from .mcp_server import build_server
 from .repository import SnapshotRepository, resolve_counterfactual_refs_for_humans
@@ -200,11 +209,32 @@ def _index_summary_line(result: BuildResult) -> str:
     The split is counted in DOCUMENTS because that is the unit reuse is decided in:
     `_stored_document` accepts or rejects a file's entire passage set, so a per-passage figure would
     be arithmetic the build never performs."""
-    return (
+    line = (
         f"Index: {result.passages} passage(s) from {result.documents} document(s) "
         f"({result.reused_documents} reused, {result.documents - result.reused_documents} embedded)"
         f", build {result.build_id[:8]} is active"
     )
+    if result.dropped_premises:
+        # Grouped by premise id, never a flat id list: a premise can be the target of more than one
+        # drop (two GitHub candidates losing the issue-number tie-break, or a losing declaration
+        # alongside an ignored GitHub invalidation), and each one must still name its own document
+        # and reason rather than being folded into an undifferentiated count.
+        by_id: dict[str, list[DroppedPremise]] = {}
+        for dropped in result.dropped_premises:
+            by_id.setdefault(dropped.premise_id, []).append(dropped)
+        groups = "; ".join(
+            f"{premise_id} (" + ", ".join(
+                f"{dropped.relative_path}: {dropped.reason}" for dropped in drops
+            ) + ")"
+            for premise_id, drops in by_id.items()
+        )
+        # "entries", never "declarations": a drop is either a losing premise declaration or an
+        # ignored invalidation (`github_invalidation_ignored`), and the earlier wording claimed
+        # every drop was a declaration even when it was not.
+        count = len(result.dropped_premises)
+        entry_word = "entry" if count == 1 else "entries"
+        line += f". Dropped {count} GitHub premise {entry_word}: {groups}"
+    return line
 
 
 def run_init(paths: PlatformPaths) -> Path:
@@ -745,8 +775,13 @@ def _cmd_index(
             query_prefix=getattr(args, "query_prefix", None),
             passage_prefix=getattr(args, "passage_prefix", None),
         )
-    except (CorpusPolicyError, IndexLifecycleError, FileExistsError, ValueError, OSError, yaml.YAMLError) as error:
+    except (
+        CorpusPolicyError, IndexLifecycleError, FileExistsError, ValueError, OSError, yaml.YAMLError,
+        sqlite3.Error,
+    ) as error:
         # yaml.YAMLError (a malformed --policy that exists) is neither ValueError nor OSError.
+        # sqlite3.Error (a corrupt or locked database file) is neither: without it here, a build
+        # failing at that layer reached the terminal as a raw traceback instead of a typed error.
         raise CliError(f"index_failed:{getattr(error, 'code', type(error).__name__)}") from error
     summary = {
         "build_id": result.build_id,
@@ -758,6 +793,19 @@ def _cmd_index(
         # they find out when it was not: a full re-embed after a model or parser change shows up
         # here as zero, on the run that took the time.
         "reused_documents": result.reused_documents,
+        # A GitHub-sourced premise declaration that lost to a higher-trust (repository) or
+        # lower-issue-number one, or a GitHub-sourced invalidation that targeted a repository-tier
+        # premise -- never one targeting a GitHub-tier premise, which still applies normally
+        # (`index._build_premise_and_alternative_records`) -- is dropped rather than applied.
+        # Reported here, by id and source document, so the drop is visible instead of silent.
+        "dropped_premises": [
+            {
+                "premise_id": dropped.premise_id,
+                "document": dropped.relative_path,
+                "reason": dropped.reason,
+            }
+            for dropped in result.dropped_premises
+        ],
     }
     print(json.dumps(summary, sort_keys=True))
     print(_index_summary_line(result), file=sys.stderr)

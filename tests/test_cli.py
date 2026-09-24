@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import json
 import os
+import sqlite3
 import stat
 import subprocess
 import sys
@@ -16,6 +17,7 @@ import anyio
 import platformdirs
 import pytest
 
+import bruriah.index as index_module
 from conftest import requires_vault
 from bruriah import __version__ as bruriah_version
 from bruriah import cache, cli, clients, packs
@@ -426,6 +428,146 @@ def test_cli_index_dispatch_builds_only_under_private_data_dir(tmp_path: Path) -
     assert exit_code == 0
     assert (data_dir / "active.json").is_file()
     assert all(path.parent == data_dir for path in data_dir.rglob("candidate-*.sqlite3"))
+
+
+def test_a_sqlite_error_during_index_is_a_typed_message_never_a_raw_traceback(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture,
+) -> None:
+    """premise-id-collision: `_cmd_index`'s except tuple did not include `sqlite3.Error`, so a
+    corrupt or locked database file reaching that layer surfaced as a raw traceback instead of the
+    typed `index_failed:...` message every other build failure already gets."""
+    root, policy_path = _corpus(tmp_path)
+
+    def _boom(*args: object, **kwargs: object) -> None:
+        raise sqlite3.OperationalError("disk I/O error")
+
+    monkeypatch.setattr(cli, "run_index", _boom)
+    exit_code = cli.bruriah_main(
+        [
+            "index",
+            "--config-dir",
+            str(tmp_path / "config"),
+            "--data-dir",
+            str(tmp_path / "data"),
+            "--corpus-root",
+            str(root),
+            "--policy",
+            str(policy_path),
+        ]
+    )
+    captured = capsys.readouterr()
+    assert exit_code == 1
+    assert "bruriah: error: index_failed:OperationalError" in captured.err
+    assert "Traceback" not in captured.err
+
+
+def _write_md(path: Path, frontmatter: str, body: str = "# Doc\nBody text for one real passage.\n") -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(f"---\n{frontmatter}---\n{body}", encoding="utf-8")
+
+
+def test_the_index_report_names_every_dropped_document_and_groups_by_premise_id(
+    tmp_path: Path, capsys: pytest.CaptureFixture,
+) -> None:
+    """R3-summary-line-omits-document / R2-summary-duplicate-ids / R3-cli-drop-report-untested
+    (review lineage review-aa1bc7b855f40f4c): the human summary line used to name only the dropped
+    premise ids, never the document each drop came from, and a premise dropped more than once
+    collapsed into one undifferentiated id in that list. This drives one mixed corpus through the
+    real CLI: a repository premise a GitHub document redeclares (`shadowed_by_repository_premise`),
+    two GitHub documents racing on a second id (`shadowed_by_lower_github_issue`), and a GitHub
+    document trying to invalidate the first, repository-authored premise
+    (`github_invalidation_ignored`) -- then asserts both the JSON `dropped_premises` field names
+    and the exact grouped, per-document human summary text."""
+    root = tmp_path / "vault"
+    _write_md(
+        root / "public" / "adr.md",
+        'premises:\n  - id: scale-premise\n    statement: "Write volume stays under 10k/s"\n'
+        "    status: active\n",
+    )
+    _write_md(
+        root / "public" / "g1-issue-9-redeclare.md",
+        "bruriah_source: github\nissue: 9\n"
+        'premises:\n  - id: scale-premise\n    statement: "Attacker override"\n',
+    )
+    _write_md(
+        root / "public" / "g2-issue-30-other-a.md",
+        "bruriah_source: github\nissue: 30\n"
+        'premises:\n  - id: other-premise\n    statement: "From issue 30"\n',
+    )
+    _write_md(
+        root / "public" / "g3-issue-4-other-b.md",
+        "bruriah_source: github\nissue: 4\n"
+        'premises:\n  - id: other-premise\n    statement: "From issue 4"\n',
+    )
+    _write_md(
+        root / "public" / "g4-issue-50-invalidate.md",
+        "bruriah_source: github\nissue: 50\ninvalidated_premises:\n  - scale-premise\n",
+    )
+    policy_path = tmp_path / "policy.yaml"
+    policy_path.write_text("version: 1\ninclude: ['public/**']\nexclude: []\n", encoding="utf-8")
+    args = cli._build_cli_parser().parse_args(
+        [
+            "index",
+            "--config-dir", str(tmp_path / "config"),
+            "--data-dir", str(tmp_path / "data"),
+            "--corpus-root", str(root),
+            "--policy", str(policy_path),
+        ]
+    )
+
+    exit_code = cli._cmd_index(args, embedder_factory=_fake_embedder_factory)
+    captured = capsys.readouterr()
+    assert exit_code == 0
+
+    summary = json.loads(captured.out)
+    assert summary["dropped_premises"] == [
+        {
+            "premise_id": "scale-premise",
+            "document": "public/g1-issue-9-redeclare.md",
+            "reason": "shadowed_by_repository_premise",
+        },
+        {
+            "premise_id": "other-premise",
+            "document": "public/g2-issue-30-other-a.md",
+            "reason": "shadowed_by_lower_github_issue",
+        },
+        {
+            "premise_id": "scale-premise",
+            "document": "public/g4-issue-50-invalidate.md",
+            "reason": "github_invalidation_ignored",
+        },
+    ]
+
+    assert captured.err.strip().endswith(
+        ". Dropped 3 GitHub premise entries: "
+        "scale-premise (public/g1-issue-9-redeclare.md: shadowed_by_repository_premise, "
+        "public/g4-issue-50-invalidate.md: github_invalidation_ignored); "
+        "other-premise (public/g2-issue-30-other-a.md: shadowed_by_lower_github_issue)"
+    )
+
+
+def test_the_dropped_entry_count_is_grammatically_singular_for_exactly_one_drop() -> None:
+    """R2/R3/R4 summary label (review lineage review-c2885675bd293875): "declaration(s)" used to
+    both mislabel an invalidation as a declaration and never distinguish one drop from several.
+    "entry"/"entries" fixes both, exercised directly against `_index_summary_line` (no build
+    needed) for the boundary the mixed-corpus test above cannot show: exactly one drop."""
+    result = index_module.BuildResult(
+        path=Path("/unused"), build_id="0" * 32, manifest_hash="0" * 64,
+        documents=1, passages=1, reused_documents=0,
+        dropped_premises=(
+            index_module.DroppedPremise(
+                premise_id="scale-premise",
+                document_ref="doc:v1:unused",
+                relative_path="public/g1-issue-9-redeclare.md",
+                reason="shadowed_by_repository_premise",
+            ),
+        ),
+    )
+    line = cli._index_summary_line(result)
+    assert line.endswith(
+        ". Dropped 1 GitHub premise entry: "
+        "scale-premise (public/g1-issue-9-redeclare.md: shadowed_by_repository_premise)"
+    )
 
 
 def test_index_persists_absolute_paths_so_serve_survives_a_different_working_directory(

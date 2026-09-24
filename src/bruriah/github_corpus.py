@@ -426,6 +426,11 @@ def _render_document(
     # wrote with YAML in mind -- "Attempt: retry on lock contention" is a completely ordinary PR
     # title that breaks an unquoted `name: <value>` line the moment it reaches a `:` of its own.
     frontmatter_data: dict[str, Any] = {
+        # The explicit, unambiguous marker `corpus._metadata` reads to trust-tier this document
+        # below anything discovered from the corpus tree: an issue or pull request body is text
+        # whoever opened it chose, never text the repository owner wrote. Never inferred from the
+        # file name or path below, both of which a repository-authored document is free to reuse.
+        "bruriah_source": "github",
         "commit": linking_commits[0].sha,
         "issue": number,
         "github_url": html_url,

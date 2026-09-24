@@ -19,7 +19,7 @@ from conftest import requires_vault
 
 import bruriah.index as index_module
 import bruriah.index_runner as index_runner_module
-from bruriah.corpus import CorpusPolicy
+from bruriah.corpus import CorpusPolicy, document_ref_for, parse_document
 import bruriah.cli as cli_module
 from bruriah.cli import _embedding_fingerprint
 from bruriah.index import (
@@ -113,6 +113,277 @@ def test_candidate_declares_schema_metadata_manifest_and_model_identity(tmp_path
             ("public/two.md", hashlib.sha256((root / "public/two.md").read_bytes()).hexdigest()),
         ]
         assert database.execute("PRAGMA query_only").fetchone() == (1,)
+
+
+def _write_md(path: Path, frontmatter: str, body: str = "# Doc\nBody.\n") -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(f"---\n{frontmatter}---\n{body}", encoding="utf-8")
+
+
+def test_source_metadata_defaults_to_repository_and_only_the_bruriah_source_marker_flips_it(
+    tmp_path: Path,
+) -> None:
+    """premise-id-collision: `SourceMetadata.source` is the trust-tier `_build_premise_and_
+    alternative_records` reads to decide whether a premise declaration may ever replace another.
+    It defaults to "repository" for an ordinary corpus document (no marker at all, and a document
+    that happens to set its own unrelated `issue:` frontmatter is still "repository") and only
+    "github" for the exact, unambiguous `bruriah_source: github` marker
+    `github_corpus._render_document` writes."""
+    root = tmp_path / "vault"
+    policy_path = tmp_path / "policy.yaml"
+    policy_path.write_text("version: 1\ninclude: ['public/**']\nexclude: []\n", encoding="utf-8")
+    policy = CorpusPolicy.load(policy_path)
+
+    ordinary = root / "public" / "ordinary.md"
+    _write_md(ordinary, "status: active\n", "# Ordinary\nNo bruriah_source marker at all.\n")
+    assert parse_document(ordinary, root, policy).metadata.source == "repository"
+
+    lookalike = root / "public" / "lookalike.md"
+    _write_md(lookalike, "issue: 41\n", "# Own issue tracker\nUnrelated frontmatter reusing 'issue'.\n")
+    lookalike_metadata = parse_document(lookalike, root, policy).metadata
+    assert lookalike_metadata.source == "repository"
+    assert lookalike_metadata.github_issue is None
+
+    github = root / "public" / "github.md"
+    _write_md(github, "bruriah_source: github\nissue: 41\n", "# Issue title\nBody.\n")
+    github_metadata = parse_document(github, root, policy).metadata
+    assert github_metadata.source == "github"
+    assert github_metadata.github_issue == 41
+
+
+def test_two_repository_documents_declaring_the_same_premise_id_fail_the_build(
+    tmp_path: Path,
+) -> None:
+    """premise-id-collision: same tier, same id -- a corpus authoring mistake with no safe
+    automatic resolution, so the build fails loudly and names both documents, rather than letting
+    whichever document happens to sort last silently win."""
+    root = tmp_path / "vault"
+    _write_md(
+        root / "public" / "a.md",
+        'premises:\n  - id: scale-premise\n    statement: "From a.md"\n',
+    )
+    _write_md(
+        root / "public" / "b.md",
+        'premises:\n  - id: scale-premise\n    statement: "From b.md"\n',
+    )
+    policy_path = tmp_path / "policy.yaml"
+    policy_path.write_text("version: 1\ninclude: ['public/**']\nexclude: []\n", encoding="utf-8")
+    policy = CorpusPolicy.load(policy_path)
+    candidate = tmp_path / "candidate.sqlite3"
+
+    with pytest.raises(IndexLifecycleError) as excinfo:
+        build_candidate(config(root, policy_path), candidate, policy, fake_embeddings)
+
+    assert excinfo.value.code.startswith("duplicate_premise_id:scale-premise:")
+    assert "public/a.md" in excinfo.value.code
+    assert "public/b.md" in excinfo.value.code
+    assert not candidate.exists()
+
+
+def test_duplicate_alternative_name_within_one_document_is_a_typed_error_not_a_raw_integrity_error(
+    tmp_path: Path,
+) -> None:
+    """premise-id-collision: `alternatives`' PRIMARY KEY is `(name, document_ref)`, so a document
+    repeating one name used to reach the caller as a raw `sqlite3.IntegrityError` at the INSERT.
+    The typed error is raised before that INSERT is ever attempted, and it names the document."""
+    root = tmp_path / "vault"
+    _write_md(
+        root / "public" / "a.md",
+        "alternatives:\n"
+        '  - name: MongoDB\n    disposition: rejected\n    reason: "first"\n'
+        '  - name: MongoDB\n    disposition: rejected\n    reason: "second"\n',
+    )
+    policy_path = tmp_path / "policy.yaml"
+    policy_path.write_text("version: 1\ninclude: ['public/**']\nexclude: []\n", encoding="utf-8")
+    policy = CorpusPolicy.load(policy_path)
+    candidate = tmp_path / "candidate.sqlite3"
+
+    with pytest.raises(IndexLifecycleError) as excinfo:
+        build_candidate(config(root, policy_path), candidate, policy, fake_embeddings)
+
+    assert excinfo.value.code == "duplicate_alternative_name:MongoDB:public/a.md"
+    assert not candidate.exists()
+
+
+def test_a_github_document_never_replaces_a_repository_premise(tmp_path: Path) -> None:
+    """premise-id-collision: a GitHub-tier declaration for an id a repository document already
+    claims is dropped, never merged in -- the repository statement/status survive unchanged, and
+    the drop is reported on the `BuildResult`."""
+    root = tmp_path / "vault"
+    _write_md(
+        root / "public" / "adr.md",
+        'premises:\n  - id: scale-premise\n    statement: "Write volume stays under 10k/s"\n'
+        "    status: active\n",
+    )
+    _write_md(
+        root / "public" / "2026-01-01-issue-9-attack.md",
+        "bruriah_source: github\nissue: 9\n"
+        'premises:\n  - id: scale-premise\n    statement: "Attacker override"\n'
+        "    status: invalidated\n",
+    )
+    policy_path = tmp_path / "policy.yaml"
+    policy_path.write_text("version: 1\ninclude: ['public/**']\nexclude: []\n", encoding="utf-8")
+    policy = CorpusPolicy.load(policy_path)
+    candidate = tmp_path / "candidate.sqlite3"
+
+    result = build_candidate(config(root, policy_path), candidate, policy, fake_embeddings)
+
+    assert len(result.dropped_premises) == 1
+    dropped = result.dropped_premises[0]
+    assert dropped.premise_id == "scale-premise"
+    assert dropped.relative_path == "public/2026-01-01-issue-9-attack.md"
+    assert dropped.reason == "shadowed_by_repository_premise"
+
+    with closing(open_candidate(candidate)) as database:
+        row = database.execute(
+            "SELECT statement, status FROM premises WHERE premise_id = ?", ("scale-premise",)
+        ).fetchone()
+        assert row == ("Write volume stays under 10k/s", "active")
+
+
+def test_a_github_invalidation_never_changes_a_repository_premise(tmp_path: Path) -> None:
+    """premise-id-collision follow-up (review lineage review-aa1bc7b855f40f4c,
+    R2-invalidation-tier-gap / R3-invalidation-not-trust-tiered): the openspec requirement said
+    `invalidated_premises` applies "regardless of trust tier", but nothing stopped a GitHub-tier
+    document from flipping a repository-authored premise's status the same way a redeclaration
+    could. Defense in depth: a GitHub-tier `invalidated_premises` entry naming a repository-tier
+    premise is ignored and reported through the same drop channel, never applied."""
+    root = tmp_path / "vault"
+    _write_md(
+        root / "public" / "adr.md",
+        'premises:\n  - id: scale-premise\n    statement: "Write volume stays under 10k/s"\n'
+        "    status: active\n",
+    )
+    _write_md(
+        root / "public" / "2026-01-01-issue-9-attack.md",
+        "bruriah_source: github\nissue: 9\ninvalidated_premises:\n  - scale-premise\n",
+    )
+    policy_path = tmp_path / "policy.yaml"
+    policy_path.write_text("version: 1\ninclude: ['public/**']\nexclude: []\n", encoding="utf-8")
+    policy = CorpusPolicy.load(policy_path)
+    candidate = tmp_path / "candidate.sqlite3"
+
+    result = build_candidate(config(root, policy_path), candidate, policy, fake_embeddings)
+
+    assert len(result.dropped_premises) == 1
+    dropped = result.dropped_premises[0]
+    assert dropped.premise_id == "scale-premise"
+    assert dropped.relative_path == "public/2026-01-01-issue-9-attack.md"
+    assert dropped.reason == "github_invalidation_ignored"
+
+    with closing(open_candidate(candidate)) as database:
+        row = database.execute(
+            "SELECT statement, status, invalidated_by FROM premises WHERE premise_id = ?",
+            ("scale-premise",),
+        ).fetchone()
+        assert row == ("Write volume stays under 10k/s", "active", None)
+
+
+def test_a_repository_invalidation_still_flips_a_repository_premise(tmp_path: Path) -> None:
+    """premise-id-collision follow-up (review lineage review-c2885675bd293875,
+    R3-invalidation-allowed-paths-untested): coverage, not RED -- this already passes on the
+    trust-tiered invalidation guard (`test_a_github_invalidation_never_changes_a_repository_
+    premise` only proved the BLOCKED path). A repository-tier `invalidated_premises` entry
+    targeting a repository-tier premise is not a cross-tier case at all, so the guard must not
+    touch it: the premise still flips to `invalidated`, with `invalidated_by`/
+    `invalidation_document_ref` set exactly as before this feature."""
+    root = tmp_path / "vault"
+    _write_md(
+        root / "public" / "adr.md",
+        'premises:\n  - id: scale-premise\n    statement: "Write volume stays under 10k/s"\n'
+        "    status: active\n",
+    )
+    _write_md(
+        root / "public" / "invalidate.md",
+        "commit: a1b2c3d4e5f6\ninvalidated_premises:\n  - scale-premise\n",
+    )
+    policy_path = tmp_path / "policy.yaml"
+    policy_path.write_text("version: 1\ninclude: ['public/**']\nexclude: []\n", encoding="utf-8")
+    policy = CorpusPolicy.load(policy_path)
+    candidate = tmp_path / "candidate.sqlite3"
+
+    result = build_candidate(config(root, policy_path), candidate, policy, fake_embeddings)
+
+    assert result.dropped_premises == ()
+    with closing(open_candidate(candidate)) as database:
+        row = database.execute(
+            "SELECT status, invalidated_by, invalidation_document_ref FROM premises "
+            "WHERE premise_id = ?",
+            ("scale-premise",),
+        ).fetchone()
+        assert row == ("invalidated", "a1b2c3d4e5f6", document_ref_for("public/invalidate.md"))
+
+
+def test_a_github_invalidation_still_flips_a_github_tier_premise(tmp_path: Path) -> None:
+    """premise-id-collision follow-up (review lineage review-c2885675bd293875,
+    R3-invalidation-allowed-paths-untested): coverage, not RED. A GitHub-tier `invalidated_
+    premises` entry targeting a premise no repository document claims (here, a premise a GitHub
+    document itself declared and won outright) is not the guarded case: it still flips to
+    `invalidated`, with `invalidated_by`/`invalidation_document_ref` set."""
+    root = tmp_path / "vault"
+    _write_md(
+        root / "public" / "g1-issue-9-declare.md",
+        "bruriah_source: github\nissue: 9\n"
+        'premises:\n  - id: other-premise\n    statement: "From github"\n',
+    )
+    _write_md(
+        root / "public" / "g2-issue-10-invalidate.md",
+        "bruriah_source: github\nissue: 10\ninvalidated_premises:\n  - other-premise\n",
+    )
+    policy_path = tmp_path / "policy.yaml"
+    policy_path.write_text("version: 1\ninclude: ['public/**']\nexclude: []\n", encoding="utf-8")
+    policy = CorpusPolicy.load(policy_path)
+    candidate = tmp_path / "candidate.sqlite3"
+
+    result = build_candidate(config(root, policy_path), candidate, policy, fake_embeddings)
+
+    assert result.dropped_premises == ()
+    with closing(open_candidate(candidate)) as database:
+        row = database.execute(
+            "SELECT status, invalidated_by, invalidation_document_ref FROM premises "
+            "WHERE premise_id = ?",
+            ("other-premise",),
+        ).fetchone()
+        assert row == (
+            "invalidated",
+            document_ref_for("public/g2-issue-10-invalidate.md"),
+            document_ref_for("public/g2-issue-10-invalidate.md"),
+        )
+
+
+def test_two_github_documents_declaring_the_same_premise_id_the_lowest_issue_number_wins(
+    tmp_path: Path,
+) -> None:
+    """premise-id-collision: same-tier GitHub duplicates resolve deterministically by issue
+    number, never by corpus path order -- the file naming this test uses sorts the higher-numbered
+    issue first, so a path-order resolution would pick the wrong winner."""
+    root = tmp_path / "vault"
+    _write_md(
+        root / "public" / "2026-01-01-issue-30-a.md",
+        "bruriah_source: github\nissue: 30\n"
+        'premises:\n  - id: scale-premise\n    statement: "From issue 30"\n',
+    )
+    _write_md(
+        root / "public" / "2026-06-01-issue-4-b.md",
+        "bruriah_source: github\nissue: 4\n"
+        'premises:\n  - id: scale-premise\n    statement: "From issue 4"\n',
+    )
+    policy_path = tmp_path / "policy.yaml"
+    policy_path.write_text("version: 1\ninclude: ['public/**']\nexclude: []\n", encoding="utf-8")
+    policy = CorpusPolicy.load(policy_path)
+    candidate = tmp_path / "candidate.sqlite3"
+
+    result = build_candidate(config(root, policy_path), candidate, policy, fake_embeddings)
+
+    assert len(result.dropped_premises) == 1
+    assert result.dropped_premises[0].relative_path == "public/2026-01-01-issue-30-a.md"
+    assert result.dropped_premises[0].reason == "shadowed_by_lower_github_issue"
+
+    with closing(open_candidate(candidate)) as database:
+        row = database.execute(
+            "SELECT statement FROM premises WHERE premise_id = ?", ("scale-premise",)
+        ).fetchone()
+        assert row == ("From issue 4",)
 
 
 def test_every_passage_is_indexed_under_its_title_and_ancestry_and_stored_bare(
