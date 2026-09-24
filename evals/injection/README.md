@@ -88,6 +88,51 @@ Every stage's 17 cases (and their controls) report `executed: true`; the current
 (`evals/injection/report.json`) is committed alongside this benchmark and regenerated whenever a
 change could affect it.
 
+## Framework comparison: what does each architecture return to the model?
+
+0/17 only means something next to what the standard architecture does with the same corpus, so
+[`frameworks/`](frameworks/) runs the identical 17 cases -- same fixtures byte for byte, same
+markers, same control-run provenance, same executed-path invariant -- through the typical agent
+retrieval-as-tool pattern of LlamaIndex (`RetrieverTool`, `llama-index-core==0.14.25`) and
+LangChain (`create_retriever_tool`, `langchain-core==1.6.4`), at each framework's defaults, with
+fake embeddings and `k` covering the whole fixture corpus so ranking luck cannot decide an
+outcome.
+
+**Read the numbers for what they are.** A retriever tool returns retrieved text to the model by
+design -- that is what a RAG retriever tool is for, and "leaked" in these rows records that
+intended behavior reaching an attacker-controlled surface, not a defect in either framework.
+Neither framework claims the boundary this benchmark measures; Bruriah does, which is why its row
+is the one under obligation. The honest trade sits in the same table: Bruriah's agent needs two
+calls to reach retrieved content (`investigate_work`, then an explicit `read_evidence`), a
+retriever tool needs one.
+
+| architecture | pattern measured | leaked / measured | calls to reach retrieved content |
+|---|---|:---:|:---:|
+| bruriah | `investigate_work` (opaque refs; text via explicit `read_evidence`) | 0/17 | 2 |
+| llamaindex | `RetrieverTool` over a `VectorStoreIndex` retriever, defaults | 17/17 | 1 |
+| langchain | `create_retriever_tool` over an `InMemoryVectorStore` retriever, defaults | 15/17 | 1 |
+
+The two rows where the frameworks differ are the comparison's honesty check: `md-file-name` and
+`lineage-successor-file-name` carry their marker only in a document's file name. LlamaIndex's
+tool serializes node content with LLM-visible metadata, so the file name reaches the model;
+LangChain's default `document_prompt` formats `page_content` alone, so it does not. Both are
+documented defaults, neither is a defect, and every surface carried in document *text* leaks
+through both.
+
+Both adapters ingest each corpus file's exact text (no framework file loader), so a markdown
+loader's parsing idiosyncrasies can never masquerade as a row difference: the only variable
+between rows is what each architecture's serialized tool output carries. Per-surface rows live in
+[`frameworks/report-frameworks.md`](frameworks/report-frameworks.md).
+
+```bash
+uv sync --group frameworks-compare   # pinned llama-index-core + langchain-core; CI never installs it
+uv run --no-sync python evals/injection/frameworks/compare.py
+```
+
+Runs offline and deterministically (byte-identical reports across runs), like everything else
+here. Without the group installed, the comparison runner and its tests skip cleanly; the core
+benchmark and its committed reports never depend on it.
+
 ## What this does not measure
 
 - **Model behavior.** This measures `investigate_work`'s serialized response, a structural

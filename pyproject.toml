@@ -85,6 +85,14 @@ dev = [
   "sqlite-vec==0.1.9",
   "types-PyYAML>=6.0.12,<7",
 ]
+# The injection benchmark's framework comparison rows (evals/injection/frameworks/) and nothing
+# else. Pinned exactly: the published comparison states what these specific versions return to
+# the model, so a silent resolver bump must not be able to change a published number. CI never
+# installs this group; the comparison runner and its tests skip cleanly without it.
+frameworks-compare = [
+    "langchain-core==1.6.4",
+    "llama-index-core==0.14.25",
+]
 
 [tool.pytest.ini_options]
 addopts = "-ra"
