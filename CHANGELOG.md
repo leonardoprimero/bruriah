@@ -28,8 +28,17 @@ and the entries here name what changed for *you* rather than which files moved.
   fails with a typed `duplicate_alternative_name` error naming the document, before any insert is
   attempted. `bruriah index` also now wraps `sqlite3.Error` in a typed `CliError`, so a corrupt or
   locked database file reaching that layer surfaces as `index_failed:...`, never a raw traceback.
-- `invalidated_premises` keeps its existing semantics; this release changes only how a *new*
-  premise declaration is allowed to win, never how an existing one is invalidated.
+- `invalidated_premises`/`Premise-Invalidated` is trust-tiered the same way a declaration is: a
+  document can still change the `status`/`invalidated_by` of a premise its own tier or a
+  lower-trust tier claims, but a GitHub-tier document's invalidation of a repository-tier premise
+  is now dropped and reported (`github_invalidation_ignored`), never applied. Defense in depth --
+  `github_corpus` does not currently generate any `invalidated_premises`, only `premises`
+  declarations -- but the boundary now holds regardless of what a GitHub-tier document declares.
+- `bruriah index`'s human summary line now names the source document for every dropped premise
+  (previously it listed only the premise id) and groups drops by premise id, so a premise dropped
+  more than once -- a losing redeclaration and an ignored invalidation, for example -- shows each
+  document and reason instead of collapsing into one undifferentiated count. The JSON
+  `dropped_premises` output already named each document; it is unchanged.
 
 ### Migration
 - **A corpus that already has two repository documents declaring the same premise id** stops

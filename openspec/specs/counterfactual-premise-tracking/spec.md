@@ -102,9 +102,14 @@ chosen by whoever opened it, not by the repository owner.
   letting whichever one happens to parse last silently win.
 - Two GitHub-tier documents declaring the same id MUST resolve deterministically: the lower
   issue/PR number wins, and the other is dropped and reported the same way.
-- `invalidated_premises` is unaffected: an existing premise's `status`/`invalidated_by` can still
-  be changed by a later document's `Premise-Invalidated`/`invalidated_premises` declaration,
-  regardless of trust tier.
+- `invalidated_premises`/`Premise-Invalidated` is trust-tiered the same way a declaration is: a
+  document MAY change the `status`/`invalidated_by` of a premise its own tier or a lower-trust tier
+  claims, but a GitHub-tier document's `invalidated_premises` entry MUST NOT change a
+  repository-tier premise's `status`/`invalidated_by`. That entry MUST instead be dropped and
+  reported the same way as a losing declaration (reason `github_invalidation_ignored`). This is
+  defense in depth: `github_corpus` does not currently emit any `invalidated_premises` (only
+  `premises` declarations, from `Premise:` lines), but the boundary applies regardless of what a
+  future or hand-authored GitHub-tier document declares.
 
 #### Scenario: A GitHub issue redeclares a repository premise
 - GIVEN a repository-authored ADR declaring `id: fastmcp-no-forbid` with `status: active`, and a
@@ -119,6 +124,14 @@ chosen by whoever opened it, not by the repository owner.
 - WHEN `bruriah index` builds the premise table
 - THEN the build fails with a typed `duplicate_premise_id` error naming both documents, and no
   candidate index is promoted.
+
+#### Scenario: A GitHub document tries to invalidate a repository premise
+- GIVEN a repository-authored ADR declaring `id: scale-premise` with `status: active`, and a
+  GitHub-tier document declaring `invalidated_premises: [scale-premise]`
+- WHEN `bruriah index` builds the premise table
+- THEN the repository declaration's `status`/`invalidated_by` are stored unchanged, the GitHub
+  invalidation is dropped and reported with reason `github_invalidation_ignored`, and
+  `investigate_work`'s counterfactual verdict for that premise is unaffected.
 
 ---
 
