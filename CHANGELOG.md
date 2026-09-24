@@ -3,6 +3,74 @@
 Notable changes, newest first. This project follows [semantic versioning](https://semver.org/),
 and the entries here name what changed for *you* rather than which files moved.
 
+## [2.0.0] — 2026-09-23
+
+A security release and a breaking one: `investigate_work` now holds, measurably, the boundary
+1.6.0 only partially closed. Every author-controlled value that used to reach the serialized
+response as text now leaves it as an opaque reference.
+
+### Fixed: `investigate_work` closes the last of the measured retrieval-boundary leaks
+- 1.6.0 closed the leaks a first probe found; a wider, hermetic benchmark
+  (`evals/injection/`, see [`evals/injection/README.md`](evals/injection/README.md)) then measured
+  17 attacker-controlled surfaces across markdown front-matter, the file name, git commits, GitHub
+  closing comments, and the code-target and lineage paths, and found the real exposure was larger:
+  **13/17** attacker-controlled surfaces reached the response (Attack Success Rate, ASR) at that
+  widened baseline.
+- Closing the evidence locators and closing the authority-rationale vocabulary to a fixed set of
+  codes (below) brought that to **7/17**. Closing the alternative/premise/counterfactual shapes to
+  opaque references and fixed wording (below) brought it to **0/17**. Every case, and its paired
+  control run, is proven to have executed the code path it measures -- a path that never ran is
+  never counted as held.
+- **What this needed to bite:** write access to a document, a commit, or a GitHub issue/pull
+  request comment in a repository Bruriah indexes -- the same category of access 1.6.0's fix
+  addressed, now closed across every currently known channel rather than the subset the original
+  probe covered.
+
+### Changed: the investigation contract is opaque by construction (`schema_version` "2")
+- `InvestigationResult.schema_version` is now `"2"`. `EvidenceRecord.locator` and
+  `.citation_locator` are now document references (`doc:v1:<hash>` and
+  `doc:v1:<hash>#L<start>-<end>`), never a corpus-authored file name or path; `.publisher` is a
+  fixed literal per evidence kind, never author-supplied. `authority_rationale` is now a closed set
+  of codes the schema enforces, never a free-text sentence built from a document's own wording.
+- `AlternativeRecord` and `PremiseRecord` are now opaque-by-construction: `alt:v1:<hash>` and
+  `premise:v1:<hash>` references replace `name`/`reason`/`id`/`statement`/free-text `rationale` on
+  the wire, carrying only closed fields (`disposition`/`status`, ref lists, `decision_ref`).
+  `CounterfactualAssessment.matched_alternative_ref` replaces `matched_alternative`.
+  `PremiseRecord.invalidated_by` is now a validated commit sha or nothing, never the raw,
+  unvalidated frontmatter value a document could put there.
+- `rationale`, `conflicts`, and claim text are now fixed wording built only from the verdict,
+  reference counts, and a validated sha -- never from an alternative's name or reason, a premise's
+  statement, or a commit's subject or author name.
+- Alternative name matching now ignores a name with no token of at least 3 characters, closing a
+  short-name match that could shadow an unrelated task or a legitimate alternative sorting after it
+  in the same document. `evals/counterfactual/runner.py`'s 20-scenario fixture suite is unaffected
+  (20/20, byte-identical verdicts before and after).
+- The human-facing CLI view (`bruriah ask` without `--json`) is unchanged: it resolves every ref
+  locally and still prints names, reasons, statements, and paths. `--json` output and the MCP
+  surface carry references only.
+
+### Added: `read_evidence` resolves `alt:` and `premise:` references
+- `read_evidence` accepts `alt:v1:<hash>` and `premise:v1:<hash>` refs alongside the existing
+  passage, capability, skill and live-fetch kinds, and returns the referenced alternative's or
+  premise's own stored fields as canonical JSON, subject to the same budget, windowing, and cursor
+  pagination every other read kind already uses. A ref with no matching row reads as a typed
+  `missing_ref`, never a fabricated record. This is the explicit, caller-requested channel that
+  discloses corpus-authored text `investigate_work` no longer carries implicitly.
+
+### Migration
+- **User-authored policy packs** pinned to `max_router_version: "1.9.9"` are rejected by a 2.x
+  router (`incompatible_pack`) until their authors widen the window and re-sign the pack. The four
+  packs this project bundles were already widened and re-signed in this release.
+- **MCP clients** that read `matched_alternative`, `alternatives[].name`/`.reason`, or
+  `premises[].id`/`.statement`/`.rationale` directly from `investigate_work`'s response must now
+  call `read_evidence` on the corresponding `alt:`/`premise:` ref instead; the fields themselves no
+  longer carry that text.
+- **A 1.x cache entry** with a free-text `authority_rationale` value is not compatible with the
+  2.x closed vocabulary. It reads as a cache miss and is re-fetched, never as an error.
+- **Alternative name matching** now requires the name to carry a token of at least 3 characters; a
+  name shorter than that (or with no such token) stops matching a task by name. No currently known
+  real-world alternative name is affected.
+
 ## [1.6.0] — 2026-09-22
 
 A security release, and deliberately the only thing in it: `--agent` output no longer carries text
