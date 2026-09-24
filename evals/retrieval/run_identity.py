@@ -19,6 +19,7 @@ max_extracted_chars to 200,000, which is where the published reranking figures c
 who passes no Budgets gets 50 and 20,000. The gap between those two rows is how the defect
 survived its own eval.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -69,8 +70,9 @@ def summarize(rows: list[dict]) -> str:
             count = len(subset)
             changed = sum(1 for r in subset if r["dropped"] or r["added"])
             lost = sum(1 for r in subset if r["plain_rank"] and not r["staged_rank"])
-            moved = sum(1 for r in subset
-                        if r["plain_rank"] and r["staged_rank"] and r["plain_rank"] != r["staged_rank"])
+            moved = sum(
+                1 for r in subset if r["plain_rank"] and r["staged_rank"] and r["plain_rank"] != r["staged_rank"]
+            )
             plain = sum(r["plain_documents"] for r in subset) / count
             staged = sum(r["staged_documents"] for r in subset) / count
             lines.append(
@@ -83,8 +85,14 @@ def summarize(rows: list[dict]) -> str:
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--index", nargs=2, action="append", metavar=("CORPUS", "DATA_DIR"),
-                        required=True, help="corpus name and the data dir holding its snapshot")
+    parser.add_argument(
+        "--index",
+        nargs=2,
+        action="append",
+        metavar=("CORPUS", "DATA_DIR"),
+        required=True,
+        help="corpus name and the data dir holding its snapshot",
+    )
     parser.add_argument("--out", type=Path, default=None, help="per-question rows, as JSONL")
     args = parser.parse_args(argv)
 
@@ -94,32 +102,43 @@ def main(argv: list[str] | None = None) -> int:
         cases = [
             json.loads(line)
             for line in (ROOT / "evals" / "project-memory" / f"{corpus}-issues.jsonl")
-            .read_text(encoding="utf-8").splitlines() if line.strip()
+            .read_text(encoding="utf-8")
+            .splitlines()
+            if line.strip()
         ]
         try:
             for label, budgets in BUDGETS.items():
                 for case in cases:
                     truth = strip_build_sha(case["ground_truth"]["must_include"][0])
-                    plain = search(deps.snapshot, case["query"], budgets,
-                                   embed_query=deps.embed_query, clock=deps.clock)
-                    staged = search(deps.snapshot, case["query"], budgets,
-                                    embed_query=deps.embed_query, rerank=identity_rerank,
-                                    clock=deps.clock)
+                    plain = search(
+                        deps.snapshot, case["query"], budgets, embed_query=deps.embed_query, clock=deps.clock
+                    )
+                    staged = search(
+                        deps.snapshot,
+                        case["query"],
+                        budgets,
+                        embed_query=deps.embed_query,
+                        rerank=identity_rerank,
+                        clock=deps.clock,
+                    )
                     # Without this the run would compare the shipped ranking against itself and
                     # report a confident "no effect" -- run_ablation.py's guard, same reason.
                     if not any(note.startswith("reranked:") for note in staged.degradation):
-                        raise SystemExit(
-                            f"{case['id']}: the stage did not run -- {staged.degradation}")
+                        raise SystemExit(f"{case['id']}: the stage did not run -- {staged.degradation}")
                     plain_documents, staged_documents = documents_of(plain), documents_of(staged)
-                    rows.append({
-                        "corpus": corpus, "id": case["id"], "budgets": label,
-                        "plain_documents": len(plain_documents),
-                        "staged_documents": len(staged_documents),
-                        "dropped": sorted(set(plain_documents) - set(staged_documents)),
-                        "added": sorted(set(staged_documents) - set(plain_documents)),
-                        "plain_rank": plain_documents.index(truth) + 1 if truth in plain_documents else None,
-                        "staged_rank": staged_documents.index(truth) + 1 if truth in staged_documents else None,
-                    })
+                    rows.append(
+                        {
+                            "corpus": corpus,
+                            "id": case["id"],
+                            "budgets": label,
+                            "plain_documents": len(plain_documents),
+                            "staged_documents": len(staged_documents),
+                            "dropped": sorted(set(plain_documents) - set(staged_documents)),
+                            "added": sorted(set(staged_documents) - set(plain_documents)),
+                            "plain_rank": plain_documents.index(truth) + 1 if truth in plain_documents else None,
+                            "staged_rank": staged_documents.index(truth) + 1 if truth in staged_documents else None,
+                        }
+                    )
         finally:
             deps.snapshot.database.close()
         print(f"{corpus}: {len(cases)} questions x {len(BUDGETS)} budgets", flush=True)
@@ -127,8 +146,7 @@ def main(argv: list[str] | None = None) -> int:
     print()
     print(summarize(rows))
     if args.out:
-        args.out.write_text(
-            "\n".join(json.dumps(row, sort_keys=True) for row in rows) + "\n", encoding="utf-8")
+        args.out.write_text("\n".join(json.dumps(row, sort_keys=True) for row in rows) + "\n", encoding="utf-8")
         print(f"\nWrote {args.out}")
     return 0
 

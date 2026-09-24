@@ -54,8 +54,7 @@ def test_nothing_matched_yields_nothing_and_no_gap() -> None:
 def test_excess_past_the_ceiling_is_reported_never_silently_dropped() -> None:
     matches = [_match(f"s{index:02d}.skill") for index in range(8)]
     result = dispatch(_lookup(*matches), [], ceiling=3)
-    assert [item.skill.skill.skill_id for item in result.skills] == [
-        "s00.skill", "s01.skill", "s02.skill"]
+    assert [item.skill.skill.skill_id for item in result.skills] == ["s00.skill", "s01.skill", "s02.skill"]
     assert result.gaps == ("skill_ceiling_exceeded:5",)
 
 
@@ -107,16 +106,14 @@ def test_approval_follows_the_digest_and_not_the_version_label() -> None:
     # matching version with a different digest emphatically is not.
     renamed = dispatch(_lookup(_match()), [_host("design.ui-review", version="9.9.9")])
     assert renamed.skills[0].availability == "installed"
-    relabelled = dispatch(_lookup(_match()), [_host("design.ui-review", digest=OTHER_DIGEST,
-                                                    version="1.4.0")])
+    relabelled = dispatch(_lookup(_match()), [_host("design.ui-review", digest=OTHER_DIGEST, version="1.4.0")])
     assert relabelled.skills[0].availability == "digest_divergent"
 
 
 def test_a_duplicate_host_entry_cannot_improve_its_own_reported_state() -> None:
     # First entry wins. If the last one won, a host could append a corrected line to upgrade
     # `digest_divergent` into `installed`.
-    result = dispatch(_lookup(_match()), [
-        _host("design.ui-review", digest=OTHER_DIGEST), _host("design.ui-review")])
+    result = dispatch(_lookup(_match()), [_host("design.ui-review", digest=OTHER_DIGEST), _host("design.ui-review")])
     assert result.skills[0].availability == "digest_divergent"
 
 
@@ -135,11 +132,18 @@ def test_the_host_inventory_cannot_change_which_skills_are_selected() -> None:
     no inventory -- however crafted -- changes the selection or its order."""
     matches = [_match(f"s{index:02d}.skill") for index in range(6)]
     baseline = dispatch(_lookup(*matches), [], ceiling=3)
-    crafted = dispatch(_lookup(*matches), [
-        _host("s05.skill"), _host("s04.skill", digest=OTHER_DIGEST), _host("s03.skill"),
-    ], ceiling=3)
-    assert [item.skill.skill.skill_id for item in baseline.skills] == \
-           [item.skill.skill.skill_id for item in crafted.skills]
+    crafted = dispatch(
+        _lookup(*matches),
+        [
+            _host("s05.skill"),
+            _host("s04.skill", digest=OTHER_DIGEST),
+            _host("s03.skill"),
+        ],
+        ceiling=3,
+    )
+    assert [item.skill.skill.skill_id for item in baseline.skills] == [
+        item.skill.skill.skill_id for item in crafted.skills
+    ]
     assert baseline.gaps == crafted.gaps
 
 

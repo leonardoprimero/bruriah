@@ -34,7 +34,9 @@ def test_resolve_client_config_path_project_and_global(tmp_path: Path) -> None:
 
     # Cursor
     assert resolve_client_config_path("cursor", project_root=repo, scope="project") == repo / ".cursor" / "mcp.json"
-    assert resolve_client_config_path("cursor", project_root=repo, scope="global") == Path.home() / ".cursor" / "mcp.json"
+    assert (
+        resolve_client_config_path("cursor", project_root=repo, scope="global") == Path.home() / ".cursor" / "mcp.json"
+    )
 
     # Claude Code
     assert resolve_client_config_path("claude", project_root=repo, scope="project") == repo / ".mcp.json"
@@ -44,7 +46,9 @@ def test_resolve_client_config_path_project_and_global(tmp_path: Path) -> None:
     assert "Claude" in str(resolve_client_config_path("claude-desktop", project_root=repo))
 
     # Gemini
-    assert resolve_client_config_path("gemini", project_root=repo, scope="project") == repo / ".gemini" / "settings.json"
+    assert (
+        resolve_client_config_path("gemini", project_root=repo, scope="project") == repo / ".gemini" / "settings.json"
+    )
 
     # OpenCode
     assert resolve_client_config_path("opencode", project_root=repo, scope="project") == repo / "opencode.json"
@@ -101,9 +105,7 @@ def test_merge_mcp_servers_creates_and_updates_without_clobbering_existing_tools
     assert "filesystem" in merged_updated["mcpServers"]  # preserved!
 
 
-def test_merge_opencode_creates_and_preserves_existing(
-    tmp_path: Path, manifest: LaunchManifest
-) -> None:
+def test_merge_opencode_creates_and_preserves_existing(tmp_path: Path, manifest: LaunchManifest) -> None:
     config_file = tmp_path / "opencode.json"
     initial = {"mcp": {"existing_tool": {"type": "local", "command": ["node", "server.js"]}}}
     config_file.write_text(json.dumps(initial), encoding="utf-8")
@@ -115,9 +117,7 @@ def test_merge_opencode_creates_and_preserves_existing(
     assert merged["mcp"]["bruriah"]["command"] == manifest.full_argv
 
 
-def test_setup_client_dry_run_does_not_modify_disk(
-    tmp_path: Path, manifest: LaunchManifest
-) -> None:
+def test_setup_client_dry_run_does_not_modify_disk(tmp_path: Path, manifest: LaunchManifest) -> None:
     repo = tmp_path / "repo"
     repo.mkdir()
     target = repo / ".cursor" / "mcp.json"
@@ -127,9 +127,7 @@ def test_setup_client_dry_run_does_not_modify_disk(
     assert not target.exists()  # dry run: file must not be created
 
 
-def test_setup_client_creates_backup_on_modification(
-    tmp_path: Path, manifest: LaunchManifest
-) -> None:
+def test_setup_client_creates_backup_on_modification(tmp_path: Path, manifest: LaunchManifest) -> None:
     repo = tmp_path / "repo"
     target = repo / ".cursor" / "mcp.json"
     target.parent.mkdir(parents=True)
@@ -145,9 +143,7 @@ def test_setup_client_creates_backup_on_modification(
     assert json.loads(backup.read_text(encoding="utf-8")) == {"mcpServers": {"old": {"command": "old"}}}
 
 
-def test_setup_client_rejects_malformed_json_typed(
-    tmp_path: Path, manifest: LaunchManifest
-) -> None:
+def test_setup_client_rejects_malformed_json_typed(tmp_path: Path, manifest: LaunchManifest) -> None:
     repo = tmp_path / "repo"
     target = repo / ".cursor" / "mcp.json"
     target.parent.mkdir(parents=True)

@@ -49,6 +49,7 @@ a sha does not survive a history rewrite and the eval is meant to outlive one.
 
 No I/O in this module. `extract_pairs.py` does the git and GitHub work and calls in here.
 """
+
 from __future__ import annotations
 
 import re
@@ -58,9 +59,7 @@ from datetime import datetime
 
 # `closes #12`, `Fixes: #12`, `resolved #12`. The bounded gap tolerates `closes issue #12` without
 # letting a closing keyword bind to a number a paragraph away.
-_CLOSES = re.compile(
-    r"\b(?:clos(?:e|es|ed)|fix(?:e[sd])?|resolv(?:e|es|ed))\b[^\n#]{0,20}#(\d+)", re.IGNORECASE
-)
+_CLOSES = re.compile(r"\b(?:clos(?:e|es|ed)|fix(?:e[sd])?|resolv(?:e|es|ed))\b[^\n#]{0,20}#(\d+)", re.IGNORECASE)
 _SHA_IN_NAME = re.compile(r"^(\d{4}-\d{2}-\d{2})-([0-9a-f]{8})-(.*)$")
 
 
@@ -212,18 +211,27 @@ def build(
     for number in sorted(by_issue):
         answers = sorted(by_issue[number], key=lambda item: (item[0].authored_at, item[0].sha))
         commit, issue, document = answers[0]
-        kept.append(Pair(
-            issue_number=number,
-            question=issue.title,
-            ground_truth=document,
-            also_answered_by=tuple(later[2] for later in answers[1:]),
-            commit_sha=commit.sha[:12],
-            issue_author=issue.author_login,
-            commit_author=commit.author_login or commit.author_name,
-        ))
+        kept.append(
+            Pair(
+                issue_number=number,
+                question=issue.title,
+                ground_truth=document,
+                also_answered_by=tuple(later[2] for later in answers[1:]),
+                commit_sha=commit.sha[:12],
+                issue_author=issue.author_login,
+                commit_author=commit.author_login or commit.author_name,
+            )
+        )
     return kept, rejected
 
 
 __all__ = [
-    "Commit", "Issue", "Pair", "Rejected", "build", "corpus_index", "independence", "parse_closes",
+    "Commit",
+    "Issue",
+    "Pair",
+    "Rejected",
+    "build",
+    "corpus_index",
+    "independence",
+    "parse_closes",
 ]

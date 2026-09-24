@@ -3,6 +3,7 @@
 It changes ranking, so what matters is not raw accuracy but that it abstains rather than guesses:
 a wrong confident answer discounts the leg that was about to find the document.
 """
+
 from __future__ import annotations
 
 import pytest
@@ -26,11 +27,18 @@ def test_real_eval_questions_are_identified(text: str, expected: str) -> None:
     assert detect(text) == expected
 
 
-@pytest.mark.parametrize("text", [
-    "", "   ", "sha256:deadbeef", "1 2 3", "kubectl apply -f deploy.yaml",
-    "retrieval",                     # one content word, no function words at all
-    "the que",                       # one marker each: a tie is not a decision
-])
+@pytest.mark.parametrize(
+    "text",
+    [
+        "",
+        "   ",
+        "sha256:deadbeef",
+        "1 2 3",
+        "kubectl apply -f deploy.yaml",
+        "retrieval",  # one content word, no function words at all
+        "the que",  # one marker each: a tie is not a decision
+    ],
+)
 def test_it_abstains_rather_than_guessing(text: str) -> None:
     """`None` is the honest answer far more often than either language is.
 
@@ -50,7 +58,7 @@ def test_dominant_needs_a_real_majority_of_what_it_could_read() -> None:
     english = "the deployment of the service is described in the following section"
     spanish = "el despliegue del servicio se describe en la siguiente seccion con mas detalle"
     assert dominant([english, english, spanish]) == "en"
-    assert dominant([english, spanish]) is None            # an even split has no dominant language
+    assert dominant([english, spanish]) is None  # an even split has no dominant language
     assert dominant([]) is None
     assert dominant(["sha256:deadbeef", "1 2 3"]) is None  # nothing readable is not a verdict
     # An unreadable half must not veto a clear signal from the other half.

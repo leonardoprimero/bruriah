@@ -9,6 +9,7 @@ document that can never exist. Nothing failed. The eval has no runnable scorer, 
 ground truth is indistinguishable from a working one until somebody tries to reproduce the numbers
 printed on the front page -- which is the one thing a reader of THIS project is most likely to do.
 """
+
 from __future__ import annotations
 
 import json
@@ -43,19 +44,25 @@ def test_every_ground_truth_document_exists_in_the_generated_corpus() -> None:
     # The generator needs the repository ROOT, and this package is not always at it: in the
     # standalone repo it is, in the monorepo it lives one directory down. Asking git rather than
     # assuming keeps the same assertion true in both layouts.
-    toplevel = subprocess.run(["git", "rev-parse", "--show-toplevel"], cwd=ROOT,
-                              capture_output=True, text=True, timeout=60)
+    toplevel = subprocess.run(
+        ["git", "rev-parse", "--show-toplevel"], cwd=ROOT, capture_output=True, text=True, timeout=60
+    )
     if toplevel.returncode != 0:
         pytest.skip("not a git checkout")
     with tempfile.TemporaryDirectory() as workspace:
-        built = subprocess.run([sys.executable, str(GENERATOR), "--repo", toplevel.stdout.strip(),
-                                "--out", workspace], capture_output=True, text=True, timeout=300)
+        built = subprocess.run(
+            [sys.executable, str(GENERATOR), "--repo", toplevel.stdout.strip(), "--out", workspace],
+            capture_output=True,
+            text=True,
+            timeout=300,
+        )
         assert built.returncode == 0, built.stdout + built.stderr
         produced = {_SHA.sub(r"\1-", path.name) for path in Path(workspace).glob("*.md")}
     missing = _ground_truth() - produced
     assert not missing, (
         "the eval names documents this repository's history does not produce, so the published "
-        f"numbers cannot be reproduced: {sorted(missing)}")
+        f"numbers cannot be reproduced: {sorted(missing)}"
+    )
 
 
 # --- The published leakage figures have to stay true of the published question set ---------------
@@ -93,32 +100,55 @@ _PUBLISHED_CORPUS_DOCUMENTS = 147
 def test_the_published_leakage_count_is_still_true() -> None:
     from leakage import TermStatistics, leakage  # noqa: PLC0415 -- path is set above
 
-    toplevel = subprocess.run(["git", "rev-parse", "--show-toplevel"], cwd=ROOT,
-                              capture_output=True, text=True, timeout=60)
+    toplevel = subprocess.run(
+        ["git", "rev-parse", "--show-toplevel"], cwd=ROOT, capture_output=True, text=True, timeout=60
+    )
     if toplevel.returncode != 0:
         pytest.skip("not a git checkout")
     repo = toplevel.stdout.strip()
     # A shallow clone -- the default of every CI checkout that has not asked otherwise -- simply
     # does not have this object, and cannot be made to produce the published corpus. That is an
     # absent measurement, not a failed one, so it skips and says which revision it wanted.
-    if subprocess.run(["git", "cat-file", "-e", f"{_PUBLISHED_CORPUS_REVISION}^{{commit}}"],
-                      cwd=repo, capture_output=True, timeout=60).returncode != 0:
-        pytest.skip(f"{_PUBLISHED_CORPUS_REVISION} is not in this checkout (shallow clone?); the "
-                    "published corpus cannot be derived, so the published figure cannot be checked")
+    if (
+        subprocess.run(
+            ["git", "cat-file", "-e", f"{_PUBLISHED_CORPUS_REVISION}^{{commit}}"],
+            cwd=repo,
+            capture_output=True,
+            timeout=60,
+        ).returncode
+        != 0
+    ):
+        pytest.skip(
+            f"{_PUBLISHED_CORPUS_REVISION} is not in this checkout (shallow clone?); the "
+            "published corpus cannot be derived, so the published figure cannot be checked"
+        )
     with tempfile.TemporaryDirectory() as workspace:
         built = subprocess.run(
-            [sys.executable, str(GENERATOR), "--repo", repo, "--out", workspace,
-             "--revision", _PUBLISHED_CORPUS_REVISION],
-            capture_output=True, text=True, timeout=300)
+            [
+                sys.executable,
+                str(GENERATOR),
+                "--repo",
+                repo,
+                "--out",
+                workspace,
+                "--revision",
+                _PUBLISHED_CORPUS_REVISION,
+            ],
+            capture_output=True,
+            text=True,
+            timeout=300,
+        )
         assert built.returncode == 0, built.stdout + built.stderr
-        documents = {_SHA.sub(r"\1-", path.name): path.read_text(encoding="utf-8")
-                     for path in Path(workspace).glob("*.md")}
+        documents = {
+            _SHA.sub(r"\1-", path.name): path.read_text(encoding="utf-8") for path in Path(workspace).glob("*.md")
+        }
 
     assert len(documents) == _PUBLISHED_CORPUS_DOCUMENTS, (
         f"README.md describes the corpus as of `{_PUBLISHED_CORPUS_REVISION}` as "
         f"{_PUBLISHED_CORPUS_DOCUMENTS} documents; that revision now yields {len(documents)}. The "
         "pin no longer resolves to the corpus the page describes -- a rewritten history, or the "
-        "wrong sha -- so nothing below this line is measuring what the page published.")
+        "wrong sha -- so nothing below this line is measuring what the page published."
+    )
     statistics = TermStatistics.over(documents.values())
     leaking = 0
     measured = 0
@@ -165,20 +195,41 @@ def test_the_own_history_ablation_table_names_a_revision_that_reproduces_it() ->
         "under the measurement and the table stops being reproducible."
     )
 
-    toplevel = subprocess.run(["git", "rev-parse", "--show-toplevel"], cwd=ROOT,
-                              capture_output=True, text=True, timeout=60)
+    toplevel = subprocess.run(
+        ["git", "rev-parse", "--show-toplevel"], cwd=ROOT, capture_output=True, text=True, timeout=60
+    )
     if toplevel.returncode != 0:
         pytest.skip("not a git checkout")
     repo = toplevel.stdout.strip()
-    if subprocess.run(["git", "cat-file", "-e", f"{_ABLATION_CORPUS_REVISION}^{{commit}}"],
-                      cwd=repo, capture_output=True, timeout=60).returncode != 0:
-        pytest.skip(f"{_ABLATION_CORPUS_REVISION} is not in this checkout (shallow clone?); the "
-                    "pinned own-history corpus cannot be derived here")
+    if (
+        subprocess.run(
+            ["git", "cat-file", "-e", f"{_ABLATION_CORPUS_REVISION}^{{commit}}"],
+            cwd=repo,
+            capture_output=True,
+            timeout=60,
+        ).returncode
+        != 0
+    ):
+        pytest.skip(
+            f"{_ABLATION_CORPUS_REVISION} is not in this checkout (shallow clone?); the "
+            "pinned own-history corpus cannot be derived here"
+        )
     with tempfile.TemporaryDirectory() as workspace:
         built = subprocess.run(
-            [sys.executable, str(GENERATOR), "--repo", repo, "--out", workspace,
-             "--revision", _ABLATION_CORPUS_REVISION],
-            capture_output=True, text=True, timeout=300)
+            [
+                sys.executable,
+                str(GENERATOR),
+                "--repo",
+                repo,
+                "--out",
+                workspace,
+                "--revision",
+                _ABLATION_CORPUS_REVISION,
+            ],
+            capture_output=True,
+            text=True,
+            timeout=300,
+        )
         assert built.returncode == 0, built.stdout + built.stderr
         documents = len(list(Path(workspace).glob("*.md")))
 

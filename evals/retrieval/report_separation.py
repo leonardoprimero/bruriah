@@ -14,6 +14,7 @@ Report the per-corpus rows, always. Pooled, this measurement reads as a clean nu
 two large opposite effects that happen to cancel. Those are not the same finding, and only one of
 them is true.
 """
+
 from __future__ import annotations
 
 import json
@@ -40,7 +41,7 @@ def two_sided_binomial(wins: int, total: int) -> float:
         return 1.0
     extreme = max(wins, total - wins)
     tail = sum(math.comb(total, k) for k in range(extreme, total + 1))
-    return min(1.0, 2 * tail / (2 ** total))
+    return min(1.0, 2 * tail / (2**total))
 
 
 def auc(highs: list[float], lows: list[float]) -> float | None:
@@ -57,8 +58,7 @@ def pairs_for(rows: list[dict], field: str) -> list[tuple[float, float]]:
         if row[field] is not None:
             by_question.setdefault((row["origin"], row["id"]), {})[row["label"]] = row[field]
     return [
-        (sides["home"], sides["foreign"])
-        for sides in by_question.values() if "home" in sides and "foreign" in sides
+        (sides["home"], sides["foreign"]) for sides in by_question.values() if "home" in sides and "foreign" in sides
     ]
 
 
@@ -76,7 +76,7 @@ def render(label: str, rows: list[dict], field: str) -> str:
         f"{label:<28} {field:<20} pairs={len(pairs):>3}  "
         f"home={_median(home):6.2f} foreign={_median(foreign):6.2f} "
         f"delta={_median(deltas):+6.2f}  "
-        f"home wins {wins:>3}/{total:<3} ({wins/total:5.1%})  "
+        f"home wins {wins:>3}/{total:<3} ({wins / total:5.1%})  "
         f"p={two_sided_binomial(wins, total):9.3g}  AUC={area:.3f}"
     )
 
@@ -87,10 +87,15 @@ def main(argv: list[str] | None = None) -> int:
     home = sum(1 for row in rows if row["label"] == "home")
     present_home = sum(1 for row in rows if row["label"] == "home" and row["answer_present"])
     present_foreign = sum(1 for row in rows if row["label"] == "foreign" and row["answer_present"])
-    print(f"{len(rows)} rows.  answer present: {present_home}/{home} home, "
-          f"{present_foreign}/{len(rows) - home} foreign"
-          + ("  (the pairing is exact)" if present_home == home and not present_foreign else
-             "  <-- THE PAIRING IS BROKEN; nothing below means what it says"))
+    print(
+        f"{len(rows)} rows.  answer present: {present_home}/{home} home, "
+        f"{present_foreign}/{len(rows) - home} foreign"
+        + (
+            "  (the pairing is exact)"
+            if present_home == home and not present_foreign
+            else "  <-- THE PAIRING IS BROKEN; nothing below means what it says"
+        )
+    )
     print()
     for field in ("vector_separation", "lexical_separation"):
         print(render("POOLED", rows, field))

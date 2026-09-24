@@ -47,6 +47,7 @@ legacy's own default `rrf_k`), imported here rather than duplicated, so
 scores are on the same footing across both engines for the abstention
 separation metric.
 """
+
 from __future__ import annotations
 
 import importlib.util

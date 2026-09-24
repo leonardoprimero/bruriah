@@ -86,6 +86,7 @@ def write_report(path: Path, text: str) -> None:
         temporary.unlink(missing_ok=True)
         raise
 
+
 # Deterministic across every case, and across every run of this module: no fastembed download,
 # no real vector, so the "fingerprint" is a fixture value like `evals/counterfactual/runner.py`'s.
 _FINGERPRINT = (

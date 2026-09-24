@@ -12,6 +12,7 @@ split in the totals is exercised on both sides of the comparison. Both are index
 embedder `test_cli.py` uses, then read back through `report_counterfactuals.main` exactly as the
 CLI would invoke it, never through the module's private helpers.
 """
+
 from __future__ import annotations
 
 import json
@@ -36,7 +37,8 @@ import report_counterfactuals  # noqa: E402
 
 FIXTURES = Path(__file__).parent / "fixtures" / "github"
 _FINGERPRINT = (
-    '{"artifact":"model.onnx","artifact_sha256":"' + "a" * 64
+    '{"artifact":"model.onnx","artifact_sha256":"'
+    + "a" * 64
     + '","pooling":"mean","runtime":"fastembed==0.8.0","snapshot":"snapshot-a","source":"example/model"}'
 )
 
@@ -69,7 +71,9 @@ def _build_corpus(tmp_path: Path) -> Path:
     _seed_issue_41(cache, "acme", "widget")
     commits = [
         WalkedCommit(
-            sha="a" * 40, date="2026-07-15T10:00:00-03:00", subject="fix: race condition",
+            sha="a" * 40,
+            date="2026-07-15T10:00:00-03:00",
+            subject="fix: race condition",
             body="Closes #41.",
         )
     ]
@@ -99,8 +103,11 @@ def _index(tmp_path: Path, out: Path) -> Path:
     policy_path.write_text("version: 1\ninclude: ['*.md']\nexclude: []\n", encoding="utf-8")
     data_dir = tmp_path / "data"
     paths = resolve_paths(
-        cli_config_dir=tmp_path / "config", cli_data_dir=data_dir, cli_cache_dir=tmp_path / "cache",
-        cli_log_dir=tmp_path / "log", env={},
+        cli_config_dir=tmp_path / "config",
+        cli_data_dir=data_dir,
+        cli_cache_dir=tmp_path / "cache",
+        cli_log_dir=tmp_path / "log",
+        env={},
     )
     cli.run_index(paths, out, policy_path, model_name="test/minilm", embedder_factory=_fake_embedder_factory)
     return data_dir
@@ -109,12 +116,16 @@ def _index(tmp_path: Path, out: Path) -> Path:
 def _questions_file(tmp_path: Path) -> Path:
     rows = [
         {
-            "id": "issue-hit", "query": "race condition", "type": "factual",
+            "id": "issue-hit",
+            "query": "race condition",
+            "type": "factual",
             "provenance": {"commit": "a" * 12, "issue": 41},
             "ground_truth": {"must_include": ["x"], "acceptable": []},
         },
         {
-            "id": "no-issue", "query": "unrelated decision", "type": "factual",
+            "id": "no-issue",
+            "query": "unrelated decision",
+            "type": "factual",
             "provenance": {"commit": "deadbeef" * 5},
             "ground_truth": {"must_include": ["x"], "acceptable": []},
         },
@@ -134,8 +145,15 @@ def test_reports_traceable_alternatives_and_premises_for_a_question_with_provena
 
     exit_code = report_counterfactuals.main(
         [
-            "--corpus", "test-corpus", "--data-dir", str(data_dir), "--questions", str(questions_path),
-            "--out", str(out_path), "--json",
+            "--corpus",
+            "test-corpus",
+            "--data-dir",
+            str(data_dir),
+            "--questions",
+            str(questions_path),
+            "--out",
+            str(out_path),
+            "--json",
         ],
         embedder_factory=_fake_embedder_factory,
     )
@@ -145,13 +163,17 @@ def test_reports_traceable_alternatives_and_premises_for_a_question_with_provena
     # Only the question carrying `provenance.issue` is reported per-question; "no-issue" is not.
     assert len(rows) == 1
     assert rows[0] == {
-        "id": "issue-hit", "issue": 41, "has_issue_document": True,
-        "alternatives_traceable": True, "premises_traceable": True,
+        "id": "issue-hit",
+        "issue": 41,
+        "has_issue_document": True,
+        "alternatives_traceable": True,
+        "premises_traceable": True,
     }
 
 
 def test_totals_split_alternatives_and_premises_by_github_vs_commit_provenance(
-    tmp_path: Path, capsys: pytest.CaptureFixture[str],
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
 ) -> None:
     out = _build_corpus(tmp_path)
     data_dir = _index(tmp_path, out)
@@ -159,7 +181,12 @@ def test_totals_split_alternatives_and_premises_by_github_vs_commit_provenance(
 
     exit_code = report_counterfactuals.main(
         [
-            "--corpus", "test-corpus", "--data-dir", str(data_dir), "--questions", str(questions_path),
+            "--corpus",
+            "test-corpus",
+            "--data-dir",
+            str(data_dir),
+            "--questions",
+            str(questions_path),
             "--json",
         ],
         embedder_factory=_fake_embedder_factory,

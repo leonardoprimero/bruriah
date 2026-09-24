@@ -15,6 +15,7 @@ rewrite and the eval is meant to outlive one), so corpus filenames are stripped 
 that, everything reports as unmatched and this looks like a corpus problem rather than a naming one
 -- the same trap `evals/project-memory/README.md` records for the scorer.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -42,13 +43,13 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--corpus", type=Path, required=True, help="directory of derived .md documents")
     parser.add_argument("--questions", type=Path, required=True, help="a decisions-*.jsonl question set")
-    parser.add_argument("--gate", type=float, default=None,
-                        help="exit non-zero if any question's peak leakage is at or above this")
+    parser.add_argument(
+        "--gate", type=float, default=None, help="exit non-zero if any question's peak leakage is at or above this"
+    )
     parser.add_argument("--json", action="store_true", help="machine-readable output")
     args = parser.parse_args(argv)
 
-    documents = {canonical(path.name): path.read_text(encoding="utf-8")
-                 for path in sorted(args.corpus.glob("*.md"))}
+    documents = {canonical(path.name): path.read_text(encoding="utf-8") for path in sorted(args.corpus.glob("*.md"))}
     if not documents:
         print(f"error: no .md documents under {args.corpus}", file=sys.stderr)
         return 2
@@ -65,10 +66,15 @@ def main(argv: list[str] | None = None) -> int:
             unmatched.append(case["id"])
             continue
         result = leakage(case["query"], documents[wanted[0]], statistics)
-        rows.append({
-            "id": case["id"], "query": case["query"],
-            "share": result.share, "peak": result.peak, "leaked": list(result.leaked[:5]),
-        })
+        rows.append(
+            {
+                "id": case["id"],
+                "query": case["query"],
+                "share": result.share,
+                "peak": result.peak,
+                "leaked": list(result.leaked[:5]),
+            }
+        )
 
     scoreable = [row for row in rows if row["peak"] is not None]
     summary = {
@@ -93,8 +99,10 @@ def main(argv: list[str] | None = None) -> int:
             print(f"  {row['id']:6} {share} {peak}  {', '.join(row['leaked']) or '-'}")
         mean_share = "n/a" if summary["mean_share"] is None else f"{summary['mean_share']:.3f}"
         mean_peak = "n/a" if summary["mean_peak"] is None else f"{summary['mean_peak']:.3f}"
-        print(f"\n  mean share {mean_share} · mean peak {mean_peak} "
-              f"· {summary['peak_at_or_above_half']} question(s) with peak >= 0.50")
+        print(
+            f"\n  mean share {mean_share} · mean peak {mean_peak} "
+            f"· {summary['peak_at_or_above_half']} question(s) with peak >= 0.50"
+        )
 
     if args.gate is not None:
         over = [r["id"] for r in scoreable if r["peak"] >= args.gate]

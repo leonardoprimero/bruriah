@@ -10,6 +10,7 @@ A clone that has never seen the vault runs the whole product suite green; a chec
 runs the migration guarantees too. `pytest -rs` lists what was skipped, so the difference is visible
 rather than silent.
 """
+
 from __future__ import annotations
 
 import os
@@ -54,8 +55,12 @@ requires_legacy_database = pytest.mark.skipif(
 # script's presence made a fresh clone FAIL rather than skip -- the guard has to name every
 # resource the work actually touches, not the one that happens to be easiest to test for.
 requires_baseline_script = pytest.mark.skipif(
-    not (BASELINE_SCRIPT.is_file() and BASELINE_RECORD.is_file()
-         and LEGACY_ENGINE.is_file() and LEGACY_DATABASE.is_file()),
+    not (
+        BASELINE_SCRIPT.is_file()
+        and BASELINE_RECORD.is_file()
+        and LEGACY_ENGINE.is_file()
+        and LEGACY_DATABASE.is_file()
+    ),
     reason="the legacy recovery baseline is not part of this checkout",
 )
 
@@ -84,9 +89,11 @@ def no_connection_outlives_its_test(monkeypatch):
     def tracking_connect(*args, **kwargs):
         base = kwargs.pop("factory", sqlite3.Connection)
         # Subclassed per call so a caller's own factory is honoured rather than replaced.
-        tracked = type("TrackedConnection", (base,), {
-            "close": lambda self: (closed.add(id(self)), super(tracked, self).close())[1]
-        })
+        tracked = type(
+            "TrackedConnection",
+            (base,),
+            {"close": lambda self: (closed.add(id(self)), super(tracked, self).close())[1]},
+        )
         connection = real_connect(*args, factory=tracked, **kwargs)
         opened.append(connection)
         # [-1] is this wrapper and [-2] is whoever called `sqlite3.connect`. Taking the oldest of
@@ -100,7 +107,7 @@ def no_connection_outlives_its_test(monkeypatch):
     leaked = [connection for connection in opened if id(connection) not in closed]
     where = "\n".join(f"  opened at {origins[id(item)]}" for item in leaked)
     for connection in leaked:
-        connection.close()   # do not leave the next test to inherit this one's handles
+        connection.close()  # do not leave the next test to inherit this one's handles
     assert not leaked, (
         f"{len(leaked)} SQLite connection(s) were never closed:\n{where}\n"
         "Use `contextlib.closing`; a bare `with connection:` commits or rolls back and leaves the "

@@ -30,7 +30,8 @@ from bruriah.service import ServiceDeps
 from mcp.shared.memory import create_connected_server_and_client_session
 
 FINGERPRINT = (
-    '{"artifact":"model.onnx","artifact_sha256":"' + "a" * 64
+    '{"artifact":"model.onnx","artifact_sha256":"'
+    + "a" * 64
     + '","pooling":"mean","runtime":"fastembed==0.8.0","snapshot":"snapshot-a","source":"example/model"}'
 )
 _SRC = Path(__file__).resolve().parents[1] / "src"
@@ -42,8 +43,10 @@ _TASK = "Find a python schema validation library, apple pie baking recipe"
 def _real_registry() -> Registry:
     roots = json.loads((_DATA / "trust-roots.json").read_text())
     pack = load_pack(
-        _DATA / "research-policy.json", _DATA / "research-policy.manifest.json",
-        roots, today=date(2026, 7, 23),
+        _DATA / "research-policy.json",
+        _DATA / "research-policy.manifest.json",
+        roots,
+        today=date(2026, 7, 23),
     )
     return Registry.from_packs([pack])
 
@@ -62,9 +65,16 @@ def _snapshot_for(tmp_path: Path, notes: dict[str, str]):
     policy_path.write_text("version: 1\ninclude: ['public/**']\nexclude: []\n", encoding="utf-8")
     policy = CorpusPolicy.load(policy_path)
     config = BuildConfig(
-        root=tmp_path / "vault", policy_path=policy_path, schema_version=1, parser_version="corpus-v2",
-        service_version="0.1.0", mcp_range=">=1.28.1,<2", embedding_model="test/minilm",
-        embedding_revision="snapshot-a", embedding_dimensions=3, embedding_fingerprint=FINGERPRINT,
+        root=tmp_path / "vault",
+        policy_path=policy_path,
+        schema_version=1,
+        parser_version="corpus-v2",
+        service_version="0.1.0",
+        mcp_range=">=1.28.1,<2",
+        embedding_model="test/minilm",
+        embedding_revision="snapshot-a",
+        embedding_dimensions=3,
+        embedding_fingerprint=FINGERPRINT,
         ranking_config="rrf-v1",
     )
     candidate, pointer = tmp_path / "candidate.sqlite3", tmp_path / "active.json"
@@ -225,8 +235,7 @@ def test_retrieved_prompt_injection_stays_inert_through_the_protocol(tmp_path) -
         )
         assert result.isError is False
         injected = [
-            item for item in result.structuredContent["evidence"]
-            if item["locator"] == _doc_ref("public/injection.md")
+            item for item in result.structuredContent["evidence"] if item["locator"] == _doc_ref("public/injection.md")
         ]
         assert injected
         # The injected instruction is quoted evidence data only: no host action, no claim, no
@@ -306,8 +315,10 @@ def test_cross_field_validators_still_run_on_the_json_path(tmp_path) -> None:
     async def body(session) -> None:
         for label, arguments in (
             ("duplicate refs", {"refs": ["a", "a"]}),
-            ("a range naming a ref that was not requested",
-             {"refs": ["a"], "ranges": [{"ref": "b", "start": 1, "end": 2}]}),
+            (
+                "a range naming a ref that was not requested",
+                {"refs": ["a"], "ranges": [{"ref": "b", "start": 1, "end": 2}]},
+            ),
             ("a reversed range", {"refs": ["a"], "ranges": [{"ref": "a", "start": 9, "end": 2}]}),
         ):
             result = await session.call_tool(READ_TOOL, arguments)
@@ -330,6 +341,7 @@ def test_tool_execution_is_offloaded_to_worker_thread(tmp_path) -> None:
 
     with _deps_for(tmp_path, _default_notes()) as deps:
         import bruriah.mcp_server
+
         real_handler = bruriah.mcp_server._handle_investigate
 
         def wrapped_handler(*args, **kwargs):
@@ -354,7 +366,9 @@ def test_investigate_tool_with_code_target_over_mcp(tmp_path: Path) -> None:
     (repo / "script.py").write_text("print('hello')\n", encoding="utf-8")
     subprocess.run(["git", "add", "script.py"], cwd=repo, check=True, capture_output=True)
     subprocess.run(["git", "commit", "-m", "feat: script hello"], cwd=repo, check=True, capture_output=True)
-    sha = subprocess.run(["git", "rev-parse", "HEAD"], cwd=repo, capture_output=True, text=True, check=True).stdout.strip()
+    sha = subprocess.run(
+        ["git", "rev-parse", "HEAD"], cwd=repo, capture_output=True, text=True, check=True
+    ).stdout.strip()
 
     notes = {
         "decision.md": (
@@ -367,7 +381,9 @@ def test_investigate_tool_with_code_target_over_mcp(tmp_path: Path) -> None:
     }
     with _snapshot_for(tmp_path, notes) as active:
         deps = ServiceDeps(
-            registry=_real_registry(), snapshot=active, repo=repo,
+            registry=_real_registry(),
+            snapshot=active,
+            repo=repo,
             embed_query=lambda q: _embed([q])[0],
         )
 
@@ -407,7 +423,7 @@ def test_an_alt_ref_dereferences_over_mcp_and_the_published_schema_names_the_new
             "    disposition: rejected\n    reason: Drops unknown fields silently.\n"
             "    premises:\n      - fastmcp-no-forbid\n"
             "premises:\n  - id: fastmcp-no-forbid\n"
-            "    statement: FastMCP lacks extra=\"forbid\"\n    status: active\n---\n"
+            '    statement: FastMCP lacks extra="forbid"\n    status: active\n---\n'
             "# ADR 001: Reject FastMCP\nWe evaluated FastMCP and rejected it.\n"
         ),
     }
@@ -415,14 +431,12 @@ def test_an_alt_ref_dereferences_over_mcp_and_the_published_schema_names_the_new
     async def body(session) -> None:
         listed = await session.list_tools()
         read_tool = next(tool for tool in listed.tools if tool.name == READ_TOOL)
-        evidence_kind_enum = (
-            read_tool.outputSchema["$defs"]["ReadItem"]["properties"]["evidence_kind"]["anyOf"][0]["enum"]
-        )
+        evidence_kind_enum = read_tool.outputSchema["$defs"]["ReadItem"]["properties"]["evidence_kind"]["anyOf"][0][
+            "enum"
+        ]
         assert {"alternative", "premise"} <= set(evidence_kind_enum)
 
-        investigated = await session.call_tool(
-            INVESTIGATE_TOOL, {"task": "migrate server to FastMCP framework"}
-        )
+        investigated = await session.call_tool(INVESTIGATE_TOOL, {"task": "migrate server to FastMCP framework"})
         assert investigated.isError is False
         alt_ref = investigated.structuredContent["alternatives"][0]["ref"]
 
@@ -435,5 +449,3 @@ def test_an_alt_ref_dereferences_over_mcp_and_the_published_schema_names_the_new
 
     with _deps_for(tmp_path, notes) as deps:
         anyio.run(_drive, deps, body)
-
-

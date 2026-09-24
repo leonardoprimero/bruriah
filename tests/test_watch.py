@@ -13,7 +13,8 @@ from bruriah.watch import RepoWatcher, WatchError, get_git_state_fingerprint, ge
 
 def _fake_embedder_factory(model_name: str) -> tuple[Embedder, str, int]:
     fingerprint = (
-        '{"artifact":"model.onnx","artifact_sha256":"' + "a" * 64
+        '{"artifact":"model.onnx","artifact_sha256":"'
+        + "a" * 64
         + '","pooling":"mean","runtime":"fastembed==0.8.0","snapshot":"snapshot-a","source":"example/model"}'
     )
 
@@ -34,7 +35,9 @@ def _commit(repo: Path, filename: str, content: str, message: str) -> str:
     (repo / filename).write_text(content, encoding="utf-8")
     subprocess.run(["git", "add", filename], cwd=repo, check=True)
     subprocess.run(["git", "commit", "-q", "-m", message], cwd=repo, check=True)
-    return subprocess.run(["git", "rev-parse", "HEAD"], cwd=repo, capture_output=True, text=True, check=True).stdout.strip()
+    return subprocess.run(
+        ["git", "rev-parse", "HEAD"], cwd=repo, capture_output=True, text=True, check=True
+    ).stdout.strip()
 
 
 def test_watch_fails_on_non_git_repo(tmp_path: Path) -> None:
@@ -100,13 +103,18 @@ def test_watch_cli_once(tmp_path: Path) -> None:
     config_dir = tmp_path / "config"
 
     # Run via CLI with --once
-    code = bruriah_main([
-        "watch",
-        "--repo", str(repo),
-        "--data-dir", str(data_dir),
-        "--config-dir", str(config_dir),
-        "--once",
-    ])
+    code = bruriah_main(
+        [
+            "watch",
+            "--repo",
+            str(repo),
+            "--data-dir",
+            str(data_dir),
+            "--config-dir",
+            str(config_dir),
+            "--once",
+        ]
+    )
     assert code == 0
     assert (data_dir / "active.json").exists()
 

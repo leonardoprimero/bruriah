@@ -16,9 +16,14 @@ _TIMESTAMP = datetime(2026, 7, 24, 12, 0, 0, tzinfo=timezone.utc)
 
 def _record(**overrides: object) -> AuditRecord:
     payload = dict(
-        request_id="sha256:" + "a" * 64, destination_host="example.test",
-        destination_class="public_https", decision="fetched", code="ok",
-        bytes_transferred=128, elapsed_ms=42, timestamp=_TIMESTAMP,
+        request_id="sha256:" + "a" * 64,
+        destination_host="example.test",
+        destination_class="public_https",
+        decision="fetched",
+        code="ok",
+        bytes_transferred=128,
+        elapsed_ms=42,
+        timestamp=_TIMESTAMP,
     )
     payload.update(overrides)
     return AuditRecord(**payload)
@@ -61,6 +66,12 @@ def test_record_carries_only_the_closed_field_set(tmp_path: Path) -> None:
     line = path.read_text(encoding="utf-8").splitlines()[0]
     payload = json.loads(line)
     assert set(payload) == {
-        "request_id", "destination_host", "destination_class", "decision", "code",
-        "bytes_transferred", "elapsed_ms", "timestamp",
+        "request_id",
+        "destination_host",
+        "destination_class",
+        "decision",
+        "code",
+        "bytes_transferred",
+        "elapsed_ms",
+        "timestamp",
     }

@@ -20,8 +20,14 @@ from bruriah.audit import read_audit_records
 from bruriah.cache import cache_key, read_cache
 from bruriah.contracts import Budgets, InvestigationRequest
 from bruriah.research import (
-    AccessPolicy, ConcurrencyLimiter, NetworkLedger, ResearchDeps, ResearchOutcome,
-    _canonicalize, build_proxy_connect, research,
+    AccessPolicy,
+    ConcurrencyLimiter,
+    NetworkLedger,
+    ResearchDeps,
+    ResearchOutcome,
+    _canonicalize,
+    build_proxy_connect,
+    research,
 )
 
 _FIXTURES = Path(__file__).parent / "fixtures" / "fetch"
@@ -112,7 +118,8 @@ def _fake_public_resolver(_host: str) -> list[str]:
 def _request(**overrides: object) -> InvestigationRequest:
     payload: dict[str, object] = {
         "task": "Find the current published guidance for this integration.",
-        "network_policy": "public_https", "budgets": Budgets(max_network_requests=5),
+        "network_policy": "public_https",
+        "budgets": Budgets(max_network_requests=5),
     }
     payload.update(overrides)
     return InvestigationRequest(**payload)
@@ -136,10 +143,16 @@ class _Clock:
 
 def _deps(tmp_path: Path, server: "_LocalTlsServer", clock: "_Clock", **overrides: object) -> ResearchDeps:
     base: dict[str, object] = dict(
-        allowlist=_allowlist(server), cache_dir=tmp_path / "cache", audit_path=tmp_path / "audit" / "research.jsonl",
-        network_enabled=True, concurrency=ConcurrencyLimiter(4), resolver=_fake_public_resolver,
-        connect=_redirect_connect(server), ssl_context=_trusting_ssl_context(),
-        clock=clock.monotonic, now=clock.now,
+        allowlist=_allowlist(server),
+        cache_dir=tmp_path / "cache",
+        audit_path=tmp_path / "audit" / "research.jsonl",
+        network_enabled=True,
+        concurrency=ConcurrencyLimiter(4),
+        resolver=_fake_public_resolver,
+        connect=_redirect_connect(server),
+        ssl_context=_trusting_ssl_context(),
+        clock=clock.monotonic,
+        now=clock.now,
     )
     base.update(overrides)
     return ResearchDeps(**base)
@@ -159,9 +172,14 @@ def test_request_network_policy_off_returns_host_action_without_connecting(tmp_p
     server = _LocalTlsServer(_ok_responder())
     try:
         clock = _Clock(datetime(2026, 7, 24, 12, 0, 0, tzinfo=timezone.utc))
-        deps = _deps(tmp_path, server, clock, connect=lambda *_a: (_ for _ in ()).throw(
-            AssertionError("must never connect when request.network_policy == off"),
-        ))
+        deps = _deps(
+            tmp_path,
+            server,
+            clock,
+            connect=lambda *_a: (_ for _ in ()).throw(
+                AssertionError("must never connect when request.network_policy == off"),
+            ),
+        )
         outcome = research(_request(network_policy="off"), _url(server), deps)
         assert outcome.status == "disabled"
         assert outcome.code == "network_disabled"
@@ -176,9 +194,15 @@ def test_platform_network_disabled_returns_host_action_without_connecting(tmp_pa
     server = _LocalTlsServer(_ok_responder())
     try:
         clock = _Clock(datetime(2026, 7, 24, 12, 0, 0, tzinfo=timezone.utc))
-        deps = _deps(tmp_path, server, clock, network_enabled=False, connect=lambda *_a: (_ for _ in ()).throw(
-            AssertionError("must never connect when platform network is disabled"),
-        ))
+        deps = _deps(
+            tmp_path,
+            server,
+            clock,
+            network_enabled=False,
+            connect=lambda *_a: (_ for _ in ()).throw(
+                AssertionError("must never connect when platform network is disabled"),
+            ),
+        )
         outcome = research(_request(), _url(server), deps)
         assert outcome.status == "disabled"
         assert outcome.code == "network_disabled"
@@ -220,7 +244,10 @@ def test_host_not_allowlisted_is_refused_without_connecting(tmp_path: Path) -> N
     try:
         clock = _Clock(datetime(2026, 7, 24, 12, 0, 0, tzinfo=timezone.utc))
         deps = _deps(
-            tmp_path, server, clock, allowlist=frozenset({"not-this-host.example"}),
+            tmp_path,
+            server,
+            clock,
+            allowlist=frozenset({"not-this-host.example"}),
             connect=lambda *_a: (_ for _ in ()).throw(AssertionError("must not connect")),
         )
         outcome = research(_request(), _url(server), deps)
@@ -238,7 +265,10 @@ def test_access_policy_denied_path_is_refused_without_connecting(tmp_path: Path)
         # `AccessPolicy` is keyed by the bare hostname `_canonicalize` extracts -- never host:port.
         policy = AccessPolicy(disallowed_path_prefixes={_HOST: ("/private",)})
         deps = _deps(
-            tmp_path, server, clock, access_policy=policy,
+            tmp_path,
+            server,
+            clock,
+            access_policy=policy,
             connect=lambda *_a: (_ for _ in ()).throw(AssertionError("must not connect")),
         )
         outcome = research(_request(), _url(server, "/private/account"), deps)
@@ -478,6 +508,7 @@ def test_disallowed_content_type_surfaces_as_typed_refused(tmp_path: Path) -> No
 def test_unexpected_exception_is_converted_to_typed_error_not_raised(tmp_path: Path) -> None:
     server = _LocalTlsServer(_ok_responder())
     try:
+
         def _exploding_now() -> datetime:
             raise RuntimeError("unexpected failure unrelated to any typed ResearchError code")
 
@@ -582,8 +613,14 @@ def test_a_cache_entry_written_under_another_policy_version_is_refetched(tmp_pat
 
     try:
         clock = _Clock(datetime(2026, 7, 24, 12, 0, 0, tzinfo=timezone.utc))
-        deps = _deps(tmp_path, server, clock, connect=_counting_connect,
-                     policy_version="pack-v1", default_ttl=timedelta(hours=24))
+        deps = _deps(
+            tmp_path,
+            server,
+            clock,
+            connect=_counting_connect,
+            policy_version="pack-v1",
+            default_ttl=timedelta(hours=24),
+        )
         assert research(_request(), _url(server), deps).status == "fetched"
         assert connects["n"] == 1
 
@@ -612,10 +649,7 @@ def test_the_ledger_pools_requests_and_bytes_across_calls(tmp_path: Path) -> Non
         budgets = Budgets(max_bytes=1_000_000, max_network_requests=5)
         ledger = NetworkLedger.for_request(budgets, clock.monotonic)
 
-        outcomes = [
-            research(_request(budgets=budgets), _url(server, f"/p{i}"), deps, ledger)
-            for i in range(5)
-        ]
+        outcomes = [research(_request(budgets=budgets), _url(server, f"/p{i}"), deps, ledger) for i in range(5)]
         fetched = [o for o in outcomes if o.status == "fetched"]
         exhausted = [o for o in outcomes if o.code == "network_budget_exhausted"]
 

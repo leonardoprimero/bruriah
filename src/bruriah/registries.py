@@ -6,6 +6,8 @@ from datetime import date
 from types import MappingProxyType
 
 from .packs import CapabilityPolicy, Currency, DomainPack, PackError, SourcePolicy, pack_currency
+
+
 @dataclass(frozen=True)
 class Registry:
     packs: tuple[DomainPack, ...]
@@ -16,6 +18,7 @@ class Registry:
     # aging -- a registry built without a date says nothing about currency and must behave exactly
     # as it did before currency existed.
     currency: Mapping[str, Currency] = field(default_factory=lambda: MappingProxyType({}))
+
     @classmethod
     def from_packs(cls, packs: list[DomainPack], *, today: date | None = None) -> "Registry":
         """`today` is optional and never read from the clock: pass it to have each pack's review
@@ -36,12 +39,14 @@ class Registry:
                     raise PackError("duplicate_capability_id")
                 seen_capabilities.add(capability.capability_id)
         sources = tuple(item for pack in ordered for item in sorted(pack.sources, key=lambda value: value.source_id))
-        capabilities = tuple(item for pack in ordered for item in sorted(pack.capabilities, key=lambda value: value.capability_id))
+        capabilities = tuple(
+            item for pack in ordered for item in sorted(pack.capabilities, key=lambda value: value.capability_id)
+        )
         currency = MappingProxyType(
-            {} if today is None
-            else {item.pack_id: pack_currency(item, today) for item in ordered}
+            {} if today is None else {item.pack_id: pack_currency(item, today) for item in ordered}
         )
         return cls(ordered, sources, capabilities, currency)
+
     @property
     def pack_ids(self) -> tuple[str, ...]:
         return tuple(item.pack_id for item in self.packs)

@@ -3,6 +3,7 @@
 All ranking and scoring logic in this module is deterministic, in-memory, and free of I/O or
 database dependencies.
 """
+
 from __future__ import annotations
 
 import math
@@ -83,9 +84,7 @@ def bm25_scores_from_tokens(
     total_documents = len(tokenized)
     terms = set(query_tokens)
     idfs = {
-        term: math.log(
-            1 + (total_documents - document_frequency[term] + 0.5) / (document_frequency[term] + 0.5)
-        )
+        term: math.log(1 + (total_documents - document_frequency[term] + 0.5) / (document_frequency[term] + 0.5))
         for term in terms
         if term in document_frequency
     }
@@ -135,10 +134,7 @@ def bm25_scores_from_postings(
     if average_length == 0.0 or not dfs:
         return {}, False
 
-    idfs = {
-        term: math.log(1 + (total_documents - df + 0.5) / (df + 0.5))
-        for term, df in dfs.items()
-    }
+    idfs = {term: math.log(1 + (total_documents - df + 0.5) / (df + 0.5)) for term, df in dfs.items()}
 
     k1_plus_1 = k1 + 1
     b_part = 1 - b
@@ -219,9 +215,8 @@ def fuse_ranks(
     for ref in set(lexical_ranks) | set(vector_ranks):
         lexical_rank = lexical_ranks.get(ref)
         vector_rank = vector_ranks.get(ref)
-        score = (
-            (lexical_weight / (rrf_k + lexical_rank) if lexical_rank is not None else 0.0)
-            + (1.0 / (rrf_k + vector_rank) if vector_rank is not None else 0.0)
+        score = (lexical_weight / (rrf_k + lexical_rank) if lexical_rank is not None else 0.0) + (
+            1.0 / (rrf_k + vector_rank) if vector_rank is not None else 0.0
         )
         fused.append((score, ref, lexical_rank, vector_rank))
     fused.sort(key=lambda item: (-item[0], item[1]))

@@ -58,7 +58,12 @@ from collections.abc import Sequence
 from typing import Literal
 
 from .contracts import (
-    Budgets, ClaimRecord, EvidenceRecord, HostAction, InvestigationRequest, InvestigationResult,
+    Budgets,
+    ClaimRecord,
+    EvidenceRecord,
+    HostAction,
+    InvestigationRequest,
+    InvestigationResult,
 )
 from .evidence import ClaimAssessment, render_claim_record
 from .research import ResearchOutcome
@@ -88,7 +93,8 @@ _GAP_HOST_ACTIONS: dict[str, HostAction] = {
     "sources_jurisdiction_mismatch": HostAction(kind="consult_professional", reason="sources_jurisdiction_mismatch"),
 }
 _CONSEQUENTIAL_ACTION_HOST_ACTION = HostAction(
-    kind="inspect_capability", reason="consequential_action_requires_host_execution",
+    kind="inspect_capability",
+    reason="consequential_action_requires_host_execution",
 )
 
 
@@ -97,7 +103,9 @@ def _request_id(request: InvestigationRequest) -> str:
     (duplicated on purpose: a frozen module's private helper is never imported across the module
     boundary -- every new helper this slice needs lives here, per the module docstring)."""
     canonical = json.dumps(
-        request.model_dump(mode="json", exclude={"cursor"}), sort_keys=True, separators=(",", ":"),
+        request.model_dump(mode="json", exclude={"cursor"}),
+        sort_keys=True,
+        separators=(",", ":"),
     )
     return f"sha256:{hashlib.sha256(canonical.encode('utf-8')).hexdigest()}"
 
@@ -112,15 +120,17 @@ def _escalation_host_actions(gaps: Sequence[str]) -> list[HostAction]:
 
 
 def _route_gated_result(
-    request: InvestigationRequest, route_decision: RouteDecision, request_id: str, *, forced: bool,
+    request: InvestigationRequest,
+    route_decision: RouteDecision,
+    request_id: str,
+    *,
+    forced: bool,
     extra_gaps: Sequence[str] = (),
 ) -> InvestigationResult:
     """`route_decision.outcome in ("route_only", "abstained")`, or rollback `mode="route_only"`
     forcing a `proceed` decision down to route-only (guarantees #1 and #5): assemble ONLY the
     routing decision. Zero evidence, zero claims -- ever."""
-    status: Literal["route_only", "abstained"] = (
-        "abstained" if route_decision.outcome == "abstained" else "route_only"
-    )
+    status: Literal["route_only", "abstained"] = "abstained" if route_decision.outcome == "abstained" else "route_only"
     host_actions = _escalation_host_actions(route_decision.gaps)
     warnings: list[str] = []
     degradation: list[str] = ["rollback_route_only_mode"] if forced and route_decision.outcome == "proceed" else []
@@ -129,16 +139,28 @@ def _route_gated_result(
         if _CONSEQUENTIAL_ACTION_HOST_ACTION not in host_actions:
             host_actions.append(_CONSEQUENTIAL_ACTION_HOST_ACTION)
     result = InvestigationResult(
-        schema_version="2", status=status, request_id=request_id, evidence=[], claims=[],
-        conflicts=[], gaps=[*route_decision.gaps, *extra_gaps], host_actions=host_actions,
-        warnings=warnings, degradation=degradation, budgets=request.budgets, next_cursor=None,
+        schema_version="2",
+        status=status,
+        request_id=request_id,
+        evidence=[],
+        claims=[],
+        conflicts=[],
+        gaps=[*route_decision.gaps, *extra_gaps],
+        host_actions=host_actions,
+        warnings=warnings,
+        degradation=degradation,
+        budgets=request.budgets,
+        next_cursor=None,
     )
     return compact_to_budget(result, request.budgets.max_output_chars)
 
 
 def _assembled_result(
-    request: InvestigationRequest, request_id: str, assessments: Sequence[ClaimAssessment],
-    evidence_pool: Sequence[EvidenceRecord], research_outcomes: Sequence[ResearchOutcome],
+    request: InvestigationRequest,
+    request_id: str,
+    assessments: Sequence[ClaimAssessment],
+    evidence_pool: Sequence[EvidenceRecord],
+    research_outcomes: Sequence[ResearchOutcome],
 ) -> InvestigationResult:
     """`route_decision.outcome == "proceed"` under `mode="full"` (guarantee #1's only reachable
     assembly path): render each `ClaimAssessment` to a frozen `ClaimRecord`, resolve every ref a
@@ -214,9 +236,18 @@ def _assembled_result(
     )
 
     result = InvestigationResult(
-        schema_version="2", status=status, request_id=request_id, evidence=evidence, claims=claims,
-        conflicts=conflicts, gaps=gaps, host_actions=host_actions, warnings=warnings,
-        degradation=degradation, budgets=request.budgets, next_cursor=None,
+        schema_version="2",
+        status=status,
+        request_id=request_id,
+        evidence=evidence,
+        claims=claims,
+        conflicts=conflicts,
+        gaps=gaps,
+        host_actions=host_actions,
+        warnings=warnings,
+        degradation=degradation,
+        budgets=request.budgets,
+        next_cursor=None,
     )
     return compact_to_budget(result, request.budgets.max_output_chars)
 
@@ -264,20 +295,20 @@ def compact_to_budget(result: InvestigationResult, max_output_chars: int) -> Inv
         so a result could stop dropping at "now it fits", then grow back over the ceiling on its
         way out the door. Measuring the real payload is the only way the returned object and the
         checked object are the same object."""
-        return result.model_copy(update={
-            "evidence": kept,
-            "status": demoted,
-            "degradation": [
-                *result.degradation,
-                *(["output_budget_compacted"] if dropped else []),
-                *(["output_budget_unmet"] if unmet else []),
-            ],
-            # Only a real drop leaves anything to resume past; `:0` would advertise a position
-            # that does not exist.
-            "next_cursor": (
-                f"ctx-compacted:{result.request_id}:{dropped}" if dropped else result.next_cursor
-            ),
-        })
+        return result.model_copy(
+            update={
+                "evidence": kept,
+                "status": demoted,
+                "degradation": [
+                    *result.degradation,
+                    *(["output_budget_compacted"] if dropped else []),
+                    *(["output_budget_unmet"] if unmet else []),
+                ],
+                # Only a real drop leaves anything to resume past; `:0` would advertise a position
+                # that does not exist.
+                "next_cursor": (f"ctx-compacted:{result.request_id}:{dropped}" if dropped else result.next_cursor),
+            }
+        )
 
     protected = _protected_refs(result)
     kept = list(result.evidence)
@@ -309,15 +340,29 @@ def _fallback_result(request: object, code: str) -> InvestigationResult:
         except Exception:
             request_id, budgets = _FALLBACK_REQUEST_ID, Budgets()
     return InvestigationResult(
-        schema_version="2", status="abstained", request_id=request_id, evidence=[], claims=[],
-        conflicts=[], gaps=["assembly_failed"], host_actions=[], warnings=[code], degradation=[],
-        budgets=budgets, next_cursor=None,
+        schema_version="2",
+        status="abstained",
+        request_id=request_id,
+        evidence=[],
+        claims=[],
+        conflicts=[],
+        gaps=["assembly_failed"],
+        host_actions=[],
+        warnings=[code],
+        degradation=[],
+        budgets=budgets,
+        next_cursor=None,
     )
 
 
 def _assemble_context_inner(
-    request: InvestigationRequest, route_decision: RouteDecision, assessments: Sequence[ClaimAssessment],
-    evidence_pool: Sequence[EvidenceRecord], research_outcomes: Sequence[ResearchOutcome], *, mode: AssemblyMode,
+    request: InvestigationRequest,
+    route_decision: RouteDecision,
+    assessments: Sequence[ClaimAssessment],
+    evidence_pool: Sequence[EvidenceRecord],
+    research_outcomes: Sequence[ResearchOutcome],
+    *,
+    mode: AssemblyMode,
     extra_gaps: Sequence[str] = (),
 ) -> InvestigationResult:
     if not isinstance(request, InvestigationRequest):
@@ -339,7 +384,11 @@ def _assemble_context_inner(
 
     if mode == "route_only" or route_decision.outcome != "proceed":
         return _route_gated_result(
-            request, route_decision, request_id, forced=mode == "route_only", extra_gaps=extra_gaps,
+            request,
+            route_decision,
+            request_id,
+            forced=mode == "route_only",
+            extra_gaps=extra_gaps,
         )
 
     return _assembled_result(request, request_id, assessments, evidence_pool, research_outcomes)
@@ -369,8 +418,13 @@ def assemble_context(
     """
     try:
         return _assemble_context_inner(
-            request, route_decision, assessments, evidence_pool, research_outcomes,
-            mode=mode, extra_gaps=extra_gaps,
+            request,
+            route_decision,
+            assessments,
+            evidence_pool,
+            research_outcomes,
+            mode=mode,
+            extra_gaps=extra_gaps,
         )
     except ContextError as error:
         return _fallback_result(request, error.code)
@@ -379,5 +433,9 @@ def assemble_context(
 
 
 __all__ = [
-    "AssemblyMode", "ContextError", "ContextStatus", "assemble_context", "compact_to_budget",
+    "AssemblyMode",
+    "ContextError",
+    "ContextStatus",
+    "assemble_context",
+    "compact_to_budget",
 ]

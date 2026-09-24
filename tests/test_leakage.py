@@ -202,19 +202,22 @@ def _write_fixture(root: Path, *, leaky: bool) -> tuple[Path, Path]:
         "the lexical leg is discounted when the query language differs from the corpus",
         encoding="utf-8",
     )
-    question = (
-        "why were the pointer primitives moved" if leaky
-        else "how do two kinds of thing share one promise"
-    )
+    question = "why were the pointer primitives moved" if leaky else "how do two kinds of thing share one promise"
     questions = root / "questions.jsonl"
     questions.write_text(
-        json.dumps({
-            "id": "q01", "query": question, "language": "en", "type": "factual",
-            "ground_truth": {
-                "must_include": ["2026-07-25-extract-the-pointer-primitives.md"],
-                "acceptable": [],
-            },
-        }) + "\n",
+        json.dumps(
+            {
+                "id": "q01",
+                "query": question,
+                "language": "en",
+                "type": "factual",
+                "ground_truth": {
+                    "must_include": ["2026-07-25-extract-the-pointer-primitives.md"],
+                    "acceptable": [],
+                },
+            }
+        )
+        + "\n",
         encoding="utf-8",
     )
     return corpus, questions
@@ -257,11 +260,16 @@ def test_ground_truth_absent_from_the_corpus_is_reported_not_scored(tmp_path: Pa
     corpus, _ = _write_fixture(tmp_path, leaky=True)
     orphan = tmp_path / "orphan.jsonl"
     orphan.write_text(
-        json.dumps({
-            "id": "q99", "query": "why anything", "language": "en", "type": "factual",
-            "ground_truth": {"must_include": ["2020-01-01-a-document-that-never-existed.md"],
-                             "acceptable": []},
-        }) + "\n",
+        json.dumps(
+            {
+                "id": "q99",
+                "query": "why anything",
+                "language": "en",
+                "type": "factual",
+                "ground_truth": {"must_include": ["2020-01-01-a-document-that-never-existed.md"], "acceptable": []},
+            }
+        )
+        + "\n",
         encoding="utf-8",
     )
     assert report_main(["--corpus", str(corpus), "--questions", str(orphan), "--json"]) == 0

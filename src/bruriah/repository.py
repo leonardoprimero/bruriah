@@ -132,8 +132,16 @@ class SnapshotRepository:
                     stopped = True
                     break
                 (
-                    ref, document_ref, relative_path, heading_json, start_line, end_line, text,
-                    search_text, source_hash, vector,
+                    ref,
+                    document_ref,
+                    relative_path,
+                    heading_json,
+                    start_line,
+                    end_line,
+                    text,
+                    search_text,
+                    source_hash,
+                    vector,
                 ) = row
                 passages.append(
                     PassageRecord(
@@ -187,8 +195,16 @@ class SnapshotRepository:
             hydrated: dict[str, PassageRecord] = {}
             for row in rows:
                 (
-                    ref, document_ref, relative_path, heading_json, start_line, end_line, text,
-                    search_text, source_hash, vector,
+                    ref,
+                    document_ref,
+                    relative_path,
+                    heading_json,
+                    start_line,
+                    end_line,
+                    text,
+                    search_text,
+                    source_hash,
+                    vector,
                 ) = row
                 hydrated[ref] = PassageRecord(
                     ref=ref,
@@ -250,28 +266,19 @@ class SnapshotRepository:
         """Detect dominant language of the corpus from precomputed stats or sample passages."""
         try:
             if self.has_lexical_index():
-                row = self._db.execute(
-                    "SELECT str_value FROM corpus_stats WHERE key = 'corpus_language'"
-                ).fetchone()
+                row = self._db.execute("SELECT str_value FROM corpus_stats WHERE key = 'corpus_language'").fetchone()
                 if row is not None and row[0] is not None:
                     return row[0]
             if passages is not None:
-                return language.dominant(
-                    passage.search_text[:400]
-                    for passage in passages[:64]
-                )
-            sample_rows = self._db.execute(
-                "SELECT search_text FROM passages ORDER BY ref LIMIT 64"
-            ).fetchall()
-            return language.dominant(text[:400] for text, in sample_rows)
+                return language.dominant(passage.search_text[:400] for passage in passages[:64])
+            sample_rows = self._db.execute("SELECT search_text FROM passages ORDER BY ref LIMIT 64").fetchall()
+            return language.dominant(text[:400] for (text,) in sample_rows)
         except sqlite3.DatabaseError as error:
             raise RepositoryError("snapshot_unreadable") from error
 
     def has_lineage_table(self) -> bool:
         try:
-            row = self._db.execute(
-                "SELECT 1 FROM sqlite_master WHERE type='table' AND name='lineage'"
-            ).fetchone()
+            row = self._db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='lineage'").fetchone()
             return row is not None
         except sqlite3.DatabaseError:
             return False
@@ -335,16 +342,12 @@ class SnapshotRepository:
     def get_document_path(self, doc_ref: str) -> str | None:
         """Fetch document relative_path by document_ref."""
         try:
-            row = self._db.execute(
-                "SELECT relative_path FROM documents WHERE document_ref = ?", (doc_ref,)
-            ).fetchone()
+            row = self._db.execute("SELECT relative_path FROM documents WHERE document_ref = ?", (doc_ref,)).fetchone()
             return row[0] if row else None
         except sqlite3.DatabaseError:
             return None
 
-    def get_passages_by_document(
-        self, doc_ref: str, limit: int | None = None
-    ) -> list[PassageSummary]:
+    def get_passages_by_document(self, doc_ref: str, limit: int | None = None) -> list[PassageSummary]:
         """Fetch passages belonging to a document ordered by start_line."""
         query = (
             "SELECT ref, relative_path, start_line, end_line, source_hash "

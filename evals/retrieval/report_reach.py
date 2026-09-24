@@ -21,6 +21,7 @@ than a paragraph in a README quietly going stale.
 No reranker and no cross-encoder: this is the cheap half of the pipeline, minutes rather than the
 hour `run_ablation.py` costs.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -41,8 +42,13 @@ from bruriah import language  # noqa: E402
 from bruriah.cli import build_serve_deps  # noqa: E402
 from bruriah.platform import resolve_paths  # noqa: E402
 from bruriah.retrieval import (  # noqa: E402
-    _CROSS_LINGUAL_LEXICAL_WEIGHT, _bm25_ranks, _corpus_language, _fuse, _scan_passages,
-    _tokenize, _vector_ranks,
+    _CROSS_LINGUAL_LEXICAL_WEIGHT,
+    _bm25_ranks,
+    _corpus_language,
+    _fuse,
+    _scan_passages,
+    _tokenize,
+    _vector_ranks,
 )
 
 _CEILINGS = (3, 10, 40, 183, 300, 604, 2120)
@@ -87,8 +93,7 @@ def render(corpus: str, result: Reach) -> str:
         "|---|---|---|",
     ]
     lines.extend(
-        f"| top {ceiling} | {found} / {result.questions} | **{share:.3f}** |"
-        for ceiling, found, share in result.within
+        f"| top {ceiling} | {found} / {result.questions} | **{share:.3f}** |" for ceiling, found, share in result.within
     )
     return "\n".join(lines)
 
@@ -102,9 +107,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--json", action="store_true")
     args = parser.parse_args(argv)
 
-    questions = [
-        json.loads(line) for line in args.questions.read_text(encoding="utf-8").splitlines() if line.strip()
-    ]
+    questions = [json.loads(line) for line in args.questions.read_text(encoding="utf-8").splitlines() if line.strip()]
     deps = build_serve_deps(resolve_paths(cli_data_dir=args.data_dir, env={}))
     try:
         passages, _stopped = _scan_passages(deps.snapshot.database, _NO_DEADLINE, _never_expires)
@@ -114,7 +117,11 @@ def main(argv: list[str] | None = None) -> int:
             {
                 "id": case["id"],
                 "document_rank": document_rank_of_answer(
-                    passages, by_ref, corpus_language, deps, case["query"],
+                    passages,
+                    by_ref,
+                    corpus_language,
+                    deps,
+                    case["query"],
                     strip_build_sha(case["ground_truth"]["must_include"][0]),
                 ),
             }
@@ -123,11 +130,11 @@ def main(argv: list[str] | None = None) -> int:
     finally:
         deps.snapshot.database.close()
 
-    result = reach([row["document_rank"] for row in rows], _CEILINGS,
-                   len({passage.document_ref for passage in passages}))
+    result = reach(
+        [row["document_rank"] for row in rows], _CEILINGS, len({passage.document_ref for passage in passages})
+    )
     if args.out:
-        args.out.write_text(
-            "\n".join(json.dumps(row, sort_keys=True) for row in rows) + "\n", encoding="utf-8")
+        args.out.write_text("\n".join(json.dumps(row, sort_keys=True) for row in rows) + "\n", encoding="utf-8")
     print(json.dumps(asdict(result), indent=2, sort_keys=True) if args.json else render(args.corpus, result))
     return 0
 

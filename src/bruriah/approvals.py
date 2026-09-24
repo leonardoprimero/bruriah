@@ -51,14 +51,20 @@ class ApprovalRecord:
 
     def as_json(self) -> dict[str, object]:
         return {
-            "skill_id": self.skill_id, "body_digest": self.body_digest,
-            "candidate_digest": self.candidate_digest, "acknowledged": list(self.acknowledged),
+            "skill_id": self.skill_id,
+            "body_digest": self.body_digest,
+            "candidate_digest": self.candidate_digest,
+            "acknowledged": list(self.acknowledged),
             "approved_on": self.approved_on.isoformat(),
         }
 
 
 def approve_candidate(
-    candidate: Path, data_dir: Path, *, acknowledge: Iterable[str], today: date,
+    candidate: Path,
+    data_dir: Path,
+    *,
+    acknowledge: Iterable[str],
+    today: date,
 ) -> tuple[ApprovalRecord, ...]:
     """Approve every skill in a candidate, binding each to its current body digest.
 
@@ -86,8 +92,7 @@ def approve_candidate(
             skill_id=skill_id,
             body_digest=digest,
             candidate_digest=report.digest,
-            acknowledged=tuple(sorted(identifier for identifier in required
-                                      if identifier.startswith(f"{skill_id}:"))),
+            acknowledged=tuple(sorted(identifier for identifier in required if identifier.startswith(f"{skill_id}:"))),
             approved_on=today,
         )
         for skill_id, digest in _body_digests(candidate).items()
@@ -119,7 +124,8 @@ def read_approval(path: Path) -> ApprovalRecord:
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
         return ApprovalRecord(
-            skill_id=data["skill_id"], body_digest=data["body_digest"],
+            skill_id=data["skill_id"],
+            body_digest=data["body_digest"],
             candidate_digest=data["candidate_digest"],
             acknowledged=tuple(data["acknowledged"]),
             approved_on=date.fromisoformat(data["approved_on"]),

@@ -48,9 +48,19 @@ from .cache import find_by_ref
 from .classify import classify
 from .context import assemble_context, compact_to_budget
 from .contracts import (
-    AlternativeRecord, ClaimRecord, CounterfactualAssessment, EvidenceRecord, HostAction,
-    InvestigationRequest, InvestigationResult, PermissionDisclosure, PremiseRecord,
-    ReadItem, ReadRange, ReadRequest, ReadResult,
+    AlternativeRecord,
+    ClaimRecord,
+    CounterfactualAssessment,
+    EvidenceRecord,
+    HostAction,
+    InvestigationRequest,
+    InvestigationResult,
+    PermissionDisclosure,
+    PremiseRecord,
+    ReadItem,
+    ReadRange,
+    ReadRequest,
+    ReadResult,
 )
 from .corpus import alternative_ref_for, premise_ref_for
 from .dispatch import DEFAULT_SKILL_CEILING, SkillDispatch, dispatch
@@ -62,7 +72,12 @@ from .registries import Registry
 from .repository import RepositoryError, SnapshotRepository
 from .research import NetworkLedger, ResearchDeps, ResearchOutcome, research
 from .retrieval import (
-    EmbedQuery, Rerank, SearchService, build_local_evidence_record, is_shortfall, to_evidence_records,
+    EmbedQuery,
+    Rerank,
+    SearchService,
+    build_local_evidence_record,
+    is_shortfall,
+    to_evidence_records,
 )
 from .route import route
 from .why import WhyError, trace_causal_archaeology
@@ -119,7 +134,6 @@ class ServiceDeps:
     repo: Path = Path(".")
 
 
-
 def _canonical_json(payload: object) -> str:
     return json.dumps(payload, sort_keys=True, separators=(",", ":"))
 
@@ -166,7 +180,6 @@ def _decode_investigate_cursor(token: str, expected_request_id: str, expected_bu
     return decoded["offset"]
 
 
-
 def _validate_deps(deps: object) -> ServiceDeps:
     if not isinstance(deps, ServiceDeps):
         raise ServiceError("invalid_deps_type")
@@ -182,10 +195,14 @@ def _capability_digest(capability: CapabilityPolicy) -> str:
     # against the release index."), not a literal sha256 -- EvidenceRecord/ReadItem require the
     # closed `sha256:<64 hex>` pattern, so this hashes the capability's own declared identity
     # fields instead. Deterministic: the same capability always yields the same digest.
-    canonical = _canonical_json({
-        "capability_id": capability.capability_id, "canonical_distribution": capability.canonical_distribution,
-        "version": capability.version, "integrity": capability.integrity,
-    })
+    canonical = _canonical_json(
+        {
+            "capability_id": capability.capability_id,
+            "canonical_distribution": capability.canonical_distribution,
+            "version": capability.version,
+            "integrity": capability.integrity,
+        }
+    )
     return f"sha256:{hashlib.sha256(canonical.encode('utf-8')).hexdigest()}"
 
 
@@ -206,7 +223,9 @@ def _capability_evidence_record(capability: CapabilityPolicy) -> EvidenceRecord:
         digest=_capability_digest(capability),
         authority="unknown",
         authority_rationale="capability_identity_only",
-        freshness="unknown", license="unknown", conflict="unknown",
+        freshness="unknown",
+        license="unknown",
+        conflict="unknown",
     )
 
 
@@ -250,8 +269,11 @@ def _skill_evidence_record(entry: SkillDispatch) -> EvidenceRecord:
         citation_locator=f"{skill.skill_id}@{skill.version}",
         digest=skill.body_digest,
         provenance_chain=[
-            f"tier:{skill.tier}", f"pack:{entry.skill.pack_id}", f"availability:{entry.availability}",
-            f"currency:{entry.currency}", f"trusted:{str(entry.trusted).lower()}",
+            f"tier:{skill.tier}",
+            f"pack:{entry.skill.pack_id}",
+            f"availability:{entry.availability}",
+            f"currency:{entry.currency}",
+            f"trusted:{str(entry.trusted).lower()}",
         ],
         authority="unknown",
         # T2 (investigate-boundary-v2): a closed code, never `skill.summary` (author-declared
@@ -260,7 +282,9 @@ def _skill_evidence_record(entry: SkillDispatch) -> EvidenceRecord:
         authority_rationale="skill_dispatch_declared",
         # `freshness` speaks the contract's existing three words. A demoted skill says so HERE,
         # in the field a client already reads, rather than in a new channel nobody parses.
-        freshness=entry.currency, license="unknown", conflict="unknown",
+        freshness=entry.currency,
+        license="unknown",
+        conflict="unknown",
         envelope=_disclose_envelope(skill.permissions),
     )
 
@@ -280,8 +304,8 @@ def _drafting_action(classification, dispatched) -> HostAction | None:
     return HostAction(
         kind="draft_skill_candidate",
         reason=f"No vetted skill covers the {classification.domain} domain for this request. "
-               "Draft one and submit it through `bruriah skill-ingest`; it enters as a "
-               "candidate and still requires analysis and human approval before it is dispatched.",
+        "Draft one and submit it through `bruriah skill-ingest`; it enters as a "
+        "candidate and still requires analysis and human approval before it is dispatched.",
         target=classification.domain,
     )
 
@@ -316,27 +340,35 @@ def _skill_outcomes(entries: tuple[SkillDispatch, ...]) -> tuple[list[str], list
             # digest are untouched: an overdue review is a fact about the review, not about the
             # content, and the skill stays available for re-approval exactly as it was.
             gaps.append(f"skill_{entry.currency}:{ref}")
-            actions.append(HostAction(
-                kind="inspect_capability",
-                reason=f"This skill's pack is {entry.currency}; it is disclosed as a candidate "
-                       "rather than as vetted guidance until it is reviewed again.",
-                target=ref,
-            ))
+            actions.append(
+                HostAction(
+                    kind="inspect_capability",
+                    reason=f"This skill's pack is {entry.currency}; it is disclosed as a candidate "
+                    "rather than as vetted guidance until it is reviewed again.",
+                    target=ref,
+                )
+            )
         if entry.availability == "not_installed":
             gaps.append(f"skill_not_installed:{ref}")
             actions.append(HostAction(kind="install_skill", reason=entry.skill.skill.summary, target=ref))
         elif entry.availability == "digest_divergent":
             gaps.append(f"skill_digest_divergent:{ref}")
-            actions.append(HostAction(
-                kind="inspect_capability",
-                reason="The installed copy does not match the approved digest and is unapproved.",
-                target=ref,
-            ))
+            actions.append(
+                HostAction(
+                    kind="inspect_capability",
+                    reason="The installed copy does not match the approved digest and is unapproved.",
+                    target=ref,
+                )
+            )
     return gaps, actions
 
 
 def _window_text(
-    text: str, requested_range: ReadRange | None, cursor_start: int | None, item_cap: int, remaining_total: int,
+    text: str,
+    requested_range: ReadRange | None,
+    cursor_start: int | None,
+    item_cap: int,
+    remaining_total: int,
 ) -> tuple[str, int, int, bool] | None:
     # Shared exact-window/truncation logic for both local passages and capability disclosure
     # text: 1-indexed start, budget-capped window, and honest truncation reporting. `None` signals
@@ -347,7 +379,7 @@ def _window_text(
         return None
     wanted_end = min(requested_range.end, length) if requested_range else length
     cap = max(min(item_cap, remaining_total), 0)
-    window = text[start - 1: wanted_end][:cap]
+    window = text[start - 1 : wanted_end][:cap]
     actual_end = start - 1 + len(window)
     return window, start, actual_end, actual_end < wanted_end
 
@@ -483,10 +515,15 @@ def _apply_lineage(
                         existing_refs.add(p.ref)
                         additional_evidence.append(
                             build_local_evidence_record(
-                                ref=p.ref, document_ref=p.document_ref,
-                                start_line=p.start_line, end_line=p.end_line, source_hash=p.source_hash,
-                                authority="unknown", authority_rationale="not_assessed_by_retrieval",
-                                freshness="current", conflict="none",
+                                ref=p.ref,
+                                document_ref=p.document_ref,
+                                start_line=p.start_line,
+                                end_line=p.end_line,
+                                source_hash=p.source_hash,
+                                authority="unknown",
+                                authority_rationale="not_assessed_by_retrieval",
+                                freshness="current",
+                                conflict="none",
                             )
                         )
                 claims.append(
@@ -578,16 +615,18 @@ def _resolve_code_target_causality(
     freshness: Literal["current", "stale", "expired", "unknown"] = "stale" if alerts else "current"
     conflict_state: Literal["none", "declared", "unknown"] = "declared" if alerts else "none"
     uncertainty: list[str] = [
-        f"{a.relation}:{a.successor_commit[:12] if a.successor_commit else a.successor_ref}"
-        for a in alerts
+        f"{a.relation}:{a.successor_commit[:12] if a.successor_commit else a.successor_ref}" for a in alerts
     ]
 
     # T2 (investigate-boundary-v2): `commit_sha`/`line_commit.sha` are validated shas
     # (`agent_surface.short_commit_sha`), never the raw markdown-parsed author -- the governing
     # author is dropped from provenance_chain entirely, closing `code-target-author`.
     ev_record = build_local_evidence_record(
-        ref=p_ref, document_ref=gov.document_ref,
-        start_line=p_start, end_line=p_end, source_hash=p_hash,
+        ref=p_ref,
+        document_ref=gov.document_ref,
+        start_line=p_start,
+        end_line=p_end,
+        source_hash=p_hash,
         provenance_chain=[
             f"commit:{agent_surface.short_commit_sha(gov.commit_sha)}",
             f"line_commit:{agent_surface.short_commit_sha(res.line_commit.sha)}",
@@ -624,8 +663,7 @@ def _resolve_code_target_causality(
                     else None
                 )
                 active_identifier = (
-                    active_sha if active_sha and active_sha != agent_surface.UNKNOWN
-                    else alert.active_successor_ref
+                    active_sha if active_sha and active_sha != agent_surface.UNKNOWN else alert.active_successor_ref
                 )
                 conf_msg += f" (evolved to active leaf {active_identifier})"
             conflicts.append(conf_msg)
@@ -642,8 +680,11 @@ def _resolve_code_target_causality(
                         conflicting_refs.append(s.ref)
                         evidence.append(
                             build_local_evidence_record(
-                                ref=s.ref, document_ref=s.document_ref,
-                                start_line=s.start_line, end_line=s.end_line, source_hash=s.source_hash,
+                                ref=s.ref,
+                                document_ref=s.document_ref,
+                                start_line=s.start_line,
+                                end_line=s.end_line,
+                                source_hash=s.source_hash,
                                 authority="primary",
                                 authority_rationale=(
                                     "code_target_active_successor"
@@ -787,10 +828,17 @@ def _evaluate_counterfactual(
             # `.evidence[0].authority_rationale` leak_fields entry.
             cf_evidence.append(
                 build_local_evidence_record(
-                    ref=p.ref, document_ref=p.document_ref,
-                    start_line=p.start_line, end_line=p.end_line, source_hash=p.source_hash,
-                    authority="primary", authority_rationale="counterfactual_alternative_evidence",
-                    freshness="current", license="permitted", reuse="permitted", conflict="none",
+                    ref=p.ref,
+                    document_ref=p.document_ref,
+                    start_line=p.start_line,
+                    end_line=p.end_line,
+                    source_hash=p.source_hash,
+                    authority="primary",
+                    authority_rationale="counterfactual_alternative_evidence",
+                    freshness="current",
+                    license="permitted",
+                    reuse="permitted",
+                    conflict="none",
                 )
             )
     except RepositoryError:
@@ -810,9 +858,7 @@ def _evaluate_counterfactual(
         # `agent_surface.commit_sha` here too, exactly like `PremiseRecord.invalidated_by` below,
         # so the rationale/conflict text can never carry the raw, unvalidated value.
         validated_sha = agent_surface.commit_sha(inv_p.invalidated_by)
-        inv_by_display = (
-            validated_sha if validated_sha != agent_surface.UNKNOWN else "an unvalidated decision"
-        )
+        inv_by_display = validated_sha if validated_sha != agent_surface.UNKNOWN else "an unvalidated decision"
         # T3 (investigate-boundary-v2): fixed wording built only from refs, counts, the verdict
         # and a validated sha -- never from `matched_alt.name`/`.reason` or a premise's own
         # statement, closing `md-alt-name`/`md-alt-reason`/`md-premise-*` as conflict/rationale
@@ -823,8 +869,7 @@ def _evaluate_counterfactual(
             "now invalidated; the decision requires reevaluation under current conditions."
         )
         cf_conflicts.append(
-            f"Historical rejection of {alt_ref} questioned: premise {inv_p_ref} was invalidated "
-            f"by {inv_by_display}"
+            f"Historical rejection of {alt_ref} questioned: premise {inv_p_ref} was invalidated by {inv_by_display}"
         )
 
         inv_doc = inv_p.invalidation_document_ref or inv_p.document_ref
@@ -836,11 +881,17 @@ def _evaluate_counterfactual(
                         supporting_refs.append(p.ref)
                         cf_evidence.append(
                             build_local_evidence_record(
-                                ref=p.ref, document_ref=p.document_ref,
-                                start_line=p.start_line, end_line=p.end_line, source_hash=p.source_hash,
+                                ref=p.ref,
+                                document_ref=p.document_ref,
+                                start_line=p.start_line,
+                                end_line=p.end_line,
+                                source_hash=p.source_hash,
                                 authority="primary",
                                 authority_rationale="counterfactual_invalidated_premise_evidence",
-                                freshness="current", license="permitted", reuse="permitted", conflict="none",
+                                freshness="current",
+                                license="permitted",
+                                reuse="permitted",
+                                conflict="none",
                             )
                         )
             except RepositoryError:
@@ -891,9 +942,7 @@ def _evaluate_counterfactual(
                     ref=premise_ref_for(p_row.premise_id),
                     status=p_status,
                     decision_ref=p_row.document_ref,
-                    invalidated_by=(
-                        p_validated_sha if p_validated_sha != agent_surface.UNKNOWN else None
-                    ),
+                    invalidated_by=(p_validated_sha if p_validated_sha != agent_surface.UNKNOWN else None),
                     invalidated_in=p_row.invalidation_document_ref,
                 )
             )
@@ -947,9 +996,7 @@ class InvestigateService:
         request_id = _content_hash(request)
         cursor_offset = 0
         if request.cursor is not None:
-            cursor_offset = _decode_investigate_cursor(
-                request.cursor, request_id, self._deps.snapshot.build_id
-            )
+            cursor_offset = _decode_investigate_cursor(request.cursor, request_id, self._deps.snapshot.build_id)
 
         classification = classify(request)
         opted_in = request.host_skills is not None
@@ -960,9 +1007,7 @@ class InvestigateService:
         if decision.outcome != "proceed":
             return assemble_context(request, decision, mode="full", extra_gaps=pack_gaps)
 
-        return self._proceed(
-            request, request_id, cursor_offset, classification, lookup, decision, pack_gaps, opted_in
-        )
+        return self._proceed(request, request_id, cursor_offset, classification, lookup, decision, pack_gaps, opted_in)
 
     def _proceed(
         self,
@@ -977,8 +1022,7 @@ class InvestigateService:
     ) -> InvestigationResult:
         capability_evidence = [_capability_evidence_record(capability) for capability in lookup.capabilities]
         skill_dispatch = (
-            dispatch(lookup, request.host_skills or [], ceiling=self._deps.skill_ceiling)
-            if opted_in else None
+            dispatch(lookup, request.host_skills or [], ceiling=self._deps.skill_ceiling) if opted_in else None
         )
         skill_evidence = [_skill_evidence_record(item) for item in skill_dispatch.skills] if skill_dispatch else []
 
@@ -1040,10 +1084,10 @@ class InvestigateService:
         page_research = research_evidence[: max(0, available_slots)]
         evidence = page_prefix + page_local + page_research
 
-        prefix_has_more = (cursor_offset + len(page_prefix) < prefix_count)
-        local_has_more = (len(deduped_local) > len(page_local))
+        prefix_has_more = cursor_offset + len(page_prefix) < prefix_count
+        local_has_more = len(deduped_local) > len(page_local)
         search_has_more = outcome.truncated
-        research_has_more = (len(research_evidence) > len(page_research))
+        research_has_more = len(research_evidence) > len(page_research)
         has_more = prefix_has_more or local_has_more or search_has_more or research_has_more
 
         if has_more:
@@ -1072,10 +1116,21 @@ class InvestigateService:
                 host_actions = host_actions + [drafting]
 
         result = InvestigationResult(
-            schema_version="2", status=status, request_id=request_id, evidence=evidence,
-            claims=lineage_claims, conflicts=lineage_conflicts, gaps=list(decision.gaps) + extra_gaps, host_actions=host_actions,
-            warnings=warnings, degradation=degradation, budgets=request.budgets, next_cursor=next_cursor,
-            alternatives=cf_alts, premises=cf_premises, counterfactual_assessment=cf_assessment,
+            schema_version="2",
+            status=status,
+            request_id=request_id,
+            evidence=evidence,
+            claims=lineage_claims,
+            conflicts=lineage_conflicts,
+            gaps=list(decision.gaps) + extra_gaps,
+            host_actions=host_actions,
+            warnings=warnings,
+            degradation=degradation,
+            budgets=request.budgets,
+            next_cursor=next_cursor,
+            alternatives=cf_alts,
+            premises=cf_premises,
+            counterfactual_assessment=cf_assessment,
         )
         return compact_to_budget(result, request.budgets.max_output_chars)
 
@@ -1097,8 +1152,13 @@ def investigate(request: InvestigationRequest, deps: ServiceDeps) -> Investigati
 
 
 def _read_one(
-    repo: SnapshotRepository, ref: str, requested_range: ReadRange | None, cursor_start: int | None,
-    item_cap: int, remaining_total: int, request_id: str,
+    repo: SnapshotRepository,
+    ref: str,
+    requested_range: ReadRange | None,
+    cursor_start: int | None,
+    item_cap: int,
+    remaining_total: int,
+    request_id: str,
 ) -> tuple[ReadItem, int]:
     content = repo.get_passage_content(ref)
     if content is None:
@@ -1111,32 +1171,53 @@ def _read_one(
     next_cursor = _encode_cursor(request_id, ref, actual_end + 1) if truncated else None
 
     item = ReadItem(
-        ref=ref, status="ok", content=window, start=start, end=actual_end,
-        digest=f"sha256:{content.source_hash}", truncated=truncated, next_cursor=next_cursor,
-        evidence_kind="local", locator=content.relative_path,
+        ref=ref,
+        status="ok",
+        content=window,
+        start=start,
+        end=actual_end,
+        digest=f"sha256:{content.source_hash}",
+        truncated=truncated,
+        next_cursor=next_cursor,
+        evidence_kind="local",
+        locator=content.relative_path,
         citation_locator=f"{content.relative_path}#{content.start_line}-{content.end_line}",
-        authority="unknown", freshness="unknown", license="unknown", conflict="unknown",
+        authority="unknown",
+        freshness="unknown",
+        license="unknown",
+        conflict="unknown",
     )
     return item, remaining_total - len(window)
 
 
 def _read_capability_one(
-    registry: Registry, ref: str, requested_range: ReadRange | None, cursor_start: int | None,
-    item_cap: int, remaining_total: int, request_id: str,
+    registry: Registry,
+    ref: str,
+    requested_range: ReadRange | None,
+    cursor_start: int | None,
+    item_cap: int,
+    remaining_total: int,
+    request_id: str,
 ) -> tuple[ReadItem, int]:
     # Resolves a `capability:<id>` ref via the frozen `resolve_capability` (6B-2) -- never a
     # fabricated or nearest-match record; not-found is a typed `missing_ref`, exactly like local
     # refs. Content is the capability's own registry-declared metadata as canonical JSON: disclosure
     # of what the pack states, never a recommendation to run the tool and never a conclusion.
-    capability = resolve_capability(ref[len(_CAPABILITY_REF_PREFIX):], registry)
+    capability = resolve_capability(ref[len(_CAPABILITY_REF_PREFIX) :], registry)
     if capability is None:
         return ReadItem(ref=ref, status="missing_ref"), remaining_total
-    disclosure = _canonical_json({
-        "canonical_distribution": capability.canonical_distribution, "version": capability.version,
-        "integrity": capability.integrity, "advisories": capability.advisories,
-        "permissions": capability.permissions, "network_access": capability.network_access,
-        "data_access": capability.data_access, "limitations": capability.limitations,
-    })
+    disclosure = _canonical_json(
+        {
+            "canonical_distribution": capability.canonical_distribution,
+            "version": capability.version,
+            "integrity": capability.integrity,
+            "advisories": capability.advisories,
+            "permissions": capability.permissions,
+            "network_access": capability.network_access,
+            "data_access": capability.data_access,
+            "limitations": capability.limitations,
+        }
+    )
 
     windowed = _window_text(disclosure, requested_range, cursor_start, item_cap, remaining_total)
     if windowed is None:
@@ -1145,18 +1226,33 @@ def _read_capability_one(
     next_cursor = _encode_cursor(request_id, ref, actual_end + 1) if truncated else None
 
     item = ReadItem(
-        ref=ref, status="ok", content=window, start=start, end=actual_end,
-        digest=_capability_digest(capability), truncated=truncated, next_cursor=next_cursor,
-        evidence_kind="capability", locator=capability.canonical_distribution,
+        ref=ref,
+        status="ok",
+        content=window,
+        start=start,
+        end=actual_end,
+        digest=_capability_digest(capability),
+        truncated=truncated,
+        next_cursor=next_cursor,
+        evidence_kind="capability",
+        locator=capability.canonical_distribution,
         citation_locator=f"{capability.capability_id}@{capability.version}",
-        authority="unknown", freshness="unknown", license="unknown", conflict="unknown",
+        authority="unknown",
+        freshness="unknown",
+        license="unknown",
+        conflict="unknown",
     )
     return item, remaining_total - len(window)
 
 
 def _read_skill_one(
-    skill_set: SkillSet | None, ref: str, requested_range: ReadRange | None, cursor_start: int | None,
-    item_cap: int, remaining_total: int, request_id: str,
+    skill_set: SkillSet | None,
+    ref: str,
+    requested_range: ReadRange | None,
+    cursor_start: int | None,
+    item_cap: int,
+    remaining_total: int,
+    request_id: str,
 ) -> tuple[ReadItem, int]:
     # Resolves a `skill:<id>@<version>` ref against the ACTIVE set, mirroring `_read_capability_one`.
     # Content is the skill's declared METADATA as canonical JSON -- identity, provenance, envelope,
@@ -1164,18 +1260,27 @@ def _read_skill_one(
     # `SkillPolicy` has no body field, so there is no code path through either tool that could
     # return one. The version must match too: a ref pinned to a version the active set no longer
     # carries is `missing_ref`, never silently answered with a different version's metadata.
-    identifier, _, version = ref[len(_SKILL_REF_PREFIX):].partition("@")
+    identifier, _, version = ref[len(_SKILL_REF_PREFIX) :].partition("@")
     skill = skill_set.resolve(identifier) if skill_set is not None else None
     if skill is None or skill.version != version:
         return ReadItem(ref=ref, status="missing_ref"), remaining_total
-    disclosure = _canonical_json({
-        "skill_id": skill.skill_id, "version": skill.version, "tier": skill.tier,
-        "payload": skill.payload, "summary": skill.summary, "domains": skill.domains,
-        "body_locator": skill.body_locator, "body_digest": skill.body_digest,
-        "permissions": _disclose_envelope(skill.permissions).model_dump(mode="json"),
-        "provenance": skill.provenance, "license": skill.license,
-        "advisories": skill.advisories, "limitations": skill.limitations,
-    })
+    disclosure = _canonical_json(
+        {
+            "skill_id": skill.skill_id,
+            "version": skill.version,
+            "tier": skill.tier,
+            "payload": skill.payload,
+            "summary": skill.summary,
+            "domains": skill.domains,
+            "body_locator": skill.body_locator,
+            "body_digest": skill.body_digest,
+            "permissions": _disclose_envelope(skill.permissions).model_dump(mode="json"),
+            "provenance": skill.provenance,
+            "license": skill.license,
+            "advisories": skill.advisories,
+            "limitations": skill.limitations,
+        }
+    )
 
     windowed = _window_text(disclosure, requested_range, cursor_start, item_cap, remaining_total)
     if windowed is None:
@@ -1184,18 +1289,33 @@ def _read_skill_one(
     next_cursor = _encode_cursor(request_id, ref, actual_end + 1) if truncated else None
 
     item = ReadItem(
-        ref=ref, status="ok", content=window, start=start, end=actual_end,
-        digest=skill.body_digest, truncated=truncated, next_cursor=next_cursor,
-        evidence_kind="skill", locator=skill.body_locator,
+        ref=ref,
+        status="ok",
+        content=window,
+        start=start,
+        end=actual_end,
+        digest=skill.body_digest,
+        truncated=truncated,
+        next_cursor=next_cursor,
+        evidence_kind="skill",
+        locator=skill.body_locator,
         citation_locator=f"{skill.skill_id}@{skill.version}",
-        authority="unknown", freshness="unknown", license="unknown", conflict="unknown",
+        authority="unknown",
+        freshness="unknown",
+        license="unknown",
+        conflict="unknown",
     )
     return item, remaining_total - len(window)
 
 
 def _read_live_one(
-    research_deps: ResearchDeps | None, ref: str, requested_range: ReadRange | None, cursor_start: int | None,
-    item_cap: int, remaining_total: int, request_id: str,
+    research_deps: ResearchDeps | None,
+    ref: str,
+    requested_range: ReadRange | None,
+    cursor_start: int | None,
+    item_cap: int,
+    remaining_total: int,
+    request_id: str,
 ) -> tuple[ReadItem, int]:
     # Resolves a `live:sha256:<32 hex>` ref -- the refs `fetch.py` mints for captured live evidence
     # and `investigate()` hands back to the client. Until now `read()` had no branch for them, so
@@ -1234,24 +1354,40 @@ def _read_live_one(
 
     evidence = entry.evidence
     item = ReadItem(
-        ref=ref, status="ok", content=window, start=start, end=actual_end,
-        digest=evidence.digest, truncated=truncated, next_cursor=next_cursor,
+        ref=ref,
+        status="ok",
+        content=window,
+        start=start,
+        end=actual_end,
+        digest=evidence.digest,
+        truncated=truncated,
+        next_cursor=next_cursor,
         captured_at=evidence.retrieved_at,
-        evidence_kind="captured_live", locator=evidence.locator,
+        evidence_kind="captured_live",
+        locator=evidence.locator,
         citation_locator=evidence.citation_locator,
         provenance_chain=list(evidence.provenance_chain),
         # Carried from the record `investigate()` already returned, never re-derived here: the two
         # tools must not be able to disagree about the authority of one piece of evidence.
-        authority=evidence.authority, freshness=evidence.freshness,
-        license=evidence.license, conflict=evidence.conflict,
+        authority=evidence.authority,
+        freshness=evidence.freshness,
+        license=evidence.license,
+        conflict=evidence.conflict,
     )
     return item, remaining_total - len(window)
 
 
 def _read_disclosure_one(
-    disclosure: str, evidence_kind: Literal["alternative", "premise"], locator: str, citation_locator: str,
-    ref: str, requested_range: ReadRange | None, cursor_start: int | None,
-    item_cap: int, remaining_total: int, request_id: str,
+    disclosure: str,
+    evidence_kind: Literal["alternative", "premise"],
+    locator: str,
+    citation_locator: str,
+    ref: str,
+    requested_range: ReadRange | None,
+    cursor_start: int | None,
+    item_cap: int,
+    remaining_total: int,
+    request_id: str,
 ) -> tuple[ReadItem, int]:
     # T4.1 (investigate-boundary-v2, R2-t4-read-alt-premise-duplicated-body): the windowing,
     # cursor-minting, digesting and `ReadItem` construction that `_read_alternative_one` and
@@ -1265,18 +1401,33 @@ def _read_disclosure_one(
     next_cursor = _encode_cursor(request_id, ref, actual_end + 1) if truncated else None
 
     item = ReadItem(
-        ref=ref, status="ok", content=window, start=start, end=actual_end,
+        ref=ref,
+        status="ok",
+        content=window,
+        start=start,
+        end=actual_end,
         digest=f"sha256:{hashlib.sha256(disclosure.encode('utf-8')).hexdigest()}",
-        truncated=truncated, next_cursor=next_cursor,
-        evidence_kind=evidence_kind, locator=locator, citation_locator=citation_locator,
-        authority="unknown", freshness="unknown", license="unknown", conflict="unknown",
+        truncated=truncated,
+        next_cursor=next_cursor,
+        evidence_kind=evidence_kind,
+        locator=locator,
+        citation_locator=citation_locator,
+        authority="unknown",
+        freshness="unknown",
+        license="unknown",
+        conflict="unknown",
     )
     return item, remaining_total - len(window)
 
 
 def _read_alternative_one(
-    repo: SnapshotRepository, ref: str, requested_range: ReadRange | None, cursor_start: int | None,
-    item_cap: int, remaining_total: int, request_id: str,
+    repo: SnapshotRepository,
+    ref: str,
+    requested_range: ReadRange | None,
+    cursor_start: int | None,
+    item_cap: int,
+    remaining_total: int,
+    request_id: str,
 ) -> tuple[ReadItem, int]:
     # Resolves an `alt:v1:<hash>` ref back to its stored row (T4, investigate-boundary-v2),
     # mirroring `_read_capability_one`/`_read_skill_one`: not-found is a typed `missing_ref`,
@@ -1288,22 +1439,37 @@ def _read_alternative_one(
     row = repo.resolve_alternative_ref(ref)
     if row is None:
         return ReadItem(ref=ref, status="missing_ref"), remaining_total
-    disclosure = _canonical_json({
-        "name": row.name, "disposition": row.disposition, "reason": row.reason,
-        "decision_ref": row.document_ref,
-        "premise_refs": [premise_ref_for(pid) for pid in row.premises],
-    })
+    disclosure = _canonical_json(
+        {
+            "name": row.name,
+            "disposition": row.disposition,
+            "reason": row.reason,
+            "decision_ref": row.document_ref,
+            "premise_refs": [premise_ref_for(pid) for pid in row.premises],
+        }
+    )
     return _read_disclosure_one(
-        disclosure=disclosure, evidence_kind="alternative", locator=row.document_ref,
-        citation_locator=f"{row.document_ref}#{row.name}", ref=ref,
-        requested_range=requested_range, cursor_start=cursor_start,
-        item_cap=item_cap, remaining_total=remaining_total, request_id=request_id,
+        disclosure=disclosure,
+        evidence_kind="alternative",
+        locator=row.document_ref,
+        citation_locator=f"{row.document_ref}#{row.name}",
+        ref=ref,
+        requested_range=requested_range,
+        cursor_start=cursor_start,
+        item_cap=item_cap,
+        remaining_total=remaining_total,
+        request_id=request_id,
     )
 
 
 def _read_premise_one(
-    repo: SnapshotRepository, ref: str, requested_range: ReadRange | None, cursor_start: int | None,
-    item_cap: int, remaining_total: int, request_id: str,
+    repo: SnapshotRepository,
+    ref: str,
+    requested_range: ReadRange | None,
+    cursor_start: int | None,
+    item_cap: int,
+    remaining_total: int,
+    request_id: str,
 ) -> tuple[ReadItem, int]:
     # Premise analogue of `_read_alternative_one`. `invalidated_by` is the row's raw stored
     # value -- the same corpus-authored value `_evaluate_counterfactual` validates through
@@ -1313,16 +1479,27 @@ def _read_premise_one(
     row = repo.resolve_premise_ref(ref)
     if row is None:
         return ReadItem(ref=ref, status="missing_ref"), remaining_total
-    disclosure = _canonical_json({
-        "id": row.premise_id, "statement": row.statement, "status": row.status,
-        "rationale": row.rationale, "invalidated_by": row.invalidated_by,
-        "invalidated_in": row.invalidation_document_ref,
-    })
+    disclosure = _canonical_json(
+        {
+            "id": row.premise_id,
+            "statement": row.statement,
+            "status": row.status,
+            "rationale": row.rationale,
+            "invalidated_by": row.invalidated_by,
+            "invalidated_in": row.invalidation_document_ref,
+        }
+    )
     return _read_disclosure_one(
-        disclosure=disclosure, evidence_kind="premise", locator=row.document_ref,
-        citation_locator=f"{row.document_ref}#{row.premise_id}", ref=ref,
-        requested_range=requested_range, cursor_start=cursor_start,
-        item_cap=item_cap, remaining_total=remaining_total, request_id=request_id,
+        disclosure=disclosure,
+        evidence_kind="premise",
+        locator=row.document_ref,
+        citation_locator=f"{row.document_ref}#{row.premise_id}",
+        ref=ref,
+        requested_range=requested_range,
+        cursor_start=cursor_start,
+        item_cap=item_cap,
+        remaining_total=remaining_total,
+        request_id=request_id,
     )
 
 
@@ -1369,8 +1546,10 @@ class ReadService:
         if request.cursor is not None:
             decoded = _decode_cursor(request.cursor)
             if (
-                not decoded or decoded.get("request_id") != request_id
-                or decoded.get("ref") not in request.refs or not isinstance(decoded.get("start"), int)
+                not decoded
+                or decoded.get("request_id") != request_id
+                or decoded.get("ref") not in request.refs
+                or not isinstance(decoded.get("start"), int)
             ):
                 raise ServiceError("invalid_cursor")
             cursor_ref, cursor_start = str(decoded["ref"]), int(decoded["start"])
@@ -1402,8 +1581,12 @@ class ReadService:
         warnings = ["output_budget_exhausted"] if remaining <= 0 and any(item.truncated for item in items) else []
         next_cursor = next((item.next_cursor for item in items if item.next_cursor), None)
         return ReadResult(
-            schema_version="1", request_id=request_id, items=items,
-            warnings=warnings, budgets=request.budgets, next_cursor=next_cursor,
+            schema_version="1",
+            request_id=request_id,
+            items=items,
+            warnings=warnings,
+            budgets=request.budgets,
+            next_cursor=next_cursor,
         )
 
     def _read_passage(
@@ -1439,9 +1622,7 @@ class ReadService:
         remaining_total: int,
         request_id: str,
     ) -> tuple[ReadItem, int]:
-        return _read_premise_one(
-            self._repo, ref, requested_range, cursor_start, item_cap, remaining_total, request_id
-        )
+        return _read_premise_one(self._repo, ref, requested_range, cursor_start, item_cap, remaining_total, request_id)
 
     def _read_capability(
         self,
@@ -1452,7 +1633,9 @@ class ReadService:
         remaining_total: int,
         request_id: str,
     ) -> tuple[ReadItem, int]:
-        return _read_capability_one(self._registry, ref, requested_range, cursor_start, item_cap, remaining_total, request_id)
+        return _read_capability_one(
+            self._registry, ref, requested_range, cursor_start, item_cap, remaining_total, request_id
+        )
 
     def _read_skill(
         self,
@@ -1463,7 +1646,9 @@ class ReadService:
         remaining_total: int,
         request_id: str,
     ) -> tuple[ReadItem, int]:
-        return _read_skill_one(self._skill_set, ref, requested_range, cursor_start, item_cap, remaining_total, request_id)
+        return _read_skill_one(
+            self._skill_set, ref, requested_range, cursor_start, item_cap, remaining_total, request_id
+        )
 
     def _read_live(
         self,
@@ -1474,7 +1659,9 @@ class ReadService:
         remaining_total: int,
         request_id: str,
     ) -> tuple[ReadItem, int]:
-        return _read_live_one(self._research_deps, ref, requested_range, cursor_start, item_cap, remaining_total, request_id)
+        return _read_live_one(
+            self._research_deps, ref, requested_range, cursor_start, item_cap, remaining_total, request_id
+        )
 
 
 def read(request: ReadRequest, deps: ServiceDeps) -> ReadResult:

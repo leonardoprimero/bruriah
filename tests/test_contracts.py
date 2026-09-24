@@ -6,8 +6,15 @@ import pytest
 from pydantic import ValidationError
 
 from bruriah.contracts import (
-    Budgets, EvidenceRecord, InvestigationRequest, InvestigationResult, ReadItem, ReadRequest,
+    Budgets,
+    EvidenceRecord,
+    InvestigationRequest,
+    InvestigationResult,
+    ReadItem,
+    ReadRequest,
 )
+
+
 def _assert_closed(schema: dict) -> None:
     if schema.get("type") == "object":
         assert schema.get("additionalProperties") is False
@@ -18,17 +25,23 @@ def _assert_closed(schema: dict) -> None:
             for item in value:
                 if isinstance(item, dict):
                     _assert_closed(item)
+
+
 def test_public_contract_schemas_are_nested_closed() -> None:
     from bruriah import contracts
 
     for name in contracts.__all__:
         _assert_closed(getattr(contracts, name).model_json_schema())
+
+
 def test_investigation_cursor_is_documented_for_pagination() -> None:
     cursor = str(InvestigationRequest.model_json_schema()["properties"]["cursor"]).lower()
     assert "paginate" in cursor
     assert "next_cursor" in cursor
     read_cursor = str(ReadRequest.model_json_schema()["properties"]["cursor"]).lower()
     assert "cursor" in read_cursor
+
+
 @pytest.mark.parametrize(
     "payload",
     [
@@ -42,6 +55,8 @@ def test_investigation_cursor_is_documented_for_pagination() -> None:
 def test_investigation_request_rejects_invalid_or_unbounded_input(payload: dict) -> None:
     with pytest.raises(ValidationError):
         InvestigationRequest.model_validate(payload)
+
+
 def test_read_request_requires_unique_refs_and_valid_ranges() -> None:
     assert ReadRequest(refs=["evidence:one"]).refs == ["evidence:one"]
     for payload in (
@@ -52,6 +67,8 @@ def test_read_request_requires_unique_refs_and_valid_ranges() -> None:
     ):
         with pytest.raises(ValidationError):
             ReadRequest.model_validate(payload)
+
+
 def test_budgets_declares_all_ten_ceilings_with_safe_defaults() -> None:
     budgets = Budgets()
     assert budgets.max_candidates == 50
@@ -64,6 +81,8 @@ def test_budgets_declares_all_ten_ceilings_with_safe_defaults() -> None:
         Budgets(max_candidates=0)
     with pytest.raises(ValidationError):
         Budgets(max_redirects=-1)
+
+
 BASE_EVIDENCE = {
     "ref": "evidence:one",
     "kind": "captured_live",
@@ -78,11 +97,24 @@ BASE_EVIDENCE = {
     "conflict": "none",
 }
 PROVENANCE_FIELDS = {
-    "publisher", "citation_locator", "extraction_method", "provenance_chain",
-    "redirect_chain", "pack_version", "jurisdiction", "language", "retrieved_at",
-    "published_at", "updated_at", "effective_at", "expires_at",
-    "authority_rationale", "reuse",
+    "publisher",
+    "citation_locator",
+    "extraction_method",
+    "provenance_chain",
+    "redirect_chain",
+    "pack_version",
+    "jurisdiction",
+    "language",
+    "retrieved_at",
+    "published_at",
+    "updated_at",
+    "effective_at",
+    "expires_at",
+    "authority_rationale",
+    "reuse",
 }
+
+
 def test_evidence_record_carries_fifteen_provenance_fields() -> None:
     assert len(PROVENANCE_FIELDS) == 15
     assert PROVENANCE_FIELDS <= set(EvidenceRecord.model_fields)
@@ -106,14 +138,26 @@ def test_evidence_record_carries_fifteen_provenance_fields() -> None:
     assert record.provenance_chain[0] == "pack:research.minimal"
     assert (record.published_at, record.updated_at) == (date(2026, 1, 10), date(2026, 6, 1))
     assert record.reuse == "restricted"
+
+
 def test_evidence_record_leaves_missing_metadata_unknown() -> None:
     record = EvidenceRecord(**BASE_EVIDENCE)
     assert record.extraction_method == "unknown"
     assert record.reuse == "unknown"
     assert record.provenance_chain == record.redirect_chain == record.uncertainty == []
-    for name in ("pack_version", "jurisdiction", "language", "retrieved_at",
-                 "published_at", "updated_at", "effective_at", "expires_at"):
+    for name in (
+        "pack_version",
+        "jurisdiction",
+        "language",
+        "retrieved_at",
+        "published_at",
+        "updated_at",
+        "effective_at",
+        "expires_at",
+    ):
         assert getattr(record, name) is None
+
+
 @pytest.mark.parametrize(
     "override",
     [
@@ -131,6 +175,8 @@ def test_evidence_record_leaves_missing_metadata_unknown() -> None:
 def test_evidence_record_rejects_invalid_provenance(override: dict) -> None:
     with pytest.raises(ValidationError):
         EvidenceRecord.model_validate({**BASE_EVIDENCE, **override})
+
+
 def test_read_item_carries_eight_evidence_state_fields() -> None:
     item = ReadItem(
         ref="evidence:one",
@@ -160,9 +206,17 @@ import json  # noqa: E402
 from bruriah.contracts import HostAction, HostSkill, PermissionDisclosure  # noqa: E402
 
 _EVIDENCE_FIELDS = dict(
-    ref="local:a#1", kind="local", publisher="p", locator="l", citation_locator="c",
-    digest="sha256:" + "a" * 64, authority="official", authority_rationale="not_assessed_by_retrieval",
-    freshness="current", license="permitted", conflict="none",
+    ref="local:a#1",
+    kind="local",
+    publisher="p",
+    locator="l",
+    citation_locator="c",
+    digest="sha256:" + "a" * 64,
+    authority="official",
+    authority_rationale="not_assessed_by_retrieval",
+    freshness="current",
+    license="permitted",
+    conflict="none",
 )
 
 
@@ -180,8 +234,9 @@ def test_a_record_without_an_envelope_serializes_exactly_as_before() -> None:
 def test_an_envelope_is_emitted_when_it_is_actually_present() -> None:
     # The negative control for the test above: if `envelope` were dropped unconditionally, the field
     # would be unreachable and the omission would be a bug rather than a gate.
-    record = EvidenceRecord(**{**_EVIDENCE_FIELDS, "kind": "skill",
-                              "envelope": PermissionDisclosure(filesystem_read=["docs/"])})
+    record = EvidenceRecord(
+        **{**_EVIDENCE_FIELDS, "kind": "skill", "envelope": PermissionDisclosure(filesystem_read=["docs/"])}
+    )
     dumped = record.model_dump(mode="json")
     assert dumped["envelope"]["filesystem_read"] == ["docs/"]
     assert dumped["envelope"]["network_hosts"] == []
@@ -190,11 +245,16 @@ def test_an_envelope_is_emitted_when_it_is_actually_present() -> None:
 def test_an_empty_envelope_still_serializes_as_a_grant_of_nothing() -> None:
     # Default-deny must be VISIBLE. An envelope granting nothing is not the same as no envelope, and
     # collapsing the two would hide the strongest thing Bruriah can say about a skill.
-    dumped = EvidenceRecord(**{**_EVIDENCE_FIELDS, "kind": "skill",
-                              "envelope": PermissionDisclosure()}).model_dump(mode="json")
+    dumped = EvidenceRecord(**{**_EVIDENCE_FIELDS, "kind": "skill", "envelope": PermissionDisclosure()}).model_dump(
+        mode="json"
+    )
     assert dumped["envelope"] == {
-        "filesystem_read": [], "filesystem_write": [], "network_hosts": [],
-        "network_schemes": [], "programs": [], "secrets": [],
+        "filesystem_read": [],
+        "filesystem_write": [],
+        "network_hosts": [],
+        "network_schemes": [],
+        "programs": [],
+        "secrets": [],
     }
 
 
@@ -210,14 +270,12 @@ def test_a_host_skill_entry_is_strictly_typed() -> None:
     assert entry.skill_id == "design.ui-review"
     for bad in ({"skill_id": "Design UI"}, {"version": "1.4"}, {"digest": "b" * 64}):
         with pytest.raises(ValidationError):
-            HostSkill(**{**{"skill_id": "a.b", "version": "1.0.0",
-                            "digest": "sha256:" + "b" * 64}, **bad})
+            HostSkill(**{**{"skill_id": "a.b", "version": "1.0.0", "digest": "sha256:" + "b" * 64}, **bad})
 
 
 @pytest.mark.parametrize("model", [HostSkill, PermissionDisclosure])
 def test_the_new_models_are_closed(model) -> None:
-    base = ({"skill_id": "a.b", "version": "1.0.0", "digest": "sha256:" + "b" * 64}
-            if model is HostSkill else {})
+    base = {"skill_id": "a.b", "version": "1.0.0", "digest": "sha256:" + "b" * 64} if model is HostSkill else {}
     with pytest.raises(ValidationError) as error:
         model(**base, unexpected="x")
     assert "unexpected" in str(error.value)
@@ -227,11 +285,23 @@ def test_the_new_enum_members_are_the_only_ones_added() -> None:
     # Widening an OUTPUT enum is the one change a pinned client cannot ignore, so the exact members
     # are pinned here rather than left to review.
     import typing
+
     assert set(typing.get_args(EvidenceRecord.model_fields["kind"].annotation)) == {
-        "local", "captured_live", "source", "capability", "skill"}
+        "local",
+        "captured_live",
+        "source",
+        "capability",
+        "skill",
+    }
     assert set(typing.get_args(HostAction.model_fields["kind"].annotation)) == {
-        "web_search", "fetch_public_url", "inspect_capability", "request_jurisdiction",
-        "consult_professional", "draft_skill_candidate", "install_skill"}
+        "web_search",
+        "fetch_public_url",
+        "inspect_capability",
+        "request_jurisdiction",
+        "consult_professional",
+        "draft_skill_candidate",
+        "install_skill",
+    }
 
 
 def test_authority_rationale_is_a_closed_set_of_codes_never_free_text() -> None:
@@ -269,8 +339,14 @@ def test_the_disclosure_covers_every_dimension_the_signed_envelope_can_express()
     envelope = set(PermissionEnvelope.model_fields)
     disclosed = set(PermissionDisclosure.model_fields)
     assert envelope == {"filesystem", "network", "subprocess", "secrets"}
-    assert disclosed == {"filesystem_read", "filesystem_write", "network_hosts",
-                         "network_schemes", "programs", "secrets"}
+    assert disclosed == {
+        "filesystem_read",
+        "filesystem_write",
+        "network_hosts",
+        "network_schemes",
+        "programs",
+        "secrets",
+    }
 
 
 # --- the layer has to be discoverable, or it does not exist ---------------------------------------
@@ -324,55 +400,57 @@ def test_descriptions_do_not_change_the_response_shape() -> None:
 # commented allowlist means a future field that reintroduces free corpus/git text (the exact
 # failure class T2/T3 closed: `authority_rationale`, alternative/premise names, ids, statements,
 # reasons, rationales) fails this test loudly instead of silently shipping unconstrained.
-_FREE_STRING_FIELD_ALLOWLIST: frozenset[str] = frozenset({
-    # Fixed-wording templates built from structure (verdict literals, refs, counts, validated
-    # shas) -- content-bearing text, but never corpus/git-authored free text (T2/T3 design).
-    "claims[].text",
-    "conflicts[]",
-    "counterfactual_assessment.rationale",
-    "degradation[]",
-    "gaps[]",
-    "host_actions[].reason",
-    "host_actions[].target",
-    "warnings[]",
-    # `next_cursor`/`request_id`: opaque, server-minted tokens (base64/sha256 digests), never
-    # corpus/git text -- `Ref`/a bespoke bound has no `pattern` today, only a length ceiling.
-    "next_cursor",
-    "request_id",
-    # `Ref`-typed identifiers: length-bounded, server- or index-minted (passage/skill/capability/
-    # live refs), never raw corpus prose.
-    "claims[].conflicting_refs[]",
-    "claims[].supporting_refs[]",
-    "counterfactual_assessment.supporting_evidence[]",
-    "evidence[].ref",
-    # `EvidenceRecord`'s disclosure surface: `locator`/`citation_locator`/`publisher` carry the
-    # opaque `doc:v1:`/`live:sha256:`/pack/source identifiers `build_local_evidence_record` and
-    # the other producers mint -- ShortText at the type level (no corpus text reaches them by
-    # construction, enforced by the injection benchmark, not by a schema pattern).
-    "evidence[].citation_locator",
-    "evidence[].locator",
-    "evidence[].publisher",
-    "evidence[].provenance_chain[]",
-    "evidence[].redirect_chain[]",
-    "evidence[].uncertainty[]",
-    "evidence[].jurisdiction",
-    # Skill permission disclosure: filesystem/network/program/secret identifiers from a SIGNED
-    # pack, never corpus prose.
-    "evidence[].envelope.filesystem_read[]",
-    "evidence[].envelope.filesystem_write[]",
-    "evidence[].envelope.network_hosts[]",
-    "evidence[].envelope.network_schemes[]",
-    "evidence[].envelope.programs[]",
-    "evidence[].envelope.secrets[]",
-    # Date/datetime fields: `type: string` with a `format`, not a `pattern` -- pydantic's schema
-    # does not emit a regex for these, so they fall out of a naive pattern/enum walk even though
-    # they are already date-shaped, never free text.
-    "evidence[].effective_at",
-    "evidence[].expires_at",
-    "evidence[].published_at",
-    "evidence[].retrieved_at",
-    "evidence[].updated_at",
-})
+_FREE_STRING_FIELD_ALLOWLIST: frozenset[str] = frozenset(
+    {
+        # Fixed-wording templates built from structure (verdict literals, refs, counts, validated
+        # shas) -- content-bearing text, but never corpus/git-authored free text (T2/T3 design).
+        "claims[].text",
+        "conflicts[]",
+        "counterfactual_assessment.rationale",
+        "degradation[]",
+        "gaps[]",
+        "host_actions[].reason",
+        "host_actions[].target",
+        "warnings[]",
+        # `next_cursor`/`request_id`: opaque, server-minted tokens (base64/sha256 digests), never
+        # corpus/git text -- `Ref`/a bespoke bound has no `pattern` today, only a length ceiling.
+        "next_cursor",
+        "request_id",
+        # `Ref`-typed identifiers: length-bounded, server- or index-minted (passage/skill/capability/
+        # live refs), never raw corpus prose.
+        "claims[].conflicting_refs[]",
+        "claims[].supporting_refs[]",
+        "counterfactual_assessment.supporting_evidence[]",
+        "evidence[].ref",
+        # `EvidenceRecord`'s disclosure surface: `locator`/`citation_locator`/`publisher` carry the
+        # opaque `doc:v1:`/`live:sha256:`/pack/source identifiers `build_local_evidence_record` and
+        # the other producers mint -- ShortText at the type level (no corpus text reaches them by
+        # construction, enforced by the injection benchmark, not by a schema pattern).
+        "evidence[].citation_locator",
+        "evidence[].locator",
+        "evidence[].publisher",
+        "evidence[].provenance_chain[]",
+        "evidence[].redirect_chain[]",
+        "evidence[].uncertainty[]",
+        "evidence[].jurisdiction",
+        # Skill permission disclosure: filesystem/network/program/secret identifiers from a SIGNED
+        # pack, never corpus prose.
+        "evidence[].envelope.filesystem_read[]",
+        "evidence[].envelope.filesystem_write[]",
+        "evidence[].envelope.network_hosts[]",
+        "evidence[].envelope.network_schemes[]",
+        "evidence[].envelope.programs[]",
+        "evidence[].envelope.secrets[]",
+        # Date/datetime fields: `type: string` with a `format`, not a `pattern` -- pydantic's schema
+        # does not emit a regex for these, so they fall out of a naive pattern/enum walk even though
+        # they are already date-shaped, never free text.
+        "evidence[].effective_at",
+        "evidence[].expires_at",
+        "evidence[].published_at",
+        "evidence[].retrieved_at",
+        "evidence[].updated_at",
+    }
+)
 
 
 def _free_string_fields(schema: dict, defs: dict, *, seen: frozenset[str] = frozenset(), path: str = "") -> list[str]:
@@ -418,4 +496,3 @@ def test_investigation_code_target_validation() -> None:
     # Too long should fail max_length=4096
     with pytest.raises(ValidationError):
         InvestigationRequest(task="why line", code_target="a" * 4097)
-

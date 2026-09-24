@@ -47,6 +47,7 @@ Design, matching `fetch.py`'s conventions where they apply:
   builder, but filtering is the builder's job (T3), not the fetcher's -- `get_issue_timeline`
   returns the full recorded page exactly as GitHub sent it.
 """
+
 from __future__ import annotations
 
 import http.client
@@ -136,7 +137,9 @@ def _default_transport(method: str, url: str, token: str | None) -> _RawResponse
     try:
         with urllib.request.urlopen(request, timeout=_DEFAULT_TIMEOUT_SECONDS) as response:
             return _RawResponse(
-                status=response.status, headers=dict(response.headers.items()), body=response.read(),
+                status=response.status,
+                headers=dict(response.headers.items()),
+                body=response.read(),
             )
     except urllib.error.HTTPError as exc:
         try:
@@ -313,7 +316,12 @@ def _get_single(
     if not network_enabled:
         raise GitHubOfflineError(path)
     response = _request_with_retry(
-        "GET", f"{_API_ROOT}{path}", token, transport=transport, clock=clock, sleep=sleep,
+        "GET",
+        f"{_API_ROOT}{path}",
+        token,
+        transport=transport,
+        clock=clock,
+        sleep=sleep,
     )
     data = json.loads(response.body.decode("utf-8"))
     cache.set(path, data)
@@ -355,8 +363,13 @@ def get_issue(
     """`GET /repos/{owner}/{repo}/issues/{number}`. Cache-then-network; see module docstring."""
     path = f"/repos/{owner}/{repo}/issues/{number}"
     return _get_single(
-        path, cache=cache, token=token, network_enabled=network_enabled, transport=transport,
-        clock=clock, sleep=sleep,
+        path,
+        cache=cache,
+        token=token,
+        network_enabled=network_enabled,
+        transport=transport,
+        clock=clock,
+        sleep=sleep,
     )
 
 
@@ -375,8 +388,13 @@ def get_pull(
     """`GET /repos/{owner}/{repo}/pulls/{number}`. Cache-then-network; see module docstring."""
     path = f"/repos/{owner}/{repo}/pulls/{number}"
     return _get_single(
-        path, cache=cache, token=token, network_enabled=network_enabled, transport=transport,
-        clock=clock, sleep=sleep,
+        path,
+        cache=cache,
+        token=token,
+        network_enabled=network_enabled,
+        transport=transport,
+        clock=clock,
+        sleep=sleep,
     )
 
 
@@ -397,8 +415,13 @@ def get_issue_timeline(
     unfiltered -- filtering is the document builder's job (T3), not this fetcher's."""
     path = f"/repos/{owner}/{repo}/issues/{number}/timeline"
     return _get_paginated(
-        path, cache=cache, token=token, network_enabled=network_enabled, transport=transport,
-        clock=clock, sleep=sleep,
+        path,
+        cache=cache,
+        token=token,
+        network_enabled=network_enabled,
+        transport=transport,
+        clock=clock,
+        sleep=sleep,
     )
 
 
@@ -419,8 +442,13 @@ def get_issue_comments(
     comment (see `tests/fixtures/github/pull-47-comments.json`)."""
     path = f"/repos/{owner}/{repo}/issues/{number}/comments"
     return _get_paginated(
-        path, cache=cache, token=token, network_enabled=network_enabled, transport=transport,
-        clock=clock, sleep=sleep,
+        path,
+        cache=cache,
+        token=token,
+        network_enabled=network_enabled,
+        transport=transport,
+        clock=clock,
+        sleep=sleep,
     )
 
 

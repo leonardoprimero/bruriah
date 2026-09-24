@@ -124,8 +124,12 @@ def test_network_disabled_returns_typed_result_without_connecting() -> None:
         raise AssertionError("must never connect when network is disabled")
 
     result = fetch(
-        "https://example.invalid/", "GET", Budgets(), network_enabled=False,
-        allowlist=frozenset({"example.invalid"}), connect=_spy_connect,
+        "https://example.invalid/",
+        "GET",
+        Budgets(),
+        network_enabled=False,
+        allowlist=frozenset({"example.invalid"}),
+        connect=_spy_connect,
     )
     assert result.status == "disabled"
     assert result.code == "network_disabled"
@@ -138,7 +142,10 @@ def test_network_disabled_returns_typed_result_without_connecting() -> None:
 
 def test_non_https_scheme_rejected_before_connection() -> None:
     result = fetch(
-        "http://example.invalid/", "GET", Budgets(), network_enabled=True,
+        "http://example.invalid/",
+        "GET",
+        Budgets(),
+        network_enabled=True,
         allowlist=frozenset({"example.invalid"}),
         connect=lambda *_a: (_ for _ in ()).throw(AssertionError("no connect expected")),
     )
@@ -148,7 +155,10 @@ def test_non_https_scheme_rejected_before_connection() -> None:
 
 def test_non_get_head_method_rejected() -> None:
     result = fetch(
-        "https://example.invalid/", "POST", Budgets(), network_enabled=True,  # type: ignore[arg-type]
+        "https://example.invalid/",
+        "POST",
+        Budgets(),
+        network_enabled=True,  # type: ignore[arg-type]
         allowlist=frozenset({"example.invalid"}),
         connect=lambda *_a: (_ for _ in ()).throw(AssertionError("no connect expected")),
     )
@@ -167,8 +177,12 @@ def test_non_allowlisted_host_rejected_before_dns() -> None:
         return [_PUBLIC_IP]
 
     result = fetch(
-        "https://not-allowed.example/", "GET", Budgets(), network_enabled=True,
-        allowlist=frozenset({"allowed.example"}), resolver=_spy_resolver,
+        "https://not-allowed.example/",
+        "GET",
+        Budgets(),
+        network_enabled=True,
+        allowlist=frozenset({"allowed.example"}),
+        resolver=_spy_resolver,
     )
     assert result.status == "blocked"
     assert result.code == "host_not_allowlisted"
@@ -192,8 +206,13 @@ def test_dns_rebinding_validate_public_then_connect_private_is_blocked() -> None
         raise AssertionError("must never connect to a validated-dangerous IP")
 
     result = fetch(
-        "https://internal.example/", "GET", Budgets(), network_enabled=True,
-        allowlist=frozenset({"internal.example"}), resolver=_private_resolver, connect=_spy_connect,
+        "https://internal.example/",
+        "GET",
+        Budgets(),
+        network_enabled=True,
+        allowlist=frozenset({"internal.example"}),
+        resolver=_private_resolver,
+        connect=_spy_connect,
     )
     assert result.status == "blocked"
     assert result.code == "dangerous_ip_blocked"
@@ -219,8 +238,13 @@ def test_resolver_called_exactly_once_and_connect_uses_that_exact_ip() -> None:
         raise FetchError("connect_failed")  # short-circuit; only the IP matters for this test
 
     result = fetch(
-        "https://rebind.example/", "GET", Budgets(), network_enabled=True,
-        allowlist=frozenset({"rebind.example"}), resolver=_tracking_resolver, connect=_spy_connect,
+        "https://rebind.example/",
+        "GET",
+        Budgets(),
+        network_enabled=True,
+        allowlist=frozenset({"rebind.example"}),
+        resolver=_tracking_resolver,
+        connect=_spy_connect,
     )
     assert resolver_call_count == 1
     assert connect_ips == [_PUBLIC_IP]
@@ -235,12 +259,22 @@ def test_every_dangerous_ip_class_is_blocked() -> None:
     # Metadata (explicit cloud metadata address), loopback v4/v6, unspecified v4/v6, multicast,
     # reserved -- each resolved alone for one hop, each must be rejected before any connect.
     dangerous_ips = (
-        "169.254.169.254", "127.0.0.1", "::1", "0.0.0.0", "::", "224.0.0.1", "240.0.0.1",
+        "169.254.169.254",
+        "127.0.0.1",
+        "::1",
+        "0.0.0.0",
+        "::",
+        "224.0.0.1",
+        "240.0.0.1",
     )
     for ip in dangerous_ips:
         result = fetch(
-            "https://x.internal/", "GET", Budgets(), network_enabled=True,
-            allowlist=frozenset({"x.internal"}), resolver=lambda _h, ip=ip: [ip],
+            "https://x.internal/",
+            "GET",
+            Budgets(),
+            network_enabled=True,
+            allowlist=frozenset({"x.internal"}),
+            resolver=lambda _h, ip=ip: [ip],
             connect=lambda *_a: (_ for _ in ()).throw(AssertionError(f"must not connect for {ip}")),
         )
         assert result.status == "blocked" and result.code == "dangerous_ip_blocked", ip
@@ -250,8 +284,12 @@ def test_mixed_answer_dns_with_one_dangerous_ip_is_blocked() -> None:
     """A resolver returning BOTH a public IP and a private IP for one hostname (a real-world
     multi-A-record SSRF technique) must be rejected entirely, not silently picked-around."""
     result = fetch(
-        "https://mixed.internal/", "GET", Budgets(), network_enabled=True,
-        allowlist=frozenset({"mixed.internal"}), resolver=lambda _h: [_PUBLIC_IP, "192.168.1.1"],
+        "https://mixed.internal/",
+        "GET",
+        Budgets(),
+        network_enabled=True,
+        allowlist=frozenset({"mixed.internal"}),
+        resolver=lambda _h: [_PUBLIC_IP, "192.168.1.1"],
         connect=lambda *_a: (_ for _ in ()).throw(AssertionError("must not connect")),
     )
     assert result.status == "blocked"
@@ -279,10 +317,14 @@ def test_redirect_to_private_host_is_blocked() -> None:
             return socket.create_connection(("127.0.0.1", server.port), timeout=timeout)
 
         result = fetch(
-            _url(server), "GET", Budgets(max_redirects=3),
+            _url(server),
+            "GET",
+            Budgets(max_redirects=3),
             network_enabled=True,
             allowlist=frozenset({f"{_HOST}:{server.port}", "internal-target.example"}),
-            resolver=_resolver, connect=_connect, ssl_context=_trusting_ssl_context(),
+            resolver=_resolver,
+            connect=_connect,
+            ssl_context=_trusting_ssl_context(),
         )
         assert result.status == "blocked"
         assert result.code == "dangerous_ip_blocked"
@@ -298,9 +340,13 @@ def test_redirect_to_non_allowlisted_host_is_blocked() -> None:
     server = _LocalTlsServer(_responder)
     try:
         result = fetch(
-            _url(server), "GET", Budgets(), network_enabled=True,
+            _url(server),
+            "GET",
+            Budgets(),
+            network_enabled=True,
             allowlist=frozenset({f"{_HOST}:{server.port}"}),  # redirect target is NOT allowlisted
-            resolver=_fake_public_resolver, connect=_redirect_connect(server),
+            resolver=_fake_public_resolver,
+            connect=_redirect_connect(server),
             ssl_context=_trusting_ssl_context(),
         )
         assert result.status == "blocked"
@@ -316,9 +362,14 @@ def test_redirect_count_exceeded_stops_following() -> None:
     server = _LocalTlsServer(_responder)
     try:
         result = fetch(
-            _url(server), "GET", Budgets(max_redirects=0, max_network_requests=10),
-            network_enabled=True, allowlist=_allowlist(server), resolver=_fake_public_resolver,
-            connect=_redirect_connect(server), ssl_context=_trusting_ssl_context(),
+            _url(server),
+            "GET",
+            Budgets(max_redirects=0, max_network_requests=10),
+            network_enabled=True,
+            allowlist=_allowlist(server),
+            resolver=_fake_public_resolver,
+            connect=_redirect_connect(server),
+            ssl_context=_trusting_ssl_context(),
         )
         assert result.status == "blocked"
         assert result.code == "redirect_count_exceeded"
@@ -333,9 +384,14 @@ def test_network_request_count_exceeded_stops_before_second_hop() -> None:
     server = _LocalTlsServer(_responder)
     try:
         result = fetch(
-            _url(server), "GET", Budgets(max_redirects=5, max_network_requests=1),
-            network_enabled=True, allowlist=_allowlist(server), resolver=_fake_public_resolver,
-            connect=_redirect_connect(server), ssl_context=_trusting_ssl_context(),
+            _url(server),
+            "GET",
+            Budgets(max_redirects=5, max_network_requests=1),
+            network_enabled=True,
+            allowlist=_allowlist(server),
+            resolver=_fake_public_resolver,
+            connect=_redirect_connect(server),
+            ssl_context=_trusting_ssl_context(),
         )
         assert result.status == "blocked"
         assert result.code == "network_request_count_exceeded"
@@ -357,8 +413,13 @@ def test_userinfo_stripped_and_no_cookie_or_authorization_sent() -> None:
     try:
         url = f"https://user:s3cr3t@{_HOST}:{server.port}/path"
         result = fetch(
-            url, "GET", Budgets(), network_enabled=True, allowlist=_allowlist(server),
-            resolver=_fake_public_resolver, connect=_redirect_connect(server),
+            url,
+            "GET",
+            Budgets(),
+            network_enabled=True,
+            allowlist=_allowlist(server),
+            resolver=_fake_public_resolver,
+            connect=_redirect_connect(server),
             ssl_context=_trusting_ssl_context(),
         )
         assert result.status == "ok"
@@ -384,9 +445,14 @@ def test_decompression_bomb_stopped_at_decompressed_limit() -> None:
     server = _LocalTlsServer(_responder)
     try:
         result = fetch(
-            _url(server), "GET", Budgets(max_bytes=10_000), network_enabled=True,
-            allowlist=_allowlist(server), resolver=_fake_public_resolver,
-            connect=_redirect_connect(server), ssl_context=_trusting_ssl_context(),
+            _url(server),
+            "GET",
+            Budgets(max_bytes=10_000),
+            network_enabled=True,
+            allowlist=_allowlist(server),
+            resolver=_fake_public_resolver,
+            connect=_redirect_connect(server),
+            ssl_context=_trusting_ssl_context(),
         )
         assert result.status == "blocked"
         assert result.code == "decompressed_limit_exceeded"
@@ -405,8 +471,13 @@ def test_disallowed_mime_type_rejected() -> None:
     server = _LocalTlsServer(_responder)
     try:
         result = fetch(
-            _url(server), "GET", Budgets(), network_enabled=True, allowlist=_allowlist(server),
-            resolver=_fake_public_resolver, connect=_redirect_connect(server),
+            _url(server),
+            "GET",
+            Budgets(),
+            network_enabled=True,
+            allowlist=_allowlist(server),
+            resolver=_fake_public_resolver,
+            connect=_redirect_connect(server),
             ssl_context=_trusting_ssl_context(),
         )
         assert result.status == "blocked"
@@ -433,9 +504,14 @@ def test_elapsed_timeout_enforced_via_injected_clock() -> None:
                 return 100.0
 
         result = fetch(
-            _url(server), "GET", Budgets(max_elapsed_ms=1000), network_enabled=True,
-            allowlist=_allowlist(server), resolver=_fake_public_resolver,
-            connect=_redirect_connect(server), ssl_context=_trusting_ssl_context(),
+            _url(server),
+            "GET",
+            Budgets(max_elapsed_ms=1000),
+            network_enabled=True,
+            allowlist=_allowlist(server),
+            resolver=_fake_public_resolver,
+            connect=_redirect_connect(server),
+            ssl_context=_trusting_ssl_context(),
             clock=_fake_clock,
         )
         assert result.status == "error"
@@ -456,8 +532,13 @@ def test_retrieved_content_with_injected_instructions_is_returned_inert() -> Non
     server = _LocalTlsServer(_responder)
     try:
         result = fetch(
-            _url(server), "GET", Budgets(), network_enabled=True, allowlist=_allowlist(server),
-            resolver=_fake_public_resolver, connect=_redirect_connect(server),
+            _url(server),
+            "GET",
+            Budgets(),
+            network_enabled=True,
+            allowlist=_allowlist(server),
+            resolver=_fake_public_resolver,
+            connect=_redirect_connect(server),
             ssl_context=_trusting_ssl_context(),
         )
         assert result.status == "ok"
@@ -481,9 +562,14 @@ def test_successful_get_returns_bounded_evidence_record_with_digest_and_redirect
     try:
         pinned_time = datetime(2026, 7, 24, 12, 0, 0, tzinfo=timezone.utc)
         result = fetch(
-            _url(server, "/page"), "GET", Budgets(), network_enabled=True,
-            allowlist=_allowlist(server), resolver=_fake_public_resolver,
-            connect=_redirect_connect(server), ssl_context=_trusting_ssl_context(),
+            _url(server, "/page"),
+            "GET",
+            Budgets(),
+            network_enabled=True,
+            allowlist=_allowlist(server),
+            resolver=_fake_public_resolver,
+            connect=_redirect_connect(server),
+            ssl_context=_trusting_ssl_context(),
             retrieved_at=pinned_time,
         )
         assert result.status == "ok"
@@ -509,8 +595,13 @@ def test_head_request_returns_empty_body_and_never_reads_content() -> None:
     server = _LocalTlsServer(_responder)
     try:
         result = fetch(
-            _url(server), "HEAD", Budgets(), network_enabled=True, allowlist=_allowlist(server),
-            resolver=_fake_public_resolver, connect=_redirect_connect(server),
+            _url(server),
+            "HEAD",
+            Budgets(),
+            network_enabled=True,
+            allowlist=_allowlist(server),
+            resolver=_fake_public_resolver,
+            connect=_redirect_connect(server),
             ssl_context=_trusting_ssl_context(),
         )
         assert result.status == "ok"
@@ -529,9 +620,14 @@ def test_multi_hop_redirect_to_allowlisted_host_succeeds_with_full_chain() -> No
     server = _LocalTlsServer(_responder)
     try:
         result = fetch(
-            _url(server, "/start"), "GET", Budgets(max_redirects=3), network_enabled=True,
-            allowlist=_allowlist(server), resolver=_fake_public_resolver,
-            connect=_redirect_connect(server), ssl_context=_trusting_ssl_context(),
+            _url(server, "/start"),
+            "GET",
+            Budgets(max_redirects=3),
+            network_enabled=True,
+            allowlist=_allowlist(server),
+            resolver=_fake_public_resolver,
+            connect=_redirect_connect(server),
+            ssl_context=_trusting_ssl_context(),
         )
         assert result.status == "ok"
         assert result.body == b"final content"
@@ -551,8 +647,12 @@ def test_unexpected_exception_is_converted_to_typed_error_result_not_raised() ->
         raise RuntimeError("unexpected failure unrelated to any typed FetchError code")
 
     result = fetch(
-        "https://boom.example/", "GET", Budgets(), network_enabled=True,
-        allowlist=frozenset({"boom.example"}), resolver=_exploding_resolver,
+        "https://boom.example/",
+        "GET",
+        Budgets(),
+        network_enabled=True,
+        allowlist=frozenset({"boom.example"}),
+        resolver=_exploding_resolver,
     )
     assert result.status == "error"
     assert result.code == "internal_error"
@@ -566,7 +666,8 @@ def test_production_defaults_are_wired_and_typed_without_real_network(monkeypatc
     # listens on (pure OS-level refusal, no external network) -- proves both production defaults
     # are wired to the real stdlib calls and typed-convert failures, never a bare socket error.
     monkeypatch.setattr(
-        socket, "getaddrinfo",
+        socket,
+        "getaddrinfo",
         lambda *_a, **_kw: (_ for _ in ()).throw(socket.gaierror("simulated, no real DNS")),
     )
     try:
@@ -612,9 +713,14 @@ def _spy_unbounded_reads(monkeypatch) -> dict[str, int]:
 
 def _fetch_from(server: "_LocalTlsServer", **budget_overrides: object):
     return fetch(
-        _url(server), "GET", Budgets(**budget_overrides), network_enabled=True,
-        allowlist=_allowlist(server), resolver=_fake_public_resolver,
-        connect=_redirect_connect(server), ssl_context=_trusting_ssl_context(),
+        _url(server),
+        "GET",
+        Budgets(**budget_overrides),
+        network_enabled=True,
+        allowlist=_allowlist(server),
+        resolver=_fake_public_resolver,
+        connect=_redirect_connect(server),
+        ssl_context=_trusting_ssl_context(),
     )
 
 
@@ -644,9 +750,7 @@ def test_a_rejected_content_type_body_is_not_read_without_a_limit(monkeypatch) -
 
 def test_a_redirect_body_is_not_read_without_a_limit(monkeypatch) -> None:
     seen = _spy_unbounded_reads(monkeypatch)
-    server = _LocalTlsServer(
-        lambda _r: (302, {"Location": "/next", "Content-Type": "text/plain"}, b"x" * 3_000_000)
-    )
+    server = _LocalTlsServer(lambda _r: (302, {"Location": "/next", "Content-Type": "text/plain"}, b"x" * 3_000_000))
     try:
         result = _fetch_from(server, max_bytes=1_000_000, max_redirects=1, max_network_requests=2)
         assert result.status == "blocked"  # the chain is refused, one way or another
@@ -674,9 +778,7 @@ def test_a_failed_fetch_still_reports_the_connections_it_made() -> None:
     # The reason `_Usage` is a mutable argument rather than a return value: a `FetchError` unwinds
     # past every local, so without it a call refused after several hops reported the same nothing
     # as one rejected on its scheme. A caller pooling a budget has to charge for failed work.
-    server = _LocalTlsServer(
-        lambda _r: (302, {"Location": "/loop", "Content-Type": "text/plain"}, b"")
-    )
+    server = _LocalTlsServer(lambda _r: (302, {"Location": "/loop", "Content-Type": "text/plain"}, b""))
     try:
         result = _fetch_from(server, max_redirects=3, max_network_requests=3)
         assert result.status == "blocked"

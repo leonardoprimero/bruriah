@@ -45,6 +45,7 @@ TWO NUMBERS, AND THEY ARE NOT INTERCHANGEABLE.
 No I/O, no wall-clock, no randomness: every function is a pure computation over its arguments, the
 same discipline `metrics.py` follows, so the same inputs always produce the same outputs.
 """
+
 from __future__ import annotations
 
 import math
@@ -132,8 +133,7 @@ def leakage(question: str, answer: str, statistics: TermStatistics) -> Leakage:
     shared = [term for term in dict.fromkeys(question_terms) if term in answer_terms]
     weight = sum(statistics.idf(term) for term in question_terms)
 
-    share = (sum(statistics.idf(term) for term in question_terms if term in answer_terms) / weight
-             if weight else 0.0)
+    share = sum(statistics.idf(term) for term in question_terms if term in answer_terms) / weight if weight else 0.0
     ceiling = statistics.ceiling
     peak = (max((statistics.idf(term) for term in shared), default=0.0) / ceiling) if ceiling else 0.0
     return Leakage(

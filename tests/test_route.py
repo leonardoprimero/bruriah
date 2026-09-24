@@ -23,7 +23,9 @@ _DATA = _SRC / "bruriah" / "data"
 
 
 def _classification(intent="investigate", domain="general", claim_type="factual", risk="low", jurisdiction="unknown"):
-    return RequestClassification(intent=intent, domain=domain, claim_type=claim_type, risk=risk, jurisdiction=jurisdiction)
+    return RequestClassification(
+        intent=intent, domain=domain, claim_type=claim_type, risk=risk, jurisdiction=jurisdiction
+    )
 
 
 def _request(risk_class="low", jurisdiction=None, as_of=None):
@@ -35,21 +37,41 @@ def _no_evidence() -> LookupResult:
 
 
 def _source(source_id="src.one", jurisdiction_applicable=True, jurisdictions=("GLOBAL",)) -> SourceMatch:
-    policy = SourcePolicy.model_validate({
-        "source_id": source_id, "publisher": "Test Publisher", "authority": "official", "rationale": "test",
-        "claim_types": ["documentation"], "jurisdictions": list(jurisdictions), "temporal_rules": "n/a",
-        "citation_rules": "n/a", "reuse_rules": "n/a", "freshness_days": 30, "limitations": [],
-        "biases": [], "conflicts": [], "exclusions": [],
-    })
+    policy = SourcePolicy.model_validate(
+        {
+            "source_id": source_id,
+            "publisher": "Test Publisher",
+            "authority": "official",
+            "rationale": "test",
+            "claim_types": ["documentation"],
+            "jurisdictions": list(jurisdictions),
+            "temporal_rules": "n/a",
+            "citation_rules": "n/a",
+            "reuse_rules": "n/a",
+            "freshness_days": 30,
+            "limitations": [],
+            "biases": [],
+            "conflicts": [],
+            "exclusions": [],
+        }
+    )
     return SourceMatch(source=policy, jurisdiction_applicable=jurisdiction_applicable)
 
 
 def _capability(capability_id="cap.one") -> CapabilityPolicy:
-    return CapabilityPolicy.model_validate({
-        "capability_id": capability_id, "canonical_distribution": "https://example.test/pkg", "version": "1.0.0",
-        "advisories": [], "integrity": "digest pinned", "permissions": [], "network_access": [],
-        "data_access": [], "limitations": [],
-    })
+    return CapabilityPolicy.model_validate(
+        {
+            "capability_id": capability_id,
+            "canonical_distribution": "https://example.test/pkg",
+            "version": "1.0.0",
+            "advisories": [],
+            "integrity": "digest pinned",
+            "permissions": [],
+            "network_access": [],
+            "data_access": [],
+            "limitations": [],
+        }
+    )
 
 
 def _with_sources(*matches: SourceMatch) -> LookupResult:
@@ -58,8 +80,9 @@ def _with_sources(*matches: SourceMatch) -> LookupResult:
 
 def _real_bundled_registry() -> Registry:
     roots = json.loads((_DATA / "trust-roots.json").read_text())
-    pack = load_pack(_DATA / "research-policy.json", _DATA / "research-policy.manifest.json",
-                     roots, today=date(2026, 7, 23))
+    pack = load_pack(
+        _DATA / "research-policy.json", _DATA / "research-policy.manifest.json", roots, today=date(2026, 7, 23)
+    )
     return Registry.from_packs([pack])
 
 
@@ -105,6 +128,7 @@ def test_real_pipeline_medical_tool_request_declared_regulated_does_not_proceed(
 
 # --- Binding constraint 1: domain-agnostic abstention gate ---------------------------------
 
+
 def test_binding_constraint_1_general_and_unsupported_abstain_identically_with_no_pack() -> None:
     general = route(_classification(domain="general", risk="low"), _no_evidence(), _request())
     unsupported = route(_classification(domain="unsupported", risk="unknown"), _no_evidence(), _request())
@@ -113,8 +137,18 @@ def test_binding_constraint_1_general_and_unsupported_abstain_identically_with_n
     assert general.gaps == unsupported.gaps
 
 
-@pytest.mark.parametrize("domain,risk", [("law", "regulated"), ("accounting", "regulated"), ("cybersecurity", "high"),
-                                          ("programming", "medium"), ("ux_design", "medium"), ("general", "low"), ("unsupported", "unknown")])
+@pytest.mark.parametrize(
+    "domain,risk",
+    [
+        ("law", "regulated"),
+        ("accounting", "regulated"),
+        ("cybersecurity", "high"),
+        ("programming", "medium"),
+        ("ux_design", "medium"),
+        ("general", "low"),
+        ("unsupported", "unknown"),
+    ],
+)
 def test_binding_constraint_1_gate_ignores_domain_value_for_all_seven_domains(domain, risk) -> None:
     # The gate runs off `LookupResult` alone -- never off `classification.domain`.
     decision = route(_classification(domain=domain, risk=risk), _no_evidence(), _request())
@@ -131,24 +165,32 @@ def test_capability_only_evidence_is_not_abstained_even_when_domain_unsupported(
 
 # --- Binding constraint 2: caller's risk_class is a floor -----------------------------------
 
+
 def test_binding_constraint_2_caller_declared_risk_elevates_assessed_low_risk() -> None:
     # Classifier assessed "low", caller declares "regulated" -- effective risk must elevate.
-    decision = route(_classification(domain="general", risk="low"), _with_sources(_source()),
-                      _request(risk_class="regulated", jurisdiction="US", as_of=date(2026, 1, 1)))
+    decision = route(
+        _classification(domain="general", risk="low"),
+        _with_sources(_source()),
+        _request(risk_class="regulated", jurisdiction="US", as_of=date(2026, 1, 1)),
+    )
     assert decision.effective_risk == "regulated"
 
 
 @pytest.mark.parametrize(("domain", "assessed_risk"), [("cybersecurity", "high"), ("unsupported", "unknown")])
 def test_binding_constraint_2_floor_never_lowers_an_already_higher_assessed_risk(domain, assessed_risk) -> None:
-    decision = route(_classification(domain=domain, risk=assessed_risk), _with_sources(_source()),
-                      _request(risk_class="low"))
+    decision = route(
+        _classification(domain=domain, risk=assessed_risk), _with_sources(_source()), _request(risk_class="low")
+    )
     assert decision.effective_risk == assessed_risk
 
 
 def test_binding_constraint_2_elevated_floor_triggers_regulated_missing_context() -> None:
     # A caller-elevated risk must feed the SAME regulated-context rule as an assessed one.
-    decision = route(_classification(domain="general", risk="low", jurisdiction="unknown"),
-                      _with_sources(_source()), _request(risk_class="regulated"))
+    decision = route(
+        _classification(domain="general", risk="low", jurisdiction="unknown"),
+        _with_sources(_source()),
+        _request(risk_class="regulated"),
+    )
     assert decision.outcome == "route_only"
     assert decision.reason == "regulated_domain_missing_context"
     assert "missing_jurisdiction" in decision.gaps
@@ -156,11 +198,13 @@ def test_binding_constraint_2_elevated_floor_triggers_regulated_missing_context(
 
 # --- Rule 1: consequential action -------------------------------------------------------------
 
+
 @pytest.mark.parametrize(("has_evidence", "expected_outcome"), [(True, "route_only"), (False, "abstained")])
 def test_consequential_action_outcome_depends_only_on_evidence_never_proceeds(has_evidence, expected_outcome) -> None:
     lookup = _with_sources(_source()) if has_evidence else _no_evidence()
-    decision = route(_classification(intent="consequential_action", domain="programming", risk="medium"),
-                      lookup, _request())
+    decision = route(
+        _classification(intent="consequential_action", domain="programming", risk="medium"), lookup, _request()
+    )
     assert decision.outcome == expected_outcome
     assert decision.reason == "consequential_action_requires_host_action"
     assert decision.requires_escalation is True
@@ -168,12 +212,16 @@ def test_consequential_action_outcome_depends_only_on_evidence_never_proceeds(ha
 
 def test_consequential_action_outranks_regulated_domain_missing_context() -> None:
     # Rule 1 wins over Rule 3 even for a regulated domain missing jurisdiction.
-    decision = route(_classification(intent="consequential_action", domain="law", risk="regulated",
-                                      jurisdiction="unknown"), _with_sources(_source()), _request())
+    decision = route(
+        _classification(intent="consequential_action", domain="law", risk="regulated", jurisdiction="unknown"),
+        _with_sources(_source()),
+        _request(),
+    )
     assert decision.reason == "consequential_action_requires_host_action"
 
 
 # --- Rule 3: regulated domain missing context -------------------------------------------------
+
 
 @pytest.mark.parametrize(
     ("jurisdiction", "as_of", "expected_gaps"),
@@ -184,20 +232,26 @@ def test_consequential_action_outranks_regulated_domain_missing_context() -> Non
     ],
 )
 def test_regulated_domain_missing_context_names_each_gap(jurisdiction, as_of, expected_gaps) -> None:
-    decision = route(_classification(domain="law", risk="regulated", jurisdiction=jurisdiction),
-                      _with_sources(_source()), _request(as_of=as_of))
+    decision = route(
+        _classification(domain="law", risk="regulated", jurisdiction=jurisdiction),
+        _with_sources(_source()),
+        _request(as_of=as_of),
+    )
     assert decision.outcome == "route_only"
     assert decision.gaps == expected_gaps
 
 
 def test_regulated_domain_with_full_context_does_not_trigger_rule_3() -> None:
-    decision = route(_classification(domain="law", risk="regulated", jurisdiction="US"),
-                      _with_sources(_source(jurisdictions=("US",))),
-                      _request(jurisdiction="US", as_of=date(2026, 1, 1)))
+    decision = route(
+        _classification(domain="law", risk="regulated", jurisdiction="US"),
+        _with_sources(_source(jurisdictions=("US",))),
+        _request(jurisdiction="US", as_of=date(2026, 1, 1)),
+    )
     assert decision.reason != "regulated_domain_missing_context"
 
 
 # --- Rule 4: jurisdiction-sensitive sources present but inapplicable ------------------------
+
 
 @pytest.mark.parametrize(
     ("applicable_flags", "expected_outcome", "expected_reason"),
@@ -207,14 +261,20 @@ def test_regulated_domain_with_full_context_does_not_trigger_rule_3() -> None:
     ],
 )
 def test_source_jurisdiction_applicability_gates_outcome(applicable_flags, expected_outcome, expected_reason) -> None:
-    matches = tuple(_source(source_id=f"src.{i}", jurisdiction_applicable=flag) for i, flag in enumerate(applicable_flags))
-    decision = route(_classification(domain="accounting", risk="regulated", jurisdiction="AR"),
-                      _with_sources(*matches), _request(as_of=date(2026, 1, 1)))
+    matches = tuple(
+        _source(source_id=f"src.{i}", jurisdiction_applicable=flag) for i, flag in enumerate(applicable_flags)
+    )
+    decision = route(
+        _classification(domain="accounting", risk="regulated", jurisdiction="AR"),
+        _with_sources(*matches),
+        _request(as_of=date(2026, 1, 1)),
+    )
     assert decision.outcome == expected_outcome
     assert decision.reason == expected_reason
 
 
 # --- Rule 5: default proceed -----------------------------------------------------------------
+
 
 def test_domain_supported_with_applicable_evidence_proceeds() -> None:
     decision = route(_classification(domain="programming", risk="medium"), _with_sources(_source()), _request())
@@ -225,6 +285,7 @@ def test_domain_supported_with_applicable_evidence_proceeds() -> None:
 
 
 # --- Purity, determinism, typing --------------------------------------------------------------
+
 
 def test_pure_function_same_inputs_same_result() -> None:
     classification, lookup, request = _classification(), _no_evidence(), _request()
@@ -249,7 +310,10 @@ def test_determinism_across_hash_seeds() -> None:
     outputs = set()
     for seed in ("0", "1", "42", "2026"):
         result = subprocess.run(
-            [sys.executable, "-c", script], capture_output=True, text=True, check=True,
+            [sys.executable, "-c", script],
+            capture_output=True,
+            text=True,
+            check=True,
             env={**os.environ, "PYTHONHASHSEED": seed},
         )
         outputs.add(result.stdout)
@@ -314,14 +378,17 @@ def _skill_only_lookup() -> LookupResult:
 
     pack = SkillPack.model_validate_json(json.dumps(_skill_pack()))
     return LookupResult(
-        domain_supported=False, sources=(), capabilities=(),
+        domain_supported=False,
+        sources=(),
+        capabilities=(),
         skills=(SkillMatch(skill=pack.skills[0], pack=pack),),
     )
 
 
 def _investigate() -> RequestClassification:
-    return RequestClassification(intent="investigate", domain="programming", claim_type="factual",
-                                 risk="low", jurisdiction="unknown")
+    return RequestClassification(
+        intent="investigate", domain="programming", claim_type="factual", risk="low", jurisdiction="unknown"
+    )
 
 
 def test_a_skill_alone_is_enough_evidence_to_proceed() -> None:
@@ -349,8 +416,6 @@ def test_skills_only_add_evidence_and_never_remove_it() -> None:
 
     pack = SkillPack.model_validate_json(json.dumps(_skill_pack()))
     supported = LookupResult(domain_supported=True, sources=(), capabilities=(), skills=())
-    with_skills = dataclasses.replace(
-        supported, skills=(SkillMatch(skill=pack.skills[0], pack=pack),)
-    )
+    with_skills = dataclasses.replace(supported, skills=(SkillMatch(skill=pack.skills[0], pack=pack),))
     request = InvestigationRequest(task="review this ui")
     assert route(_investigate(), supported, request).outcome == route(_investigate(), with_skills, request).outcome

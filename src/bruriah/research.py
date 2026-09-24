@@ -75,7 +75,13 @@ from .contracts import Budgets, EvidenceRecord, HostAction, InvestigationRequest
 from .fetch import ConnectionFactory, FetchError, Resolver, default_connect, default_resolver, fetch
 
 ResearchStatus = Literal[
-    "disabled", "not_warranted", "cached", "fetched", "refused", "degraded", "error",
+    "disabled",
+    "not_warranted",
+    "cached",
+    "fetched",
+    "refused",
+    "degraded",
+    "error",
 ]
 
 
@@ -221,12 +227,14 @@ class NetworkLedger:
         milliseconds_left = int((self.deadline - clock()) * 1000)
         if self.requests_remaining < 1 or self.bytes_remaining < 1024 or milliseconds_left < 1:
             return None
-        return budgets.model_validate({
-            **budgets.model_dump(),
-            "max_network_requests": min(budgets.max_network_requests, self.requests_remaining),
-            "max_bytes": min(budgets.max_bytes, self.bytes_remaining),
-            "max_elapsed_ms": min(budgets.max_elapsed_ms, milliseconds_left),
-        })
+        return budgets.model_validate(
+            {
+                **budgets.model_dump(),
+                "max_network_requests": min(budgets.max_network_requests, self.requests_remaining),
+                "max_bytes": min(budgets.max_bytes, self.bytes_remaining),
+                "max_elapsed_ms": min(budgets.max_elapsed_ms, milliseconds_left),
+            }
+        )
 
     def charge(self, requests: int, bytes_read: int) -> None:
         """Deduct what a call actually spent, whether it succeeded or was refused mid-flight.
@@ -255,7 +263,9 @@ def _canonicalize(url: str) -> tuple[str, str, int, str]:
 
 def _request_id(request: InvestigationRequest) -> str:
     canonical = json.dumps(
-        request.model_dump(mode="json", exclude={"cursor"}), sort_keys=True, separators=(",", ":"),
+        request.model_dump(mode="json", exclude={"cursor"}),
+        sort_keys=True,
+        separators=(",", ":"),
     )
     return f"sha256:{hashlib.sha256(canonical.encode('utf-8')).hexdigest()}"
 
@@ -286,20 +296,31 @@ def _record(
     append_audit(
         deps.audit_path,
         AuditRecord(
-            request_id=request_id, destination_host=host,
+            request_id=request_id,
+            destination_host=host,
             destination_class="public_https" if host else "none",
-            decision=audit_decision, code=code, bytes_transferred=bytes_transferred,
-            elapsed_ms=elapsed_ms, timestamp=deps.now(),
+            decision=audit_decision,
+            code=code,
+            bytes_transferred=bytes_transferred,
+            elapsed_ms=elapsed_ms,
+            timestamp=deps.now(),
         ),
     )
     return ResearchOutcome(
-        status=decision, code=code, evidence=evidence, excerpt=excerpt, excerpt_only=excerpt_only,
-        host_actions=host_actions, cache_hit=cache_hit,
+        status=decision,
+        code=code,
+        evidence=evidence,
+        excerpt=excerpt,
+        excerpt_only=excerpt_only,
+        host_actions=host_actions,
+        cache_hit=cache_hit,
     )
 
 
 def _research_inner(
-    request: InvestigationRequest, url: str | None, deps: ResearchDeps,
+    request: InvestigationRequest,
+    url: str | None,
+    deps: ResearchDeps,
     ledger: NetworkLedger | None = None,
 ) -> ResearchOutcome:
     if not isinstance(request, InvestigationRequest):
@@ -311,18 +332,35 @@ def _research_inner(
 
     if request.network_policy != "public_https" or not deps.network_enabled:
         return _record(
-            deps=deps, request_id=request_id, host=None, decision="disabled", code="network_disabled",
-            bytes_transferred=0, started=started, host_actions=(_host_action_for("network_disabled", url),),
+            deps=deps,
+            request_id=request_id,
+            host=None,
+            decision="disabled",
+            code="network_disabled",
+            bytes_transferred=0,
+            started=started,
+            host_actions=(_host_action_for("network_disabled", url),),
         )
     if url is None:
         return _record(
-            deps=deps, request_id=request_id, host=None, decision="not_warranted", code="no_candidate_url",
-            bytes_transferred=0, started=started, host_actions=(_host_action_for("no_candidate_url", None),),
+            deps=deps,
+            request_id=request_id,
+            host=None,
+            decision="not_warranted",
+            code="no_candidate_url",
+            bytes_transferred=0,
+            started=started,
+            host_actions=(_host_action_for("no_candidate_url", None),),
         )
     if request.budgets.max_network_requests < 1:
         return _record(
-            deps=deps, request_id=request_id, host=None, decision="not_warranted",
-            code="network_budget_exhausted", bytes_transferred=0, started=started,
+            deps=deps,
+            request_id=request_id,
+            host=None,
+            decision="not_warranted",
+            code="network_budget_exhausted",
+            bytes_transferred=0,
+            started=started,
             host_actions=(_host_action_for("network_budget_exhausted", url),),
         )
 
@@ -340,13 +378,25 @@ def _research_inner(
     # concurrency slot; the guarantee that a cache hit never touches either is unchanged.
     if host not in deps.allowlist and f"{host}:{port}" not in deps.allowlist:
         return _record(
-            deps=deps, request_id=request_id, host=host, decision="refused", code="host_not_allowlisted",
-            bytes_transferred=0, started=started, host_actions=(_host_action_for("host_not_allowlisted", url),),
+            deps=deps,
+            request_id=request_id,
+            host=host,
+            decision="refused",
+            code="host_not_allowlisted",
+            bytes_transferred=0,
+            started=started,
+            host_actions=(_host_action_for("host_not_allowlisted", url),),
         )
     if deps.access_policy.path_denied(host, path):
         return _record(
-            deps=deps, request_id=request_id, host=host, decision="refused", code="access_restricted",
-            bytes_transferred=0, started=started, host_actions=(_host_action_for("access_restricted", url),),
+            deps=deps,
+            request_id=request_id,
+            host=host,
+            decision="refused",
+            code="access_restricted",
+            bytes_transferred=0,
+            started=started,
+            host_actions=(_host_action_for("access_restricted", url),),
         )
 
     lookup = read_cache(deps.cache_dir, canonical, now=deps.now())
@@ -360,22 +410,50 @@ def _research_inner(
         # deleted -- the TTL and `prune_expired` still own removal.
         if entry.policy_version == deps.policy_version:
             return _record(
-                deps=deps, request_id=request_id, host=host, decision="cached", code="ok",
-                bytes_transferred=len(entry.excerpt), started=started, evidence=entry.evidence,
-                excerpt=entry.excerpt, excerpt_only=entry.excerpt_only, cache_hit=True,
+                deps=deps,
+                request_id=request_id,
+                host=host,
+                decision="cached",
+                code="ok",
+                bytes_transferred=len(entry.excerpt),
+                started=started,
+                evidence=entry.evidence,
+                excerpt=entry.excerpt,
+                excerpt_only=entry.excerpt_only,
+                cache_hit=True,
             )
         return _fetch_under_current_policy(
-            request, deps, request_id, started, canonical, host, url, ledger,
+            request,
+            deps,
+            request_id,
+            started,
+            canonical,
+            host,
+            url,
+            ledger,
         )
 
     return _fetch_under_current_policy(
-        request, deps, request_id, started, canonical, host, url, ledger,
+        request,
+        deps,
+        request_id,
+        started,
+        canonical,
+        host,
+        url,
+        ledger,
     )
 
 
 def _fetch_under_current_policy(
-    request: InvestigationRequest, deps: ResearchDeps, request_id: str, started: float,
-    canonical: str, host: str, url: str, ledger: NetworkLedger | None,
+    request: InvestigationRequest,
+    deps: ResearchDeps,
+    request_id: str,
+    started: float,
+    canonical: str,
+    host: str,
+    url: str,
+    ledger: NetworkLedger | None,
 ) -> ResearchOutcome:
     """The live leg: acquire a concurrency slot, fetch, cache, audit. Split out of
     `_research_inner` so the cache-miss path and the stale-policy path reach it by the same
@@ -393,23 +471,40 @@ def _fetch_under_current_policy(
         allowance = ledger.allowance(budgets, deps.clock)
         if allowance is None:
             return _record(
-                deps=deps, request_id=request_id, host=host, decision="not_warranted",
-                code="network_budget_exhausted", bytes_transferred=0, started=started,
+                deps=deps,
+                request_id=request_id,
+                host=host,
+                decision="not_warranted",
+                code="network_budget_exhausted",
+                bytes_transferred=0,
+                started=started,
                 host_actions=(_host_action_for("network_budget_exhausted", url),),
             )
         budgets = allowance
 
     if not deps.concurrency.try_acquire():
         return _record(
-            deps=deps, request_id=request_id, host=host, decision="degraded",
-            code="concurrency_limit_exceeded", bytes_transferred=0, started=started,
+            deps=deps,
+            request_id=request_id,
+            host=host,
+            decision="degraded",
+            code="concurrency_limit_exceeded",
+            bytes_transferred=0,
+            started=started,
             host_actions=(_host_action_for("concurrency_limit_exceeded", url),),
         )
     try:
         result = fetch(
-            canonical, "GET", budgets, network_enabled=True, allowlist=deps.allowlist,
-            resolver=deps.resolver, connect=deps.connect, ssl_context=deps.ssl_context,
-            clock=deps.clock, retrieved_at=deps.now(),
+            canonical,
+            "GET",
+            budgets,
+            network_enabled=True,
+            allowlist=deps.allowlist,
+            resolver=deps.resolver,
+            connect=deps.connect,
+            ssl_context=deps.ssl_context,
+            clock=deps.clock,
+            retrieved_at=deps.now(),
         )
     finally:
         deps.concurrency.release()
@@ -423,8 +518,14 @@ def _fetch_under_current_policy(
     if result.status != "ok" or result.evidence is None or result.body is None:
         decision: ResearchStatus = "error" if result.status == "error" else "refused"
         return _record(
-            deps=deps, request_id=request_id, host=host, decision=decision, code=result.code,
-            bytes_transferred=0, started=started, host_actions=(_host_action_for(result.code, url),),
+            deps=deps,
+            request_id=request_id,
+            host=host,
+            decision=decision,
+            code=result.code,
+            bytes_transferred=0,
+            started=started,
+            host_actions=(_host_action_for(result.code, url),),
         )
 
     evidence = result.evidence
@@ -432,20 +533,33 @@ def _fetch_under_current_policy(
         evidence = evidence.model_copy(update={"reuse": deps.resolve_reuse(evidence)})
 
     entry = build_cache_entry(
-        evidence, retrieved_at=deps.now(), ttl=deps.default_ttl, body=result.body,
-        max_excerpt_chars=budgets.max_extracted_chars, policy_version=deps.policy_version,
+        evidence,
+        retrieved_at=deps.now(),
+        ttl=deps.default_ttl,
+        body=result.body,
+        max_excerpt_chars=budgets.max_extracted_chars,
+        policy_version=deps.policy_version,
     )
     write_cache_atomic(deps.cache_dir, canonical, entry)
 
     return _record(
-        deps=deps, request_id=request_id, host=host, decision="fetched", code="ok",
-        bytes_transferred=len(result.body), started=started, evidence=entry.evidence,
-        excerpt=entry.excerpt, excerpt_only=entry.excerpt_only,
+        deps=deps,
+        request_id=request_id,
+        host=host,
+        decision="fetched",
+        code="ok",
+        bytes_transferred=len(result.body),
+        started=started,
+        evidence=entry.evidence,
+        excerpt=entry.excerpt,
+        excerpt_only=entry.excerpt_only,
     )
 
 
 def research(
-    request: InvestigationRequest, url: str | None, deps: ResearchDeps,
+    request: InvestigationRequest,
+    url: str | None,
+    deps: ResearchDeps,
     ledger: NetworkLedger | None = None,
 ) -> ResearchOutcome:
     """Decide whether live research for `url` is warranted under `request`/`deps`'s resolved
@@ -469,6 +583,13 @@ def research(
 
 
 __all__ = [
-    "AccessPolicy", "ConcurrencyLimiter", "NetworkLedger", "ResearchDeps", "ResearchError", "ResearchOutcome",
-    "ResearchStatus", "build_proxy_connect", "research",
+    "AccessPolicy",
+    "ConcurrencyLimiter",
+    "NetworkLedger",
+    "ResearchDeps",
+    "ResearchError",
+    "ResearchOutcome",
+    "ResearchStatus",
+    "build_proxy_connect",
+    "research",
 ]

@@ -22,6 +22,7 @@ Usage:
         --reranker jinaai/jina-reranker-v2-base-multilingual \
         --out evals/project-memory/leakcanary-ablation.jsonl
 """
+
 from __future__ import annotations
 
 import argparse
@@ -65,8 +66,12 @@ def load_questions(path: Path) -> list[dict]:
 
 def _ranking(deps, query: str, rerank) -> tuple[list[str], tuple[str, ...]]:
     outcome = search(
-        deps.snapshot, query, _BUDGETS,
-        embed_query=deps.embed_query, rerank=rerank, clock=deps.clock,
+        deps.snapshot,
+        query,
+        _BUDGETS,
+        embed_query=deps.embed_query,
+        rerank=rerank,
+        clock=deps.clock,
     )
     return document_ranking([match.relative_path for match in outcome.matches]), outcome.degradation
 
@@ -123,7 +128,8 @@ def run(corpus: str, questions: list[dict], deps, out: Path) -> list[QuestionOut
             )
 
         outcome = QuestionOutcome(
-            id=case["id"], corpus=corpus,
+            id=case["id"],
+            corpus=corpus,
             base_rank=rank_of(base_order, ground_truth),
             reranked_rank=rank_of(reranked_order, ground_truth),
             pool_documents=len(base_order),
@@ -150,8 +156,9 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     # could only ever have been produced by editing the source between runs -- which is why that
     # table names no command and could not be re-run when the measurement behind it was questioned.
     # Every row it writes already records the depth it used, so a run stays self-describing.
-    parser.add_argument("--depth", type=int, default=None,
-                        help="override retrieval._RERANK_DEPTH for this run (default: shipped)")
+    parser.add_argument(
+        "--depth", type=int, default=None, help="override retrieval._RERANK_DEPTH for this run (default: shipped)"
+    )
     return parser.parse_args(argv)
 
 

@@ -56,35 +56,51 @@ class TestDetectPRContext:
     def test_returns_none_for_non_pr_event(self, tmp_path: Path) -> None:
         event = tmp_path / "event.json"
         event.write_text('{"action": "push"}')
-        with patch.dict(os.environ, {
-            "GITHUB_EVENT_PATH": str(event),
-            "GITHUB_REPOSITORY": "leo/bruriah",
-        }, clear=True):
+        with patch.dict(
+            os.environ,
+            {
+                "GITHUB_EVENT_PATH": str(event),
+                "GITHUB_REPOSITORY": "leo/bruriah",
+            },
+            clear=True,
+        ):
             assert detect_pr_context() is None
 
     def test_returns_none_for_missing_file(self) -> None:
-        with patch.dict(os.environ, {
-            "GITHUB_EVENT_PATH": "/nonexistent/path.json",
-            "GITHUB_REPOSITORY": "leo/bruriah",
-        }, clear=True):
+        with patch.dict(
+            os.environ,
+            {
+                "GITHUB_EVENT_PATH": "/nonexistent/path.json",
+                "GITHUB_REPOSITORY": "leo/bruriah",
+            },
+            clear=True,
+        ):
             assert detect_pr_context() is None
 
     def test_returns_none_for_invalid_json(self, tmp_path: Path) -> None:
         event = tmp_path / "event.json"
         event.write_text("not json{{{")
-        with patch.dict(os.environ, {
-            "GITHUB_EVENT_PATH": str(event),
-            "GITHUB_REPOSITORY": "leo/bruriah",
-        }, clear=True):
+        with patch.dict(
+            os.environ,
+            {
+                "GITHUB_EVENT_PATH": str(event),
+                "GITHUB_REPOSITORY": "leo/bruriah",
+            },
+            clear=True,
+        ):
             assert detect_pr_context() is None
 
     def test_returns_none_for_invalid_repository_format(self, tmp_path: Path) -> None:
         event = tmp_path / "event.json"
         event.write_text('{"pull_request": {"number": 1, "base": {"ref": "main"}, "head": {"sha": "abc"}}}')
-        with patch.dict(os.environ, {
-            "GITHUB_EVENT_PATH": str(event),
-            "GITHUB_REPOSITORY": "noslash",
-        }, clear=True):
+        with patch.dict(
+            os.environ,
+            {
+                "GITHUB_EVENT_PATH": str(event),
+                "GITHUB_REPOSITORY": "noslash",
+            },
+            clear=True,
+        ):
             assert detect_pr_context() is None
 
     def test_returns_context_for_valid_pr_event(self, tmp_path: Path) -> None:
@@ -97,10 +113,14 @@ class TestDetectPRContext:
         }
         event = tmp_path / "event.json"
         event.write_text(json.dumps(event_data))
-        with patch.dict(os.environ, {
-            "GITHUB_EVENT_PATH": str(event),
-            "GITHUB_REPOSITORY": "leonardoprimero/bruriah",
-        }, clear=True):
+        with patch.dict(
+            os.environ,
+            {
+                "GITHUB_EVENT_PATH": str(event),
+                "GITHUB_REPOSITORY": "leonardoprimero/bruriah",
+            },
+            clear=True,
+        ):
             ctx = detect_pr_context()
             assert ctx is not None
             assert ctx.owner == "leonardoprimero"
@@ -118,10 +138,14 @@ class TestDetectPRContext:
         }
         event = tmp_path / "event.json"
         event.write_text(json.dumps(event_data))
-        with patch.dict(os.environ, {
-            "GITHUB_EVENT_PATH": str(event),
-            "GITHUB_REPOSITORY": "leo/bruriah",
-        }, clear=True):
+        with patch.dict(
+            os.environ,
+            {
+                "GITHUB_EVENT_PATH": str(event),
+                "GITHUB_REPOSITORY": "leo/bruriah",
+            },
+            clear=True,
+        ):
             assert detect_pr_context() is None
 
 

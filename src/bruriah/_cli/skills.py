@@ -30,8 +30,7 @@ def run_skill_ingest(paths: PlatformPaths, source: Path) -> dict[str, Any]:
         record = candidates.ingest_candidate(source, paths.data_dir)
     except candidates.CandidateError as error:
         raise CliError(f"candidate_rejected:{error.code}") from error
-    return {"path": str(record.path), "digest": record.digest,
-            "pack_id": record.pack_id, "version": record.version}
+    return {"path": str(record.path), "digest": record.digest, "pack_id": record.pack_id, "version": record.version}
 
 
 def run_skill_analyze(candidate: Path) -> dict[str, Any]:
@@ -42,11 +41,12 @@ def run_skill_analyze(candidate: Path) -> dict[str, Any]:
     except candidates.CandidateError as error:
         raise CliError(f"candidate_rejected:{error.code}") from error
     return {
-        "digest": report.digest, "pack_id": report.pack_id, "version": report.version,
+        "digest": report.digest,
+        "pack_id": report.pack_id,
+        "version": report.version,
         "skill_ids": list(report.skill_ids),
         "advisories": [
-            {"id": item.identifier, "code": item.code, "skill_id": item.skill_id,
-             "detail": item.detail}
+            {"id": item.identifier, "code": item.code, "skill_id": item.skill_id, "detail": item.detail}
             for item in report.advisories
         ],
         "analysis_limits": _ANALYSIS_LIMITS,
@@ -54,17 +54,23 @@ def run_skill_analyze(candidate: Path) -> dict[str, Any]:
 
 
 def run_skill_approve(
-    paths: PlatformPaths, candidate: Path, acknowledge: list[str], *, today: date | None = None,
+    paths: PlatformPaths,
+    candidate: Path,
+    acknowledge: list[str],
+    *,
+    today: date | None = None,
 ) -> dict[str, Any]:
     """Record human approval, bound to each skill's current body digest."""
     try:
         records = approvals.approve_candidate(
-            candidate, paths.data_dir, acknowledge=acknowledge, today=today or date.today(),
+            candidate,
+            paths.data_dir,
+            acknowledge=acknowledge,
+            today=today or date.today(),
         )
     except approvals.ApprovalError as error:
         raise CliError(f"approval_refused:{error.code}") from error
-    return {"approved": [record.as_json() for record in records],
-            "analysis_limits": _ANALYSIS_LIMITS}
+    return {"approved": [record.as_json() for record in records], "analysis_limits": _ANALYSIS_LIMITS}
 
 
 def run_skill_sign(key: Path, signer: str, pack: Path, out: Path | None) -> dict[str, Any]:
@@ -74,14 +80,19 @@ def run_skill_sign(key: Path, signer: str, pack: Path, out: Path | None) -> dict
         manifest = signing.sign_pack(key, signer, pack, out)
     except signing.SigningError as error:
         raise CliError(f"signing_failed:{error.code}") from error
-    return {"manifest": str(manifest), "signer": signer,
-            "note": "A signature establishes who signed these bytes. It is not a claim that they "
-                    "are correct or safe."}
+    return {
+        "manifest": str(manifest),
+        "signer": signer,
+        "note": "A signature establishes who signed these bytes. It is not a claim that they are correct or safe.",
+    }
 
 
 def run_skill_activate(
-    paths: PlatformPaths, candidates_: list[Path], *,
-    allow_unsigned_local: bool = False, today: date | None = None,
+    paths: PlatformPaths,
+    candidates_: list[Path],
+    *,
+    allow_unsigned_local: bool = False,
+    today: date | None = None,
 ) -> dict[str, Any]:
     """Compile the named approved candidates into one generation and promote it.
 
@@ -104,30 +115,41 @@ def run_skill_activate(
     try:
         destination = skillset.generation_path(skills_dir)
         skillset.compile_skillset(
-            sources, destination, platform_module.load_trust_roots(),
-            approvals.load_approvals(paths.data_dir), today=today,
+            sources,
+            destination,
+            platform_module.load_trust_roots(),
+            approvals.load_approvals(paths.data_dir),
+            today=today,
         )
         result = skillset.promote_skillset(
-            destination, skills_dir / "active.json", platform_module.load_trust_roots(),
-            approvals.load_approvals(paths.data_dir), today=today,
+            destination,
+            skills_dir / "active.json",
+            platform_module.load_trust_roots(),
+            approvals.load_approvals(paths.data_dir),
+            today=today,
         )
     except (skillset.SkillSetError, approvals.ApprovalError) as error:
         raise CliError(f"activation_refused:{error.code}") from error
-    return {"active": str(result.path), "build_id": result.build_id, "durable": result.durable,
-            "skills": list(result.skill_set.skill_ids)}
+    return {
+        "active": str(result.path),
+        "build_id": result.build_id,
+        "durable": result.durable,
+        "skills": list(result.skill_set.skill_ids),
+    }
 
 
 def run_skill_rollback(paths: PlatformPaths, *, today: date | None = None) -> dict[str, Any]:
     """Restore the most recently retained generation, revalidating it first."""
     try:
         result = skillset.rollback_skillset(
-            paths.data_dir / "skills" / "active.json", platform_module.load_trust_roots(),
-            approvals.load_approvals(paths.data_dir), today=today,
+            paths.data_dir / "skills" / "active.json",
+            platform_module.load_trust_roots(),
+            approvals.load_approvals(paths.data_dir),
+            today=today,
         )
     except (skillset.SkillSetError, approvals.ApprovalError) as error:
         raise CliError(f"rollback_refused:{error.code}") from error
-    return {"active": str(result.path), "build_id": result.build_id,
-            "skills": list(result.skill_set.skill_ids)}
+    return {"active": str(result.path), "build_id": result.build_id, "skills": list(result.skill_set.skill_ids)}
 
 
 def run_skill_status(paths: PlatformPaths, *, today: date | None = None) -> dict[str, Any]:
@@ -135,11 +157,14 @@ def run_skill_status(paths: PlatformPaths, *, today: date | None = None) -> dict
     the command an operator runs precisely when something is wrong."""
     pointer = paths.data_dir / "skills" / "active.json"
     state = skillset.open_skillset(
-        pointer, platform_module.load_trust_roots(), approvals.load_approvals(paths.data_dir),
+        pointer,
+        platform_module.load_trust_roots(),
+        approvals.load_approvals(paths.data_dir),
         today=today,
     )
     report: dict[str, Any] = {
-        "active": state.build_id, "skills": list(state.skill_set.skill_ids) if state.skill_set else [],
+        "active": state.build_id,
+        "skills": list(state.skill_set.skill_ids) if state.skill_set else [],
         "warning": state.warning,
     }
     try:
@@ -167,13 +192,13 @@ def run_skill_prune(paths: PlatformPaths) -> dict[str, Any]:
 
 
 def cmd_skill_activate(args: argparse.Namespace) -> int:
-    result = run_skill_activate(resolve_cli_paths(args), args.candidate or [],
-                                allow_unsigned_local=args.allow_unsigned_local)
+    result = run_skill_activate(
+        resolve_cli_paths(args), args.candidate or [], allow_unsigned_local=args.allow_unsigned_local
+    )
     print(json.dumps(result, indent=2, sort_keys=True))
     print(f"Activated {len(result['skills'])} skill(s) as {result['build_id'][:16]}", file=sys.stderr)
     if not result["durable"]:
-        print("Warning: the directory fsync failed; the pointer is written but less durable.",
-              file=sys.stderr)
+        print("Warning: the directory fsync failed; the pointer is written but less durable.", file=sys.stderr)
     return 0
 
 

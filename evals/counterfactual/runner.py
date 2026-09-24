@@ -8,6 +8,7 @@ they commit architectural regressions.
 Usage:
     uv run python evals/counterfactual/runner.py
 """
+
 from __future__ import annotations
 
 import json
@@ -27,7 +28,8 @@ from bruriah.repository import SnapshotRepository
 from bruriah.service import InvestigateService, ServiceDeps
 
 FINGERPRINT = (
-    '{"artifact":"model.onnx","artifact_sha256":"' + "a" * 64
+    '{"artifact":"model.onnx","artifact_sha256":"'
+    + "a" * 64
     + '","pooling":"mean","runtime":"fastembed==0.8.0","snapshot":"snapshot-a","source":"example/model"}'
 )
 ROOT = Path(__file__).resolve().parents[2]
@@ -149,7 +151,7 @@ def run_benchmark() -> list[ScenarioResult]:
                     row = repo.resolve_alternative_ref(cf.matched_alternative_ref)
                     matched_alt = row.name if row is not None else cf.matched_alternative_ref
                 evidence_count = len(cf.supporting_evidence) if cf else 0
-                success = (actual_verdict == sc["expected_verdict"])
+                success = actual_verdict == sc["expected_verdict"]
 
                 results.append(
                     ScenarioResult(
@@ -173,7 +175,9 @@ def print_summary(results: list[ScenarioResult]) -> None:
     accuracy = (passed / total) * 100.0 if total else 0.0
 
     print("\n# Counterfactual Architectural Memory Correctness Suite\n")
-    print(f"**Total Fixture Scenarios:** {total} | **Passed:** {passed} | **Suite Status:** {'VERIFIED' if passed == total else 'FAILURES DETECTED'} ({accuracy:.1f}%)\n")
+    print(
+        f"**Total Fixture Scenarios:** {total} | **Passed:** {passed} | **Suite Status:** {'VERIFIED' if passed == total else 'FAILURES DETECTED'} ({accuracy:.1f}%)\n"
+    )
     print("| Scenario ID | Category | Expected Verdict | Actual Verdict | Result |")
     print("|---|---|---|---|:---:|")
     for r in results:
@@ -181,7 +185,6 @@ def print_summary(results: list[ScenarioResult]) -> None:
         print(f"| `{r.scenario_id}` | {r.category} | `{r.expected_verdict}` | `{r.actual_verdict}` | {status_icon} |")
 
     print(f"\n{passed}/{total} deterministic fixture scenarios verified as expected.")
-
 
 
 if __name__ == "__main__":

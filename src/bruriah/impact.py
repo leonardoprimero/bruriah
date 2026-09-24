@@ -80,7 +80,11 @@ def _get_git_files(repo: Path, target: str) -> tuple[str, tuple[str, ...]]:
 
     if ".." in target or is_rev:
         # Revision or range: get diff files
-        cmd = ["git", "diff", "--name-only", target] if ".." in target else ["git", "diff", "--name-only", f"{target}~1", target]
+        cmd = (
+            ["git", "diff", "--name-only", target]
+            if ".." in target
+            else ["git", "diff", "--name-only", f"{target}~1", target]
+        )
         try:
             diff_res = subprocess.run(
                 cmd,

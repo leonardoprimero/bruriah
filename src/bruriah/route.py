@@ -128,10 +128,7 @@ def route(classification: RequestClassification, lookup: LookupResult, request: 
     effective_risk = _effective_risk(classification.risk, request.risk_class)
     # Strictly ADDITIVE: skills can only make evidence present, never absent. A caller that
     # passes no skill set gets `skills=()` and the identical decision it got before.
-    has_evidence = (
-        lookup.domain_supported or bool(lookup.sources)
-        or bool(lookup.capabilities) or bool(lookup.skills)
-    )
+    has_evidence = lookup.domain_supported or bool(lookup.sources) or bool(lookup.capabilities) or bool(lookup.skills)
 
     if classification.intent == "consequential_action":
         outcome: RouteOutcome = "route_only" if has_evidence else "abstained"
@@ -139,8 +136,9 @@ def route(classification: RequestClassification, lookup: LookupResult, request: 
         return RouteDecision(outcome, "consequential_action_requires_host_action", effective_risk, gaps, True)
 
     if not has_evidence:
-        return RouteDecision("abstained", "no_approved_pack_or_local_evidence", effective_risk,
-                              ("no_approved_domain_pack",), True)
+        return RouteDecision(
+            "abstained", "no_approved_pack_or_local_evidence", effective_risk, ("no_approved_domain_pack",), True
+        )
 
     if effective_risk == "regulated":
         context_gaps: list[Gap] = []
@@ -149,12 +147,18 @@ def route(classification: RequestClassification, lookup: LookupResult, request: 
         if request.as_of is None:
             context_gaps.append("missing_effective_date")
         if context_gaps:
-            return RouteDecision("route_only", "regulated_domain_missing_context", effective_risk,
-                                  tuple(context_gaps), True)
+            return RouteDecision(
+                "route_only", "regulated_domain_missing_context", effective_risk, tuple(context_gaps), True
+            )
 
     if lookup.sources and all(not match.jurisdiction_applicable for match in lookup.sources):
-        return RouteDecision("route_only", "sources_not_jurisdiction_applicable", effective_risk,
-                              ("sources_jurisdiction_mismatch",), True)
+        return RouteDecision(
+            "route_only",
+            "sources_not_jurisdiction_applicable",
+            effective_risk,
+            ("sources_jurisdiction_mismatch",),
+            True,
+        )
 
     return RouteDecision("proceed", "domain_supported_with_applicable_evidence", effective_risk, (), False)
 

@@ -6,6 +6,7 @@ never open a socket: a cache hit is proven by injecting a transport that raises 
 if it is ever called, and retry/backoff/rate-limit behavior is proven with injected `clock`/`sleep`
 callables instead of real timing.
 """
+
 from __future__ import annotations
 
 import http.client
@@ -119,14 +120,24 @@ class TestCacheAndOffline:
         cache = ResponseCache(tmp_path)
         with pytest.raises(GitHubOfflineError):
             get_issue(
-                "acme", "widget", 41, cache=cache, network_enabled=False, transport=_never_called,
+                "acme",
+                "widget",
+                41,
+                cache=cache,
+                network_enabled=False,
+                transport=_never_called,
             )
 
     def test_offline_error_is_a_github_error(self, tmp_path: Path) -> None:
         cache = ResponseCache(tmp_path)
         with pytest.raises(GitHubError):
             get_issue(
-                "acme", "widget", 41, cache=cache, network_enabled=False, transport=_never_called,
+                "acme",
+                "widget",
+                41,
+                cache=cache,
+                network_enabled=False,
+                transport=_never_called,
             )
 
     def test_successful_fetch_populates_the_cache(self, tmp_path: Path) -> None:
@@ -175,14 +186,22 @@ class TestNotFound:
 class TestServerErrorRetry:
     def test_retries_then_succeeds(self, tmp_path: Path) -> None:
         cache = ResponseCache(tmp_path)
-        transport = _ScriptedTransport([
-            _json_response(500, {"message": "boom"}),
-            _json_response(502, {"message": "boom again"}),
-            _json_response(200, _load("issue-41.json")),
-        ])
+        transport = _ScriptedTransport(
+            [
+                _json_response(500, {"message": "boom"}),
+                _json_response(502, {"message": "boom again"}),
+                _json_response(200, _load("issue-41.json")),
+            ]
+        )
         sleep = _RecordingSleep()
         result = get_issue(
-            "acme", "widget", 41, cache=cache, transport=transport, sleep=sleep, clock=_clock_seq(0.0, 0.0, 0.0),
+            "acme",
+            "widget",
+            41,
+            cache=cache,
+            transport=transport,
+            sleep=sleep,
+            clock=_clock_seq(0.0, 0.0, 0.0),
         )
         assert result["number"] == 41
         assert len(transport.calls) == 3
@@ -192,14 +211,18 @@ class TestServerErrorRetry:
 
     def test_exhausts_retries_and_raises(self, tmp_path: Path) -> None:
         cache = ResponseCache(tmp_path)
-        transport = _ScriptedTransport([
-            _json_response(500, {"message": "boom"}),
-            _json_response(500, {"message": "boom"}),
-            _json_response(500, {"message": "boom"}),
-        ])
+        transport = _ScriptedTransport(
+            [
+                _json_response(500, {"message": "boom"}),
+                _json_response(500, {"message": "boom"}),
+                _json_response(500, {"message": "boom"}),
+            ]
+        )
         sleep = _RecordingSleep()
         with pytest.raises(GitHubError):
-            get_issue("acme", "widget", 41, cache=cache, transport=transport, sleep=sleep, clock=_clock_seq(0.0, 0.0, 0.0))
+            get_issue(
+                "acme", "widget", 41, cache=cache, transport=transport, sleep=sleep, clock=_clock_seq(0.0, 0.0, 0.0)
+            )
         assert len(transport.calls) == 3
 
     def test_never_retries_a_plain_4xx(self, tmp_path: Path) -> None:
@@ -240,13 +263,13 @@ class TestDefaultTransportTimeout:
 
         monkeypatch.setattr(github_read.urllib.request, "urlopen", _fake_urlopen)
         github_read._default_transport(
-            "GET", "https://api.github.com/repos/acme/widget/issues/41", None,
+            "GET",
+            "https://api.github.com/repos/acme/widget/issues/41",
+            None,
         )
         assert captured["timeout"] == github_read._DEFAULT_TIMEOUT_SECONDS
 
-    def test_a_stalled_connection_raises_a_typed_timeout_error(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_a_stalled_connection_raises_a_typed_timeout_error(self, monkeypatch: pytest.MonkeyPatch) -> None:
         import bruriah.github_read as github_read
 
         def _fake_urlopen(request: Any, timeout: float | None = None) -> Any:
@@ -255,7 +278,9 @@ class TestDefaultTransportTimeout:
         monkeypatch.setattr(github_read.urllib.request, "urlopen", _fake_urlopen)
         with pytest.raises(GitHubError) as excinfo:
             github_read._default_transport(
-                "GET", "https://api.github.com/repos/acme/widget/issues/41", None,
+                "GET",
+                "https://api.github.com/repos/acme/widget/issues/41",
+                None,
             )
         assert excinfo.value.code == "github_timeout"
 
@@ -323,28 +348,41 @@ class TestDefaultTransportMidBodyReadFailure:
 class TestRateLimit:
     def test_403_with_remaining_zero_sleeps_until_reset(self, tmp_path: Path) -> None:
         cache = ResponseCache(tmp_path)
-        transport = _ScriptedTransport([
-            _json_response(
-                403, {"message": "rate limited"},
-                headers={"X-RateLimit-Remaining": "0", "X-RateLimit-Reset": "1000"},
-            ),
-            _json_response(200, _load("issue-41.json")),
-        ])
+        transport = _ScriptedTransport(
+            [
+                _json_response(
+                    403,
+                    {"message": "rate limited"},
+                    headers={"X-RateLimit-Remaining": "0", "X-RateLimit-Reset": "1000"},
+                ),
+                _json_response(200, _load("issue-41.json")),
+            ]
+        )
         sleep = _RecordingSleep()
         result = get_issue(
-            "acme", "widget", 41, cache=cache, transport=transport, sleep=sleep, clock=_clock_seq(940.0, 940.0),
+            "acme",
+            "widget",
+            41,
+            cache=cache,
+            transport=transport,
+            sleep=sleep,
+            clock=_clock_seq(940.0, 940.0),
         )
         assert result["number"] == 41
         assert sleep.calls == [60.0]
 
     def test_429_with_retry_after_sleeps_that_many_seconds(self, tmp_path: Path) -> None:
         cache = ResponseCache(tmp_path)
-        transport = _ScriptedTransport([
-            _json_response(429, {"message": "rate limited"}, headers={"Retry-After": "30"}),
-            _json_response(200, _load("issue-41.json")),
-        ])
+        transport = _ScriptedTransport(
+            [
+                _json_response(429, {"message": "rate limited"}, headers={"Retry-After": "30"}),
+                _json_response(200, _load("issue-41.json")),
+            ]
+        )
         sleep = _RecordingSleep()
-        result = get_issue("acme", "widget", 41, cache=cache, transport=transport, sleep=sleep, clock=_clock_seq(0.0, 0.0))
+        result = get_issue(
+            "acme", "widget", 41, cache=cache, transport=transport, sleep=sleep, clock=_clock_seq(0.0, 0.0)
+        )
         assert result["number"] == 41
         assert sleep.calls == [30.0]
 
@@ -367,16 +405,24 @@ class TestRateLimit:
 class TestRateLimitWindowClosed:
     def test_far_reset_raises_immediately_without_sleeping(self, tmp_path: Path) -> None:
         cache = ResponseCache(tmp_path)
-        transport = _ScriptedTransport([
-            _json_response(
-                403, {"message": "rate limited"},
-                headers={"X-RateLimit-Remaining": "0", "X-RateLimit-Reset": "3600"},
-            ),
-        ])
+        transport = _ScriptedTransport(
+            [
+                _json_response(
+                    403,
+                    {"message": "rate limited"},
+                    headers={"X-RateLimit-Remaining": "0", "X-RateLimit-Reset": "3600"},
+                ),
+            ]
+        )
         sleep = _RecordingSleep()
         with pytest.raises(GitHubRateLimitedError) as excinfo:
             get_issue(
-                "acme", "widget", 41, cache=cache, transport=transport, sleep=sleep,
+                "acme",
+                "widget",
+                41,
+                cache=cache,
+                transport=transport,
+                sleep=sleep,
                 clock=_clock_seq(0.0, 0.0),
             )
         assert sleep.calls == []
@@ -385,54 +431,76 @@ class TestRateLimitWindowClosed:
 
     def test_rate_limited_error_is_a_github_error(self, tmp_path: Path) -> None:
         cache = ResponseCache(tmp_path)
-        transport = _ScriptedTransport([
-            _json_response(
-                403, {"message": "rate limited"},
-                headers={"X-RateLimit-Remaining": "0", "X-RateLimit-Reset": "3600"},
-            ),
-        ])
+        transport = _ScriptedTransport(
+            [
+                _json_response(
+                    403,
+                    {"message": "rate limited"},
+                    headers={"X-RateLimit-Remaining": "0", "X-RateLimit-Reset": "3600"},
+                ),
+            ]
+        )
         with pytest.raises(GitHubError):
             get_issue(
-                "acme", "widget", 41, cache=cache, transport=transport,
+                "acme",
+                "widget",
+                41,
+                cache=cache,
+                transport=transport,
                 clock=_clock_seq(0.0, 0.0),
             )
 
     def test_near_reset_sleeps_once_for_the_full_wait_then_retries(self, tmp_path: Path) -> None:
         cache = ResponseCache(tmp_path)
-        transport = _ScriptedTransport([
-            _json_response(
-                403, {"message": "rate limited"},
-                headers={"X-RateLimit-Remaining": "0", "X-RateLimit-Reset": "120"},
-            ),
-            _json_response(200, _load("issue-41.json")),
-        ])
+        transport = _ScriptedTransport(
+            [
+                _json_response(
+                    403,
+                    {"message": "rate limited"},
+                    headers={"X-RateLimit-Remaining": "0", "X-RateLimit-Reset": "120"},
+                ),
+                _json_response(200, _load("issue-41.json")),
+            ]
+        )
         sleep = _RecordingSleep()
         result = get_issue(
-            "acme", "widget", 41, cache=cache, transport=transport, sleep=sleep,
+            "acme",
+            "widget",
+            41,
+            cache=cache,
+            transport=transport,
+            sleep=sleep,
             clock=_clock_seq(0.0, 0.0),
         )
         assert result["number"] == 41
         assert sleep.calls == [120.0]
         assert len(transport.calls) == 2
 
-    def test_rate_limited_again_after_the_one_sleep_raises_without_a_third_attempt(
-        self, tmp_path: Path
-    ) -> None:
+    def test_rate_limited_again_after_the_one_sleep_raises_without_a_third_attempt(self, tmp_path: Path) -> None:
         cache = ResponseCache(tmp_path)
-        transport = _ScriptedTransport([
-            _json_response(
-                403, {"message": "rate limited"},
-                headers={"X-RateLimit-Remaining": "0", "X-RateLimit-Reset": "10"},
-            ),
-            _json_response(
-                403, {"message": "still rate limited"},
-                headers={"X-RateLimit-Remaining": "0", "X-RateLimit-Reset": "10"},
-            ),
-        ])
+        transport = _ScriptedTransport(
+            [
+                _json_response(
+                    403,
+                    {"message": "rate limited"},
+                    headers={"X-RateLimit-Remaining": "0", "X-RateLimit-Reset": "10"},
+                ),
+                _json_response(
+                    403,
+                    {"message": "still rate limited"},
+                    headers={"X-RateLimit-Remaining": "0", "X-RateLimit-Reset": "10"},
+                ),
+            ]
+        )
         sleep = _RecordingSleep()
         with pytest.raises(GitHubRateLimitedError):
             get_issue(
-                "acme", "widget", 41, cache=cache, transport=transport, sleep=sleep,
+                "acme",
+                "widget",
+                41,
+                cache=cache,
+                transport=transport,
+                sleep=sleep,
                 clock=_clock_seq(0.0, 0.0, 0.0),
             )
         assert len(transport.calls) == 2
@@ -450,10 +518,12 @@ class TestPagination:
         page1 = [{"body": "first"}]
         page2 = [{"body": "second"}]
         next_url = "https://api.github.com/repositories/1/issues/41/comments?page=2"
-        transport = _ScriptedTransport([
-            _json_response(200, page1, headers={"Link": f'<{next_url}>; rel="next"'}),
-            _json_response(200, page2),
-        ])
+        transport = _ScriptedTransport(
+            [
+                _json_response(200, page1, headers={"Link": f'<{next_url}>; rel="next"'}),
+                _json_response(200, page2),
+            ]
+        )
         result = get_issue_comments("acme", "widget", 41, cache=cache, transport=transport)
         assert result == [{"body": "first"}, {"body": "second"}]
         assert len(transport.calls) == 2
@@ -487,10 +557,12 @@ class TestPagination:
     def test_paginated_result_is_cached_as_the_concatenated_list(self, tmp_path: Path) -> None:
         cache = ResponseCache(tmp_path)
         next_url = "https://api.github.com/repositories/1/issues/41/comments?page=2"
-        transport = _ScriptedTransport([
-            _json_response(200, [{"body": "first"}], headers={"Link": f'<{next_url}>; rel="next"'}),
-            _json_response(200, [{"body": "second"}]),
-        ])
+        transport = _ScriptedTransport(
+            [
+                _json_response(200, [{"body": "first"}], headers={"Link": f'<{next_url}>; rel="next"'}),
+                _json_response(200, [{"body": "second"}]),
+            ]
+        )
         get_issue_comments("acme", "widget", 41, cache=cache, transport=transport)
         cached = cache.get("/repos/acme/widget/issues/41/comments")
         assert cached == [{"body": "first"}, {"body": "second"}]

@@ -57,11 +57,16 @@ def build_cli_parser(
     )
     init_parser.add_argument("--limit", type=int, default=None, help="most recent N commits only")
     init_parser.add_argument(
-        "--model", default=DEFAULT_EMBEDDING_MODEL,
+        "--model",
+        default=DEFAULT_EMBEDDING_MODEL,
         help=f"embedding model name (default: {DEFAULT_EMBEDDING_MODEL})",
     )
-    init_parser.add_argument("--query-prefix", default=None, help="query prefix template for asymmetric embedding models")
-    init_parser.add_argument("--passage-prefix", default=None, help="passage prefix template for asymmetric embedding models")
+    init_parser.add_argument(
+        "--query-prefix", default=None, help="query prefix template for asymmetric embedding models"
+    )
+    init_parser.add_argument(
+        "--passage-prefix", default=None, help="passage prefix template for asymmetric embedding models"
+    )
     init_parser.add_argument(
         "--local",
         action="store_true",
@@ -187,9 +192,7 @@ def build_cli_parser(
         help="PDF file or directory of PDFs to derive corpus from",
     )
     corpus_parser.add_argument("--out", type=Path, required=True, help="directory to write into")
-    corpus_parser.add_argument(
-        "--limit", type=int, default=None, help="most recent N commits only (git corpus)"
-    )
+    corpus_parser.add_argument("--limit", type=int, default=None, help="most recent N commits only (git corpus)")
     corpus_parser.add_argument(
         "--revision",
         default="HEAD",
@@ -321,8 +324,7 @@ def build_cli_parser(
     review_parser.add_argument(
         "--post",
         action="store_true",
-        help="post review comments to the pull request via GitHub API "
-        "(requires GITHUB_TOKEN environment variable)",
+        help="post review comments to the pull request via GitHub API (requires GITHUB_TOKEN environment variable)",
     )
     review_parser.add_argument(
         "--strict",
@@ -613,11 +615,16 @@ def build_cli_parser(
     index_parser.add_argument("--corpus-root", type=Path, required=True)
     index_parser.add_argument("--policy", type=Path, required=True)
     index_parser.add_argument(
-        "--model", default=DEFAULT_EMBEDDING_MODEL,
+        "--model",
+        default=DEFAULT_EMBEDDING_MODEL,
         help=f"embedding model name (default: {DEFAULT_EMBEDDING_MODEL})",
     )
-    index_parser.add_argument("--query-prefix", default=None, help="query prefix template for asymmetric embedding models")
-    index_parser.add_argument("--passage-prefix", default=None, help="passage prefix template for asymmetric embedding models")
+    index_parser.add_argument(
+        "--query-prefix", default=None, help="query prefix template for asymmetric embedding models"
+    )
+    index_parser.add_argument(
+        "--passage-prefix", default=None, help="passage prefix template for asymmetric embedding models"
+    )
     ingest = add("skill-ingest", "Store a candidate skill pack privately.")
     ingest.add_argument("--pack", type=Path, required=True)
     analyze = add("skill-analyze", "Report structural findings for review.")

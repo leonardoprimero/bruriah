@@ -93,13 +93,15 @@ KNOWN_MODEL_PREFIXES: dict[str, tuple[str, str]] = {
 # DEFAULT_EMBEDDING_MODEL jina-embeddings-v2-base-es Spanish recall@3 0.750 vs the old default
 # paraphrase-multilingual-MiniLM-L12-v2's 0.500 -- one of the patterns below; see
 # "The embedder was the bottleneck, measured 2026-09-20" in evals/project-memory/README.md).
-_SYMMETRIC_MODEL_PATTERNS: frozenset[str] = frozenset({
-    "paraphrase-",
-    "all-minilm",
-    "all-mpnet",
-    "distiluse",
-    "msmarco-distilbert",  # fine-tuned on MS MARCO, but symmetric
-})
+_SYMMETRIC_MODEL_PATTERNS: frozenset[str] = frozenset(
+    {
+        "paraphrase-",
+        "all-minilm",
+        "all-mpnet",
+        "distiluse",
+        "msmarco-distilbert",  # fine-tuned on MS MARCO, but symmetric
+    }
+)
 
 
 def is_symmetric_model(model_name: str) -> bool:

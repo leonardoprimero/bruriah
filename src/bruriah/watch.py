@@ -4,6 +4,7 @@ Watches a Git repository for new commits, branch switches, or merges, and
 automatically updates the corpus and index in the background using incremental
 snapshot reuse.
 """
+
 from __future__ import annotations
 
 import subprocess

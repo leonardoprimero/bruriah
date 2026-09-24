@@ -21,6 +21,7 @@ reranker rather than about the arithmetic of bounded ranks.
 
 No I/O, no wall-clock, no randomness: `run_ablation.py` does the searching and calls in here.
 """
+
 from __future__ import annotations
 
 import re
@@ -235,16 +236,11 @@ def summarize(corpus: str, outcomes: Iterable[QuestionOutcome]) -> AblationSumma
         corpus=corpus,
         questions=len(every),
         outside_pool=len(every) - len(scoreable),
-        evicted=sum(
-            1 for outcome in every if outcome.base_rank is not None and outcome.reranked_rank is None
-        ),
-        rescued=sum(
-            1 for outcome in every if outcome.base_rank is None and outcome.reranked_rank is not None
-        ),
+        evicted=sum(1 for outcome in every if outcome.base_rank is not None and outcome.reranked_rank is None),
+        rescued=sum(1 for outcome in every if outcome.base_rank is None and outcome.reranked_rank is not None),
         mean_pool_documents=_mean([float(outcome.pool_documents) for outcome in every]),
         mean_reranked_pool_documents=_mean(
-            [float(outcome.reranked_pool_documents) for outcome in every
-             if outcome.reranked_pool_documents is not None]
+            [float(outcome.reranked_pool_documents) for outcome in every if outcome.reranked_pool_documents is not None]
         ),
         recall_at_3_before=_mean(
             [1.0 if outcome.base_rank is not None and outcome.base_rank <= 3 else 0.0 for outcome in every]
@@ -252,9 +248,7 @@ def summarize(corpus: str, outcomes: Iterable[QuestionOutcome]) -> AblationSumma
         recall_at_3_after=_mean(
             [1.0 if outcome.reranked_rank is not None and outcome.reranked_rank <= 3 else 0.0 for outcome in every]
         ),
-        buckets=tuple(
-            summarize_bucket(label, by_bucket[label]) for label, _low, _high in _BUCKETS if by_bucket[label]
-        ),
+        buckets=tuple(summarize_bucket(label, by_bucket[label]) for label, _low, _high in _BUCKETS if by_bucket[label]),
     )
 
 
@@ -292,9 +286,13 @@ def reach(ranks: Sequence[int | None], ceilings: Sequence[int], total_documents:
         never_ranked=len(ranks) - len(present),
         median_rank=present[len(present) // 2] if present else None,
         within=tuple(
-            (ceiling, sum(1 for rank in present if rank <= ceiling),
-             sum(1 for rank in present if rank <= ceiling) / len(ranks) if ranks else 0.0)
-            for ceiling in ceilings if ceiling <= total_documents
+            (
+                ceiling,
+                sum(1 for rank in present if rank <= ceiling),
+                sum(1 for rank in present if rank <= ceiling) / len(ranks) if ranks else 0.0,
+            )
+            for ceiling in ceilings
+            if ceiling <= total_documents
         ),
     )
 

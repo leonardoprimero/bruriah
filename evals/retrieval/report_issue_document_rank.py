@@ -26,6 +26,7 @@ Like `report_reach.py`, this reaches into `bruriah.retrieval`'s private `_bm25_r
 `_vector_ranks`/`_fuse` to see the ranking BEFORE `search`'s public candidate ceiling truncates it
 -- see that script's docstring for why that reach is deliberate. No reranker, no network.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -47,8 +48,13 @@ from bruriah import language  # noqa: E402
 from bruriah.cli import build_serve_deps  # noqa: E402
 from bruriah.platform import resolve_paths  # noqa: E402
 from bruriah.retrieval import (  # noqa: E402
-    _CROSS_LINGUAL_LEXICAL_WEIGHT, _bm25_ranks, _corpus_language, _fuse, _scan_passages,
-    _tokenize, _vector_ranks,
+    _CROSS_LINGUAL_LEXICAL_WEIGHT,
+    _bm25_ranks,
+    _corpus_language,
+    _fuse,
+    _scan_passages,
+    _tokenize,
+    _vector_ranks,
 )
 
 _NO_DEADLINE = float("inf")
@@ -150,19 +156,21 @@ def render(rows: list[IssueDocumentRankRow]) -> str:
     rank1 = sum(1 for row in rows if row.issue_doc_rank == 1)
     missing = sum(1 for row in rows if row.issue_doc_rank is None)
     above = sum(
-        1 for row in rows
-        if row.truth_rank is not None and row.issue_doc_rank is not None
-        and row.issue_doc_rank < row.truth_rank
+        1
+        for row in rows
+        if row.truth_rank is not None and row.issue_doc_rank is not None and row.issue_doc_rank < row.truth_rank
     )
-    return "\n".join([
-        f"n={n}",
-        f"commit truth: recall@3={r_at('truth_rank', 3):.3f} recall@10={r_at('truth_rank', 10):.3f}",
-        f"commit truth among commit docs only: recall@3={r_at('truth_rank_commit_only', 3):.3f} "
-        f"recall@10={r_at('truth_rank_commit_only', 10):.3f}",
-        f"own issue doc: recall@3={r_at('issue_doc_rank', 3):.3f} "
-        f"recall@10={r_at('issue_doc_rank', 10):.3f} rank1={rank1} missing_doc={missing}",
-        f"own issue doc ranked above the commit truth: {above}",
-    ])
+    return "\n".join(
+        [
+            f"n={n}",
+            f"commit truth: recall@3={r_at('truth_rank', 3):.3f} recall@10={r_at('truth_rank', 10):.3f}",
+            f"commit truth among commit docs only: recall@3={r_at('truth_rank_commit_only', 3):.3f} "
+            f"recall@10={r_at('truth_rank_commit_only', 10):.3f}",
+            f"own issue doc: recall@3={r_at('issue_doc_rank', 3):.3f} "
+            f"recall@10={r_at('issue_doc_rank', 10):.3f} rank1={rank1} missing_doc={missing}",
+            f"own issue doc ranked above the commit truth: {above}",
+        ]
+    )
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -172,9 +180,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--out", type=Path, default=None, help="per-question ranks, as JSONL")
     args = parser.parse_args(argv)
 
-    questions = [
-        json.loads(line) for line in args.questions.read_text(encoding="utf-8").splitlines() if line.strip()
-    ]
+    questions = [json.loads(line) for line in args.questions.read_text(encoding="utf-8").splitlines() if line.strip()]
     deps = build_serve_deps(resolve_paths(cli_data_dir=args.data_dir, env={}))
     rows: list[IssueDocumentRankRow] = []
     try:
@@ -191,7 +197,8 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.out:
         args.out.write_text(
-            "\n".join(json.dumps(asdict(row), sort_keys=True) for row in rows) + "\n", encoding="utf-8",
+            "\n".join(json.dumps(asdict(row), sort_keys=True) for row in rows) + "\n",
+            encoding="utf-8",
         )
     print(render(rows))
     return 0

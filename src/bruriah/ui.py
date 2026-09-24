@@ -131,9 +131,7 @@ def build_dag_from_database(database: sqlite3.Connection) -> DAGData:
     # 1. Read lineage relations
     has_lineage = False
     try:
-        row = database.execute(
-            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='lineage'"
-        ).fetchone()
+        row = database.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='lineage'").fetchone()
         has_lineage = row is not None
     except sqlite3.DatabaseError:
         pass
@@ -145,11 +143,13 @@ def build_dag_from_database(database: sqlite3.Connection) -> DAGData:
             ).fetchall()
             for succ_ref, _pred_target, pred_ref, relation in lineage_rows:
                 if pred_ref:
-                    edges.append(LineageEdge(
-                        source=pred_ref,
-                        target=succ_ref,
-                        relation=relation,
-                    ))
+                    edges.append(
+                        LineageEdge(
+                            source=pred_ref,
+                            target=succ_ref,
+                            relation=relation,
+                        )
+                    )
                     if relation == "supersedes":
                         superseded_refs.add(pred_ref)
                     elif relation == "deprecates":
@@ -166,9 +166,7 @@ def build_dag_from_database(database: sqlite3.Connection) -> DAGData:
 
     has_cf = False
     try:
-        row = database.execute(
-            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='premises'"
-        ).fetchone()
+        row = database.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='premises'").fetchone()
         has_cf = row is not None
     except sqlite3.DatabaseError:
         pass
@@ -187,16 +185,17 @@ def build_dag_from_database(database: sqlite3.Connection) -> DAGData:
                     ).fetchall()
                 ]
             for pid, stmt, p_status, inv_by, rationale, d_ref, _inv_d_ref in p_rows:
-
                 if d_ref not in doc_premises:
                     doc_premises[d_ref] = []
-                doc_premises[d_ref].append({
-                    "id": pid,
-                    "statement": stmt,
-                    "status": p_status,
-                    "invalidated_by": inv_by or "",
-                    "rationale": rationale or "",
-                })
+                doc_premises[d_ref].append(
+                    {
+                        "id": pid,
+                        "statement": stmt,
+                        "status": p_status,
+                        "invalidated_by": inv_by or "",
+                        "rationale": rationale or "",
+                    }
+                )
                 if p_status == "invalidated":
                     doc_has_drift[d_ref] = True
 
@@ -211,20 +210,20 @@ def build_dag_from_database(database: sqlite3.Connection) -> DAGData:
                     p_list = json.loads(premises_json)
                 except (json.JSONDecodeError, TypeError):
                     pass
-                doc_alts[d_ref].append({
-                    "name": name,
-                    "disposition": disp,
-                    "reason": reason,
-                    "premises": p_list,
-                })
+                doc_alts[d_ref].append(
+                    {
+                        "name": name,
+                        "disposition": disp,
+                        "reason": reason,
+                        "premises": p_list,
+                    }
+                )
         except sqlite3.DatabaseError:
             pass
 
     # 3. Read all documents and their first passage (for subject + body)
     try:
-        doc_rows = database.execute(
-            "SELECT document_ref, relative_path, metadata FROM documents"
-        ).fetchall()
+        doc_rows = database.execute("SELECT document_ref, relative_path, metadata FROM documents").fetchall()
     except sqlite3.DatabaseError:
         return DAGData(nodes=[], edges=[])
 
@@ -267,20 +266,22 @@ def build_dag_from_database(database: sqlite3.Connection) -> DAGData:
         elif doc_ref in amended_refs:
             status = "amended"
 
-        nodes.append(DecisionNode(
-            id=doc_ref,
-            label=subject,
-            path=relative_path,
-            commit=commit[:8] if commit else "",
-            author=author,
-            date=date,
-            status=status,
-            files=files,
-            body_preview=body_preview,
-            premises=doc_premises.get(doc_ref, []),
-            alternatives=doc_alts.get(doc_ref, []),
-            has_drift=doc_has_drift.get(doc_ref, False),
-        ))
+        nodes.append(
+            DecisionNode(
+                id=doc_ref,
+                label=subject,
+                path=relative_path,
+                commit=commit[:8] if commit else "",
+                author=author,
+                date=date,
+                status=status,
+                files=files,
+                body_preview=body_preview,
+                premises=doc_premises.get(doc_ref, []),
+                alternatives=doc_alts.get(doc_ref, []),
+                has_drift=doc_has_drift.get(doc_ref, False),
+            )
+        )
 
     return DAGData(nodes=nodes, edges=edges)
 

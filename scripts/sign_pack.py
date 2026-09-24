@@ -19,6 +19,7 @@ manifests instead of drifting apart.
 Signing asserts WHO signed the bytes. It is not a claim that the pack is well-formed, current, or
 safe -- the fail-closed load path decides that.
 """
+
 from __future__ import annotations
 
 import argparse

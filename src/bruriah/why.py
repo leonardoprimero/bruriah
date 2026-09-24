@@ -18,6 +18,7 @@ if TYPE_CHECKING:
 
 class WhyError(ValueError):
     """Raised when causal resolution fails for a structured, typed reason."""
+
     def __init__(self, code: str):
         self.code = code
         super().__init__(code)
@@ -113,9 +114,7 @@ def _run_git(repo: Path, *args: str) -> str:
         raise WhyError(f"git_error:{err.returncode}")
 
 
-def resolve_commit_for_target(
-    repo: Path, relative_path: str, line: int | None = None
-) -> CommitInfo:
+def resolve_commit_for_target(repo: Path, relative_path: str, line: int | None = None) -> CommitInfo:
     """Find the commit that last touched the given line or file."""
     if line is not None:
         raw_blame = _run_git(repo, "blame", "-L", f"{line},{line}", "--porcelain", "--", relative_path)
@@ -131,12 +130,12 @@ def resolve_commit_for_target(
         date_str = "unknown"
         for line_str in lines[1:]:
             if line_str.startswith("author "):
-                author = line_str[len("author "):].strip()
+                author = line_str[len("author ") :].strip()
             elif line_str.startswith("summary "):
-                subject = line_str[len("summary "):].strip()
+                subject = line_str[len("summary ") :].strip()
             elif line_str.startswith("author-time "):
                 try:
-                    epoch = int(line_str[len("author-time "):].strip())
+                    epoch = int(line_str[len("author-time ") :].strip())
                     date_str = datetime.fromtimestamp(epoch, tz=timezone.utc).strftime("%Y-%m-%d")
                 except (ValueError, OSError):
                     pass
@@ -154,9 +153,7 @@ def resolve_commit_for_target(
     return CommitInfo(sha=sha, author=author, date=date_str, subject=subject)
 
 
-def find_decision_in_database(
-    database: sqlite3.Connection, commit_sha: str
-) -> DecisionInfo | None:
+def find_decision_in_database(database: sqlite3.Connection, commit_sha: str) -> DecisionInfo | None:
     """Find a decision document in SQLite that was built from the given commit SHA."""
     prefix_8 = commit_sha[:8].lower()
     full_sha = commit_sha.lower()
@@ -199,7 +196,11 @@ def find_decision_in_database(
     # Extract author and date
     date_str = str(matched_meta.get("verification_date", "unknown"))
     author = "unknown"
-    meta_match = re.search(r"\*\*Decided:\*\*\s*([^\s·]+)\s*·\s*\*\*Commit:\*\*\s*`([^`]+)`\s*·\s*\*\*Author:\*\*\s*(.+)$", full_text, re.MULTILINE)
+    meta_match = re.search(
+        r"\*\*Decided:\*\*\s*([^\s·]+)\s*·\s*\*\*Commit:\*\*\s*`([^`]+)`\s*·\s*\*\*Author:\*\*\s*(.+)$",
+        full_text,
+        re.MULTILINE,
+    )
     if meta_match:
         date_str = meta_match.group(1).strip()
         author = meta_match.group(3).strip()
@@ -213,9 +214,9 @@ def find_decision_in_database(
     # Extract reasoning body (text between author header and files section)
     body = full_text
     if meta_match and files_section:
-        body = full_text[meta_match.end(): files_section.start()].strip()
+        body = full_text[meta_match.end() : files_section.start()].strip()
     elif meta_match:
-        body = full_text[meta_match.end():].strip()
+        body = full_text[meta_match.end() :].strip()
     elif files_section:
         body = full_text[: files_section.start()].strip()
 
@@ -231,9 +232,7 @@ def find_decision_in_database(
 
 
 def _doc_info(database: sqlite3.Connection, doc_ref: str) -> tuple[str | None, str | None]:
-    succ_doc = database.execute(
-        "SELECT metadata FROM documents WHERE document_ref = ?", (doc_ref,)
-    ).fetchone()
+    succ_doc = database.execute("SELECT metadata FROM documents WHERE document_ref = ?", (doc_ref,)).fetchone()
     succ_sha: str | None = None
     succ_subj: str | None = None
     if succ_doc:
@@ -253,17 +252,12 @@ def _doc_info(database: sqlite3.Connection, doc_ref: str) -> tuple[str | None, s
     return succ_sha, succ_subj
 
 
-def check_lineage_alerts(
-    database: sqlite3.Connection, decision_ref: str, commit_sha: str
-) -> tuple[LineageAlert, ...]:
+def check_lineage_alerts(database: sqlite3.Connection, decision_ref: str, commit_sha: str) -> tuple[LineageAlert, ...]:
     """Check if the given decision has been superseded, deprecated, or amended in the lineage DAG,
     tracing multi-hop successor chains transitively to find the active leaf decision.
     """
     has_lineage = (
-        database.execute(
-            "SELECT count(*) FROM sqlite_master WHERE type='table' AND name='lineage'"
-        ).fetchone()[0]
-        > 0
+        database.execute("SELECT count(*) FROM sqlite_master WHERE type='table' AND name='lineage'").fetchone()[0] > 0
     )
     if not has_lineage:
         return ()
@@ -278,9 +272,7 @@ def check_lineage_alerts(
     for successor_ref, relation, _target in rows:
         succ_sha, succ_subj = _doc_info(database, successor_ref)
 
-        chain: list[LineageHop] = [
-            LineageHop(relation=relation, ref=successor_ref, commit=succ_sha, subject=succ_subj)
-        ]
+        chain: list[LineageHop] = [LineageHop(relation=relation, ref=successor_ref, commit=succ_sha, subject=succ_subj)]
         visited = {decision_ref, successor_ref}
         current_ref = successor_ref
         current_sha = succ_sha
@@ -299,9 +291,7 @@ def check_lineage_alerts(
                 break
             visited.add(next_succ_ref)
             n_sha, n_subj = _doc_info(database, next_succ_ref)
-            chain.append(
-                LineageHop(relation=next_rel, ref=next_succ_ref, commit=n_sha, subject=n_subj)
-            )
+            chain.append(LineageHop(relation=next_rel, ref=next_succ_ref, commit=n_sha, subject=n_subj))
             current_ref = next_succ_ref
             current_sha = n_sha
             current_subj = n_subj
@@ -359,9 +349,7 @@ def trace_causal_archaeology(
                 pass
 
         try:
-            file_log = _run_git(
-                repo, "log", "--format=%H%x00%s%x00%an%x00%aI", "--", file_path
-            )
+            file_log = _run_git(repo, "log", "--format=%H%x00%s%x00%an%x00%aI", "--", file_path)
             for line_text in file_log.splitlines():
                 if "\x00" in line_text:
                     parts = line_text.strip().split("\x00")

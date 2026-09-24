@@ -64,7 +64,11 @@ _ARCH_SUBJECT_PATTERNS: list[tuple[re.Pattern[str], float, str]] = [
 
 # Keywords that penalize commit score (routine / non-architectural)
 _ROUTINE_SUBJECT_PATTERNS: list[tuple[re.Pattern[str], float, str]] = [
-    (re.compile(r"^(chore|style|docs|typo|lint|ci|build)(\([^)]*\))?:", re.IGNORECASE), -0.35, "routine chore/style/docs"),
+    (
+        re.compile(r"^(chore|style|docs|typo|lint|ci|build)(\([^)]*\))?:", re.IGNORECASE),
+        -0.35,
+        "routine chore/style/docs",
+    ),
     (re.compile(r"^bump\s+version|release\s+v?\d", re.IGNORECASE), -0.4, "version bump"),
     (re.compile(r"^(merge\s+branch|merge\s+pull\s+request)", re.IGNORECASE), -0.5, "merge commit"),
 ]
@@ -342,13 +346,7 @@ def run_bootstrap(
         # Create a default policy.yaml in out_dir's parent or out_dir if needed
         policy_path = out_dir.parent / "policy.yaml"
         if not policy_path.exists():
-            policy_content = (
-                "version: 1\n"
-                "include:\n"
-                "  - '**/*.md'\n"
-                "exclude:\n"
-                "  - '**/archive/**'\n"
-            )
+            policy_content = "version: 1\ninclude:\n  - '**/*.md'\nexclude:\n  - '**/archive/**'\n"
             policy_path.write_text(policy_content, encoding="utf-8")
 
         run_index(

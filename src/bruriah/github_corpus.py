@@ -53,6 +53,7 @@ Design decisions, carried over verbatim from `odd/tasks/github-issue-pr-ingestio
   parses the document programmatically gets a second, structured pointer back to GitHub, entirely
   through keys `_metadata` already understood before this module existed.
 """
+
 from __future__ import annotations
 
 import json
@@ -112,9 +113,7 @@ class GitHubCorpusResult:
 def _run_git(repo: Path, *args: str) -> str:
     import subprocess
 
-    result = subprocess.run(
-        ["git", *args], cwd=repo, capture_output=True, text=True, check=True
-    )
+    result = subprocess.run(["git", *args], cwd=repo, capture_output=True, text=True, check=True)
     return result.stdout.strip()
 
 
@@ -231,39 +230,76 @@ class _Ledger:
 
     def issue(self, number: int) -> dict[str, Any]:
         path = f"/repos/{self.owner}/{self.repo}/issues/{number}"
-        return self._fetch(path, lambda: get_issue(
-            self.owner, self.repo, number, cache=self.cache, token=self.token,
-            network_enabled=self.network_enabled, transport=self.transport,
-            clock=self.clock, sleep=self.sleep,
-        ))
+        return self._fetch(
+            path,
+            lambda: get_issue(
+                self.owner,
+                self.repo,
+                number,
+                cache=self.cache,
+                token=self.token,
+                network_enabled=self.network_enabled,
+                transport=self.transport,
+                clock=self.clock,
+                sleep=self.sleep,
+            ),
+        )
 
     def pull(self, number: int) -> dict[str, Any]:
         path = f"/repos/{self.owner}/{self.repo}/pulls/{number}"
-        return self._fetch(path, lambda: get_pull(
-            self.owner, self.repo, number, cache=self.cache, token=self.token,
-            network_enabled=self.network_enabled, transport=self.transport,
-            clock=self.clock, sleep=self.sleep,
-        ))
+        return self._fetch(
+            path,
+            lambda: get_pull(
+                self.owner,
+                self.repo,
+                number,
+                cache=self.cache,
+                token=self.token,
+                network_enabled=self.network_enabled,
+                transport=self.transport,
+                clock=self.clock,
+                sleep=self.sleep,
+            ),
+        )
 
     def timeline(self, number: int) -> list[Any]:
         path = f"/repos/{self.owner}/{self.repo}/issues/{number}/timeline"
-        return self._fetch(path, lambda: get_issue_timeline(
-            self.owner, self.repo, number, cache=self.cache, token=self.token,
-            network_enabled=self.network_enabled, transport=self.transport,
-            clock=self.clock, sleep=self.sleep,
-        ))
+        return self._fetch(
+            path,
+            lambda: get_issue_timeline(
+                self.owner,
+                self.repo,
+                number,
+                cache=self.cache,
+                token=self.token,
+                network_enabled=self.network_enabled,
+                transport=self.transport,
+                clock=self.clock,
+                sleep=self.sleep,
+            ),
+        )
 
     def comments(self, number: int) -> list[Any]:
         path = f"/repos/{self.owner}/{self.repo}/issues/{number}/comments"
-        return self._fetch(path, lambda: get_issue_comments(
-            self.owner, self.repo, number, cache=self.cache, token=self.token,
-            network_enabled=self.network_enabled, transport=self.transport,
-            clock=self.clock, sleep=self.sleep,
-        ))
+        return self._fetch(
+            path,
+            lambda: get_issue_comments(
+                self.owner,
+                self.repo,
+                number,
+                cache=self.cache,
+                token=self.token,
+                network_enabled=self.network_enabled,
+                transport=self.transport,
+                clock=self.clock,
+                sleep=self.sleep,
+            ),
+        )
 
 
 def _resolve_links_for_commit(
-    commit: WalkedCommit, ledger: _Ledger,
+    commit: WalkedCommit,
+    ledger: _Ledger,
 ) -> tuple[set[int], int]:
     """The same-repo issue numbers `commit` closes, plus how many cross-repo links it named (never
     fetched -- see the module docstring). `mentions` links are dropped here, permanently."""
@@ -313,9 +349,7 @@ def _rejected_alternative_from_issue(issue: dict[str, Any], ledger: _Ledger, num
     }
 
 
-_HTML_URL_REPO = re.compile(
-    r"^https?://github\.com/(?P<owner>[^/]+)/(?P<repo>[^/]+)/(?:issues|pull)/\d+/?$"
-)
+_HTML_URL_REPO = re.compile(r"^https?://github\.com/(?P<owner>[^/]+)/(?P<repo>[^/]+)/(?:issues|pull)/\d+/?$")
 
 
 def _source_repo_slug(src_issue: dict[str, Any]) -> str | None:
@@ -449,12 +483,18 @@ def _render_document(
         ]
     if premises:
         frontmatter_data["premises"] = [
-            {"id": premise["id"], "statement": premise["statement"], "status": "active"}
-            for premise in premises
+            {"id": premise["id"], "statement": premise["statement"], "status": "active"} for premise in premises
         ]
-    frontmatter = "---\n" + yaml.safe_dump(
-        frontmatter_data, sort_keys=False, allow_unicode=True, default_flow_style=False,
-    ) + "---\n\n"
+    frontmatter = (
+        "---\n"
+        + yaml.safe_dump(
+            frontmatter_data,
+            sort_keys=False,
+            allow_unicode=True,
+            default_flow_style=False,
+        )
+        + "---\n\n"
+    )
 
     body_text = str(issue.get("body") or "").strip()
     alt_section = ""
@@ -466,8 +506,7 @@ def _render_document(
         f"- `{commit.sha[:8]}` {commit.subject}\n" for commit in linking_commits
     )
     return (
-        frontmatter
-        + f"# {title}\n\n"
+        frontmatter + f"# {title}\n\n"
         f"**Issue:** [#{number}]({html_url}) · **Repository:** {repo}\n\n"
         f"{body_text}\n"
         f"{alt_section}"
@@ -498,8 +537,14 @@ def build_documents(
         raise GitHubCorpusError("invalid_repo_slug", repo)
     owner, repo_name = repo.split("/", 1)
     ledger = _Ledger(
-        cache=cache, owner=owner, repo=repo_name, token=token, network_enabled=network_enabled,
-        transport=transport, clock=clock, sleep=sleep,
+        cache=cache,
+        owner=owner,
+        repo=repo_name,
+        token=token,
+        network_enabled=network_enabled,
+        transport=transport,
+        clock=clock,
+        sleep=sleep,
     )
 
     # issue number -> linking commits, in first-appearance order (dedup by sha per issue).
@@ -535,14 +580,19 @@ def build_documents(
         except GitHubError as error:
             issues_skipped += 1
             print(
-                f"warning: skipping issue #{number} ({repo}): {error}", file=sys.stderr,
+                f"warning: skipping issue #{number} ({repo}): {error}",
+                file=sys.stderr,
             )
             continue
         issues_fetched += 1
         premises = _extract_premises(str(issue.get("body") or ""))
         document = _render_document(
-            issue=issue, number=number, repo=repo, linking_commits=linking_commits[number],
-            alternatives=alternatives, premises=premises,
+            issue=issue,
+            number=number,
+            repo=repo,
+            linking_commits=linking_commits[number],
+            alternatives=alternatives,
+            premises=premises,
         )
         date10 = str(issue.get("closed_at") or issue.get("created_at") or "")[:10] or "unknown-date"
         title = str(issue.get("title", ""))
@@ -554,7 +604,8 @@ def build_documents(
     if rate_limited_numbers:
         assert ledger.rate_limited_until is not None  # set by `_Ledger._fetch` on the first raise
         rate_limited_until_iso = datetime.fromtimestamp(
-            ledger.rate_limited_until, tz=timezone.utc,
+            ledger.rate_limited_until,
+            tz=timezone.utc,
         ).strftime("%Y-%m-%dT%H:%M:%SZ")
         print(
             f"warning: GitHub rate limit window closed; skipped {len(rate_limited_numbers)} "

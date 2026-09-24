@@ -139,11 +139,7 @@ def find_project_root(start: Path | None = None) -> Path | None:
     """
     current = (start or Path.cwd()).resolve()
     for parent in (current, *current.parents):
-        if (
-            (parent / ".bruriah").exists()
-            or (parent / ".bruriah.json").is_file()
-            or (parent / ".git").exists()
-        ):
+        if (parent / ".bruriah").exists() or (parent / ".bruriah.json").is_file() or (parent / ".git").exists():
             return parent
     return None
 
@@ -285,17 +281,29 @@ def ensure_private_dirs(paths: PlatformPaths) -> None:
 
 
 _BUILD_DESCRIPTOR_FIELDS = (
-    "root", "policy_path", "schema_version", "parser_version", "service_version", "mcp_range",
-    "embedding_model", "embedding_revision", "embedding_dimensions", "embedding_fingerprint",
-    "ranking_config", "query_prefix", "passage_prefix",
+    "root",
+    "policy_path",
+    "schema_version",
+    "parser_version",
+    "service_version",
+    "mcp_range",
+    "embedding_model",
+    "embedding_revision",
+    "embedding_dimensions",
+    "embedding_fingerprint",
+    "ranking_config",
+    "query_prefix",
+    "passage_prefix",
 )
 
 
 def write_build_descriptor(paths: PlatformPaths, config: BuildConfig) -> None:
     """Persist `index`'s `BuildConfig` so `serve`/`doctor` can validate the promoted snapshot
     against an identical config without re-loading an embedding model."""
-    payload = {field: str(getattr(config, field)) if field in {"root", "policy_path"}
-               else getattr(config, field) for field in _BUILD_DESCRIPTOR_FIELDS}
+    payload = {
+        field: str(getattr(config, field)) if field in {"root", "policy_path"} else getattr(config, field)
+        for field in _BUILD_DESCRIPTOR_FIELDS
+    }
     (paths.data_dir / "build-config.json").write_text(
         json.dumps(payload, sort_keys=True), encoding="utf-8", newline="\n"
     )
@@ -307,12 +315,17 @@ def load_build_descriptor(paths: PlatformPaths) -> BuildConfig:
         raise PlatformError("corrupt_build_descriptor")
     try:
         return BuildConfig(
-            root=Path(payload["root"]), policy_path=Path(payload["policy_path"]),
-            schema_version=payload["schema_version"], parser_version=payload["parser_version"],
-            service_version=payload["service_version"], mcp_range=payload["mcp_range"],
-            embedding_model=payload["embedding_model"], embedding_revision=payload["embedding_revision"],
+            root=Path(payload["root"]),
+            policy_path=Path(payload["policy_path"]),
+            schema_version=payload["schema_version"],
+            parser_version=payload["parser_version"],
+            service_version=payload["service_version"],
+            mcp_range=payload["mcp_range"],
+            embedding_model=payload["embedding_model"],
+            embedding_revision=payload["embedding_revision"],
             embedding_dimensions=payload["embedding_dimensions"],
-            embedding_fingerprint=payload["embedding_fingerprint"], ranking_config=payload["ranking_config"],
+            embedding_fingerprint=payload["embedding_fingerprint"],
+            ranking_config=payload["ranking_config"],
             query_prefix=payload.get("query_prefix", ""),
             passage_prefix=payload.get("passage_prefix", ""),
         )
@@ -348,8 +361,11 @@ def load_bundled_skills(today: date | None = None) -> SkillSet:
     only keep serving content that expired WHILE in service."""
     try:
         pack = load_skill_pack(
-            _BUNDLED_DATA / "practices-pack.json", _BUNDLED_DATA / "practices-pack.manifest.json",
-            load_trust_roots(), today=today, enforce_currency=False,
+            _BUNDLED_DATA / "practices-pack.json",
+            _BUNDLED_DATA / "practices-pack.manifest.json",
+            load_trust_roots(),
+            today=today,
+            enforce_currency=False,
         )
     except PackError as error:
         raise PlatformError(f"skills_load_failed:{error.code}") from error
@@ -370,8 +386,10 @@ def load_active_skills(paths: PlatformPaths, today: date | None = None) -> Skill
     name gets quietly replaced."""
     bundled = load_bundled_skills(today)
     status = open_skillset(
-        paths.data_dir / "skills" / "active.json", load_trust_roots(),
-        load_approvals(paths.data_dir), today=today,
+        paths.data_dir / "skills" / "active.json",
+        load_trust_roots(),
+        load_approvals(paths.data_dir),
+        today=today,
     )
     if status.skill_set is None:
         return bundled
@@ -404,8 +422,11 @@ def load_registry(today: date | None = None) -> Registry:
         roots = json.loads((_BUNDLED_DATA / "trust-roots.json").read_text(encoding="utf-8"))
         packs = [
             load_pack(
-                _BUNDLED_DATA / f"{name}.json", _BUNDLED_DATA / f"{name}.manifest.json", roots,
-                today=today, enforce_currency=False,
+                _BUNDLED_DATA / f"{name}.json",
+                _BUNDLED_DATA / f"{name}.manifest.json",
+                roots,
+                today=today,
+                enforce_currency=False,
             )
             for name in _BUNDLED_PACKS
         ]
@@ -444,16 +465,30 @@ def load_deps(
     rule for the identical reason: another model this module refuses to load, threaded through
     to `ServiceDeps` and left `None` unless an operator asked for it."""
     return ServiceDeps(
-        registry=load_registry(today), snapshot=open_snapshot(paths), embed_query=embed_query,
-        skill_set=load_active_skills(paths, today), skill_ceiling=paths.skill_ceiling,
+        registry=load_registry(today),
+        snapshot=open_snapshot(paths),
+        embed_query=embed_query,
+        skill_set=load_active_skills(paths, today),
+        skill_ceiling=paths.skill_ceiling,
         rerank=rerank,
         repo=repo if repo is not None else Path("."),
     )
 
 
 __all__ = [
-    "PlatformError", "PlatformPaths", "ensure_private_dirs", "find_project_root",
-    "load_active_skills", "load_bundled_skills", "load_build_descriptor", "load_deps",
-    "load_registry", "load_trust_roots", "open_snapshot", "project_id_for_repo",
-    "project_scoped_paths", "resolve_paths", "write_build_descriptor",
+    "PlatformError",
+    "PlatformPaths",
+    "ensure_private_dirs",
+    "find_project_root",
+    "load_active_skills",
+    "load_bundled_skills",
+    "load_build_descriptor",
+    "load_deps",
+    "load_registry",
+    "load_trust_roots",
+    "open_snapshot",
+    "project_id_for_repo",
+    "project_scoped_paths",
+    "resolve_paths",
+    "write_build_descriptor",
 ]

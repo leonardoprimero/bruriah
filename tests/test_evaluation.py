@@ -20,11 +20,24 @@ from conftest import requires_baseline_script
 from bruriah.contracts import ClosedModel
 from bruriah.corpus import CorpusPolicy
 from bruriah.evaluation import (
-    DomainClaimCase, EvaluationContext, EvaluationError, GateCell, InvestigationCase,
-    SecretLeakProbe, _safe_cell, load_domain_cases, load_investigation_cases, run_domain_gate,
-    run_gate_matrix, run_invocation_gate, run_package_os_client_gate,
-    run_rollback_preservation_gate, run_schema_fallback_gate, run_security_gate,
-    run_utility_latency_gate, summarize,
+    DomainClaimCase,
+    EvaluationContext,
+    EvaluationError,
+    GateCell,
+    InvestigationCase,
+    SecretLeakProbe,
+    _safe_cell,
+    load_domain_cases,
+    load_investigation_cases,
+    run_domain_gate,
+    run_gate_matrix,
+    run_invocation_gate,
+    run_package_os_client_gate,
+    run_rollback_preservation_gate,
+    run_schema_fallback_gate,
+    run_security_gate,
+    run_utility_latency_gate,
+    summarize,
 )
 from bruriah.index import BuildConfig, build_candidate, promote_candidate, snapshot_active
 from bruriah.packs import load_pack
@@ -37,7 +50,8 @@ from test_research import _deps as _research_deps
 from test_research import _url as _research_url
 
 FINGERPRINT = (
-    '{"artifact":"model.onnx","artifact_sha256":"' + "a" * 64
+    '{"artifact":"model.onnx","artifact_sha256":"'
+    + "a" * 64
     + '","pooling":"mean","runtime":"fastembed==0.8.0","snapshot":"snapshot-a","source":"example/model"}'
 )
 _ROOT = Path(__file__).resolve().parents[1]
@@ -54,7 +68,10 @@ _TODAY = date(2026, 7, 24)
 def _real_registry() -> Registry:
     roots = json.loads((_DATA / "trust-roots.json").read_text())
     pack = load_pack(
-        _DATA / "research-policy.json", _DATA / "research-policy.manifest.json", roots, today=_TODAY,
+        _DATA / "research-policy.json",
+        _DATA / "research-policy.manifest.json",
+        roots,
+        today=_TODAY,
     )
     return Registry.from_packs([pack])
 
@@ -73,9 +90,16 @@ def _snapshot_for(tmp_path: Path, notes: dict[str, str]):
     policy_path.write_text("version: 1\ninclude: ['public/**']\nexclude: []\n", encoding="utf-8")
     policy = CorpusPolicy.load(policy_path)
     config = BuildConfig(
-        root=tmp_path / "vault", policy_path=policy_path, schema_version=1, parser_version="corpus-v2",
-        service_version="0.1.0", mcp_range=">=1.28.1,<2", embedding_model="test/minilm",
-        embedding_revision="snapshot-a", embedding_dimensions=3, embedding_fingerprint=FINGERPRINT,
+        root=tmp_path / "vault",
+        policy_path=policy_path,
+        schema_version=1,
+        parser_version="corpus-v2",
+        service_version="0.1.0",
+        mcp_range=">=1.28.1,<2",
+        embedding_model="test/minilm",
+        embedding_revision="snapshot-a",
+        embedding_dimensions=3,
+        embedding_fingerprint=FINGERPRINT,
         ranking_config="rrf-v1",
     )
     candidate, pointer = tmp_path / "candidate.sqlite3", tmp_path / "active.json"
@@ -122,9 +146,13 @@ def _ssrf_research_deps(tmp_path: Path) -> ResearchDeps:
         raise AssertionError("fetch must block on IP validation before ever attempting to connect")
 
     return ResearchDeps(
-        allowlist=frozenset({"cerebro-ssrf-probe.test"}), cache_dir=tmp_path / "ssrf-cache",
-        audit_path=tmp_path / "ssrf-audit" / "research.jsonl", network_enabled=True,
-        concurrency=ConcurrencyLimiter(1), resolver=_rebound_to_loopback, connect=_refuse_connect,
+        allowlist=frozenset({"cerebro-ssrf-probe.test"}),
+        cache_dir=tmp_path / "ssrf-cache",
+        audit_path=tmp_path / "ssrf-audit" / "research.jsonl",
+        network_enabled=True,
+        concurrency=ConcurrencyLimiter(1),
+        resolver=_rebound_to_loopback,
+        connect=_refuse_connect,
     )
 
 
@@ -137,7 +165,10 @@ def test_load_investigation_cases_parses_the_real_fixture_file() -> None:
     dimensions = {case.dimension for case in cases}
     assert dimensions == {"invocation", "utility", "security"}
     assert {case.kind for case in cases} == {
-        "explicit_invocation", "negative_control", "utility_golden", "consequential_action",
+        "explicit_invocation",
+        "negative_control",
+        "utility_golden",
+        "consequential_action",
         "prompt_injection",
     }
 
@@ -216,9 +247,12 @@ def test_run_security_gate_without_a_secret_probe_is_honest_not_validated(deps, 
     injection_case = next(case for case in investigation_cases if case.kind == "prompt_injection")
     consequential_case = next(case for case in investigation_cases if case.kind == "consequential_action")
     cells = run_security_gate(
-        deps, injection_case=injection_case, consequential_case=consequential_case,
+        deps,
+        injection_case=injection_case,
+        consequential_case=consequential_case,
         ssrf_research_deps=_ssrf_research_deps(tmp_path),
-        ssrf_locator="https://cerebro-ssrf-probe.test/page", secret_probe=None,
+        ssrf_locator="https://cerebro-ssrf-probe.test/page",
+        secret_probe=None,
     )
     by_id = {cell.cell_id: cell for cell in cells}
     assert by_id["prompt_injection_stays_inert"].status == "pass"
@@ -242,9 +276,12 @@ def test_run_security_gate_with_a_real_live_secret_probe_passes(deps, tmp_path, 
             secret_token=secret_token,
         )
         cells = run_security_gate(
-            deps, injection_case=injection_case, consequential_case=consequential_case,
+            deps,
+            injection_case=injection_case,
+            consequential_case=consequential_case,
             ssrf_research_deps=_ssrf_research_deps(tmp_path / "ssrf"),
-            ssrf_locator="https://cerebro-ssrf-probe.test/page", secret_probe=probe,
+            ssrf_locator="https://cerebro-ssrf-probe.test/page",
+            secret_probe=probe,
         )
         by_id = {cell.cell_id: cell for cell in cells}
         assert by_id["secret_not_leaked_in_audit"].status == "pass", by_id["secret_not_leaked_in_audit"].reason
@@ -283,7 +320,11 @@ def test_run_package_os_client_gate_never_reports_an_unreachable_cell_as_pass(de
     assert len(not_validated) == len(cells) - 2
     client_not_validated_ids = {cell.cell_id for cell in not_validated if cell.cell_id.startswith("client_")}
     assert client_not_validated_ids == {
-        "client_claude-code", "client_opencode", "client_cursor", "client_gemini", "client_antigravity",
+        "client_claude-code",
+        "client_opencode",
+        "client_cursor",
+        "client_gemini",
+        "client_antigravity",
     }
 
 
@@ -294,7 +335,9 @@ def test_run_package_os_client_gate_never_reports_an_unreachable_cell_as_pass(de
 def test_run_rollback_preservation_gate_runs_the_real_baseline_script() -> None:
     cells = run_rollback_preservation_gate(_ROOT, baseline_script=_BASELINE_SCRIPT)
     by_id = {cell.cell_id: cell for cell in cells}
-    assert by_id["preservation_baseline_still_passes"].status == "pass", by_id["preservation_baseline_still_passes"].reason
+    assert by_id["preservation_baseline_still_passes"].status == "pass", by_id[
+        "preservation_baseline_still_passes"
+    ].reason
     assert by_id["rollback_rehearsal_config_first"].status == "not_validated"
     assert "12D" in by_id["rollback_rehearsal_config_first"].reason
 
@@ -335,7 +378,9 @@ def test_gate_cell_and_report_are_closed_models_rejecting_unknown_fields() -> No
 
 
 def test_run_gate_matrix_missing_required_fixture_case_is_a_typed_error_never_stopiteration(
-    deps, tmp_path, domain_cases,
+    deps,
+    tmp_path,
+    domain_cases,
 ) -> None:
     # An incomplete fixture set (no prompt_injection case) must surface as the module's typed
     # EvaluationError at the assembly seam, never as a bare StopIteration escaping run_gate_matrix.
@@ -343,9 +388,15 @@ def test_run_gate_matrix_missing_required_fixture_case_is_a_typed_error_never_st
         case for case in load_investigation_cases(_INVESTIGATION_CASES_PATH) if case.kind != "prompt_injection"
     ]
     context = EvaluationContext(
-        deps=deps, today=_TODAY, investigation_cases=cases_without_injection, domain_cases=domain_cases,
-        ssrf_research_deps=_ssrf_research_deps(tmp_path), ssrf_locator="https://cerebro-ssrf-probe.test/page",
-        repo_root=_ROOT, baseline_script=_BASELINE_SCRIPT, secret_probe=None,
+        deps=deps,
+        today=_TODAY,
+        investigation_cases=cases_without_injection,
+        domain_cases=domain_cases,
+        ssrf_research_deps=_ssrf_research_deps(tmp_path),
+        ssrf_locator="https://cerebro-ssrf-probe.test/page",
+        repo_root=_ROOT,
+        baseline_script=_BASELINE_SCRIPT,
+        secret_probe=None,
     )
     with pytest.raises(EvaluationError) as error:
         run_gate_matrix(context)
@@ -353,16 +404,23 @@ def test_run_gate_matrix_missing_required_fixture_case_is_a_typed_error_never_st
 
 
 def test_run_gate_matrix_missing_consequential_action_case_is_a_typed_error_never_stopiteration(
-    deps, tmp_path, domain_cases,
+    deps,
+    tmp_path,
+    domain_cases,
 ) -> None:
     cases_without_consequential = [
-        case for case in load_investigation_cases(_INVESTIGATION_CASES_PATH)
-        if case.kind != "consequential_action"
+        case for case in load_investigation_cases(_INVESTIGATION_CASES_PATH) if case.kind != "consequential_action"
     ]
     context = EvaluationContext(
-        deps=deps, today=_TODAY, investigation_cases=cases_without_consequential, domain_cases=domain_cases,
-        ssrf_research_deps=_ssrf_research_deps(tmp_path), ssrf_locator="https://cerebro-ssrf-probe.test/page",
-        repo_root=_ROOT, baseline_script=_BASELINE_SCRIPT, secret_probe=None,
+        deps=deps,
+        today=_TODAY,
+        investigation_cases=cases_without_consequential,
+        domain_cases=domain_cases,
+        ssrf_research_deps=_ssrf_research_deps(tmp_path),
+        ssrf_locator="https://cerebro-ssrf-probe.test/page",
+        repo_root=_ROOT,
+        baseline_script=_BASELINE_SCRIPT,
+        secret_probe=None,
     )
     with pytest.raises(EvaluationError) as error:
         run_gate_matrix(context)
@@ -370,7 +428,9 @@ def test_run_gate_matrix_missing_consequential_action_case_is_a_typed_error_neve
 
 
 def test_run_gate_matrix_missing_utility_case_is_a_typed_error_never_indexerror(
-    deps, tmp_path, domain_cases,
+    deps,
+    tmp_path,
+    domain_cases,
 ) -> None:
     # An incomplete fixture set with no `utility`-dimension case at all must surface as the
     # module's typed EvaluationError at the assembly seam, never as a bare IndexError escaping
@@ -379,9 +439,15 @@ def test_run_gate_matrix_missing_utility_case_is_a_typed_error_never_indexerror(
         case for case in load_investigation_cases(_INVESTIGATION_CASES_PATH) if case.dimension != "utility"
     ]
     context = EvaluationContext(
-        deps=deps, today=_TODAY, investigation_cases=cases_without_utility, domain_cases=domain_cases,
-        ssrf_research_deps=_ssrf_research_deps(tmp_path), ssrf_locator="https://cerebro-ssrf-probe.test/page",
-        repo_root=_ROOT, baseline_script=_BASELINE_SCRIPT, secret_probe=None,
+        deps=deps,
+        today=_TODAY,
+        investigation_cases=cases_without_utility,
+        domain_cases=domain_cases,
+        ssrf_research_deps=_ssrf_research_deps(tmp_path),
+        ssrf_locator="https://cerebro-ssrf-probe.test/page",
+        repo_root=_ROOT,
+        baseline_script=_BASELINE_SCRIPT,
+        secret_probe=None,
     )
     with pytest.raises(EvaluationError) as error:
         run_gate_matrix(context)
@@ -389,19 +455,32 @@ def test_run_gate_matrix_missing_utility_case_is_a_typed_error_never_indexerror(
 
 
 @requires_baseline_script
-def test_run_gate_matrix_end_to_end_produces_a_full_honest_report(deps, tmp_path, investigation_cases, domain_cases) -> None:
+def test_run_gate_matrix_end_to_end_produces_a_full_honest_report(
+    deps, tmp_path, investigation_cases, domain_cases
+) -> None:
     context = EvaluationContext(
-        deps=deps, today=_TODAY, investigation_cases=investigation_cases, domain_cases=domain_cases,
-        ssrf_research_deps=_ssrf_research_deps(tmp_path), ssrf_locator="https://cerebro-ssrf-probe.test/page",
-        repo_root=_ROOT, baseline_script=_BASELINE_SCRIPT, secret_probe=None,
+        deps=deps,
+        today=_TODAY,
+        investigation_cases=investigation_cases,
+        domain_cases=domain_cases,
+        ssrf_research_deps=_ssrf_research_deps(tmp_path),
+        ssrf_locator="https://cerebro-ssrf-probe.test/page",
+        repo_root=_ROOT,
+        baseline_script=_BASELINE_SCRIPT,
+        secret_probe=None,
     )
     report = run_gate_matrix(context)
 
     assert report.failed == 0, [cell for cell in report.cells if cell.status == "fail"]
     dimensions = {cell.dimension for cell in report.cells}
     assert dimensions == {
-        "invocation", "schema_fallback_errors", "domain", "security", "utility_latency",
-        "package_os_client", "rollback_preservation",
+        "invocation",
+        "schema_fallback_errors",
+        "domain",
+        "security",
+        "utility_latency",
+        "package_os_client",
+        "rollback_preservation",
     }
     assert report.passed + report.failed + report.not_validated == len(report.cells)
     # Honesty invariant, holistic: at least one cell per matrix dimension is honestly

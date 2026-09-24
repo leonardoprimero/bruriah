@@ -26,9 +26,13 @@ from . import __version__ as _ROUTER_VERSION
 
 class ClosedModel(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
+
+
 Text = Annotated[str, Field(min_length=1, max_length=2048)]
 Identifier = Annotated[str, Field(pattern=r"^[a-z0-9][a-z0-9._-]{1,63}$")]
 Version = Annotated[str, Field(pattern=r"^\d+\.\d+\.\d+$")]
+
+
 class SourcePolicy(ClosedModel):
     source_id: Identifier
     publisher: Text
@@ -44,6 +48,8 @@ class SourcePolicy(ClosedModel):
     biases: list[Text]
     conflicts: list[Text]
     exclusions: list[Text]
+
+
 class CapabilityPolicy(ClosedModel):
     capability_id: Identifier
     canonical_distribution: Text
@@ -54,6 +60,8 @@ class CapabilityPolicy(ClosedModel):
     network_access: list[Text]
     data_access: list[Text]
     limitations: list[Text]
+
+
 class DomainPack(ClosedModel):
     schema_version: Literal["1"]
     pack_id: Identifier
@@ -74,6 +82,7 @@ class DomainPack(ClosedModel):
     provenance: Text
     sources: list[SourcePolicy]
     capabilities: list[CapabilityPolicy]
+
     @model_validator(mode="after")
     def coherent(self) -> "DomainPack":
         collections = (self.domains, self.claim_types, self.jurisdictions, self.languages, self.sources)
@@ -85,6 +94,8 @@ class DomainPack(ClosedModel):
             if source.freshness_days > self.freshness_days:
                 raise ValueError("source_freshness_exceeds_pack")
         return self
+
+
 class ReleaseManifest(ClosedModel):
     schema_version: Literal["1"]
     signer: Identifier
@@ -92,18 +103,28 @@ class ReleaseManifest(ClosedModel):
     version: Version
     sha256: Annotated[str, Field(pattern=r"^[0-9a-f]{64}$")]
     signature: Text
+
+
 class PackError(ValueError):
     def __init__(self, code: str):
         self.code = code
         super().__init__(code)
+
+
 _VERSION_PATTERN = re.compile(r"^\d+\.\d+\.\d+$")
 MAX_PACK_BYTES = 65_536
+
+
 def parse_version(value: str) -> tuple[int, int, int]:
     if not _VERSION_PATTERN.match(value):
         raise PackError("invalid_version")
     return tuple(map(int, value.split(".")))  # type: ignore[return-value]
+
+
 class _DuplicateKey(Exception):
     pass
+
+
 def _unique_pairs(pairs: list[tuple[str, object]]) -> dict:
     result: dict = {}
     for key, value in pairs:
@@ -111,13 +132,18 @@ def _unique_pairs(pairs: list[tuple[str, object]]) -> dict:
             raise _DuplicateKey(key)
         result[key] = value
     return result
+
+
 class _StrictYamlLoader(yaml.SafeLoader):
     yaml_implicit_resolvers: dict = {}
+
     def construct_mapping(self, node, deep: bool = False) -> dict:
         keys = [self.construct_object(key, deep=True) for key, _ in node.value]
         if len(set(keys)) != len(keys):
             raise _DuplicateKey(node.start_mark)
         return super().construct_mapping(node, deep=deep)
+
+
 for _tag, _pattern, _first in (
     ("tag:yaml.org,2002:null", r"^null$", "n"),
     ("tag:yaml.org,2002:bool", r"^(?:true|false)$", "tf"),
@@ -125,6 +151,8 @@ for _tag, _pattern, _first in (
     ("tag:yaml.org,2002:float", r"^-?(?:0|[1-9][0-9]*)(?:\.[0-9]+)?(?:[eE][-+]?[0-9]+)?$", "-0123456789"),
 ):
     yaml.add_implicit_resolver(_tag, re.compile(_pattern), list(_first), Loader=_StrictYamlLoader)
+
+
 def _reject_yaml_aliases(raw: bytes) -> None:
     try:
         tokens = list(yaml.scan(raw.decode("utf-8")))
@@ -132,6 +160,8 @@ def _reject_yaml_aliases(raw: bytes) -> None:
         raise PackError("malformed_pack") from error
     if any(isinstance(token, (yaml.AnchorToken, yaml.AliasToken)) for token in tokens):
         raise PackError("malformed_pack")
+
+
 def parse_pack_bytes(raw: bytes, suffix: str) -> dict:
     if suffix in (".yaml", ".yml"):
         _reject_yaml_aliases(raw)
@@ -151,11 +181,15 @@ def parse_pack_bytes(raw: bytes, suffix: str) -> dict:
     if not isinstance(data, dict):
         raise PackError("malformed_pack")
     return data
+
+
 def encode_pack(data: dict) -> str:
     try:
         return json.dumps(data, allow_nan=False)
     except (TypeError, ValueError) as error:
         raise PackError("malformed_pack") from error
+
+
 # Helpers shared with any second pack kind (skill packs). Extraction only: every code and, more
 # importantly, every CHECK ORDER below is identical to the inline version it replaced. The order is
 # observable -- callers branch on which code surfaces when two conditions fail together -- and is
@@ -169,6 +203,8 @@ def read_pack_bytes(pack_path: Path) -> bytes:
     if len(raw) > MAX_PACK_BYTES:
         raise PackError("pack_too_large")
     return raw
+
+
 def verify_manifest_bytes(
     raw: bytes, manifest_raw: bytes, trust_roots: dict[str, str], pack_id: str, version: str
 ) -> ReleaseManifest:
@@ -195,6 +231,8 @@ def verify_manifest_bytes(
     except (ValueError, InvalidSignature) as error:
         raise PackError("invalid_signature") from error
     return manifest
+
+
 def verify_manifest(
     raw: bytes, manifest_path: Path, trust_roots: dict[str, str], pack_id: str, version: str
 ) -> ReleaseManifest:
@@ -205,6 +243,8 @@ def verify_manifest(
     except OSError as error:
         raise PackError("malformed_manifest") from error
     return verify_manifest_bytes(raw, manifest_raw, trust_roots, pack_id, version)
+
+
 Currency = Literal["current", "stale", "expired"]
 
 
@@ -229,8 +269,12 @@ def pack_currency(pack: ExpirablePack, today: date) -> Currency:
 
 
 def check_review_window(
-    reviewed_at: date, expires_at: date, freshness_days: int, now: date,
-    *, enforce_currency: bool = True,
+    reviewed_at: date,
+    expires_at: date,
+    freshness_days: int,
+    now: date,
+    *,
+    enforce_currency: bool = True,
 ) -> None:
     """Fixed order: future_review -> expired_pack -> stale_pack.
 
@@ -248,19 +292,19 @@ def check_review_window(
         raise PackError("expired_pack")
     if reviewed_at + timedelta(days=freshness_days) < now:
         raise PackError("stale_pack")
-def check_router_compatibility(
-    min_router_version: str, max_router_version: str, router_version: str
-) -> None:
-    if not (
-        parse_version(min_router_version)
-        <= parse_version(router_version)
-        <= parse_version(max_router_version)
-    ):
+
+
+def check_router_compatibility(min_router_version: str, max_router_version: str, router_version: str) -> None:
+    if not (parse_version(min_router_version) <= parse_version(router_version) <= parse_version(max_router_version)):
         raise PackError("incompatible_pack")
+
+
 def check_version_floor(pack_id: str, version: str, minimum_versions: dict[str, str] | None) -> None:
     minimum = (minimum_versions or {}).get(pack_id)
     if minimum and parse_version(version) < parse_version(minimum):
         raise PackError("version_rollback")
+
+
 def load_pack(
     pack_path: Path,
     manifest_path: Path | None,
@@ -301,7 +345,10 @@ def load_pack(
         verify_manifest(raw, manifest_path, trust_roots, pack.pack_id, pack.version)
     now = today or date.today()
     check_review_window(
-        pack.reviewed_at, pack.expires_at, pack.freshness_days, now,
+        pack.reviewed_at,
+        pack.expires_at,
+        pack.freshness_days,
+        now,
         enforce_currency=enforce_currency,
     )
     check_router_compatibility(pack.min_router_version, pack.max_router_version, router_version)

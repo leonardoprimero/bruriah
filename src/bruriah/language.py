@@ -10,6 +10,7 @@ forever for the same bytes.
 It answers exactly one question -- "English, Spanish, or I cannot tell" -- and `None` is a real
 answer that callers must handle, not a failure. When it cannot tell, nothing downstream changes.
 """
+
 from __future__ import annotations
 
 import re
@@ -19,18 +20,105 @@ from collections.abc import Iterable
 # both (`no`, `a`, `en`, `son`, `me`) are excluded on purpose: a marker that fires for either
 # language is not evidence, and including it would only add noise to the margin test below.
 _MARKERS: dict[str, frozenset[str]] = {
-    "en": frozenset({
-        "the", "of", "and", "to", "that", "is", "was", "were", "for", "with", "as", "on", "by",
-        "are", "this", "these", "those", "from", "which", "what", "why", "how", "when", "where",
-        "did", "does", "do", "we", "our", "not", "but", "have", "has", "had", "be", "been", "it",
-        "its", "they", "their", "there", "would", "should", "could", "than", "then", "into",
-    }),
-    "es": frozenset({
-        "que", "por", "para", "con", "los", "las", "del", "una", "como", "donde", "cuando",
-        "porque", "sobre", "este", "esta", "estos", "estas", "fue", "fueron", "hace", "desde",
-        "hasta", "entre", "mas", "muy", "sin", "tambien", "cual", "quien", "nuestro", "nuestra",
-        "el", "la", "lo", "al", "se", "su", "sus", "es", "un", "si", "ya", "pero", "todo",
-    }),
+    "en": frozenset(
+        {
+            "the",
+            "of",
+            "and",
+            "to",
+            "that",
+            "is",
+            "was",
+            "were",
+            "for",
+            "with",
+            "as",
+            "on",
+            "by",
+            "are",
+            "this",
+            "these",
+            "those",
+            "from",
+            "which",
+            "what",
+            "why",
+            "how",
+            "when",
+            "where",
+            "did",
+            "does",
+            "do",
+            "we",
+            "our",
+            "not",
+            "but",
+            "have",
+            "has",
+            "had",
+            "be",
+            "been",
+            "it",
+            "its",
+            "they",
+            "their",
+            "there",
+            "would",
+            "should",
+            "could",
+            "than",
+            "then",
+            "into",
+        }
+    ),
+    "es": frozenset(
+        {
+            "que",
+            "por",
+            "para",
+            "con",
+            "los",
+            "las",
+            "del",
+            "una",
+            "como",
+            "donde",
+            "cuando",
+            "porque",
+            "sobre",
+            "este",
+            "esta",
+            "estos",
+            "estas",
+            "fue",
+            "fueron",
+            "hace",
+            "desde",
+            "hasta",
+            "entre",
+            "mas",
+            "muy",
+            "sin",
+            "tambien",
+            "cual",
+            "quien",
+            "nuestro",
+            "nuestra",
+            "el",
+            "la",
+            "lo",
+            "al",
+            "se",
+            "su",
+            "sus",
+            "es",
+            "un",
+            "si",
+            "ya",
+            "pero",
+            "todo",
+        }
+    ),
 }
 
 _WORD = re.compile(r"[a-záéíóúüñ]+")
@@ -59,8 +147,7 @@ def detect(text: str) -> str | None:
     words = _WORD.findall(_fold(text))
     if not words:
         return None
-    counts = {code: sum(1 for word in words if word in markers)
-              for code, markers in _MARKERS.items()}
+    counts = {code: sum(1 for word in words if word in markers) for code, markers in _MARKERS.items()}
     (best, best_count), (_, runner_up) = sorted(counts.items(), key=lambda item: -item[1])
     if best_count < _MINIMUM_HITS or best_count - runner_up < _MARGIN:
         return None

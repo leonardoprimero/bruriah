@@ -59,15 +59,20 @@ _kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
 
 class _OVERLAPPED(ctypes.Structure):
     _fields_ = [
-        ("Internal", ctypes.c_void_p), ("InternalHigh", ctypes.c_void_p),
-        ("Offset", wintypes.DWORD), ("OffsetHigh", wintypes.DWORD), ("hEvent", wintypes.HANDLE),
+        ("Internal", ctypes.c_void_p),
+        ("InternalHigh", ctypes.c_void_p),
+        ("Offset", wintypes.DWORD),
+        ("OffsetHigh", wintypes.DWORD),
+        ("hEvent", wintypes.HANDLE),
     ]
 
 
 class _FILE_RENAME_INFO(ctypes.Structure):
     _fields_ = [
-        ("Flags", wintypes.DWORD), ("RootDirectory", wintypes.HANDLE),
-        ("FileNameLength", wintypes.DWORD), ("FileName", wintypes.WCHAR * 1),
+        ("Flags", wintypes.DWORD),
+        ("RootDirectory", wintypes.HANDLE),
+        ("FileNameLength", wintypes.DWORD),
+        ("FileName", wintypes.WCHAR * 1),
     ]
 
 
@@ -99,9 +104,7 @@ def open_pinned(path: Path) -> int:
     `O_NOFOLLOW` FAILS on a symlink; this flag SUCCEEDS and hands back the link itself. Opening the
     link and then treating it as the target would be strictly worse than following it, so the
     reparse point is rejected explicitly right after the open."""
-    handle = _create(
-        path, GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE, FILE_FLAG_OPEN_REPARSE_POINT
-    )
+    handle = _create(path, GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE, FILE_FLAG_OPEN_REPARSE_POINT)
     descriptor = msvcrt.open_osfhandle(handle, os.O_RDONLY | os.O_BINARY)
     try:
         if os.fstat(descriptor).st_file_attributes & stat.FILE_ATTRIBUTE_REPARSE_POINT:
@@ -145,9 +148,7 @@ def posix_replace(source: Path, target: Path) -> None:
     turn an unavailable guarantee into a silently weaker one on old Windows or non-NTFS volumes,
     and a promotion that quietly stops being atomic is the failure mode this whole module exists to
     avoid. Failing here is the honest outcome."""
-    handle = _create(
-        source, DELETE | SYNCHRONIZE, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE
-    )
+    handle = _create(source, DELETE | SYNCHRONIZE, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE)
     try:
         encoded = str(Path(target).absolute()).encode("utf-16-le")
         size = _NAME_OFFSET + len(encoded) + 2
@@ -158,9 +159,7 @@ def posix_replace(source: Path, target: Path) -> None:
         info.FileNameLength = len(encoded)
         ctypes.memmove(ctypes.addressof(buffer) + _NAME_OFFSET, encoded, len(encoded))
         if not _kernel32.SetFileInformationByHandle(handle, _FileRenameInfoEx, buffer, size):
-            raise OSError(
-                0, "POSIX-semantics rename unavailable", str(target), ctypes.get_last_error()
-            )
+            raise OSError(0, "POSIX-semantics rename unavailable", str(target), ctypes.get_last_error())
     finally:
         _kernel32.CloseHandle(handle)
 
@@ -173,8 +172,12 @@ def acquire_exclusive(descriptor: int) -> None:
     out. (`msvcrt.locking` cannot express this: it gives up after roughly ten seconds and raises,
     turning a slow holder into a failed promotion.)"""
     if not _kernel32.LockFileEx(
-        msvcrt.get_osfhandle(descriptor), _LOCKFILE_EXCLUSIVE_LOCK, 0,
-        _LOCK_RANGE, 0, ctypes.byref(_OVERLAPPED()),
+        msvcrt.get_osfhandle(descriptor),
+        _LOCKFILE_EXCLUSIVE_LOCK,
+        0,
+        _LOCK_RANGE,
+        0,
+        ctypes.byref(_OVERLAPPED()),
     ):
         raise OSError(0, "LockFileEx failed", None, ctypes.get_last_error())
 
@@ -184,9 +187,7 @@ def release(descriptor: int) -> None:
     never mask the exception that got it there -- POSIX `LOCK_UN` on an unheld lock is a no-op, and
     the caller should see the original failure, not this one."""
     try:
-        _kernel32.UnlockFileEx(
-            msvcrt.get_osfhandle(descriptor), 0, _LOCK_RANGE, 0, ctypes.byref(_OVERLAPPED())
-        )
+        _kernel32.UnlockFileEx(msvcrt.get_osfhandle(descriptor), 0, _LOCK_RANGE, 0, ctypes.byref(_OVERLAPPED()))
     except OSError:
         pass
 
@@ -231,5 +232,11 @@ def pread(descriptor: int, length: int, offset: int) -> bytes:
 
 
 __all__ = [
-    "acquire_exclusive", "flush", "open_pinned", "open_shared", "posix_replace", "pread", "release",
+    "acquire_exclusive",
+    "flush",
+    "open_pinned",
+    "open_shared",
+    "posix_replace",
+    "pread",
+    "release",
 ]

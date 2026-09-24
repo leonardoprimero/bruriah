@@ -18,6 +18,7 @@ at rank 40 can only move up. A reranker assigning scores at random would produce
 arithmetic -- it is positions better than a uniform shuffle of the same head would have managed --
 and only it says anything about the model. See `ablation.py` for the closed form.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -34,9 +35,7 @@ from ablation import AblationSummary, QuestionOutcome, summarize  # noqa: E402
 
 def load(path: Path) -> list[QuestionOutcome]:
     return [
-        QuestionOutcome(**json.loads(line))
-        for line in path.read_text(encoding="utf-8").splitlines()
-        if line.strip()
+        QuestionOutcome(**json.loads(line)) for line in path.read_text(encoding="utf-8").splitlines() if line.strip()
     ]
 
 
@@ -75,8 +74,13 @@ def render(summary: AblationSummary) -> list[str]:
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--ablation", type=Path, action="append", required=True,
-                        help="a *-ablation.jsonl artifact; repeat for several corpora")
+    parser.add_argument(
+        "--ablation",
+        type=Path,
+        action="append",
+        required=True,
+        help="a *-ablation.jsonl artifact; repeat for several corpora",
+    )
     parser.add_argument("--json", action="store_true", help="machine-readable output")
     args = parser.parse_args(argv)
 
@@ -91,8 +95,11 @@ def main(argv: list[str] | None = None) -> int:
     summaries.append(summarize("both corpora pooled", pooled))
 
     if args.json:
-        print(json.dumps([summary.__dict__ for summary in summaries], default=lambda o: o.__dict__,
-                         indent=2, sort_keys=True))
+        print(
+            json.dumps(
+                [summary.__dict__ for summary in summaries], default=lambda o: o.__dict__, indent=2, sort_keys=True
+            )
+        )
         return 0
 
     lines: list[str] = []

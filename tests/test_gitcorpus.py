@@ -5,6 +5,7 @@ front page told anyone who ran `pip install bruriah` to execute a file they did 
 tests cover the behaviour AND the distribution: shipping is part of the contract here, not an
 afterthought, because the failure was invisible to a suite that ran from a clone.
 """
+
 from __future__ import annotations
 
 import json
@@ -59,11 +60,9 @@ def test_the_document_carries_the_provenance_that_makes_it_worth_retrieving(tmp_
 
 def test_it_writes_nothing_to_the_repository_it_reads(tmp_path: Path) -> None:
     repo = _repo(tmp_path)
-    before = subprocess.run(["git", "status", "--porcelain"], cwd=repo,
-                            capture_output=True, text=True).stdout
+    before = subprocess.run(["git", "status", "--porcelain"], cwd=repo, capture_output=True, text=True).stdout
     gitcorpus.build(repo, tmp_path / "out")
-    after = subprocess.run(["git", "status", "--porcelain"], cwd=repo,
-                           capture_output=True, text=True).stdout
+    after = subprocess.run(["git", "status", "--porcelain"], cwd=repo, capture_output=True, text=True).stdout
     assert before == after == ""
 
 
@@ -76,17 +75,27 @@ def test_a_named_revision_derives_the_corpus_that_history_had_at_that_point(tmp_
     nothing could take it up on that, and a reader running the documented command got a different
     corpus with nothing to tell them why."""
     repo = _repo(tmp_path)  # a reasoned commit, then a bodiless one
-    subprocess.run(["git", "commit", "-q", "--allow-empty", "-m",
-                    "feat: a later decision\n\nAdded after the measurement was published."],
-                   cwd=repo, check=True, capture_output=True)
-    first = subprocess.run(["git", "rev-list", "--max-parents=0", "HEAD"], cwd=repo,
-                           capture_output=True, text=True, check=True).stdout.strip()
+    subprocess.run(
+        [
+            "git",
+            "commit",
+            "-q",
+            "--allow-empty",
+            "-m",
+            "feat: a later decision\n\nAdded after the measurement was published.",
+        ],
+        cwd=repo,
+        check=True,
+        capture_output=True,
+    )
+    first = subprocess.run(
+        ["git", "rev-list", "--max-parents=0", "HEAD"], cwd=repo, capture_output=True, text=True, check=True
+    ).stdout.strip()
 
     assert gitcorpus.build(repo, tmp_path / "head").written == 2
     pinned = gitcorpus.build(repo, tmp_path / "pinned", revision=first)
     assert (pinned.written, pinned.examined) == (1, 1)
-    assert "a later decision" not in "".join(
-        path.read_text() for path in (tmp_path / "pinned").glob("*.md"))
+    assert "a later decision" not in "".join(path.read_text() for path in (tmp_path / "pinned").glob("*.md"))
 
 
 def test_a_revision_that_does_not_resolve_says_so_before_writing_anything(tmp_path: Path) -> None:
@@ -100,15 +109,37 @@ def test_a_revision_that_does_not_resolve_says_so_before_writing_anything(tmp_pa
 
 
 def test_the_subcommand_refuses_a_directory_that_is_not_a_repository(tmp_path: Path) -> None:
-    code = cli.bruriah_main(["corpus", "--repo", str(tmp_path), "--out", str(tmp_path / "out"),
-                             "--data-dir", str(tmp_path / "d"), "--config-dir", str(tmp_path / "c")])
+    code = cli.bruriah_main(
+        [
+            "corpus",
+            "--repo",
+            str(tmp_path),
+            "--out",
+            str(tmp_path / "out"),
+            "--data-dir",
+            str(tmp_path / "d"),
+            "--config-dir",
+            str(tmp_path / "c"),
+        ]
+    )
     assert code != 0
 
 
 def test_the_subcommand_produces_what_the_module_produces(tmp_path: Path) -> None:
     repo = _repo(tmp_path)
-    code = cli.bruriah_main(["corpus", "--repo", str(repo), "--out", str(tmp_path / "viacli"),
-                             "--data-dir", str(tmp_path / "d"), "--config-dir", str(tmp_path / "c")])
+    code = cli.bruriah_main(
+        [
+            "corpus",
+            "--repo",
+            str(repo),
+            "--out",
+            str(tmp_path / "viacli"),
+            "--data-dir",
+            str(tmp_path / "d"),
+            "--config-dir",
+            str(tmp_path / "c"),
+        ]
+    )
     assert code == 0
     gitcorpus.build(repo, tmp_path / "direct")
     viacli = {path.name: path.read_text() for path in (tmp_path / "viacli").glob("*.md")}
@@ -122,9 +153,22 @@ def test_it_says_how_much_of_the_history_it_had_to_skip(tmp_path: Path, capsys) 
     documents from three hundred commits printed `{"documents": 3}` and said nothing, which reads
     as a small project rather than a history that does not explain itself."""
     repo = _repo(tmp_path)  # two non-merge commits, one of them with no body
-    assert cli.bruriah_main(["corpus", "--repo", str(repo), "--out", str(tmp_path / "out"),
-                             "--data-dir", str(tmp_path / "d"),
-                             "--config-dir", str(tmp_path / "c")]) == 0
+    assert (
+        cli.bruriah_main(
+            [
+                "corpus",
+                "--repo",
+                str(repo),
+                "--out",
+                str(tmp_path / "out"),
+                "--data-dir",
+                str(tmp_path / "d"),
+                "--config-dir",
+                str(tmp_path / "c"),
+            ]
+        )
+        == 0
+    )
     captured = capsys.readouterr()
 
     assert json.loads(captured.out)["commits_examined"] == 2
@@ -143,9 +187,22 @@ def test_a_history_that_explains_itself_is_not_nagged(tmp_path: Path, capsys) ->
     (repo / "a.txt").write_text("one")
     run("add", "-A")
     run("commit", "-q", "-m", "feat: add the thing\n\nBecause the other way needed two trips.")
-    assert cli.bruriah_main(["corpus", "--repo", str(repo), "--out", str(tmp_path / "out"),
-                             "--data-dir", str(tmp_path / "d"),
-                             "--config-dir", str(tmp_path / "c")]) == 0
+    assert (
+        cli.bruriah_main(
+            [
+                "corpus",
+                "--repo",
+                str(repo),
+                "--out",
+                str(tmp_path / "out"),
+                "--data-dir",
+                str(tmp_path / "d"),
+                "--config-dir",
+                str(tmp_path / "c"),
+            ]
+        )
+        == 0
+    )
     assert capsys.readouterr().err == "", "nothing was skipped, so there is nothing to report"
 
 
@@ -164,8 +221,9 @@ def test_the_built_wheel_actually_contains_it(tmp_path: Path) -> None:
     """Built, not asserted about. The distribution is the thing that was wrong before."""
     if shutil.which("uv") is None:
         pytest.skip("uv is not on PATH")
-    built = subprocess.run(["uv", "build", "--wheel", "-o", str(tmp_path)],
-                           cwd=ROOT, capture_output=True, text=True, timeout=600)
+    built = subprocess.run(
+        ["uv", "build", "--wheel", "-o", str(tmp_path)], cwd=ROOT, capture_output=True, text=True, timeout=600
+    )
     assert built.returncode == 0, built.stderr
     wheel = next(Path(tmp_path).glob("*.whl"))
     with zipfile.ZipFile(wheel) as archive:
@@ -189,8 +247,7 @@ def _import_bruriah_fresh(hide_fcntl: bool, os_name: str | None = None):
     saved = {name: sys.modules.pop(name) for name in list(sys.modules) if name.startswith("bruriah")}
     try:
         if hide_fcntl:
-            importlib.util.find_spec = lambda name, *a, **k: (
-                None if name == "fcntl" else real_find(name, *a, **k))
+            importlib.util.find_spec = lambda name, *a, **k: None if name == "fcntl" else real_find(name, *a, **k)
         if os_name is not None:
             os_module.name = os_name
         return importlib.import_module("bruriah")
@@ -238,7 +295,9 @@ def test_gitcorpus_extracts_lineage_trailers_into_document_metadata(tmp_path: Pa
     (repo / "f1.txt").write_text("v1")
     run("add", "-A")
     run("commit", "-q", "-m", "feat: initial approach\n\nUsing FastMCP because it seemed easy.")
-    c1 = subprocess.run(["git", "rev-parse", "HEAD"], cwd=repo, capture_output=True, text=True, check=True).stdout.strip()
+    c1 = subprocess.run(
+        ["git", "rev-parse", "HEAD"], cwd=repo, capture_output=True, text=True, check=True
+    ).stdout.strip()
 
     (repo / "f2.txt").write_text("v2")
     run("add", "-A")
@@ -258,6 +317,7 @@ def test_gitcorpus_extracts_lineage_trailers_into_document_metadata(tmp_path: Pa
     assert len(docs) == 2
 
     from bruriah.corpus import CorpusPolicy, parse_document
+
     policy = CorpusPolicy(include=("**",), exclude=())
     target_doc = next(p for p in docs if "replace-with-lowlevel" in p.name)
     doc2 = parse_document(target_doc, out, policy)

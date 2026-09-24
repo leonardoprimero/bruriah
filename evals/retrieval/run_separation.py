@@ -19,6 +19,7 @@ rather than importing it. A restatement that has drifted would measure a differe
 run ASSERTS that its ranks equal the shipped helpers' ranks for every query, and aborts otherwise.
 That guard is the reason these numbers can be quoted; without it they describe this file.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -39,7 +40,13 @@ from separation import separation  # noqa: E402
 from bruriah.cli import build_serve_deps  # noqa: E402
 from bruriah.platform import resolve_paths  # noqa: E402
 from bruriah.retrieval import (  # noqa: E402
-    _BM25_B, _BM25_K1, _bm25_ranks, _ranked, _scan_passages, _tokenize, _vector_ranks,
+    _BM25_B,
+    _BM25_K1,
+    _bm25_ranks,
+    _ranked,
+    _scan_passages,
+    _tokenize,
+    _vector_ranks,
 )
 
 _NO_DEADLINE = float("inf")
@@ -85,6 +92,7 @@ def _bm25_scores(passages, query_tokens) -> list[tuple[float, str]]:
 
 def _vector_scores(passages, query_vector: bytes) -> list[tuple[float, str]]:
     from array import array
+
     query = array("f")
     query.frombytes(query_vector)
     query_norm = math.sqrt(sum(value * value for value in query))
@@ -119,9 +127,7 @@ def measure(passages, deps, query: str) -> tuple[float | None, float | None]:
         raise SystemExit(f"restated BM25 disagrees with retrieval._bm25_ranks on: {query!r}")
     if _ranked(vector_scored) != (shipped_vector or {}):
         raise SystemExit(f"restated cosine disagrees with retrieval._vector_ranks on: {query!r}")
-    return separation([score for score, _ in lexical_scored]), separation(
-        [score for score, _ in vector_scored]
-    )
+    return separation([score for score, _ in lexical_scored]), separation([score for score, _ in vector_scored])
 
 
 def load(name: str) -> list[dict]:
@@ -131,8 +137,14 @@ def load(name: str) -> list[dict]:
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--index", nargs=2, action="append", metavar=("CORPUS", "DATA_DIR"),
-                        required=True, help="corpus name and the data dir holding its snapshot")
+    parser.add_argument(
+        "--index",
+        nargs=2,
+        action="append",
+        metavar=("CORPUS", "DATA_DIR"),
+        required=True,
+        help="corpus name and the data dir holding its snapshot",
+    )
     parser.add_argument("--out", type=Path, required=True)
     args = parser.parse_args(argv)
 
@@ -143,27 +155,29 @@ def main(argv: list[str] | None = None) -> int:
         deps = build_serve_deps(resolve_paths(cli_data_dir=Path(data_dir), env={}))
         try:
             passages, _stopped = _scan_passages(deps.snapshot.database, _NO_DEADLINE, _never_expires)
-            present = {
-                strip_build_sha(passage.relative_path.rsplit("/", 1)[-1]) for passage in passages
-            }
+            present = {strip_build_sha(passage.relative_path.rsplit("/", 1)[-1]) for passage in passages}
             print(f"{index_name}: {len(passages)} passages, snapshot {deps.snapshot.build_id}", flush=True)
             for origin in names:
                 for case in questions[origin]:
                     lexical, vector = measure(passages, deps, case["query"])
                     truth = strip_build_sha(case["ground_truth"]["must_include"][0])
-                    rows.append({
-                        "id": case["id"], "origin": origin, "index": index_name,
-                        # `home` means this index holds the corpus the question was written about.
-                        "label": "home" if origin == index_name else "foreign",
-                        "lexical_separation": lexical, "vector_separation": vector,
-                        "answer_present": truth in present,
-                    })
+                    rows.append(
+                        {
+                            "id": case["id"],
+                            "origin": origin,
+                            "index": index_name,
+                            # `home` means this index holds the corpus the question was written about.
+                            "label": "home" if origin == index_name else "foreign",
+                            "lexical_separation": lexical,
+                            "vector_separation": vector,
+                            "answer_present": truth in present,
+                        }
+                    )
                 print(f"  {origin}: {len(questions[origin])} questions", flush=True)
         finally:
             deps.snapshot.database.close()
 
-    args.out.write_text(
-        "\n".join(json.dumps(row, sort_keys=True) for row in rows) + "\n", encoding="utf-8")
+    args.out.write_text("\n".join(json.dumps(row, sort_keys=True) for row in rows) + "\n", encoding="utf-8")
     print(f"Wrote {args.out} ({len(rows)} rows)")
     return 0
 

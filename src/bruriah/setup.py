@@ -42,13 +42,7 @@ class SetupResult:
 
 def _claude_desktop_path() -> Path:
     if sys.platform == "darwin":
-        return (
-            Path.home()
-            / "Library"
-            / "Application Support"
-            / "Claude"
-            / "claude_desktop_config.json"
-        )
+        return Path.home() / "Library" / "Application Support" / "Claude" / "claude_desktop_config.json"
     if sys.platform == "win32":
         appdata = os.environ.get("APPDATA")
         base = Path(appdata) if appdata else Path.home() / "AppData" / "Roaming"
@@ -227,9 +221,7 @@ def detect_installed_clients(project_root: Path | None = None) -> list[str]:
     detected: list[str] = []
 
     # Cursor
-    if (Path.home() / ".cursor").is_dir() or (
-        project_root and (project_root / ".cursor").is_dir()
-    ):
+    if (Path.home() / ".cursor").is_dir() or (project_root and (project_root / ".cursor").is_dir()):
         detected.append("cursor")
 
     # Claude Desktop
@@ -237,21 +229,15 @@ def detect_installed_clients(project_root: Path | None = None) -> list[str]:
         detected.append("claude-desktop")
 
     # Claude Code
-    if (Path.home() / ".claude").is_dir() or (
-        project_root and (project_root / ".mcp.json").exists()
-    ):
+    if (Path.home() / ".claude").is_dir() or (project_root and (project_root / ".mcp.json").exists()):
         detected.append("claude")
 
     # Gemini CLI
-    if (Path.home() / ".gemini").is_dir() or (
-        project_root and (project_root / ".gemini").is_dir()
-    ):
+    if (Path.home() / ".gemini").is_dir() or (project_root and (project_root / ".gemini").is_dir()):
         detected.append("gemini")
 
     # OpenCode
-    if (Path.home() / ".config" / "opencode").is_dir() or (
-        project_root and (project_root / "opencode.json").exists()
-    ):
+    if (Path.home() / ".config" / "opencode").is_dir() or (project_root and (project_root / "opencode.json").exists()):
         detected.append("opencode")
 
     return detected
