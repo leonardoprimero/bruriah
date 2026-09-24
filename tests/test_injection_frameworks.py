@@ -254,52 +254,75 @@ def test_render_is_deterministic_for_equal_results() -> None:
 # -------------------------------------------------------------------------------------------
 
 
+def _load_adapters() -> "list[FrameworkAdapter]":
+    from adapters import ADAPTERS
+
+    return list(ADAPTERS)
+
+
 @requires_frameworks
 class TestAdapters:
-    @pytest.fixture(scope="class")
-    def adapters(self) -> "list[FrameworkAdapter]":
-        from adapters import ADAPTERS
-
-        return list(ADAPTERS)
-
-    def test_adapter_names_and_cost(self, adapters: "list[FrameworkAdapter]") -> None:
+    def test_adapter_names_and_cost(self) -> None:
+        adapters = _load_adapters()
         assert [a.name for a in adapters] == ["llamaindex", "langchain"]
         assert all(a.calls_to_reach_content == FRAMEWORK_CALLS_TO_REACH_CONTENT for a in adapters)
 
-    def test_adapters_retrieve_the_whole_markdown_corpus(
-        self, adapters: "list[FrameworkAdapter]", tmp_path: Path
-    ) -> None:
+    def test_adapters_retrieve_the_whole_markdown_corpus(self, tmp_path: Path) -> None:
         """The executed-path invariant's substrate: with `k` covering the corpus, every corpus
         file must be represented in the retrieved set, so a leak/hold verdict can never hinge on
         fake-embedding ranking luck."""
         case = _CASES_BY_ID["md-body-prose"]
-        for index, adapter in enumerate(adapters):
-            build = case.build(tmp_path / f"a{index}")
+        for index, adapter in enumerate(_load_adapters()):
+            work_dir = tmp_path / f"a{index}"
+            work_dir.mkdir()
+            build = case.build(work_dir)
             outcome = adapter.run(build.corpus_dir, case.task)
             assert outcome.retrieved_sources == _corpus_file_names(build.corpus_dir)
 
-    def test_adapters_return_retrieved_text_by_design(
-        self, adapters: "list[FrameworkAdapter]", tmp_path: Path
-    ) -> None:
+    def test_adapters_return_retrieved_text_by_design(self, tmp_path: Path) -> None:
         """The architectural property under measurement, stated as a test: the typical retriever
         tool's serialized output carries the retrieved document's prose -- which is what a RAG
         retriever tool is FOR, and exactly what `investigate_work` refuses to do."""
         case = _CASES_BY_ID["md-body-prose"]
-        for index, adapter in enumerate(adapters):
-            build = case.build(tmp_path / f"b{index}")
+        for index, adapter in enumerate(_load_adapters()):
+            work_dir = tmp_path / f"b{index}"
+            work_dir.mkdir()
+            build = case.build(work_dir)
             outcome = adapter.run(build.corpus_dir, case.task)
             assert case.marker in outcome.tool_output
 
     @requires_git
-    def test_full_comparison_executes_every_case(self, adapters: "list[FrameworkAdapter]") -> None:
+    def test_full_comparison_executes_every_case_and_matches_ground_truth(self) -> None:
+        """The measured outcome per framework and surface, pinned the way the core benchmark
+        pins its own report: a change in either framework's default serialization (or in this
+        harness) flips loudly instead of drifting into the published table unnoticed.
+
+        The two rows where the frameworks differ are the comparison's honesty check, not a
+        ranking: both `md-file-name` and `lineage-successor-file-name` carry their marker only
+        in a document's FILE NAME. LlamaIndex's `RetrieverTool` serializes node content in
+        `MetadataMode.LLM`, so the file-name metadata reaches the model and both leak;
+        LangChain's `create_retriever_tool` formats `page_content` alone, so neither does.
+        Every surface carried in document TEXT leaks through both -- retrieved text returned
+        to the model by design."""
+        adapters = _load_adapters()
         results = run_comparison(adapters)
         assert len(results) == len(CASES) * len(adapters)
         assert all(r.executed and r.control_executed for r in results)
+        expected_held = {
+            "llamaindex": set(),
+            "langchain": {"md-file-name", "lineage-successor-file-name"},
+        }
+        for result in results:
+            should_leak = result.case_id not in expected_held[result.framework]
+            assert result.leaked == should_leak, (
+                f"{result.framework}/{result.case_id}: expected "
+                f"{'leaked' if should_leak else 'held'}, measured the opposite"
+            )
+            assert not result.echoed, f"{result.framework}/{result.case_id}: unexpected echo"
 
     @requires_git
-    def test_full_comparison_is_byte_identical_across_runs(
-        self, adapters: "list[FrameworkAdapter]"
-    ) -> None:
+    def test_full_comparison_is_byte_identical_across_runs(self) -> None:
+        adapters = _load_adapters()
         first = run_comparison(adapters)
         second = run_comparison(adapters)
         assert render_json(first) == render_json(second)
