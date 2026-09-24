@@ -37,6 +37,8 @@ from run import (  # noqa: E402
 
 import pytest  # noqa: E402
 
+import run as run_module  # noqa: E402
+
 _NO_GIT_REASON = "git is not available on PATH; the injection benchmark needs it for the git/github cases"
 
 
@@ -713,3 +715,54 @@ def test_run_case_reports_a_git_unavailable_case_as_not_executed_never_as_held(
     assert result.leaked is False
     assert result.leak_fields == ()
     assert result.control_executed is False
+
+
+# -------------------------------------------------------------------------------------------
+# Report publication: a committed report is replaced whole or not at all
+# -------------------------------------------------------------------------------------------
+
+
+def test_write_report_publishes_exact_bytes_and_leaves_no_temporary(tmp_path: Path) -> None:
+    """The report lands byte-exact, overwrites a previous one, and the directory holds nothing
+    but the report afterwards -- no temporary file survives a successful publication."""
+    target = tmp_path / "report.md"
+    run_module.write_report(target, "first\n")
+    run_module.write_report(target, "second -- with unicode: caf\u00e9\n")
+    assert target.read_text(encoding="utf-8") == "second -- with unicode: caf\u00e9\n"
+    assert sorted(p.name for p in tmp_path.iterdir()) == ["report.md"]
+
+
+def test_write_report_keeps_the_previous_report_when_publication_fails(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A reader must never observe a half-written report: when the final publication step
+    fails, the previous report is still there, intact, and the temporary is cleaned up."""
+    target = tmp_path / "report.json"
+    target.write_text('{"committed": true}\n', encoding="utf-8")
+
+    def refuse(_source: object, _destination: object) -> None:
+        raise OSError("simulated publication failure")
+
+    monkeypatch.setattr(run_module.os, "replace", refuse)
+    with pytest.raises(OSError, match="simulated publication failure"):
+        run_module.write_report(target, '{"committed": false}\n')
+    assert target.read_text(encoding="utf-8") == '{"committed": true}\n'
+    assert sorted(p.name for p in tmp_path.iterdir()) == ["report.json"]
+
+
+def test_main_publishes_both_reports_through_write_report(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """`main` never writes a report with a plain `write_text`: both committed reports go
+    through the atomic publication path, in the documented order."""
+    json_path = tmp_path / "report.json"
+    md_path = tmp_path / "report.md"
+    published: list[tuple[Path, str]] = []
+    monkeypatch.setattr(run_module, "run_benchmark", lambda: [])
+    monkeypatch.setattr(run_module, "render_json", lambda _results: "JSON")
+    monkeypatch.setattr(run_module, "render_markdown", lambda _results: "MARKDOWN")
+    monkeypatch.setattr(run_module, "REPORT_JSON_PATH", json_path)
+    monkeypatch.setattr(run_module, "REPORT_MD_PATH", md_path)
+    monkeypatch.setattr(run_module, "write_report", lambda path, text: published.append((path, text)))
+
+    assert run_module.main() == 0
+    assert published == [(json_path, "JSON"), (md_path, "MARKDOWN")]
+    assert not json_path.exists() and not md_path.exists()
