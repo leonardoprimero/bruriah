@@ -48,7 +48,15 @@ from ._cli.skills import (
     run_skill_status,
 )
 from .corpus import CorpusPolicy, CorpusPolicyError
-from .index import BuildConfig, BuildResult, Embedder, IndexLifecycleError, build_candidate, prune_generations
+from .index import (
+    BuildConfig,
+    BuildResult,
+    DroppedPremise,
+    Embedder,
+    IndexLifecycleError,
+    build_candidate,
+    prune_generations,
+)
 from .index_runner import EmbedderFactory, _default_embedder_factory, _embedding_fingerprint, run_index
 from .mcp_server import build_server
 from .repository import SnapshotRepository, resolve_counterfactual_refs_for_humans
@@ -207,10 +215,21 @@ def _index_summary_line(result: BuildResult) -> str:
         f", build {result.build_id[:8]} is active"
     )
     if result.dropped_premises:
-        ids = ", ".join(dropped.premise_id for dropped in result.dropped_premises)
+        # Grouped by premise id, never a flat id list: a premise can be the target of more than one
+        # drop (two GitHub candidates losing the issue-number tie-break, or a losing declaration
+        # alongside an ignored GitHub invalidation), and each one must still name its own document
+        # and reason rather than being folded into an undifferentiated count.
+        by_id: dict[str, list[DroppedPremise]] = {}
+        for dropped in result.dropped_premises:
+            by_id.setdefault(dropped.premise_id, []).append(dropped)
+        groups = "; ".join(
+            f"{premise_id} (" + ", ".join(
+                f"{dropped.relative_path}: {dropped.reason}" for dropped in drops
+            ) + ")"
+            for premise_id, drops in by_id.items()
+        )
         line += (
-            f". Dropped {len(result.dropped_premises)} GitHub premise declaration(s) that lost to "
-            f"a higher-trust or lower-numbered source: {ids}"
+            f". Dropped {len(result.dropped_premises)} GitHub premise declaration(s): {groups}"
         )
     return line
 
@@ -771,9 +790,10 @@ def _cmd_index(
         # they find out when it was not: a full re-embed after a model or parser change shows up
         # here as zero, on the run that took the time.
         "reused_documents": result.reused_documents,
-        # A GitHub-sourced premise declaration that lost to a higher-trust or lower-issue-number
-        # one (`index._build_premise_and_alternative_records`) is dropped rather than merged in --
-        # reported here, by id and source document, so the drop is visible instead of silent.
+        # A GitHub-sourced premise declaration or invalidation that lost to a higher-trust or
+        # lower-issue-number one (`index._build_premise_and_alternative_records`) is dropped rather
+        # than applied -- reported here, by id and source document, so the drop is visible instead
+        # of silent.
         "dropped_premises": [
             {
                 "premise_id": dropped.premise_id,

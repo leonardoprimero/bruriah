@@ -460,6 +460,91 @@ def test_a_sqlite_error_during_index_is_a_typed_message_never_a_raw_traceback(
     assert "Traceback" not in captured.err
 
 
+def _write_md(path: Path, frontmatter: str, body: str = "# Doc\nBody text for one real passage.\n") -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(f"---\n{frontmatter}---\n{body}", encoding="utf-8")
+
+
+def test_the_index_report_names_every_dropped_document_and_groups_by_premise_id(
+    tmp_path: Path, capsys: pytest.CaptureFixture,
+) -> None:
+    """R3-summary-line-omits-document / R2-summary-duplicate-ids / R3-cli-drop-report-untested
+    (review lineage review-aa1bc7b855f40f4c): the human summary line used to name only the dropped
+    premise ids, never the document each drop came from, and a premise dropped more than once
+    collapsed into one undifferentiated id in that list. This drives one mixed corpus through the
+    real CLI: a repository premise a GitHub document redeclares (`shadowed_by_repository_premise`),
+    two GitHub documents racing on a second id (`shadowed_by_lower_github_issue`), and a GitHub
+    document trying to invalidate the first, repository-authored premise
+    (`github_invalidation_ignored`) -- then asserts both the JSON `dropped_premises` field names
+    and the exact grouped, per-document human summary text."""
+    root = tmp_path / "vault"
+    _write_md(
+        root / "public" / "adr.md",
+        'premises:\n  - id: scale-premise\n    statement: "Write volume stays under 10k/s"\n'
+        "    status: active\n",
+    )
+    _write_md(
+        root / "public" / "g1-issue-9-redeclare.md",
+        "bruriah_source: github\nissue: 9\n"
+        'premises:\n  - id: scale-premise\n    statement: "Attacker override"\n',
+    )
+    _write_md(
+        root / "public" / "g2-issue-30-other-a.md",
+        "bruriah_source: github\nissue: 30\n"
+        'premises:\n  - id: other-premise\n    statement: "From issue 30"\n',
+    )
+    _write_md(
+        root / "public" / "g3-issue-4-other-b.md",
+        "bruriah_source: github\nissue: 4\n"
+        'premises:\n  - id: other-premise\n    statement: "From issue 4"\n',
+    )
+    _write_md(
+        root / "public" / "g4-issue-50-invalidate.md",
+        "bruriah_source: github\nissue: 50\ninvalidated_premises:\n  - scale-premise\n",
+    )
+    policy_path = tmp_path / "policy.yaml"
+    policy_path.write_text("version: 1\ninclude: ['public/**']\nexclude: []\n", encoding="utf-8")
+    args = cli._build_cli_parser().parse_args(
+        [
+            "index",
+            "--config-dir", str(tmp_path / "config"),
+            "--data-dir", str(tmp_path / "data"),
+            "--corpus-root", str(root),
+            "--policy", str(policy_path),
+        ]
+    )
+
+    exit_code = cli._cmd_index(args, embedder_factory=_fake_embedder_factory)
+    captured = capsys.readouterr()
+    assert exit_code == 0
+
+    summary = json.loads(captured.out)
+    assert summary["dropped_premises"] == [
+        {
+            "premise_id": "scale-premise",
+            "document": "public/g1-issue-9-redeclare.md",
+            "reason": "shadowed_by_repository_premise",
+        },
+        {
+            "premise_id": "other-premise",
+            "document": "public/g2-issue-30-other-a.md",
+            "reason": "shadowed_by_lower_github_issue",
+        },
+        {
+            "premise_id": "scale-premise",
+            "document": "public/g4-issue-50-invalidate.md",
+            "reason": "github_invalidation_ignored",
+        },
+    ]
+
+    assert captured.err.strip().endswith(
+        ". Dropped 3 GitHub premise declaration(s): "
+        "scale-premise (public/g1-issue-9-redeclare.md: shadowed_by_repository_premise, "
+        "public/g4-issue-50-invalidate.md: github_invalidation_ignored); "
+        "other-premise (public/g2-issue-30-other-a.md: shadowed_by_lower_github_issue)"
+    )
+
+
 def test_index_persists_absolute_paths_so_serve_survives_a_different_working_directory(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
