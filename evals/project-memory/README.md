@@ -44,6 +44,112 @@ alternatives recovered across `square/leakcanary` and `emilk/egui`, 34 of 236 qu
 counterfactual the engine could not raise before, zero premises (nobody writes explicit `Premise:`
 lines in a GitHub issue).
 
+## The fusion rule is not the lever either, measured 2026-09-24
+
+Every section below varies what goes INTO the ranking -- the embedder, its prefix, a reranker on
+the way out, a noise filter on the corpus -- and none varies the ranking rule itself. That rule has
+three knobs no published number had moved together: the lexical leg's weight (1.0, or 0.1
+cross-lingually), the RRF constant (60, the literature default) and how a document's rank is
+derived from its passages' ranks, which is the position of its FIRST fused passage and discards
+every other passage the same document matched. `report_reach.py` had already established that the
+correct document is ranked every time and that the loss is in the last stretch of ordering; this
+asks whether that stretch is partly the rule. Nothing here needs a model, a reranker or a re-index:
+`evals/retrieval/run_fusion_sweep.py` computes both legs once per question and every condition is
+arithmetic over the cached ranks.
+
+### The method
+
+Same corpora, pins and questions as the 2026-09-20 section (`square/leakcanary` at `0f7dbab17e2a`,
+884 documents, 153 questions; `emilk/egui` at `5d3e958ecfd3`, 2,180 documents, 83 questions),
+indexed with the shipped default `jinaai/jina-embeddings-v2-base-es`, no reranker. Python 3.14,
+fastembed 0.8.0, M4 Pro, macOS, at this repository's commit `1d36bc7`. Three aggregations --
+`first` (shipped), `sum` (a document's score is the sum of its passages' RRF scores) and `doc_rrf`
+(each leg collapsed to a document rank BEFORE fusing, so a commit whose subject matched lexically
+and whose body matched semantically is credited for both) -- crossed with six lexical weights
+(0.25 to 2.0) and five RRF constants (10 to 100): 90 conditions. The `first w=1.0 k=60` row is
+asserted equal to `_fuse`'s own document order on every question before anything is printed, and
+it reproduces the published 0.373 / 0.554 / 0.436 digit-for-digit.
+
+### The result
+
+recall@3 / recall@10 / MRR@10 over both corpora (236 questions); `entered` and `left` are questions
+that moved into / out of the top 3 against the shipped rule, `p` the exact two-sided McNemar over
+those pairs. Best eight of ninety:
+
+| condition | recall@3 | recall@10 | MRR@10 | entered | left | p |
+|---|---|---|---|---|---|---|
+| `doc_rrf  w=1.0  k=10 ` | 0.458 | 0.564 | 0.390 | 6 | 1 | 0.1250 |
+| `first    w=0.75 k=20 ` | 0.458 | 0.555 | 0.390 | 5 | 0 | 0.0625 |
+| `doc_rrf  w=0.75 k=20 ` | 0.458 | 0.576 | 0.388 | 5 | 0 | 0.0625 |
+| `doc_rrf  w=0.25 k=40 ` | 0.458 | 0.581 | 0.386 | 8 | 3 | 0.2266 |
+| `doc_rrf  w=0.75 k=10 ` | 0.458 | 0.568 | 0.386 | 7 | 2 | 0.1797 |
+| `first    w=1.0  k=10 ` | 0.458 | 0.555 | 0.384 | 8 | 3 | 0.2266 |
+| `first    w=0.5  k=100` | 0.453 | 0.555 | 0.394 | 6 | 2 | 0.2891 |
+| `first    w=0.75 k=40 ` | 0.453 | 0.564 | 0.388 | 4 | 0 | 0.1250 |
+| `first    w=1.0  k=60 ` *(shipped)* | 0.436 | 0.559 | 0.380 | 0 | 0 | 1.0000 |
+
+**The best rule of ninety is worth five questions, and no rule reaches significance.** The
+strongest paired evidence is 5 entered / 0 left (p=0.0625), and that row was selected as the best
+of ninety, which is exactly the situation in which a p just above 0.05 should be read as noise. Per
+corpus: leakcanary's best is 0.405 against the shipped 0.373 (four conditions tie there, p ≥ 0.0625);
+egui's best is 0.578 against 0.554 (`doc_rrf w=1.0 k=10`, 3 entered / 1 left, p=0.625). The
+direction that recurs across the top rows -- a lexical weight below 1.0, a smaller `k` -- is
+consistent and small, and consistent-and-small at this sample size is not a change to ship.
+
+`sum` is the one clear finding, and it is negative: **every `sum` condition is below the shipped
+rule**, from 0.445 at its best (`k=10`) to 0.331 at `k=100`. Letting every passage of a document
+add to its score rewards documents for being long, and a git-derived corpus has long documents in
+proportion to how much a commit touched, not to how relevant it is.
+
+### A title leg does not help, and on egui it hurts significantly
+
+The questions are issue titles and the answers are the commits that closed them, so the obvious
+third leg is the query against each document's H1 -- the commit subject -- alone, on the hypothesis
+that a title resembles a subject more than it resembles the passage the subject is diluted in.
+`run_fusion_sweep.py --title-leg` embeds every subject with the same model and fuses that rank with
+the shipped order at document level:
+
+| condition | recall@3 | recall@10 | MRR@10 | entered | left | p |
+|---|---|---|---|---|---|---|
+| `first    w=1.0  k=60 ` *(shipped)* | 0.436 | 0.559 | 0.380 | 0 | 0 | 1.0000 |
+| `first    w=1.0  k=60  title=0.5` | 0.411 | 0.521 | 0.361 | 8 | 14 | 0.2863 |
+| `first    w=1.0  k=60  title=1.0` | 0.403 | 0.521 | 0.353 | 8 | 16 | 0.1516 |
+| `first    w=0.5  k=60  title=1.0` | 0.390 | 0.517 | 0.355 | 11 | 22 | 0.0801 |
+| `first    w=1.0  k=60  title=2.0` | 0.390 | 0.492 | 0.344 | 11 | 22 | 0.0801 |
+| `title    w=1.0  k=60 ` *(title leg alone)* | 0.343 | 0.436 | 0.305 | 10 | 32 | 0.0009 |
+
+Every weight loses on both corpora (leakcanary 0.373 → 0.340–0.359; egui 0.554 → 0.470–0.506), and
+the leg on its own is significantly worse than the shipped ranking on egui (0.398, 4 entered / 17
+left, p=0.0072) and pooled (p=0.0009). The subject is not the signal the passage is missing; the
+passage already carries it, prefixed by `_search_text`, next to the body that disambiguates it.
+
+### What this does not establish
+
+That the rule cannot be improved -- only that none of these ninety-five conditions improves it
+detectably on 236 questions, under one embedder. The lexical weight and `k` were not swept for
+bge, whose 2026-09-20 caveat about "a different fusion weight" therefore still stands for bge.
+Nothing about BM25's own `k1`/`b`, or about chunking, which stays the one input-side knob without a
+measurement on this page. And the reranker section below remains the only stage measured to move
+recall@3 by more than five questions on these corpora; this section closes off the cheap
+alternative to it rather than finding a new one.
+
+### Reproduce
+
+```bash
+# corpora and jina indexes exactly as in the 2026-09-20 section's Reproduce block, then:
+python evals/retrieval/run_fusion_sweep.py --corpus leakcanary --data-dir indexes/lc-jina \
+    --questions evals/project-memory/leakcanary-issues.jsonl --legs-cache /tmp/legs-lc.json \
+    --out /tmp/sweep-lc.jsonl --title-leg
+python evals/retrieval/run_fusion_sweep.py --corpus egui --data-dir indexes/egui-jina \
+    --questions evals/project-memory/egui-issues.jsonl --legs-cache /tmp/legs-egui.json \
+    --out /tmp/sweep-egui.jsonl --title-leg
+python evals/retrieval/report_fusion_sweep.py --ranks /tmp/sweep-lc.jsonl /tmp/sweep-egui.jsonl --top 8
+python evals/retrieval/report_fusion_sweep.py --ranks /tmp/sweep-lc.jsonl /tmp/sweep-egui.jsonl --only title
+```
+
+The first run of each corpus embeds every question and, with `--title-leg`, every document's H1;
+the legs cache makes every run after that a matter of seconds.
+
 ## The embedder was the bottleneck, measured 2026-09-20
 
 `## The model matters more than the weighting` below (2026-07-26) found `jina-embeddings-v2-base-es`
@@ -242,7 +348,9 @@ the same caveat every section on this page carries. Nothing about the reranker �
 Nothing about other bilingual pairs: `jina-v2-base-es` is Spanish-tuned specifically, and a corpus
 queried in a third language has no evidence here either way. The bge numbers are handicapped
 exactly as much as the prefix follow-up measures and no more; a fully-tuned bge deployment
-(different chunking, a reranker, a different fusion weight) is untested.
+(different chunking, a reranker, a different fusion weight) is untested. The fusion weight and RRF
+constant have since been swept for the jina default -- "The fusion rule is not the lever either",
+above -- and found not to matter there; for bge they remain unmeasured.
 
 ### Index build cost, model size, and this repository's own numbers
 
