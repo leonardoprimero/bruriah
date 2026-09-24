@@ -30,6 +30,17 @@ class SourceMetadata:
     # same premise id. `None` for a repository document, where it plays no role.
     github_issue: int | None = None
 
+    def __post_init__(self) -> None:
+        # `Literal["repository", "github"]` is a static-only guarantee: nothing stops a caller
+        # (untyped code, a `**kwargs` construction, a future frontmatter-driven value) from
+        # actually passing a third string at runtime. `index._build_premise_and_alternative_
+        # records` branches on `tier == "repository"`/`else` (the GitHub-tier path), so a bogus
+        # tier would silently fall into the GitHub, lower-trust branch -- the tier must fail
+        # closed here instead, the same `BuildConfig.__post_init__` pattern this module's sibling
+        # dataclass already uses.
+        if self.source not in ("repository", "github"):
+            raise ValueError("invalid_source_tier")
+
 
 @dataclass(frozen=True)
 class Passage:
