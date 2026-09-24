@@ -9,12 +9,34 @@ from datetime import date
 from pathlib import Path
 from typing import Any
 
-from .contracts import InvestigationRequest
+from .contracts import InvestigationRequest, ReadRequest
 from .corpus import CorpusPolicy
 from .index import BuildConfig, build_candidate, promote_candidate, snapshot_active
 from .packs import DomainPack
 from .registries import Registry
-from .service import InvestigateService, ServiceDeps
+from .repository import SnapshotRepository, resolve_counterfactual_refs_for_humans
+from .service import InvestigateService, ServiceDeps, read
+
+
+def _alternative_name(ref: str, deps: ServiceDeps) -> str:
+    """Dereference a bare `alt:v1:` ref to its stored name through the `read_evidence` path
+    (T4, investigate-boundary-v2) -- the natural seam for a single bare ref, unlike
+    `resolve_counterfactual_refs_for_humans`'s regex substitution over refs embedded inside
+    larger template text (`rationale`, `conflicts`) below. Falls back to the raw ref on anything
+    but an `ok`, COMPLETE read (T4.1, R3-demo-alt-name-truncated-json): a `truncated` item's
+    `content` is a byte-exact prefix, never a complete document, so it is not necessarily valid
+    JSON at all -- e.g. a `reason` long enough to exceed the default output budget cuts off
+    mid-string. Matching that resolver's not-found behavior, any of "not ok", truncated,
+    unparseable, not an object, or missing `name` falls back to the raw ref rather than raise."""
+    item = read(ReadRequest(refs=[ref]), deps).items[0]
+    if item.status != "ok" or item.content is None or item.truncated:
+        return ref
+    try:
+        disclosure = json.loads(item.content)
+    except json.JSONDecodeError:
+        return ref
+    name = disclosure.get("name") if isinstance(disclosure, dict) else None
+    return name if isinstance(name, str) else ref
 
 _SRC = Path(__file__).resolve().parent
 _DATA = _SRC / "data"
@@ -147,15 +169,17 @@ We evaluated FastMCP and rejected it. Supporting premise: fastmcp-no-forbid.
         out.write("Calling investigate_work(task=...)\n\n")
 
         with snapshot_active(p1, cfg) as active1:
-            s1 = InvestigateService(ServiceDeps(registry=reg, snapshot=active1))
+            deps1 = ServiceDeps(registry=reg, snapshot=active1)
+            s1 = InvestigateService(deps1)
             res1 = s1.investigate(InvestigationRequest(task=task_prompt))
 
             cf1 = res1.counterfactual_assessment
             if cf1:
+                repo1 = SnapshotRepository(active1.database)
                 out.write("  " + _format_red(f"🛑 VERDICT: {cf1.verdict}", use_color) + "\n")
-                out.write(f"  Matched Alternative: {cf1.matched_alternative}\n")
-                out.write(f"  Rationale: {cf1.rationale}\n")
-                out.write(f"  Conflicts: {res1.conflicts}\n\n")
+                out.write(f"  Matched Alternative: {_alternative_name(cf1.matched_alternative_ref, deps1)}\n")
+                out.write(f"  Rationale: {resolve_counterfactual_refs_for_humans(cf1.rationale, repo1)}\n")
+                out.write(f"  Conflicts: {[resolve_counterfactual_refs_for_humans(c, repo1) for c in res1.conflicts]}\n\n")
                 out.write(_format_green("RESULT: Agent is warned and flagged with an architectural conflict!", use_color) + "\n")
             else:
                 out.write("  No counterfactual assessment generated.\n")
@@ -191,15 +215,17 @@ FastMCP v2.0 added strict extra='forbid' validation. Premise fastmcp-no-forbid i
         out.write("Calling investigate_work(task=...)\n\n")
 
         with snapshot_active(p2, cfg) as active2:
-            s2 = InvestigateService(ServiceDeps(registry=reg, snapshot=active2))
+            deps2 = ServiceDeps(registry=reg, snapshot=active2)
+            s2 = InvestigateService(deps2)
             res2 = s2.investigate(InvestigationRequest(task=task_prompt))
 
             cf2 = res2.counterfactual_assessment
             if cf2:
+                repo2 = SnapshotRepository(active2.database)
                 out.write("  " + _format_yellow(f"🔄 VERDICT: {cf2.verdict}", use_color) + "\n")
-                out.write(f"  Matched Alternative: {cf2.matched_alternative}\n")
-                out.write(f"  Rationale: {cf2.rationale}\n")
-                out.write(f"  Conflicts: {res2.conflicts}\n\n")
+                out.write(f"  Matched Alternative: {_alternative_name(cf2.matched_alternative_ref, deps2)}\n")
+                out.write(f"  Rationale: {resolve_counterfactual_refs_for_humans(cf2.rationale, repo2)}\n")
+                out.write(f"  Conflicts: {[resolve_counterfactual_refs_for_humans(c, repo2) for c in res2.conflicts]}\n\n")
                 out.write(_format_green("RESULT: Bruriah tracks premise invalidation and signals that FastMCP now requires reevaluation!", use_color) + "\n")
             else:
                 out.write("  No counterfactual assessment generated.\n")

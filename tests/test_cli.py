@@ -79,7 +79,7 @@ def _evidence_for_cache(**overrides: object) -> EvidenceRecord:
         digest="sha256:" + "b" * 64,
         extraction_method="raw_lines",
         authority="unknown",
-        authority_rationale="Live HTTP fetch.",
+        authority_rationale="live_fetch_unassessed",
         freshness="unknown",
         license="unknown",
         reuse="unknown",

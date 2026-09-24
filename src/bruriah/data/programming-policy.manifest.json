@@ -1,8 +1,8 @@
 {
   "pack_id": "programming.minimal",
   "schema_version": "1",
-  "sha256": "951eb21961200ddd2e58c058acf67fcd31e220ef9ca5077d6387df61b4e2554c",
-  "signature": "p9KZIHnjnUUBX7OIL3Aq0kcnrLh7tKeZ/rcPoJyIkOXr0SCNqj28kMi89ZrsYyOAcQ3Dt5qcLGUr1kR27FvhBQ==",
+  "sha256": "4eddd40d1c163f50ba86715fb67177d79674eb00bb5446a562c4c804522c59b2",
+  "signature": "2qGESB6cNyRtdUeTXZVyBkZtUyBIMgNUR0jRnucBO1vrbEJEkga0gtkyR+QrMw1+fzPRfdfpIMH69K//zBKfDw==",
   "signer": "bruriah-release",
   "version": "1.0.0"
 }

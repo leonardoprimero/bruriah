@@ -1,8 +1,8 @@
 {
   "pack_id": "research.minimal",
   "schema_version": "1",
-  "sha256": "80ee4c7c3e3fb6cffb1f796e696f6c33abf79a951e8959827e24f1a217bdc08d",
-  "signature": "AUdqlaaP/3/3RYsK3afbVOeggIw/7zLS1GfMbxBwbfRCMqrWPtPZ/eSCdgpveCQYLFeG5N5Hbpyp9+Ka8NpKBg==",
+  "sha256": "60627d44e272edf31d389378c633cf59b6434f3959b529a40ea99fa262f1191f",
+  "signature": "YybeIUQSfhp7AifFI7hTorJ5fWSvXc4E8W+tX9pNRS7J+CibCKL+fSdVqOZ9MhYlmi6rj4f/8qDnM2RvvqMVDw==",
   "signer": "bruriah-release",
   "version": "1.0.0"
 }

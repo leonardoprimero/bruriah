@@ -10,6 +10,7 @@
 # prior synthetic-fixture CRITICALs. `service.investigate`/`service.read` are never mocked.
 from __future__ import annotations
 
+import hashlib
 import json
 import subprocess
 import threading
@@ -81,6 +82,12 @@ def _default_notes() -> dict[str, str]:
             f"delete_all tool. It also mentions an apple pie baking recipe for broad recall.\n{_FILLER}\n"
         ),
     }
+
+
+def _doc_ref(relative_path: str) -> str:
+    """T2 (investigate-boundary-v2): the opaque `doc:v1:<sha256>` ref evidence.locator now
+    carries, computed the identical way `corpus.parse_document` does."""
+    return f"doc:v1:{hashlib.sha256(relative_path.encode('utf-8')).hexdigest()}"
 
 
 @contextmanager
@@ -218,7 +225,8 @@ def test_retrieved_prompt_injection_stays_inert_through_the_protocol(tmp_path) -
         )
         assert result.isError is False
         injected = [
-            item for item in result.structuredContent["evidence"] if item["locator"] == "public/injection.md"
+            item for item in result.structuredContent["evidence"]
+            if item["locator"] == _doc_ref("public/injection.md")
         ]
         assert injected
         # The injected instruction is quoted evidence data only: no host action, no claim, no
@@ -374,7 +382,7 @@ def test_investigate_tool_with_code_target_over_mcp(tmp_path: Path) -> None:
             assert structured["status"] == "complete"
             gov_ev = next(ev for ev in structured["evidence"] if ev["authority"] == "primary")
             assert gov_ev["kind"] == "local"
-            assert "Governing architectural decision for script.py:1" in gov_ev["authority_rationale"]
+            assert gov_ev["authority_rationale"] == "code_target_governing_decision"
 
             # Read the exact lines using READ_TOOL
             ref = gov_ev["ref"]
@@ -384,6 +392,48 @@ def test_investigate_tool_with_code_target_over_mcp(tmp_path: Path) -> None:
             assert read_structured["items"][0]["status"] == "ok"
             assert "Why script was added" in read_structured["items"][0]["content"]
 
+        anyio.run(_drive, deps, body)
+
+
+def test_an_alt_ref_dereferences_over_mcp_and_the_published_schema_names_the_new_kinds(
+    tmp_path: Path,
+) -> None:
+    """T4 (investigate-boundary-v2): `read_evidence`'s published `outputSchema` advertises the
+    two new `evidence_kind` values, and a real `alt:v1:` ref an actual `investigate_work` call
+    returned dereferences to its stored name over the real MCP protocol session."""
+    notes = {
+        "adr-01.md": (
+            "---\ncommit: a1b2c3d4e5f6\nalternatives:\n  - name: FastMCP\n"
+            "    disposition: rejected\n    reason: Drops unknown fields silently.\n"
+            "    premises:\n      - fastmcp-no-forbid\n"
+            "premises:\n  - id: fastmcp-no-forbid\n"
+            "    statement: FastMCP lacks extra=\"forbid\"\n    status: active\n---\n"
+            "# ADR 001: Reject FastMCP\nWe evaluated FastMCP and rejected it.\n"
+        ),
+    }
+
+    async def body(session) -> None:
+        listed = await session.list_tools()
+        read_tool = next(tool for tool in listed.tools if tool.name == READ_TOOL)
+        evidence_kind_enum = (
+            read_tool.outputSchema["$defs"]["ReadItem"]["properties"]["evidence_kind"]["anyOf"][0]["enum"]
+        )
+        assert {"alternative", "premise"} <= set(evidence_kind_enum)
+
+        investigated = await session.call_tool(
+            INVESTIGATE_TOOL, {"task": "migrate server to FastMCP framework"}
+        )
+        assert investigated.isError is False
+        alt_ref = investigated.structuredContent["alternatives"][0]["ref"]
+
+        result = await session.call_tool(READ_TOOL, {"refs": [alt_ref]})
+        assert result.isError is False
+        item = result.structuredContent["items"][0]
+        assert item["status"] == "ok"
+        assert item["evidence_kind"] == "alternative"
+        assert json.loads(item["content"])["name"] == "FastMCP"
+
+    with _deps_for(tmp_path, notes) as deps:
         anyio.run(_drive, deps, body)
 
 

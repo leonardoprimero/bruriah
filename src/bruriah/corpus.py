@@ -94,6 +94,33 @@ def _digest(*parts: str) -> str:
     return hashlib.sha256("\0".join(parts).encode()).hexdigest()
 
 
+def document_ref_for(relative_path: str) -> str:
+    """The `doc:v1:<sha256>` ref `parse_document` mints for a document at `relative_path`
+    (posix, relative to the corpus root) -- the single source of truth for computing it, so a
+    caller that needs to recognize a document by its ref (e.g. `evaluation.py`'s golden-query
+    gate, since T2/investigate-boundary-v2 made `EvidenceRecord.locator` this opaque ref rather
+    than the raw path) never re-derives the hash formula itself."""
+    return f"doc:v1:{_digest(relative_path)}"
+
+
+def alternative_ref_for(document_ref: str, name: str) -> str:
+    """The `alt:v1:<sha256>` ref for an evaluated alternative (T3, investigate-boundary-v2):
+    the hash of `document_ref + "\\x00" + name`, unique because `alternatives`' own PRIMARY KEY
+    is `(name, document_ref)` (`index.py`). Opaque and deterministic -- no index migration, no
+    new column -- so both `service.py::_evaluate_counterfactual` (minting it) and
+    `repository.py`'s local resolver (recomputing it over a stored row to look one back up)
+    share this one formula rather than re-deriving it."""
+    return f"alt:v1:{_digest(document_ref, name)}"
+
+
+def premise_ref_for(premise_id: str) -> str:
+    """The `premise:v1:<sha256>` ref for a premise (T3, investigate-boundary-v2): the hash of
+    `premise_id` alone, unique because `premises.premise_id` is the table's own PRIMARY KEY
+    (`index.py`) -- globally unique across every document. Opaque and deterministic, the same
+    one-formula pattern as `document_ref_for`/`alternative_ref_for`."""
+    return f"premise:v1:{_digest(premise_id)}"
+
+
 def _frontmatter(lines: list[str]) -> tuple[dict[str, Any], int]:
     if not lines or lines[0].rstrip("\r\n") != "---":
         return {}, 0
@@ -252,7 +279,7 @@ def parse_document(path: Path, root: Path, policy: CorpusPolicy) -> Document:
     frontmatter, body_start = _frontmatter(lines)
     relative = resolved.relative_to(root.resolve(strict=True)).as_posix()
     source_hash = hashlib.sha256(raw).hexdigest()
-    document_ref = f"doc:v1:{_digest(relative)}"
+    document_ref = document_ref_for(relative)
     metadata = _metadata(frontmatter)
     tokens = MarkdownIt("commonmark").parse("".join(lines[body_start:]))
     headings: list[tuple[int, int, str]] = []

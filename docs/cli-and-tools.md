@@ -377,7 +377,10 @@ agent → investigate_work({
   "code_target": "src/bruriah/mcp_server.py:42"
 })
 
-// 2. Bruriah returns the governing architectural decision as primary evidence with DAG alerts
+// 2. Bruriah returns the governing architectural decision as primary evidence with DAG alerts.
+// Since 2.0.0 (schema_version "2"), authority_rationale is a closed code and conflicts/claims
+// text is built only from a validated commit sha, the code target and a closed relation --
+// never the decision's markdown-authored subject or author.
 bruriah ← {
   "status": "complete",
   "evidence": [
@@ -385,17 +388,17 @@ bruriah ← {
       "ref": "chunk:v1:6d43293...",
       "kind": "local",
       "authority": "primary",
-      "authority_rationale": "Governing architectural decision for src/bruriah/mcp_server.py:42...",
+      "authority_rationale": "code_target_governing_decision",
       "freshness": "stale",
       "conflict": "declared"
     }
   ],
   "conflicts": [
-    "Decision in 2026-07-23-e8f3003b.md governing src/bruriah/mcp_server.py:42 has been superseded by..."
+    "Decision e8f3003bda26 governing src/bruriah/mcp_server.py:42 has been superseded by f6e5d4c3"
   ],
   "claims": [
     {
-      "text": "Governing decision e8f3003b for src/bruriah/mcp_server.py:42 is supersedes",
+      "text": "Governing decision e8f3003bda26 for src/bruriah/mcp_server.py:42 is superseded",
       "state": "conflicted"
     }
   ]

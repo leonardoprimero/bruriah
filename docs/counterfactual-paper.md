@@ -133,39 +133,46 @@ While competitors expose 20 to 50 granular MCP endpoints (e.g. `save_memory`, `s
 1. `investigate_work(task, code_target)`: Resolves governing decisions, lineage alerts, and counterfactual assessments.
 2. `read_evidence(refs, ranges)`: Slices byte-for-byte immutable evidence from local repository snapshots.
 
-When `investigate_work` runs, it executes counterfactual evaluation in sub-millisecond time:
+When `investigate_work` runs, it executes counterfactual evaluation in sub-millisecond time. As of
+2.0.0 (`schema_version: "2"`), every corpus-authored value -- the alternative's name, its rejection
+reason, a premise's statement -- leaves this response as an opaque reference; `rationale` and
+`conflicts` are fixed wording built only from refs, counts and the verdict, never from that text.
+A caller that needs the name resolves the ref explicitly through `read_evidence`:
 ```json
 {
   "counterfactual_assessment": {
-    "matched_alternative": "FastMCP",
-    "decision_ref": "public/2026-07-20-e8f3003b-refactor-mcp.md",
+    "matched_alternative_ref": "alt:v1:a21ab7011a3889f1a8e86c338126181018a280b3d53e5c93b7401f61d3dacb2f",
+    "decision_ref": "doc:v1:141c897dc0d685fae30e1230c30ddecf8501b3b946c8102beb611a5b316c93cd",
     "verdict": "repeat_of_rejected_architecture",
     "supporting_evidence": [
-      "public/2026-07-20-e8f3003b-refactor-mcp.md#1-24"
+      "doc:v1:141c897dc0d685fae30e1230c30ddecf8501b3b946c8102beb611a5b316c93cd#L1-24"
     ],
-    "rationale": "Alternative 'FastMCP' was evaluated and rejected because: Drops unknown fields silently without extra='forbid'. All supporting premises (fastmcp-no-forbid) remain active."
+    "rationale": "Alternative alt:v1:a21ab7011a3889f1a8e86c338126181018a280b3d53e5c93b7401f61d3dacb2f (rejected) matches the task. All 1 supporting premise(s) remain active."
   },
   "conflicts": [
-    "Task matches rejected architecture 'FastMCP' under active premises: Drops unknown fields silently without extra='forbid'"
+    "Task matches rejected architecture alt:v1:a21ab7011a3889f1a8e86c338126181018a280b3d53e5c93b7401f61d3dacb2f under active premises"
   ],
   "alternatives": [
     {
-      "name": "FastMCP",
+      "ref": "alt:v1:a21ab7011a3889f1a8e86c338126181018a280b3d53e5c93b7401f61d3dacb2f",
       "disposition": "rejected",
-      "reason": "Drops unknown fields silently without extra='forbid'",
-      "premises": ["fastmcp-no-forbid"]
+      "decision_ref": "doc:v1:141c897dc0d685fae30e1230c30ddecf8501b3b946c8102beb611a5b316c93cd",
+      "premise_refs": ["premise:v1:8d9600d217286b5cfd031da9340ad3dfb0d131b5a35f3afa644ae6cff9bf57e3"]
     }
   ],
   "premises": [
     {
-      "id": "fastmcp-no-forbid",
-      "statement": "FastMCP derives schemas without extra='forbid'",
+      "ref": "premise:v1:8d9600d217286b5cfd031da9340ad3dfb0d131b5a35f3afa644ae6cff9bf57e3",
       "status": "active",
-      "invalidated_by": null
+      "decision_ref": "doc:v1:141c897dc0d685fae30e1230c30ddecf8501b3b946c8102beb611a5b316c93cd",
+      "invalidated_by": null,
+      "invalidated_in": null
     }
   ]
 }
 ```
+The human-facing CLI view (`bruriah ask`, without `--json`) resolves these refs locally and still
+prints the name, reason and statement; `--json` output and the MCP surface stay ref-only.
 
 ---
 

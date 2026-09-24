@@ -43,6 +43,7 @@ from dataclasses import dataclass
 from typing import Any, Literal
 from urllib.parse import urlsplit
 
+from . import agent_surface
 from .cache import find_by_ref
 from .classify import classify
 from .context import assemble_context, compact_to_budget
@@ -51,6 +52,7 @@ from .contracts import (
     InvestigationRequest, InvestigationResult, PermissionDisclosure, PremiseRecord,
     ReadItem, ReadRange, ReadRequest, ReadResult,
 )
+from .corpus import alternative_ref_for, premise_ref_for
 from .dispatch import DEFAULT_SKILL_CEILING, SkillDispatch, dispatch
 from .index import ActiveSnapshot
 from .lookup import LookupResult, SkillMatch, discover, resolve_capability
@@ -59,7 +61,9 @@ from .skills import PermissionEnvelope, SkillSet
 from .registries import Registry
 from .repository import RepositoryError, SnapshotRepository
 from .research import NetworkLedger, ResearchDeps, ResearchOutcome, research
-from .retrieval import EmbedQuery, Rerank, SearchService, is_shortfall, to_evidence_records
+from .retrieval import (
+    EmbedQuery, Rerank, SearchService, build_local_evidence_record, is_shortfall, to_evidence_records,
+)
 from .route import route
 from .why import WhyError, trace_causal_archaeology
 
@@ -69,6 +73,12 @@ _SKILL_REF_PREFIX = "skill:"
 # as a constant, next to the two it joins, so the routing table in `read()` reads as one list of
 # ref kinds rather than two named prefixes and a literal.
 _LIVE_REF_PREFIX = "live:"
+# T4 (investigate-boundary-v2): the counterfactual contract's opaque refs (`corpus.py`'s
+# `alternative_ref_for`/`premise_ref_for`), now dereferenceable through `read_evidence` too --
+# `investigate_work` mints them, `read_evidence` is the explicit, caller-requested channel
+# allowed to disclose the stored corpus prose behind them.
+_ALTERNATIVE_REF_PREFIX = "alt:v1:"
+_PREMISE_REF_PREFIX = "premise:v1:"
 
 
 class ServiceError(ValueError):
@@ -195,7 +205,7 @@ def _capability_evidence_record(capability: CapabilityPolicy) -> EvidenceRecord:
         citation_locator=f"{capability.capability_id}@{capability.version}",
         digest=_capability_digest(capability),
         authority="unknown",
-        authority_rationale="Capability identity only; permissions and limitations are disclosed on read.",
+        authority_rationale="capability_identity_only",
         freshness="unknown", license="unknown", conflict="unknown",
     )
 
@@ -244,7 +254,10 @@ def _skill_evidence_record(entry: SkillDispatch) -> EvidenceRecord:
             f"currency:{entry.currency}", f"trusted:{str(entry.trusted).lower()}",
         ],
         authority="unknown",
-        authority_rationale=skill.summary,
+        # T2 (investigate-boundary-v2): a closed code, never `skill.summary` (author-declared
+        # pack text). A caller who wants the summary reads it via `read_evidence`'s
+        # `skill:<id>@<version>` disclosure, which still carries it verbatim on explicit request.
+        authority_rationale="skill_dispatch_declared",
         # `freshness` speaks the contract's existing three words. A demoted skill says so HERE,
         # in the field a client already reads, rather than in a new channel nobody parses.
         freshness=entry.currency, license="unknown", conflict="unknown",
@@ -445,21 +458,22 @@ def _apply_lineage(
         rel = rel_item.relation
 
         if pred_ref and pred_ref in doc_to_refs:
-            succ_path = repo.get_document_path(succ_ref) or succ_ref
-
+            # T2 (investigate-boundary-v2): `pred_ref`/`succ_ref` ARE already the document_refs
+            # -- never resolve them to a file path (`repo.get_document_path`) or read one out of
+            # `ref_to_doc`'s passage-metadata tuple, which is exactly what `lineage-successor-
+            # file-name` and its sibling cases measured leaking.
             for target_ref in doc_to_refs[pred_ref]:
                 overrides = ref_overrides.setdefault(target_ref, {})
                 if rel == "supersedes":
                     overrides["freshness"] = "stale"
                     overrides["conflict"] = "declared"
-                    overrides.setdefault("uncertainty", []).append(f"superseded_by:{succ_path}")
+                    overrides.setdefault("uncertainty", []).append(f"superseded_by:{succ_ref}")
                 elif rel == "deprecates":
                     overrides["freshness"] = "stale"
-                    overrides.setdefault("uncertainty", []).append(f"deprecated_by:{succ_path}")
+                    overrides.setdefault("uncertainty", []).append(f"deprecated_by:{succ_ref}")
 
             if rel == "supersedes":
-                pred_path = ref_to_doc[doc_to_refs[pred_ref][0]][1]
-                conflicts.append(f"Decision in {pred_path} was superseded by {succ_path}")
+                conflicts.append(f"Decision {pred_ref} was superseded by {succ_ref}")
 
                 succ_passages = repo.get_passages_by_document(succ_ref, limit=1)
                 supporting_refs: list[str] = []
@@ -468,24 +482,16 @@ def _apply_lineage(
                     if p.ref not in existing_refs:
                         existing_refs.add(p.ref)
                         additional_evidence.append(
-                            EvidenceRecord(
-                                ref=p.ref,
-                                kind="local",
-                                publisher=p.relative_path,
-                                locator=p.relative_path,
-                                citation_locator=f"{p.relative_path}#{p.start_line}-{p.end_line}",
-                                digest=f"sha256:{p.source_hash}",
-                                extraction_method="markdown_section",
-                                authority="unknown",
-                                authority_rationale="not_assessed_by_retrieval",
-                                freshness="current",
-                                license="unknown",
-                                conflict="none",
+                            build_local_evidence_record(
+                                ref=p.ref, document_ref=p.document_ref,
+                                start_line=p.start_line, end_line=p.end_line, source_hash=p.source_hash,
+                                authority="unknown", authority_rationale="not_assessed_by_retrieval",
+                                freshness="current", conflict="none",
                             )
                         )
                 claims.append(
                     ClaimRecord(
-                        text=f"Decision in {pred_path} was superseded by {succ_path}",
+                        text=f"Decision {pred_ref} was superseded by {succ_ref}",
                         state="conflicted",
                         supporting_refs=supporting_refs,
                         conflicting_refs=doc_to_refs[pred_ref],
@@ -564,7 +570,6 @@ def _resolve_code_target_causality(
 
     p_first = passages_rows[0]
     p_ref = p_first.ref
-    p_path = p_first.relative_path
     p_start = p_first.start_line
     p_end = p_first.end_line
     p_hash = p_first.source_hash
@@ -577,27 +582,19 @@ def _resolve_code_target_causality(
         for a in alerts
     ]
 
-    rationale = (
-        f"Governing architectural decision for {code_target} decided by {gov.author} "
-        f"on {gov.date} (commit {gov.commit_sha[:12]})."
-    )
-
-    ev_record = EvidenceRecord(
-        ref=p_ref,
-        kind="local",
-        publisher=p_path,
-        locator=p_path,
-        citation_locator=f"{p_path}#{p_start}-{p_end}",
-        digest=f"sha256:{p_hash}",
-        extraction_method="markdown_section",
+    # T2 (investigate-boundary-v2): `commit_sha`/`line_commit.sha` are validated shas
+    # (`agent_surface.short_commit_sha`), never the raw markdown-parsed author -- the governing
+    # author is dropped from provenance_chain entirely, closing `code-target-author`.
+    ev_record = build_local_evidence_record(
+        ref=p_ref, document_ref=gov.document_ref,
+        start_line=p_start, end_line=p_end, source_hash=p_hash,
         provenance_chain=[
-            f"commit:{gov.commit_sha[:12]}",
-            f"line_commit:{res.line_commit.sha[:12]}",
-            f"author:{gov.author}",
+            f"commit:{agent_surface.short_commit_sha(gov.commit_sha)}",
+            f"line_commit:{agent_surface.short_commit_sha(res.line_commit.sha)}",
             f"target:{code_target}",
         ][:10],
         authority="primary",
-        authority_rationale=rationale,
+        authority_rationale="code_target_governing_decision",
         freshness=freshness,
         license="permitted",
         reuse="permitted",
@@ -609,18 +606,28 @@ def _resolve_code_target_causality(
     conflicting_refs: list[str] = []
     if alerts:
         for alert in alerts:
+            # T2: rebuilt from structure -- the document, the relation (a closed vocabulary --
+            # `agent_surface.KNOWN_LINEAGE_STATES`), and a validated sha or, failing that, the
+            # bare successor ref. Neither `alert.successor_subject` nor
+            # `alert.active_successor_subject` (both markdown-parsed, author-controlled text)
+            # reach this message -- closing `code-target-successor-subject`.
+            succ_sha = agent_surface.short_commit_sha(alert.successor_commit) if alert.successor_commit else None
+            succ_identifier = succ_sha if succ_sha and succ_sha != agent_surface.UNKNOWN else alert.successor_ref
             conf_msg = (
-                f"Decision in {p_path} governing {code_target} has been {alert.relation} "
-                f"by {alert.successor_commit[:8] if alert.successor_commit else alert.successor_ref}: "
-                f"{alert.successor_subject or 'successor'}"
+                f"Decision {agent_surface.short_commit_sha(gov.commit_sha)} governing {code_target} "
+                f"has been {alert.relation} by {succ_identifier}"
             )
             if alert.depth > 1 and alert.active_successor_ref:
-                act_str = (
-                    alert.active_successor_commit[:8]
+                active_sha = (
+                    agent_surface.short_commit_sha(alert.active_successor_commit)
                     if alert.active_successor_commit
+                    else None
+                )
+                active_identifier = (
+                    active_sha if active_sha and active_sha != agent_surface.UNKNOWN
                     else alert.active_successor_ref
                 )
-                conf_msg += f" (evolved to active leaf {act_str}: {alert.active_successor_subject or 'active'})"
+                conf_msg += f" (evolved to active leaf {active_identifier})"
             conflicts.append(conf_msg)
 
             try:
@@ -634,19 +641,14 @@ def _resolve_code_target_causality(
                     for s in succ_passages:
                         conflicting_refs.append(s.ref)
                         evidence.append(
-                            EvidenceRecord(
-                                ref=s.ref,
-                                kind="local",
-                                publisher=s.relative_path,
-                                locator=s.relative_path,
-                                citation_locator=f"{s.relative_path}#{s.start_line}-{s.end_line}",
-                                digest=f"sha256:{s.source_hash}",
-                                extraction_method="markdown_section",
+                            build_local_evidence_record(
+                                ref=s.ref, document_ref=s.document_ref,
+                                start_line=s.start_line, end_line=s.end_line, source_hash=s.source_hash,
                                 authority="primary",
                                 authority_rationale=(
-                                    f"Active successor decision for {code_target}"
+                                    "code_target_active_successor"
                                     if is_active_leaf
-                                    else f"Intermediate successor decision ({alert.relation}) for {code_target}"
+                                    else "code_target_intermediate_successor"
                                 ),
                                 freshness="current" if is_active_leaf else "stale",
                                 license="permitted",
@@ -658,16 +660,20 @@ def _resolve_code_target_causality(
 
         claims.append(
             ClaimRecord(
-                text=f"Governing decision {gov.commit_sha[:8]} for {code_target} is {alerts[0].relation}",
+                text=(
+                    f"Governing decision {agent_surface.short_commit_sha(gov.commit_sha)} "
+                    f"for {code_target} is {alerts[0].relation}"
+                ),
                 state="conflicted",
                 supporting_refs=[p_ref],
                 conflicting_refs=conflicting_refs,
             )
         )
     else:
+        # T2: the governing decision's subject is dropped -- closing `code-target-subject`.
         claims.append(
             ClaimRecord(
-                text=f"Decision {gov.commit_sha[:8]} ({gov.subject}) governs {code_target}",
+                text=f"Decision {agent_surface.short_commit_sha(gov.commit_sha)} governs {code_target}",
                 state="supported",
                 supporting_refs=[p_ref],
                 conflicting_refs=[],
@@ -706,10 +712,23 @@ def _evaluate_counterfactual(
 
     for alt in alt_rows:
         alt_name_lower = alt.name.lower()
-        # 1. Exact substring
-        if alt_name_lower in task_text or (target_text and alt_name_lower in target_text):
-            matched_alt = alt
-            break
+        alt_all_tokens = re.findall(r"\w+", alt_name_lower)
+        # T3 (investigate-boundary-v2): the name-match floor. A name with no token of at least 3
+        # characters (e.g. "A", "Go", "Q") is not specific enough to identify a task -- under the
+        # old code it fell straight into step 1's raw substring check, which a 1-2 character name
+        # satisfies against almost any English text, silently shadowing every alternative that
+        # sorts after it in `get_alternatives()`'s PK order. Skipped entirely, never even tried
+        # against steps 2/3.
+        if not any(len(tok) >= 3 for tok in alt_all_tokens):
+            continue
+
+        # 1. Exact substring -- only once the name itself is long enough (>= 4 chars) to identify
+        # a task unambiguously. A name that clears the floor above but is still only 3 characters
+        # (e.g. "SQL") can match ONLY through the anchored word-boundary step below.
+        if len(alt_name_lower) >= 4:
+            if alt_name_lower in task_text or (target_text and alt_name_lower in target_text):
+                matched_alt = alt
+                break
 
         # 2. Word boundary regex
         try:
@@ -721,7 +740,7 @@ def _evaluate_counterfactual(
             pass
 
         # 3. Token-set match: all distinct keywords (len >= 3) of the alternative appear in the text
-        alt_tokens = [tok for tok in re.findall(r"\w+", alt_name_lower) if len(tok) >= 3]
+        alt_tokens = [tok for tok in alt_all_tokens if len(tok) >= 3]
         if len(alt_tokens) >= 2:
             if all(tok in task_text or any(w.startswith(tok[:4]) for w in all_words) for tok in alt_tokens):
                 matched_alt = alt
@@ -746,6 +765,16 @@ def _evaluate_counterfactual(
         if pid not in premises_map or premises_map[pid].status not in ("active", "invalidated")
     ]
 
+    # T3 (investigate-boundary-v2): the opaque ref this match is reported under everywhere below
+    # -- never `matched_alt.name` itself. Same formula the local resolver
+    # (`repository.resolve_alternative_ref`) recomputes to look the row back up.
+    alt_ref = alternative_ref_for(matched_alt.document_ref, matched_alt.name)
+    disposition_val: Literal["rejected", "deferred", "superseded"] = (
+        matched_alt.disposition  # type: ignore[assignment]
+        if matched_alt.disposition in ("rejected", "deferred", "superseded")
+        else "rejected"
+    )
+
     supporting_refs: list[str] = []
     cf_evidence: list[EvidenceRecord] = []
 
@@ -753,21 +782,15 @@ def _evaluate_counterfactual(
         doc_passages = snapshot_repo.get_passages_by_document(matched_alt.document_ref, limit=1)
         for p in doc_passages:
             supporting_refs.append(p.ref)
+            # T2 (investigate-boundary-v2): a closed code, never a sentence built from the
+            # alternative's name/disposition -- part of `md-alt-name`'s
+            # `.evidence[0].authority_rationale` leak_fields entry.
             cf_evidence.append(
-                EvidenceRecord(
-                    ref=p.ref,
-                    kind="local",
-                    publisher=p.relative_path,
-                    locator=p.relative_path,
-                    citation_locator=f"{p.relative_path}#{p.start_line}-{p.end_line}",
-                    digest=f"sha256:{p.source_hash}",
-                    extraction_method="markdown_section",
-                    authority="primary",
-                    authority_rationale=f"Evaluated alternative '{matched_alt.name}' ({matched_alt.disposition}).",
-                    freshness="current",
-                    license="permitted",
-                    reuse="permitted",
-                    conflict="none",
+                build_local_evidence_record(
+                    ref=p.ref, document_ref=p.document_ref,
+                    start_line=p.start_line, end_line=p.end_line, source_hash=p.source_hash,
+                    authority="primary", authority_rationale="counterfactual_alternative_evidence",
+                    freshness="current", license="permitted", reuse="permitted", conflict="none",
                 )
             )
     except RepositoryError:
@@ -781,14 +804,27 @@ def _evaluate_counterfactual(
             "unassessed_premise",
         ] = "premise_changed_requires_reevaluation"
         inv_p = invalidated_premises[0]
-        inv_by = f"commit {inv_p.invalidated_by[:12]}" if inv_p.invalidated_by else "subsequent decision"
+        inv_p_ref = premise_ref_for(inv_p.premise_id)
+        # T3: `invalidated_by` was never validated as a real sha (`md-premise-invalidated-by`
+        # -- a document's own `commit:` frontmatter, fully attacker-controlled). Routed through
+        # `agent_surface.commit_sha` here too, exactly like `PremiseRecord.invalidated_by` below,
+        # so the rationale/conflict text can never carry the raw, unvalidated value.
+        validated_sha = agent_surface.commit_sha(inv_p.invalidated_by)
+        inv_by_display = (
+            validated_sha if validated_sha != agent_surface.UNKNOWN else "an unvalidated decision"
+        )
+        # T3 (investigate-boundary-v2): fixed wording built only from refs, counts, the verdict
+        # and a validated sha -- never from `matched_alt.name`/`.reason` or a premise's own
+        # statement, closing `md-alt-name`/`md-alt-reason`/`md-premise-*` as conflict/rationale
+        # channels.
         rationale = (
-            f"Alternative '{matched_alt.name}' was evaluated and {matched_alt.disposition} "
-            f"because: {matched_alt.reason}. However, premise '{inv_p.premise_id}' was "
-            f"invalidated by {inv_by}. The decision requires reevaluation under current conditions."
+            f"Alternative {alt_ref} ({disposition_val}) is contested: premise {inv_p_ref} was "
+            f"invalidated by {inv_by_display}. {len(invalidated_premises)} of its premise(s) are "
+            "now invalidated; the decision requires reevaluation under current conditions."
         )
         cf_conflicts.append(
-            f"Historical rejection of '{matched_alt.name}' questioned: premise '{inv_p.premise_id}' was invalidated by {inv_by}"
+            f"Historical rejection of {alt_ref} questioned: premise {inv_p_ref} was invalidated "
+            f"by {inv_by_display}"
         )
 
         inv_doc = inv_p.invalidation_document_ref or inv_p.document_ref
@@ -799,20 +835,12 @@ def _evaluate_counterfactual(
                     if p.ref not in supporting_refs:
                         supporting_refs.append(p.ref)
                         cf_evidence.append(
-                            EvidenceRecord(
-                                ref=p.ref,
-                                kind="local",
-                                publisher=p.relative_path,
-                                locator=p.relative_path,
-                                citation_locator=f"{p.relative_path}#{p.start_line}-{p.end_line}",
-                                digest=f"sha256:{p.source_hash}",
-                                extraction_method="markdown_section",
+                            build_local_evidence_record(
+                                ref=p.ref, document_ref=p.document_ref,
+                                start_line=p.start_line, end_line=p.end_line, source_hash=p.source_hash,
                                 authority="primary",
-                                authority_rationale=f"Invalidated premise '{inv_p.premise_id}'.",
-                                freshness="current",
-                                license="permitted",
-                                reuse="permitted",
-                                conflict="none",
+                                authority_rationale="counterfactual_invalidated_premise_evidence",
+                                freshness="current", license="permitted", reuse="permitted", conflict="none",
                             )
                         )
             except RepositoryError:
@@ -820,28 +848,19 @@ def _evaluate_counterfactual(
     elif active_premises and not unassessed_premises:
         verdict = "repeat_of_rejected_architecture"
         rationale = (
-            f"Alternative '{matched_alt.name}' was evaluated and {matched_alt.disposition} "
-            f"because: {matched_alt.reason}. All supporting premises "
-            f"({', '.join(matched_alt.premises)}) remain active."
+            f"Alternative {alt_ref} ({disposition_val}) matches the task. All "
+            f"{len(active_premises)} supporting premise(s) remain active."
         )
-        cf_conflicts.append(
-            f"Task matches rejected architecture '{matched_alt.name}' under active premises: {matched_alt.reason}"
-        )
+        cf_conflicts.append(f"Task matches rejected architecture {alt_ref} under active premises")
     else:
         verdict = "unassessed_premise"
         rationale = (
-            f"Alternative '{matched_alt.name}' was evaluated and {matched_alt.disposition} "
-            f"({matched_alt.reason}), but supporting premises have no current verification record."
+            f"Alternative {alt_ref} ({disposition_val}) matches the task, but its "
+            f"{len(unassessed_premises)} premise(s) have no current verification record."
         )
 
-    disposition_val: Literal["rejected", "deferred", "superseded"] = (
-        matched_alt.disposition  # type: ignore[assignment]
-        if matched_alt.disposition in ("rejected", "deferred", "superseded")
-        else "rejected"
-    )
-
     assessment = CounterfactualAssessment(
-        matched_alternative=matched_alt.name,
+        matched_alternative_ref=alt_ref,
         decision_ref=matched_alt.document_ref,
         verdict=verdict,
         supporting_evidence=supporting_refs,
@@ -850,10 +869,10 @@ def _evaluate_counterfactual(
 
     alt_records = [
         AlternativeRecord(
-            name=matched_alt.name,
+            ref=alt_ref,
             disposition=disposition_val,
-            reason=matched_alt.reason,
-            premises=list(matched_alt.premises),
+            decision_ref=matched_alt.document_ref,
+            premise_refs=[premise_ref_for(pid) for pid in matched_alt.premises],
         )
     ]
 
@@ -866,13 +885,16 @@ def _evaluate_counterfactual(
                 if p_row.status in ("active", "invalidated", "uncertain")
                 else "uncertain"
             )
+            p_validated_sha = agent_surface.commit_sha(p_row.invalidated_by)
             premise_records.append(
                 PremiseRecord(
-                    id=p_row.premise_id,
-                    statement=p_row.statement,
+                    ref=premise_ref_for(p_row.premise_id),
                     status=p_status,
-                    invalidated_by=p_row.invalidated_by,
-                    rationale=p_row.rationale,
+                    decision_ref=p_row.document_ref,
+                    invalidated_by=(
+                        p_validated_sha if p_validated_sha != agent_surface.UNKNOWN else None
+                    ),
+                    invalidated_in=p_row.invalidation_document_ref,
                 )
             )
 
@@ -1050,7 +1072,7 @@ class InvestigateService:
                 host_actions = host_actions + [drafting]
 
         result = InvestigationResult(
-            schema_version="1", status=status, request_id=request_id, evidence=evidence,
+            schema_version="2", status=status, request_id=request_id, evidence=evidence,
             claims=lineage_claims, conflicts=lineage_conflicts, gaps=list(decision.gaps) + extra_gaps, host_actions=host_actions,
             warnings=warnings, degradation=degradation, budgets=request.budgets, next_cursor=next_cursor,
             alternatives=cf_alts, premises=cf_premises, counterfactual_assessment=cf_assessment,
@@ -1226,6 +1248,84 @@ def _read_live_one(
     return item, remaining_total - len(window)
 
 
+def _read_disclosure_one(
+    disclosure: str, evidence_kind: Literal["alternative", "premise"], locator: str, citation_locator: str,
+    ref: str, requested_range: ReadRange | None, cursor_start: int | None,
+    item_cap: int, remaining_total: int, request_id: str,
+) -> tuple[ReadItem, int]:
+    # T4.1 (investigate-boundary-v2, R2-t4-read-alt-premise-duplicated-body): the windowing,
+    # cursor-minting, digesting and `ReadItem` construction that `_read_alternative_one` and
+    # `_read_premise_one` used to each write out in full -- identical past the point where a row
+    # resolves. The caller still owns resolving the ref to a row (`missing_ref` on a miss) and
+    # building `disclosure`/`locator`/`citation_locator`, since those differ by kind.
+    windowed = _window_text(disclosure, requested_range, cursor_start, item_cap, remaining_total)
+    if windowed is None:
+        return ReadItem(ref=ref, status="invalid_range"), remaining_total
+    window, start, actual_end, truncated = windowed
+    next_cursor = _encode_cursor(request_id, ref, actual_end + 1) if truncated else None
+
+    item = ReadItem(
+        ref=ref, status="ok", content=window, start=start, end=actual_end,
+        digest=f"sha256:{hashlib.sha256(disclosure.encode('utf-8')).hexdigest()}",
+        truncated=truncated, next_cursor=next_cursor,
+        evidence_kind=evidence_kind, locator=locator, citation_locator=citation_locator,
+        authority="unknown", freshness="unknown", license="unknown", conflict="unknown",
+    )
+    return item, remaining_total - len(window)
+
+
+def _read_alternative_one(
+    repo: SnapshotRepository, ref: str, requested_range: ReadRange | None, cursor_start: int | None,
+    item_cap: int, remaining_total: int, request_id: str,
+) -> tuple[ReadItem, int]:
+    # Resolves an `alt:v1:<hash>` ref back to its stored row (T4, investigate-boundary-v2),
+    # mirroring `_read_capability_one`/`_read_skill_one`: not-found is a typed `missing_ref`,
+    # never a fabricated or nearest-match record. Content is the row's own corpus-authored
+    # `name`/`reason` as canonical JSON -- both were dropped from `investigate_work`'s wire
+    # contract in T3 (`AlternativeRecord.ref` replaces them), and `read_evidence` is the
+    # explicit, caller-requested channel allowed to disclose them on request. `premise_refs` are
+    # opaque `premise:v1:` refs, never the raw premise ids `alternatives.premises_json` stores.
+    row = repo.resolve_alternative_ref(ref)
+    if row is None:
+        return ReadItem(ref=ref, status="missing_ref"), remaining_total
+    disclosure = _canonical_json({
+        "name": row.name, "disposition": row.disposition, "reason": row.reason,
+        "decision_ref": row.document_ref,
+        "premise_refs": [premise_ref_for(pid) for pid in row.premises],
+    })
+    return _read_disclosure_one(
+        disclosure=disclosure, evidence_kind="alternative", locator=row.document_ref,
+        citation_locator=f"{row.document_ref}#{row.name}", ref=ref,
+        requested_range=requested_range, cursor_start=cursor_start,
+        item_cap=item_cap, remaining_total=remaining_total, request_id=request_id,
+    )
+
+
+def _read_premise_one(
+    repo: SnapshotRepository, ref: str, requested_range: ReadRange | None, cursor_start: int | None,
+    item_cap: int, remaining_total: int, request_id: str,
+) -> tuple[ReadItem, int]:
+    # Premise analogue of `_read_alternative_one`. `invalidated_by` is the row's raw stored
+    # value -- the same corpus-authored value `_evaluate_counterfactual` validates through
+    # `agent_surface.commit_sha` before it ever reaches `PremiseRecord.invalidated_by` on the
+    # wire -- disclosed here verbatim because this is the explicit, caller-requested read, never
+    # the implicit `investigate_work` response.
+    row = repo.resolve_premise_ref(ref)
+    if row is None:
+        return ReadItem(ref=ref, status="missing_ref"), remaining_total
+    disclosure = _canonical_json({
+        "id": row.premise_id, "statement": row.statement, "status": row.status,
+        "rationale": row.rationale, "invalidated_by": row.invalidated_by,
+        "invalidated_in": row.invalidation_document_ref,
+    })
+    return _read_disclosure_one(
+        disclosure=disclosure, evidence_kind="premise", locator=row.document_ref,
+        citation_locator=f"{row.document_ref}#{row.premise_id}", ref=ref,
+        requested_range=requested_range, cursor_start=cursor_start,
+        item_cap=item_cap, remaining_total=remaining_total, request_id=request_id,
+    )
+
+
 class ReadService:
     """Application use case for resolving immutable evidence references across sources.
 
@@ -1233,6 +1333,7 @@ class ReadService:
     - `skill:<id>@<version>` via SkillSet
     - `capability:<id>` via Registry
     - `live:sha256:<hash>` via ResearchDeps cache
+    - `alt:v1:<hash>` / `premise:v1:<hash>` via SnapshotRepository (T4, investigate-boundary-v2)
     - `<passage_ref>` via SnapshotRepository
     """
 
@@ -1288,6 +1389,10 @@ class ReadService:
                     item, remaining = self._read_capability(ref, rng, pos, cap, remaining, request_id)
                 elif ref.startswith(_LIVE_REF_PREFIX):
                     item, remaining = self._read_live(ref, rng, pos, cap, remaining, request_id)
+                elif ref.startswith(_ALTERNATIVE_REF_PREFIX):
+                    item, remaining = self._read_alternative(ref, rng, pos, cap, remaining, request_id)
+                elif ref.startswith(_PREMISE_REF_PREFIX):
+                    item, remaining = self._read_premise(ref, rng, pos, cap, remaining, request_id)
                 else:
                     item, remaining = self._read_passage(ref, rng, pos, cap, remaining, request_id)
                 items.append(item)
@@ -1311,6 +1416,32 @@ class ReadService:
         request_id: str,
     ) -> tuple[ReadItem, int]:
         return _read_one(self._repo, ref, requested_range, cursor_start, item_cap, remaining_total, request_id)
+
+    def _read_alternative(
+        self,
+        ref: str,
+        requested_range: ReadRange | None,
+        cursor_start: int | None,
+        item_cap: int,
+        remaining_total: int,
+        request_id: str,
+    ) -> tuple[ReadItem, int]:
+        return _read_alternative_one(
+            self._repo, ref, requested_range, cursor_start, item_cap, remaining_total, request_id
+        )
+
+    def _read_premise(
+        self,
+        ref: str,
+        requested_range: ReadRange | None,
+        cursor_start: int | None,
+        item_cap: int,
+        remaining_total: int,
+        request_id: str,
+    ) -> tuple[ReadItem, int]:
+        return _read_premise_one(
+            self._repo, ref, requested_range, cursor_start, item_cap, remaining_total, request_id
+        )
 
     def _read_capability(
         self,

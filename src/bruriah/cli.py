@@ -5,6 +5,7 @@ import contextlib
 import io
 import json
 import os
+import re
 import sys
 from array import array
 from collections.abc import Callable, Sequence
@@ -49,6 +50,7 @@ from .corpus import CorpusPolicy, CorpusPolicyError
 from .index import BuildConfig, BuildResult, Embedder, IndexLifecycleError, build_candidate, prune_generations
 from .index_runner import EmbedderFactory, _default_embedder_factory, _embedding_fingerprint, run_index
 from .mcp_server import build_server
+from .repository import SnapshotRepository, resolve_counterfactual_refs_for_humans
 from .platform import (
     PlatformError,
     PlatformPaths,
@@ -776,6 +778,31 @@ def _cmd_serve(args: argparse.Namespace) -> int:
     return 0
 
 
+# T2 (investigate-boundary-v2): `EvidenceRecord.locator`/`citation_locator`/conflicts/claim text
+# now carry the opaque `doc:v1:<sha256>` document_ref, never the corpus-relative file path (see
+# `retrieval.build_local_evidence_record`). The human `ask` view is the one place that opacity is
+# meant to be undone: a person reading a terminal wants the real path, and can already get it --
+# `read_evidence`'s own `ReadItem.locator` keeps the real path unconditionally. This resolves the
+# SAME thing locally, for every doc ref embedded anywhere in the human-readable text, so a person
+# never has to run `--read` just to learn which file a conflict or claim is about. `--json` is
+# untouched: it stays exactly the prose-free payload the MCP surface returns.
+_DOC_REF_PATTERN = re.compile(r"doc:v1:[0-9a-f]{64}")
+
+
+def _resolve_doc_refs_for_humans(text: str, repo: SnapshotRepository) -> str:
+    def _resolve_doc(match: "re.Match[str]") -> str:
+        path = repo.get_document_path(match.group(0))
+        return path if path is not None else match.group(0)
+
+    text = _DOC_REF_PATTERN.sub(_resolve_doc, text)
+    # T3/T4 (investigate-boundary-v2): the counterfactual contract's opaque `alt:`/`premise:`
+    # refs -- resolved back to a name/id for the human view exactly like `doc:v1:` resolves back
+    # to a path, via the one shared resolver both this function and `demo.py` use (T4 closes
+    # R2-ref-resolver-duplicated). `--json` and the MCP surface never call this function, so they
+    # stay ref-only regardless.
+    return resolve_counterfactual_refs_for_humans(text, repo)
+
+
 def _cmd_ask(
     args: argparse.Namespace,
     *,
@@ -816,6 +843,9 @@ def _cmd_ask(
             print(json.dumps(payload, indent=2, sort_keys=True))
             return 0
 
+        # Human view only, never `--json`: resolve every embedded document_ref back to the real
+        # corpus-relative path, the same way `read_evidence` would on explicit request.
+        repo = SnapshotRepository(deps.snapshot.database)
         local = [item for item in payload["evidence"] if item["kind"] == "local"]
         print(f"\n  status: {payload['status']} · {len(local)} references")
         for note in payload["degradation"]:
@@ -823,10 +853,10 @@ def _cmd_ask(
         for gap in payload["gaps"]:
             print(f"  gap: {gap}")
         for conflict in payload.get("conflicts", []):
-            print(f"  conflict: {conflict}")
+            print(f"  conflict: {_resolve_doc_refs_for_humans(conflict, repo)}")
         for claim in payload.get("claims", []):
             if claim.get("state") == "conflicted":
-                print(f"  claim (conflicted): {claim['text']}")
+                print(f"  claim (conflicted): {_resolve_doc_refs_for_humans(claim['text'], repo)}")
         if payload["status"] == "abstained":
             print(
                 "\n  No approved policy covers this domain, so nothing is returned rather than the\n"
@@ -840,7 +870,7 @@ def _cmd_ask(
             : args.limit if not args.read else None
         ]
         for position, item in shown:
-            print(f"\n  [{position}] {item['citation_locator']}")
+            print(f"\n  [{position}] {_resolve_doc_refs_for_humans(item['citation_locator'], repo)}")
             print(f"      authority: {item['authority']} ({item['authority_rationale']})")
             if item.get("freshness") and item["freshness"] != "unknown":
                 print(f"      freshness: {item['freshness']}")

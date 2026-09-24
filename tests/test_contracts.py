@@ -5,7 +5,9 @@ from datetime import date, datetime, timezone
 import pytest
 from pydantic import ValidationError
 
-from bruriah.contracts import Budgets, EvidenceRecord, InvestigationRequest, ReadItem, ReadRequest
+from bruriah.contracts import (
+    Budgets, EvidenceRecord, InvestigationRequest, InvestigationResult, ReadItem, ReadRequest,
+)
 def _assert_closed(schema: dict) -> None:
     if schema.get("type") == "object":
         assert schema.get("additionalProperties") is False
@@ -70,7 +72,7 @@ BASE_EVIDENCE = {
     "citation_locator": "https://example.test/doc#section-2",
     "digest": "sha256:" + "0" * 64,
     "authority": "official",
-    "authority_rationale": "Canonical publisher documentation.",
+    "authority_rationale": "not_assessed_by_retrieval",
     "freshness": "current",
     "license": "permitted",
     "conflict": "none",
@@ -159,7 +161,7 @@ from bruriah.contracts import HostAction, HostSkill, PermissionDisclosure  # noq
 
 _EVIDENCE_FIELDS = dict(
     ref="local:a#1", kind="local", publisher="p", locator="l", citation_locator="c",
-    digest="sha256:" + "a" * 64, authority="official", authority_rationale="r",
+    digest="sha256:" + "a" * 64, authority="official", authority_rationale="not_assessed_by_retrieval",
     freshness="current", license="permitted", conflict="none",
 )
 
@@ -232,6 +234,33 @@ def test_the_new_enum_members_are_the_only_ones_added() -> None:
         "consult_professional", "draft_skill_candidate", "install_skill"}
 
 
+def test_authority_rationale_is_a_closed_set_of_codes_never_free_text() -> None:
+    """T2 (investigate-boundary-v2): `authority_rationale` used to be free `ShortText`, and every
+    producer wrote a sentence -- several built straight from corpus/git text (the governing
+    decision's author, an evaluated alternative's name). Closing it to a `Literal` makes every
+    one of those a fixed, content-free code instead: it describes the KIND of authority, never
+    quotes anything an attacker-controlled document or commit could have written."""
+    import typing
+
+    from bruriah.contracts import AuthorityRationale
+
+    assert set(typing.get_args(AuthorityRationale)) == {
+        "not_assessed_by_retrieval",
+        "capability_identity_only",
+        "skill_dispatch_declared",
+        "live_fetch_unassessed",
+        "raw_capture_unassessed",
+        "code_target_governing_decision",
+        "code_target_active_successor",
+        "code_target_intermediate_successor",
+        "counterfactual_alternative_evidence",
+        "counterfactual_invalidated_premise_evidence",
+    }
+    assert EvidenceRecord.model_fields["authority_rationale"].annotation == AuthorityRationale
+    with pytest.raises(ValidationError):
+        EvidenceRecord.model_validate({**BASE_EVIDENCE, "authority_rationale": "free text is no longer accepted"})
+
+
 def test_the_disclosure_covers_every_dimension_the_signed_envelope_can_express() -> None:
     """Guards the one real risk of not reusing `skills.PermissionEnvelope`: that the pack grows a
     permission dimension the public contract cannot disclose, and a skill ships a grant nobody sees."""
@@ -287,6 +316,94 @@ def test_descriptions_do_not_change_the_response_shape() -> None:
     dumped = EvidenceRecord(**_EVIDENCE_FIELDS).model_dump(mode="json")
     assert "envelope" not in dumped
     assert InvestigationRequest(task="t").host_skills is None
+
+
+# T3 (investigate-boundary-v2), item 5: every string-typed field on the public response contract
+# with neither a `pattern` nor an `enum`/`const` -- i.e. every field NOT closed by the schema
+# itself. Walking `InvestigationResult.model_json_schema()` and diffing against this explicit,
+# commented allowlist means a future field that reintroduces free corpus/git text (the exact
+# failure class T2/T3 closed: `authority_rationale`, alternative/premise names, ids, statements,
+# reasons, rationales) fails this test loudly instead of silently shipping unconstrained.
+_FREE_STRING_FIELD_ALLOWLIST: frozenset[str] = frozenset({
+    # Fixed-wording templates built from structure (verdict literals, refs, counts, validated
+    # shas) -- content-bearing text, but never corpus/git-authored free text (T2/T3 design).
+    "claims[].text",
+    "conflicts[]",
+    "counterfactual_assessment.rationale",
+    "degradation[]",
+    "gaps[]",
+    "host_actions[].reason",
+    "host_actions[].target",
+    "warnings[]",
+    # `next_cursor`/`request_id`: opaque, server-minted tokens (base64/sha256 digests), never
+    # corpus/git text -- `Ref`/a bespoke bound has no `pattern` today, only a length ceiling.
+    "next_cursor",
+    "request_id",
+    # `Ref`-typed identifiers: length-bounded, server- or index-minted (passage/skill/capability/
+    # live refs), never raw corpus prose.
+    "claims[].conflicting_refs[]",
+    "claims[].supporting_refs[]",
+    "counterfactual_assessment.supporting_evidence[]",
+    "evidence[].ref",
+    # `EvidenceRecord`'s disclosure surface: `locator`/`citation_locator`/`publisher` carry the
+    # opaque `doc:v1:`/`live:sha256:`/pack/source identifiers `build_local_evidence_record` and
+    # the other producers mint -- ShortText at the type level (no corpus text reaches them by
+    # construction, enforced by the injection benchmark, not by a schema pattern).
+    "evidence[].citation_locator",
+    "evidence[].locator",
+    "evidence[].publisher",
+    "evidence[].provenance_chain[]",
+    "evidence[].redirect_chain[]",
+    "evidence[].uncertainty[]",
+    "evidence[].jurisdiction",
+    # Skill permission disclosure: filesystem/network/program/secret identifiers from a SIGNED
+    # pack, never corpus prose.
+    "evidence[].envelope.filesystem_read[]",
+    "evidence[].envelope.filesystem_write[]",
+    "evidence[].envelope.network_hosts[]",
+    "evidence[].envelope.network_schemes[]",
+    "evidence[].envelope.programs[]",
+    "evidence[].envelope.secrets[]",
+    # Date/datetime fields: `type: string` with a `format`, not a `pattern` -- pydantic's schema
+    # does not emit a regex for these, so they fall out of a naive pattern/enum walk even though
+    # they are already date-shaped, never free text.
+    "evidence[].effective_at",
+    "evidence[].expires_at",
+    "evidence[].published_at",
+    "evidence[].retrieved_at",
+    "evidence[].updated_at",
+})
+
+
+def _free_string_fields(schema: dict, defs: dict, *, seen: frozenset[str] = frozenset(), path: str = "") -> list[str]:
+    """Every JSON-pointer-ish path (dotted properties, `[]` for array items) to a string-typed
+    field with neither `pattern` nor `enum`/`const` -- i.e. not closed by the schema itself."""
+    found: list[str] = []
+    if "$ref" in schema:
+        ref_name = schema["$ref"].rsplit("/", 1)[-1]
+        if ref_name in seen:
+            return found
+        return _free_string_fields(defs[ref_name], defs, seen=seen | {ref_name}, path=path)
+    for sub in (*schema.get("allOf", ()), *schema.get("anyOf", ()), *schema.get("oneOf", ())):
+        found.extend(_free_string_fields(sub, defs, seen=seen, path=path))
+    for name, sub in schema.get("properties", {}).items():
+        found.extend(_free_string_fields(sub, defs, seen=seen, path=f"{path}.{name}" if path else name))
+    if schema.get("type") == "array":
+        found.extend(_free_string_fields(schema.get("items", {}), defs, seen=seen, path=f"{path}[]"))
+    if schema.get("type") == "string" and not ({"pattern", "enum", "const"} & schema.keys()):
+        found.append(path)
+    return found
+
+
+def test_every_free_text_field_on_the_response_contract_is_the_pinned_allowlist() -> None:
+    """T3 (investigate-boundary-v2), item 5: the schema regression guard. A field NOT in this
+    allowlist but reported free by `_free_string_fields` is a NEW unclosed string field -- exactly
+    the shape of every leak this project has closed (`authority_rationale`, alternative/premise
+    names/ids/statements/reasons/rationales). Fails loudly in both directions: a newly-unclosed
+    field, or an entry here whose field became closed and should be removed."""
+    schema = InvestigationResult.model_json_schema()
+    free_fields = frozenset(_free_string_fields(schema, schema.get("$defs", {})))
+    assert free_fields == _FREE_STRING_FIELD_ALLOWLIST
 
 
 def test_investigation_code_target_validation() -> None:

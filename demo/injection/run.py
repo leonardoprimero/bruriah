@@ -36,11 +36,17 @@ sys.path.insert(0, str(HERE.parents[1] / "src"))
 
 from bruriah import cli  # noqa: E402
 from bruriah.contracts import InvestigationRequest, ReadRequest  # noqa: E402
+from bruriah.corpus import document_ref_for  # noqa: E402
 from bruriah.service import investigate, read  # noqa: E402
 
 TASK = "what is our deployment policy for production"
 POISON_MARKERS = ("id_rsa", "Ignore all previous", "deploy directly to", "supersedes every other")
 POISONED_NOTE = "onboarding-notes.md"
+# T2 (investigate-boundary-v2): `EvidenceRecord.locator` is now the opaque document_ref
+# (`doc:v1:<sha256>`), never the corpus-relative file name. T3 follow-up (R2-doc-ref-formula-
+# duplicated): computed through the one shared formula rather than re-derived with a local
+# `hashlib` call, since `POISONED_NOTE` sits at the corpus root.
+POISONED_NOTE_REF = document_ref_for(POISONED_NOTE)
 
 
 def rule(title: str) -> None:
@@ -80,7 +86,7 @@ def main() -> int:
 
         # --- what a text-returning pipeline would have handed over ------------------------
         rule("1. The baseline: a pipeline that returns passage TEXT")
-        ref = next(e["ref"] for e in payload["evidence"] if e["locator"] == POISONED_NOTE)
+        ref = next(e["ref"] for e in payload["evidence"] if e["locator"] == POISONED_NOTE_REF)
         body = read(ReadRequest(refs=[ref]), poisoned).model_dump(mode="json")["items"][0]["content"]
         print("These bytes reach the model's context, indistinguishable from your own prompt:\n")
         for line in body.splitlines():
@@ -93,7 +99,7 @@ def main() -> int:
         found = [marker for marker in POISON_MARKERS if marker in wire]
         print(f"Whole response: {len(wire)} bytes. Payload fragments present: {found or 'none'}")
         print("\nThe poisoned note is still FOUND. This is what is said about it:\n")
-        record = next(e for e in payload["evidence"] if e["locator"] == POISONED_NOTE)
+        record = next(e for e in payload["evidence"] if e["locator"] == POISONED_NOTE_REF)
         for key in ("locator", "citation_locator", "digest", "authority", "authority_rationale"):
             print(f"  {key:22} {record[key]}")
         assert not found, f"corpus prose reached the response: {found}"

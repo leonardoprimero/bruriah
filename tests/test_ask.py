@@ -148,6 +148,43 @@ def test_a_reference_that_does_not_exist_fails_typed(indexed) -> None:
         _ask(indexed, "apple", "--read", "99")
 
 
+def test_resolve_doc_refs_for_humans_resolves_known_and_keeps_unknown_refs_raw(indexed) -> None:
+    """R3-cli-human-ref-resolution-uncovered (T2 review, carried into T3): `_resolve_doc_refs_for_
+    humans` previously had only INDIRECT coverage, through `_cmd_ask`'s full human-view pipeline.
+    Exercises it directly against a real snapshot: a `doc:v1:` ref for an indexed document
+    resolves to its corpus-relative path, and one that resolves to nothing is left exactly as it
+    was, never dropped or replaced with a placeholder."""
+    from bruriah.corpus import document_ref_for
+    from bruriah.repository import SnapshotRepository
+
+    parser, argv = indexed
+    args = parser.parse_args(["ask", "why did we choose the apple recipe", *argv])
+    paths = cli._resolve_paths(args)
+    deps = cli.build_serve_deps(paths, embedder_factory=_fake_embedder_factory)
+    try:
+        repo = SnapshotRepository(deps.snapshot.database)
+        known_ref = document_ref_for("apple.md")
+        unknown_ref = "doc:v1:" + "0" * 64
+        resolved = cli._resolve_doc_refs_for_humans(f"see {known_ref} and also {unknown_ref}", repo)
+        assert "apple.md" in resolved
+        assert unknown_ref in resolved
+        assert known_ref not in resolved
+    finally:
+        deps.snapshot.database.close()
+
+
+def test_json_mode_never_resolves_document_refs_to_paths(indexed, capsys) -> None:
+    """The human-view resolution `_resolve_doc_refs_for_humans` performs is human-view ONLY:
+    `--json` is the wire payload an MCP client would receive, and it must keep the opaque
+    `doc:v1:` ref exactly as `investigate_work` returns it -- never a corpus-relative path a
+    client never asked to have resolved."""
+    assert _ask(indexed, "why did we choose the apple recipe", "--json") == 0
+    payload = json.loads(capsys.readouterr().out)
+    locators = [item["locator"] for item in payload["evidence"] if item["kind"] == "local"]
+    assert locators and all(loc.startswith("doc:v1:") for loc in locators)
+    assert "apple.md" not in json.dumps(payload)
+
+
 def test_json_mode_is_the_investigation_result_itself(indexed, capsys) -> None:
     # So the terminal view can never drift from what an MCP client would receive: same object.
     assert _ask(indexed, "apple recipe", "--json") == 0

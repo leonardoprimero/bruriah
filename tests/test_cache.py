@@ -5,6 +5,7 @@
 from __future__ import annotations
 
 import dataclasses
+import json
 import os
 import stat
 from datetime import datetime, timedelta, timezone
@@ -26,7 +27,7 @@ def _evidence(**overrides: object) -> EvidenceRecord:
         ref="live:sha256:" + "a" * 32, kind="captured_live", publisher="example.test",
         locator="https://example.test:443/page", citation_locator="https://example.test:443/page",
         digest="sha256:" + "b" * 64, extraction_method="raw_lines", authority="unknown",
-        authority_rationale="Live HTTP fetch.", freshness="unknown", license="unknown",
+        authority_rationale="live_fetch_unassessed", freshness="unknown", license="unknown",
         reuse="unknown", conflict="unknown", retrieved_at=_RETRIEVED_AT,
     )
     payload.update(overrides)
@@ -117,6 +118,36 @@ def test_corrupt_cache_file_is_treated_as_a_miss_not_a_crash(tmp_path: Path) -> 
     cache_dir.mkdir(parents=True)
     (cache_dir / f"{cache_key('https://example.test:443/page')}.json").write_text(
         "{not valid json", encoding="utf-8",
+    )
+    lookup = read_cache(cache_dir, "https://example.test:443/page", now=_RETRIEVED_AT)
+    assert not lookup.hit and not lookup.expired and lookup.entry is None
+
+
+def test_a_pre_contract_v2_entry_with_free_text_authority_rationale_reads_as_a_miss(tmp_path: Path) -> None:
+    """T2 (investigate-boundary-v2) closed `EvidenceRecord.authority_rationale` to a fixed set of
+    codes; before that it was free `ShortText` and cached entries could hold a full sentence
+    there. `_decode`'s `EvidenceRecord.model_validate_json` rejects that sentence with a
+    `ValidationError`, which `_decode` already turns into `CacheError("corrupt_cache_entry")` --
+    `read_cache` treats it exactly like any other corrupt file: a miss, never a crash (T3 carries
+    T2's review finding R4-authority-rationale-schema-break-breaks-persisted-records; this pins
+    the graceful-degradation path the parent verified by inspection)."""
+    cache_dir = tmp_path / "cache"
+    cache_dir.mkdir(parents=True)
+    stale_evidence = {
+        "ref": "live:sha256:" + "a" * 32, "kind": "captured_live", "publisher": "example.test",
+        "locator": "https://example.test:443/page", "citation_locator": "https://example.test:443/page",
+        "digest": "sha256:" + "b" * 64, "extraction_method": "raw_lines", "authority": "unknown",
+        "authority_rationale": "Fetched from example.test with no assessment performed.",
+        "freshness": "unknown", "license": "unknown", "reuse": "unknown", "conflict": "unknown",
+        "provenance_chain": [], "redirect_chain": [], "uncertainty": [],
+    }
+    payload = {
+        "evidence": stale_evidence,
+        "expires_at": (_RETRIEVED_AT + timedelta(hours=1)).isoformat(),
+        "excerpt": "x", "excerpt_only": False, "policy_version": "1.0.0",
+    }
+    (cache_dir / f"{cache_key('https://example.test:443/page')}.json").write_text(
+        json.dumps(payload), encoding="utf-8",
     )
     lookup = read_cache(cache_dir, "https://example.test:443/page", now=_RETRIEVED_AT)
     assert not lookup.hit and not lookup.expired and lookup.entry is None

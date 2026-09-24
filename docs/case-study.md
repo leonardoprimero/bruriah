@@ -61,7 +61,10 @@ Governing Architectural Decision:
   server-side validation.
 ```
 
-Through MCP, Bruriah returns a reference:
+Through MCP, Bruriah returns a reference. Since 2.0.0 (`schema_version: "2"`), `locator` is the
+document's opaque `doc:v1:<hash>` ref rather than its file name, `publisher` is a fixed literal,
+and `authority_rationale` is one of a closed set of codes rather than a sentence built from the
+target:
 
 ```jsonc
 bruriah ← {
@@ -70,11 +73,12 @@ bruriah ← {
     {
       "ref": "chunk:v1:6d4329329f9ab6ea67e3d34ec31da3567a07b51041f0787c800d6b1bd73fb1c4",
       "kind": "local",
-      "publisher": "2026-07-23-e8f3003b-feat-cerebro-router-add-the-two-tool-mcp-protocol-server.md",
-      "citation_locator": "2026-07-23-e8f3003b-feat-cerebro-router-add-the-two-tool-mcp-protocol-server.md#1-28",
+      "publisher": "local-corpus",
+      "locator": "doc:v1:d6bf33ff26fb661969f4279ce398a33fe49d40a08e2b78ca98eba32873e3c4fd",
+      "citation_locator": "doc:v1:d6bf33ff26fb661969f4279ce398a33fe49d40a08e2b78ca98eba32873e3c4fd#L1-28",
       "digest": "sha256:5bfcda316ae7f376c75729c07c7f90d2d39af10b8072be11067cc791a29b290d",
       "authority": "primary",
-      "authority_rationale": "Governing architectural decision for src/bruriah/mcp_server.py:42"
+      "authority_rationale": "code_target_governing_decision"
     }
   ]
 }
