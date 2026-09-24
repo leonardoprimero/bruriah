@@ -56,6 +56,8 @@ from compare import (  # noqa: E402
 )
 from run import NotExecutedError  # noqa: E402
 
+import compare as compare_module  # noqa: E402
+
 _HAS_FRAMEWORKS = bool(importlib.util.find_spec("llama_index") and importlib.util.find_spec("langchain_core"))
 requires_frameworks = pytest.mark.skipif(
     not _HAS_FRAMEWORKS,
@@ -245,6 +247,30 @@ def test_render_is_deterministic_for_equal_results() -> None:
     again = _markdown_results()
     assert render_json(results) == render_json(again)
     assert render_markdown(results) == render_markdown(again)
+
+
+def test_main_publishes_both_reports_through_write_report(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """The comparison runner publishes its two committed reports through the core runner's
+    atomic `write_report`, never through a plain `write_text` that a crash could leave half
+    written. The framework adapters are stubbed so this runs without the optional group."""
+    import types
+
+    json_path = tmp_path / "report-frameworks.json"
+    md_path = tmp_path / "report-frameworks.md"
+    published: list[tuple[Path, str]] = []
+    stub = types.ModuleType("framework_adapters")
+    stub.ADAPTERS = ()  # type: ignore[attr-defined]
+    monkeypatch.setitem(sys.modules, "framework_adapters", stub)
+    monkeypatch.setattr(compare_module, "run_comparison", lambda _adapters: [])
+    monkeypatch.setattr(compare_module, "render_json", lambda _results: "JSON")
+    monkeypatch.setattr(compare_module, "render_markdown", lambda _results: "MARKDOWN")
+    monkeypatch.setattr(compare_module, "REPORT_JSON_PATH", json_path)
+    monkeypatch.setattr(compare_module, "REPORT_MD_PATH", md_path)
+    monkeypatch.setattr(compare_module, "write_report", lambda path, text: published.append((path, text)))
+
+    assert compare_module.main() == 0
+    assert published == [(json_path, "JSON"), (md_path, "MARKDOWN")]
+    assert not json_path.exists() and not md_path.exists()
 
 
 # -------------------------------------------------------------------------------------------
