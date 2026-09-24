@@ -60,11 +60,7 @@ _TOOL_DESCRIPTION = "Search the project's decision memory for passages relevant 
 def _corpus_texts(corpus_dir: Path) -> list[tuple[str, str]]:
     """(file name, exact file text) for every corpus file, in sorted order -- the shared
     ingestion both adapters build their Documents from."""
-    return [
-        (path.name, path.read_text(encoding="utf-8"))
-        for path in sorted(corpus_dir.iterdir())
-        if path.is_file()
-    ]
+    return [(path.name, path.read_text(encoding="utf-8")) for path in sorted(corpus_dir.iterdir()) if path.is_file()]
 
 
 @dataclass(frozen=True)
@@ -88,13 +84,9 @@ class _LlamaIndexAdapter:
         # returns -- and the executed-path invariant would rightly fail the run.
         node_count = len(index.docstore.docs)
         retriever = index.as_retriever(similarity_top_k=node_count)
-        tool = RetrieverTool.from_defaults(
-            retriever=retriever, name=_TOOL_NAME, description=_TOOL_DESCRIPTION
-        )
+        tool = RetrieverTool.from_defaults(retriever=retriever, name=_TOOL_NAME, description=_TOOL_DESCRIPTION)
         output = tool.call(task)
-        retrieved_sources = frozenset(
-            str(scored.node.metadata["file_name"]) for scored in output.raw_output
-        )
+        retrieved_sources = frozenset(str(scored.node.metadata["file_name"]) for scored in output.raw_output)
         return AdapterRun(tool_output=str(output.content), retrieved_sources=retrieved_sources)
 
 
@@ -113,10 +105,7 @@ class _LangChainAdapter:
         texts = _corpus_texts(corpus_dir)
         store = InMemoryVectorStore(embedding=DeterministicFakeEmbedding(size=_EMBED_DIM))
         store.add_documents(
-            [
-                LangChainDocument(page_content=text, metadata={"source": file_name})
-                for file_name, text in texts
-            ],
+            [LangChainDocument(page_content=text, metadata={"source": file_name}) for file_name, text in texts],
             ids=[file_name for file_name, _ in texts],
         )
         retriever = store.as_retriever(search_kwargs={"k": len(texts)})
@@ -126,9 +115,7 @@ class _LangChainAdapter:
         # `document_prompt` formats `page_content` alone), so the retrieved set -- the executed
         # invariant's substrate -- comes from the same retriever the tool wraps, with the same
         # query and k. `DeterministicFakeEmbedding` makes the two invocations identical.
-        retrieved_sources = frozenset(
-            str(document.metadata["source"]) for document in retriever.invoke(task)
-        )
+        retrieved_sources = frozenset(str(document.metadata["source"]) for document in retriever.invoke(task))
         return AdapterRun(tool_output=str(tool_output), retrieved_sources=retrieved_sources)
 
 

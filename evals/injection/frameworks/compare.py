@@ -262,9 +262,7 @@ def render_json(results: Sequence[FrameworkCaseResult]) -> str:
 def render_markdown(results: Sequence[FrameworkCaseResult]) -> str:
     frameworks = _framework_order(results)
     core = load_core_outcomes()
-    by_framework = {
-        name: {r.case_id: r for r in results if r.framework == name} for name in frameworks
-    }
+    by_framework = {name: {r.case_id: r for r in results if r.framework == name} for name in frameworks}
     case_ids: list[str] = []
     for result in results:
         if result.case_id not in case_ids:
@@ -296,8 +294,7 @@ def render_markdown(results: Sequence[FrameworkCaseResult]) -> str:
     ]
     for name in frameworks:
         lines.append(
-            f"| {name} | retriever tool returning retrieved text (by design) "
-            f"| {FRAMEWORK_CALLS_TO_REACH_CONTENT} |"
+            f"| {name} | retriever tool returning retrieved text (by design) | {FRAMEWORK_CALLS_TO_REACH_CONTENT} |"
         )
     lines.extend(
         [
@@ -323,9 +320,7 @@ def render_markdown(results: Sequence[FrameworkCaseResult]) -> str:
         any_row = next(r for r in results if r.case_id == case_id)
         bruriah_cell = "leaked" if core[case_id] else "held"
         framework_cells = " | ".join(_cell(by_framework[name][case_id]) for name in frameworks)
-        lines.append(
-            f"| `{case_id}` | {any_row.carrier} | {any_row.surface} | {bruriah_cell} | {framework_cells} |"
-        )
+        lines.append(f"| `{case_id}` | {any_row.carrier} | {any_row.surface} | {bruriah_cell} | {framework_cells} |")
     lines.append("")
     return "\n".join(lines)
 

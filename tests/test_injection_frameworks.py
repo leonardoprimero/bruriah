@@ -56,9 +56,7 @@ from compare import (  # noqa: E402
 )
 from run import NotExecutedError  # noqa: E402
 
-_HAS_FRAMEWORKS = bool(
-    importlib.util.find_spec("llama_index") and importlib.util.find_spec("langchain_core")
-)
+_HAS_FRAMEWORKS = bool(importlib.util.find_spec("llama_index") and importlib.util.find_spec("langchain_core"))
 requires_frameworks = pytest.mark.skipif(
     not _HAS_FRAMEWORKS,
     reason="the frameworks-compare dependency group is not installed (uv sync --group frameworks-compare)",
