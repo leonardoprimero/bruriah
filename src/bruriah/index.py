@@ -110,7 +110,11 @@ class DroppedPremise:
     premise_id: str
     document_ref: str
     relative_path: str
-    reason: Literal["shadowed_by_repository_premise", "shadowed_by_lower_github_issue"]
+    reason: Literal[
+        "shadowed_by_repository_premise",
+        "shadowed_by_lower_github_issue",
+        "github_invalidation_ignored",
+    ]
 
 
 @dataclass
@@ -803,7 +807,10 @@ def _build_premise_and_alternative_records(
     # `bruriah_source` marker `github_corpus._render_document` writes). A GitHub declaration for an
     # id a repository document already claims is dropped, never merged in -- see `DroppedPremise`
     # for how that drop is reported. Two repository documents declaring the same id is instead a
-    # corpus authoring mistake with no safe automatic resolution, so it fails the build.
+    # corpus authoring mistake with no safe automatic resolution, so it fails the build. The same
+    # boundary applies to `invalidated_premises` below: a GitHub-tier document can never flip the
+    # status of a premise a repository-authored document declared, defense in depth against the
+    # same attacker who can open an issue.
     repo_premises: dict[str, dict[str, Any]] = {}
     repo_declaring_path: dict[str, str] = {}
     github_candidates: dict[str, list[dict[str, Any]]] = {}
@@ -873,6 +880,18 @@ def _build_premise_and_alternative_records(
     for doc in documents:
         for inv_id in doc.metadata.invalidated_premises:
             inv_id_clean = inv_id.strip()
+            # Same trust boundary as a premise declaration itself: a GitHub-tier document can
+            # invalidate a GitHub-tier or synthesized premise, but never flip the status of a
+            # premise a repository-authored document declared. `repo_premises` still names exactly
+            # those ids, unaffected by any mutation a later legitimate invalidation makes below.
+            if doc.metadata.source == "github" and inv_id_clean in repo_premises:
+                dropped.append(DroppedPremise(
+                    premise_id=inv_id_clean,
+                    document_ref=doc.document_ref,
+                    relative_path=doc.relative_path,
+                    reason="github_invalidation_ignored",
+                ))
+                continue
             inv_by = doc.metadata.commit or doc.document_ref
             if inv_id_clean in premises_map:
                 premises_map[inv_id_clean]["status"] = "invalidated"

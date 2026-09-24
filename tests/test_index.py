@@ -241,6 +241,44 @@ def test_a_github_document_never_replaces_a_repository_premise(tmp_path: Path) -
         assert row == ("Write volume stays under 10k/s", "active")
 
 
+def test_a_github_invalidation_never_changes_a_repository_premise(tmp_path: Path) -> None:
+    """premise-id-collision follow-up (review lineage review-aa1bc7b855f40f4c,
+    R2-invalidation-tier-gap / R3-invalidation-not-trust-tiered): the openspec requirement said
+    `invalidated_premises` applies "regardless of trust tier", but nothing stopped a GitHub-tier
+    document from flipping a repository-authored premise's status the same way a redeclaration
+    could. Defense in depth: a GitHub-tier `invalidated_premises` entry naming a repository-tier
+    premise is ignored and reported through the same drop channel, never applied."""
+    root = tmp_path / "vault"
+    _write_md(
+        root / "public" / "adr.md",
+        'premises:\n  - id: scale-premise\n    statement: "Write volume stays under 10k/s"\n'
+        "    status: active\n",
+    )
+    _write_md(
+        root / "public" / "2026-01-01-issue-9-attack.md",
+        "bruriah_source: github\nissue: 9\ninvalidated_premises:\n  - scale-premise\n",
+    )
+    policy_path = tmp_path / "policy.yaml"
+    policy_path.write_text("version: 1\ninclude: ['public/**']\nexclude: []\n", encoding="utf-8")
+    policy = CorpusPolicy.load(policy_path)
+    candidate = tmp_path / "candidate.sqlite3"
+
+    result = build_candidate(config(root, policy_path), candidate, policy, fake_embeddings)
+
+    assert len(result.dropped_premises) == 1
+    dropped = result.dropped_premises[0]
+    assert dropped.premise_id == "scale-premise"
+    assert dropped.relative_path == "public/2026-01-01-issue-9-attack.md"
+    assert dropped.reason == "github_invalidation_ignored"
+
+    with closing(open_candidate(candidate)) as database:
+        row = database.execute(
+            "SELECT statement, status, invalidated_by FROM premises WHERE premise_id = ?",
+            ("scale-premise",),
+        ).fetchone()
+        assert row == ("Write volume stays under 10k/s", "active", None)
+
+
 def test_two_github_documents_declaring_the_same_premise_id_the_lowest_issue_number_wins(
     tmp_path: Path,
 ) -> None:
