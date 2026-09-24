@@ -171,7 +171,8 @@ etc. -- the harness shape should admit them later, but no speculative abstractio
   directions depending on collection order. Renamed to `framework_adapters.py`; the lesson --
   a new module in any evals tree needs a repo-unique flat name, and only the full suite proves
   it -- is recorded in that module's docstring.
-- One design decision taken during implementation and recorded in `adapters.py`'s docstring:
+- One design decision taken during implementation and recorded in `framework_adapters.py`'s
+  docstring:
   SYMMETRIC RAW-TEXT INGESTION. Both adapters load each corpus file's exact text into one
   framework Document (file name as metadata) instead of using each framework's file loader,
   because a markdown loader that parses front-matter differently would turn a loader
@@ -187,7 +188,8 @@ etc. -- the harness shape should admit them later, but no speculative abstractio
   A `NotComparableError` guards the fixture mapping itself: a marker that never became
   ingestable text (file name or content) fails loudly instead of crediting a framework with a
   hold it was never asked to enforce.
-- Checks at ff3dd5b: `tests/test_injection_frameworks.py` 16 passed (with the group installed;
+- Checks at ff3dd5b (re-run unchanged after the bea29eb rename and the 98caccb ruff reformat):
+  `tests/test_injection_frameworks.py` 16 passed (with the group installed;
   logic section alone runs without it); ruff clean over src/tests/evals/scripts; mypy clean
   over src and over both new modules directly; `compare.py` run twice produces byte-identical
   reports.
