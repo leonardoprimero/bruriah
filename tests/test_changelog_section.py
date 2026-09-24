@@ -3,6 +3,7 @@
 Uses a small temporary CHANGELOG passed via `--path` so these tests never depend on the real
 CHANGELOG.md's current content.
 """
+
 from __future__ import annotations
 
 import subprocess

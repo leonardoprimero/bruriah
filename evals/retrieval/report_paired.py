@@ -27,6 +27,7 @@ produced either side.
 Reads two already-computed rank files; it does not build or query an index itself, and performs no
 network access.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -107,7 +108,8 @@ class PairedComparison:
 
 
 def compare(
-    baseline: dict[str, int | None], candidate: dict[str, int | None],
+    baseline: dict[str, int | None],
+    candidate: dict[str, int | None],
 ) -> tuple[PairedComparison, list[dict[str, Any]]]:
     """The aggregate comparison, plus one movement row per question, in `baseline`'s order.
 
@@ -126,14 +128,8 @@ def compare(
     base_ranks = [baseline[i] for i in ids]
     cand_ranks = [candidate[i] for i in ids]
 
-    entered = sum(
-        1 for b, c in zip(base_ranks, cand_ranks)
-        if (b is None or b > 3) and (c is not None and c <= 3)
-    )
-    left = sum(
-        1 for b, c in zip(base_ranks, cand_ranks)
-        if (b is not None and b <= 3) and (c is None or c > 3)
-    )
+    entered = sum(1 for b, c in zip(base_ranks, cand_ranks) if (b is None or b > 3) and (c is not None and c <= 3))
+    left = sum(1 for b, c in zip(base_ranks, cand_ranks) if (b is not None and b <= 3) and (c is None or c > 3))
     unchanged = sum(1 for b, c in zip(base_ranks, cand_ranks) if b == c)
 
     result = PairedComparison(
@@ -153,8 +149,11 @@ def compare(
     )
     rows = [
         {
-            "id": question_id, "baseline_rank": b, "candidate_rank": c,
-            "baseline_bucket": _bucket(b), "candidate_bucket": _bucket(c),
+            "id": question_id,
+            "baseline_rank": b,
+            "candidate_rank": c,
+            "baseline_bucket": _bucket(b),
+            "candidate_bucket": _bucket(c),
         }
         for question_id, b, c in zip(ids, base_ranks, cand_ranks)
     ]
@@ -173,8 +172,7 @@ def render(corpus: str, result: PairedComparison) -> str:
         f"recall@10={result.candidate_recall_at_10:.3f} MRR@10={result.candidate_mrr_at_10:.3f} "
         f"absent={result.candidate_absent}",
         "",
-        f"top-3 discordant: entered={result.entered_top3} left={result.left_top3} "
-        f"p={result.mcnemar_p:.4f}",
+        f"top-3 discordant: entered={result.entered_top3} left={result.left_top3} p={result.mcnemar_p:.4f}",
         f"unchanged rank: {result.unchanged}",
     ]
     return "\n".join(lines)
@@ -195,7 +193,8 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.out:
         args.out.write_text(
-            "\n".join(json.dumps(row, sort_keys=True) for row in rows) + "\n", encoding="utf-8",
+            "\n".join(json.dumps(row, sort_keys=True) for row in rows) + "\n",
+            encoding="utf-8",
         )
     print(json.dumps(asdict(result), indent=2, sort_keys=True) if args.json else render(args.corpus, result))
     return 0

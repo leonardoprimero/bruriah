@@ -125,10 +125,7 @@ def get_changed_lines(
 # Comment formatting
 # ---------------------------------------------------------------------------
 
-_FOOTER = (
-    "\n\n---\n🏛️ *[Bruriah](https://github.com/leonardoprimero/bruriah)"
-    " · Architectural Decision Intelligence*"
-)
+_FOOTER = "\n\n---\n🏛️ *[Bruriah](https://github.com/leonardoprimero/bruriah) · Architectural Decision Intelligence*"
 
 
 def _format_file_warning(w: DriftWarning) -> str:
@@ -155,8 +152,7 @@ def _format_file_warning(w: DriftWarning) -> str:
 
     if w.generations > 1:
         parts.append(
-            f"\n↳ This decision evolved through **{w.generations} generations** "
-            f"to reach the current active decision."
+            f"\n↳ This decision evolved through **{w.generations} generations** to reach the current active decision."
         )
 
     if w.action_recommendation:
@@ -178,18 +174,13 @@ def _format_line_warning(resolution: CausalResolution) -> str:
     if resolution.governing_decision:
         dec = resolution.governing_decision
         sha_short = dec.commit_sha[:8] if dec.commit_sha else "unknown"
-        parts.append(
-            f"This line is governed by decision **{dec.subject}** (`{sha_short}`)."
-        )
+        parts.append(f"This line is governed by decision **{dec.subject}** (`{sha_short}`).")
 
     if resolution.lineage_alerts:
         alert = resolution.lineage_alerts[0]
         succ_name = alert.successor_subject or alert.successor_ref
         succ_sha = (alert.successor_commit or "")[:8]
-        parts.append(
-            f"\nThis decision was **{alert.relation}** by "
-            f"**{succ_name}** (`{succ_sha}`)."
-        )
+        parts.append(f"\nThis decision was **{alert.relation}** by **{succ_name}** (`{succ_sha}`).")
 
         if alert.active_successor_subject and alert.depth > 1:
             active_sha = (alert.active_successor_commit or "")[:8]
@@ -228,10 +219,7 @@ def _format_summary(
             line = f"- `{w.file_path}`: **{w.governing_decision}** (`{sha_short}`)"
             if w.current_active_decision:
                 active_sha = (w.current_active_sha or "")[:8]
-                line += (
-                    f" → {w.lineage_state.lower()} by "
-                    f"**{w.current_active_decision}** (`{active_sha}`)"
-                )
+                line += f" → {w.lineage_state.lower()} by **{w.current_active_decision}** (`{active_sha}`)"
             parts.append(line)
 
         parts.append(
@@ -240,9 +228,7 @@ def _format_summary(
             "architectural evolution."
         )
     else:
-        parts.append(
-            "\n✅ All changes conform to active architectural decisions."
-        )
+        parts.append("\n✅ All changes conform to active architectural decisions.")
 
     parts.append(_FOOTER)
     return "\n".join(parts)
@@ -293,9 +279,7 @@ def build_review(
     stale_files: set[str] = set()
     for w in report.stale_warnings:
         stale_files.add(w.file_path)
-        comments.append(
-            ReviewComment(path=w.file_path, body=_format_file_warning(w))
-        )
+        comments.append(ReviewComment(path=w.file_path, body=_format_file_warning(w)))
 
     # -- Line-level comments for changed lines in stale files --
     if line_comments and database is not None and changed_lines is not None:
@@ -305,9 +289,7 @@ def build_review(
             sampled = lines[:5] if len(lines) > 5 else lines
             for line_num in sampled:
                 try:
-                    resolution = trace_causal_archaeology(
-                        repo, database, f"{file_path}:{line_num}"
-                    )
+                    resolution = trace_causal_archaeology(repo, database, f"{file_path}:{line_num}")
                 except WhyError:
                     continue
                 if resolution.lineage_alerts:

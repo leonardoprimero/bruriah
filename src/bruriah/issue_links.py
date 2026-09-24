@@ -23,6 +23,7 @@ Two exclusions matter enough to call out explicitly:
   issue's vocabulary to the PR that merged it -- confusing the very distinction (linked issue vs.
   origin PR) this module exists to preserve.
 """
+
 from __future__ import annotations
 
 import re
@@ -97,9 +98,7 @@ def _scan_references(text: str) -> list[tuple[int, str | None, str | None]]:
     for keyword_match in _CLOSING_KEYWORD.finditer(text):
         reference_match = _REFERENCE.match(text, keyword_match.end())
         if reference_match is not None:
-            consumed[(reference_match.start(), reference_match.end())] = (
-                keyword_match.group("keyword").lower()
-            )
+            consumed[(reference_match.start(), reference_match.end())] = keyword_match.group("keyword").lower()
 
     results: list[tuple[int, str | None, str | None]] = []
     for reference_match in _REFERENCE.finditer(text):
@@ -146,17 +145,13 @@ def linked_issues(subject: str, body: str) -> tuple[IssueLink, ...]:
             result.append(IssueLink(number=number, kind=kind, repo=repo, keyword=keyword))
             return
         if kind == "closes" and result[existing_index].kind == "mentions":
-            result[existing_index] = IssueLink(
-                number=number, kind="closes", repo=repo, keyword=keyword
-            )
+            result[existing_index] = IssueLink(number=number, kind="closes", repo=repo, keyword=keyword)
 
     squash_span = _squash_suffix(subject_clean)
     if squash_span is not None:
         start, end, number = squash_span
         index_by_key[(number, None)] = len(result)
-        result.append(
-            IssueLink(number=number, kind="pull_request_self", repo=None, keyword=None)
-        )
+        result.append(IssueLink(number=number, kind="pull_request_self", repo=None, keyword=None))
         subject_clean = _mask(subject_clean, start, end)
 
     for number, repo, keyword in _scan_references(subject_clean):

@@ -21,7 +21,10 @@ def wheel(tmp_path_factory: pytest.TempPathFactory) -> zipfile.ZipFile:
     out = tmp_path_factory.mktemp("dist")  # outside the repo; the build never lands in the tree
     result = subprocess.run(
         ["uv", "build", "--wheel", "--out-dir", str(out)],
-        cwd=_PROJECT, capture_output=True, text=True, check=False,
+        cwd=_PROJECT,
+        capture_output=True,
+        text=True,
+        check=False,
     )
     assert result.returncode == 0, result.stderr
     wheels = list(out.glob("*.whl"))
@@ -52,10 +55,7 @@ def test_wheel_exposes_the_cerebro_mcp_console_script(wheel: zipfile.ZipFile) ->
 
 def test_wheel_is_self_contained_and_excludes_the_legacy_runtime(wheel: zipfile.ZipFile) -> None:
     metadata = next(name for name in wheel.namelist() if name.endswith("METADATA"))
-    requires = [
-        line for line in wheel.read(metadata).decode().splitlines()
-        if line.startswith("Requires-Dist")
-    ]
+    requires = [line for line in wheel.read(metadata).decode().splitlines() if line.startswith("Requires-Dist")]
     assert any("platformdirs" in line for line in requires)  # declares its runtime dep, not transitive
     assert any("mcp" in line for line in requires)
     # The wheel is the candidate router only; the legacy FastMCP runtime is never packaged.
@@ -93,8 +93,7 @@ def test_every_declared_digest_matches_the_body_that_shipped(wheel: zipfile.ZipF
     pack = json.loads(wheel.read("bruriah/data/practices-pack.json"))
     for skill in pack["skills"]:
         shipped = wheel.read(f"bruriah/data/skills/{skill['body_locator']}")
-        assert skill["body_digest"] == "sha256:" + hashlib.sha256(shipped).hexdigest(), \
-            skill["skill_id"]
+        assert skill["body_digest"] == "sha256:" + hashlib.sha256(shipped).hexdigest(), skill["skill_id"]
 
 
 def test_the_bundled_pack_loads_from_the_installed_location() -> None:
@@ -104,9 +103,12 @@ def test_the_bundled_pack_loads_from_the_installed_location() -> None:
 
     skills = load_bundled_skills(today=date(2026, 7, 25))
     assert skills.skill_ids == (
-        "bruriah.falsifiability-probe", "bruriah.find-the-time-bomb",
-        "bruriah.make-it-inexpressible", "bruriah.preserve-behaviour-when-refactoring",
-        "bruriah.undiscoverable-is-unbuilt", "bruriah.verify-before-asserting",
+        "bruriah.falsifiability-probe",
+        "bruriah.find-the-time-bomb",
+        "bruriah.make-it-inexpressible",
+        "bruriah.preserve-behaviour-when-refactoring",
+        "bruriah.undiscoverable-is-unbuilt",
+        "bruriah.verify-before-asserting",
     )
     assert all(skill.tier == "first_party" for skill in skills.skills)
 
@@ -148,13 +150,17 @@ def test_the_bundled_skills_dispatch_for_their_declared_domain() -> None:
     today = date(2026, 7, 25)
     skills = load_bundled_skills(today=today)
     lookup = discover(
-        RequestClassification(intent="investigate", domain="programming", claim_type="factual",
-                              risk="low", jurisdiction="unknown"),
-        load_registry(today=today), skills,
+        RequestClassification(
+            intent="investigate", domain="programming", claim_type="factual", risk="low", jurisdiction="unknown"
+        ),
+        load_registry(today=today),
+        skills,
     )
     assert len(lookup.skills) == 6
-    installed = [HostSkill(skill_id=match.skill.skill_id, version=match.skill.version,
-                           digest=match.skill.body_digest) for match in lookup.skills]
+    installed = [
+        HostSkill(skill_id=match.skill.skill_id, version=match.skill.version, digest=match.skill.body_digest)
+        for match in lookup.skills
+    ]
     result = dispatch(lookup, installed)
     assert [item.availability for item in result.skills] == ["installed"] * DEFAULT_SKILL_CEILING
     # Six bundled skills against a ceiling of five: one is reported as a gap rather than dropped.
@@ -176,9 +182,11 @@ def test_a_non_programming_request_gets_no_bundled_skills() -> None:
 
     today = date(2026, 7, 25)
     lookup = discover(
-        RequestClassification(intent="investigate", domain="law", claim_type="factual",
-                              risk="low", jurisdiction="unknown"),
-        load_registry(today=today), load_bundled_skills(today=today),
+        RequestClassification(
+            intent="investigate", domain="law", claim_type="factual", risk="low", jurisdiction="unknown"
+        ),
+        load_registry(today=today),
+        load_bundled_skills(today=today),
     )
     assert lookup.skills == ()
 
@@ -240,8 +248,7 @@ def test_the_bundled_packs_are_not_about_to_expire() -> None:
         for path in sorted((_PROJECT / "src" / "bruriah" / "data").glob("*.json"))
     }
     dated = {
-        name: date.fromisoformat(payload["expires_at"])
-        for name, payload in packs.items() if "expires_at" in payload
+        name: date.fromisoformat(payload["expires_at"]) for name, payload in packs.items() if "expires_at" in payload
     }
     assert dated, "no bundled pack declares expires_at; this guard is watching nothing"
     earliest_name, earliest = min(dated.items(), key=lambda item: item[1])

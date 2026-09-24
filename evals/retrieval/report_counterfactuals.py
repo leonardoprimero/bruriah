@@ -38,6 +38,7 @@ changes the same way `report_reach.py` does for its own (private-helper) depende
 internals; unlike that script, nothing here is private, because the repository already exposes
 everything this measurement needs.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -110,7 +111,8 @@ def github_issue_documents(repo: SnapshotRepository) -> dict[int, set[str]]:
 
 
 def counterfactual_coverage(
-    repo: SnapshotRepository, questions: list[dict[str, Any]],
+    repo: SnapshotRepository,
+    questions: list[dict[str, Any]],
 ) -> tuple[CounterfactualCoverage, list[dict[str, Any]]]:
     """The aggregate report, plus one row per question that carries `provenance.issue`."""
     issue_documents = github_issue_documents(repo)
@@ -120,9 +122,7 @@ def counterfactual_coverage(
     premises: dict[str, PremiseRow] = repo.get_premises()
 
     alternatives_github = sum(1 for alt in alternatives if alt.document_ref in github_document_refs)
-    premises_github = sum(
-        1 for premise in premises.values() if premise.document_ref in github_document_refs
-    )
+    premises_github = sum(1 for premise in premises.values() if premise.document_ref in github_document_refs)
 
     rows: list[dict[str, Any]] = []
     for question in questions:
@@ -132,15 +132,15 @@ def counterfactual_coverage(
             continue
         issue = int(issue)
         docs_for_issue = issue_documents.get(issue, set())
-        rows.append({
-            "id": question["id"],
-            "issue": issue,
-            "has_issue_document": bool(docs_for_issue),
-            "alternatives_traceable": any(alt.document_ref in docs_for_issue for alt in alternatives),
-            "premises_traceable": any(
-                premise.document_ref in docs_for_issue for premise in premises.values()
-            ),
-        })
+        rows.append(
+            {
+                "id": question["id"],
+                "issue": issue,
+                "has_issue_document": bool(docs_for_issue),
+                "alternatives_traceable": any(alt.document_ref in docs_for_issue for alt in alternatives),
+                "premises_traceable": any(premise.document_ref in docs_for_issue for premise in premises.values()),
+            }
+        )
 
     result = CounterfactualCoverage(
         questions_total=len(questions),
@@ -169,16 +169,16 @@ def render(corpus: str, result: CounterfactualCoverage) -> str:
         "",
         "| | total | GitHub-derived | commit-derived |",
         "|---|---|---|---|",
-        f"| alternatives | {result.alternatives_total} | {result.alternatives_github} | "
-        f"{result.alternatives_commit} |",
-        f"| premises | {result.premises_total} | {result.premises_github} | "
-        f"{result.premises_commit} |",
+        f"| alternatives | {result.alternatives_total} | {result.alternatives_github} | {result.alternatives_commit} |",
+        f"| premises | {result.premises_total} | {result.premises_github} | {result.premises_commit} |",
     ]
     return "\n".join(lines)
 
 
 def main(
-    argv: list[str] | None = None, *, embedder_factory: EmbedderFactory = _default_embedder_factory,
+    argv: list[str] | None = None,
+    *,
+    embedder_factory: EmbedderFactory = _default_embedder_factory,
 ) -> int:
     """`embedder_factory` exists for in-process testing (a fake embedder, the same way
     `test_cli.py` drives `cli.build_serve_deps`) and defaults to the real one for CLI use; it
@@ -192,11 +192,10 @@ def main(
     parser.add_argument("--json", action="store_true")
     args = parser.parse_args(argv)
 
-    questions = [
-        json.loads(line) for line in args.questions.read_text(encoding="utf-8").splitlines() if line.strip()
-    ]
+    questions = [json.loads(line) for line in args.questions.read_text(encoding="utf-8").splitlines() if line.strip()]
     deps = build_serve_deps(
-        resolve_paths(cli_data_dir=args.data_dir, env={}), embedder_factory=embedder_factory,
+        resolve_paths(cli_data_dir=args.data_dir, env={}),
+        embedder_factory=embedder_factory,
     )
     try:
         repo = SnapshotRepository(deps.snapshot.database)
@@ -206,7 +205,8 @@ def main(
 
     if args.out:
         args.out.write_text(
-            "\n".join(json.dumps(row, sort_keys=True) for row in rows) + "\n", encoding="utf-8",
+            "\n".join(json.dumps(row, sort_keys=True) for row in rows) + "\n",
+            encoding="utf-8",
         )
     print(json.dumps(asdict(result), indent=2, sort_keys=True) if args.json else render(args.corpus, result))
     return 0

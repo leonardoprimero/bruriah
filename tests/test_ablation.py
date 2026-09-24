@@ -31,8 +31,12 @@ _DEPTH = 40
 
 def _outcome(base: int | None, reranked: int | None, **overrides: object) -> QuestionOutcome:
     payload: dict = dict(
-        id="q1", corpus="leakcanary", base_rank=base, reranked_rank=reranked,
-        pool_documents=200, rerank_depth=_DEPTH,
+        id="q1",
+        corpus="leakcanary",
+        base_rank=base,
+        reranked_rank=reranked,
+        pool_documents=200,
+        rerank_depth=_DEPTH,
     )
     payload.update(overrides)
     return QuestionOutcome(**payload)
@@ -45,7 +49,8 @@ def _outcome(base: int | None, reranked: int | None, **overrides: object) -> Que
 
 def test_the_build_sha_comes_out_and_the_rest_of_the_name_survives() -> None:
     assert strip_build_sha("2015-05-10-c2d938fb-customizable-excludedref.md") == (
-        "2015-05-10-customizable-excludedref.md")
+        "2015-05-10-customizable-excludedref.md"
+    )
 
 
 def test_a_name_that_never_carried_a_sha_is_left_alone() -> None:
@@ -70,11 +75,13 @@ def test_a_slug_that_merely_looks_hexadecimal_is_not_mistaken_for_a_sha() -> Non
 
 def test_a_document_ranks_where_its_best_passage_ranked() -> None:
     # Three passages, two documents. The reader's experience of `b` is rank 2, not rank 3.
-    ranking = document_ranking([
-        "corpus/2015-05-10-aaaaaaaa-first.md",
-        "corpus/2015-05-11-bbbbbbbb-second.md",
-        "corpus/2015-05-10-aaaaaaaa-first.md",
-    ])
+    ranking = document_ranking(
+        [
+            "corpus/2015-05-10-aaaaaaaa-first.md",
+            "corpus/2015-05-11-bbbbbbbb-second.md",
+            "corpus/2015-05-10-aaaaaaaa-first.md",
+        ]
+    )
     assert ranking == ["2015-05-10-first.md", "2015-05-11-second.md"]
 
 
@@ -133,9 +140,14 @@ def test_a_reranker_with_real_skill_beats_the_null_even_where_it_looks_harmful()
 
 
 def test_helped_hurt_and_unchanged_partition_the_scored_questions() -> None:
-    summary = summarize_bucket("4-10", [
-        _outcome(7, 2, id="up"), _outcome(7, 9, id="down"), _outcome(7, 7, id="still"),
-    ])
+    summary = summarize_bucket(
+        "4-10",
+        [
+            _outcome(7, 2, id="up"),
+            _outcome(7, 9, id="down"),
+            _outcome(7, 7, id="still"),
+        ],
+    )
     assert (summary.helped, summary.hurt, summary.unchanged, summary.n) == (1, 1, 1, 3)
 
 
@@ -154,10 +166,13 @@ def test_a_document_the_reranker_dropped_from_the_answer_is_counted_as_evicted()
     # rank 15 of 48 and the reranked one did not return it at all. `search` truncates on
     # `max_extracted_chars` AFTER reranking, and `_rerank_fused` groups every passage of a document
     # together, so the same character budget bought 48 documents unranked and 25 reranked.
-    summary = summarize("leakcanary", [
-        _outcome(15, None, id="evicted", pool_documents=48, reranked_pool_documents=25),
-        _outcome(2, 1, id="kept", pool_documents=48, reranked_pool_documents=25),
-    ])
+    summary = summarize(
+        "leakcanary",
+        [
+            _outcome(15, None, id="evicted", pool_documents=48, reranked_pool_documents=25),
+            _outcome(2, 1, id="kept", pool_documents=48, reranked_pool_documents=25),
+        ],
+    )
     assert summary.evicted == 1
     assert summary.rescued == 0
     assert summary.mean_pool_documents == 48.0
@@ -169,16 +184,30 @@ def test_a_document_the_reranker_dropped_from_the_answer_is_counted_as_evicted()
 
 
 def test_overall_recall_moves_with_the_reranked_ranks() -> None:
-    summary = summarize("egui", [
-        _outcome(1, 8, id="a"), _outcome(9, 2, id="b"), _outcome(30, 30, id="c"),
-    ])
+    summary = summarize(
+        "egui",
+        [
+            _outcome(1, 8, id="a"),
+            _outcome(9, 2, id="b"),
+            _outcome(30, 30, id="c"),
+        ],
+    )
     assert summary.recall_at_3_before == pytest.approx(1 / 3)
     assert summary.recall_at_3_after == pytest.approx(1 / 3)
 
 
 def test_buckets_cover_every_reachable_rank() -> None:
     assert [bucket_of(rank) for rank in (1, 2, 3, 4, 10, 11, 40, 41, 200)] == [
-        "1", "2-3", "2-3", "4-10", "4-10", "11-40", "11-40", "41+", "41+"]
+        "1",
+        "2-3",
+        "2-3",
+        "4-10",
+        "4-10",
+        "11-40",
+        "11-40",
+        "41+",
+        "41+",
+    ]
 
 
 # === reach: which problem this project actually has ==============================================
@@ -196,8 +225,10 @@ def test_a_document_never_ranked_counts_against_every_ceiling() -> None:
 def test_a_ceiling_deeper_than_the_corpus_is_not_reported() -> None:
     # Printing "top 2120" for a 604-document corpus would invite reading 1.000 as headroom that
     # exists rather than as a count of every document there is.
-    assert [ceiling for ceiling, _found, _share in
-            reach([1], ceilings=[3, 604, 2120], total_documents=604).within] == [3, 604]
+    assert [ceiling for ceiling, _found, _share in reach([1], ceilings=[3, 604, 2120], total_documents=604).within] == [
+        3,
+        604,
+    ]
 
 
 def test_the_median_is_the_figure_that_says_ordering_rather_than_retrieval() -> None:
@@ -228,8 +259,7 @@ def test_nothing_is_resumed_from_a_run_that_never_started(tmp_path) -> None:
 def test_every_row_already_written_is_resumed_by_id(tmp_path) -> None:
     artifact = tmp_path / "partial.jsonl"
     written = [_outcome(3, 1, id="lc1"), _outcome(27, 2, id="lc2")]
-    artifact.write_text(
-        "\n".join(_json.dumps(_asdict(outcome)) for outcome in written) + "\n", encoding="utf-8")
+    artifact.write_text("\n".join(_json.dumps(_asdict(outcome)) for outcome in written) + "\n", encoding="utf-8")
     resumed = already_scored(artifact)
     assert set(resumed) == {"lc1", "lc2"}
     # Round-trips to the same record, so a resumed run and an uninterrupted one publish identical

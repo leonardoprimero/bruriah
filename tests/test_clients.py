@@ -37,8 +37,7 @@ _MANIFEST = LaunchManifest(command=_COMMAND, args=("serve", "--config-dir", _CON
 # A space in an absolute command path is legitimate and common on both platforms, and is deliberately
 # NOT a rejected character -- see `_SHELL_METACHARACTERS`.
 _SPACED_COMMAND = (
-    "C:\\Program Files\\cerebro\\bruriah" if _WINDOWS
-    else "/Users/x/Library/Application Support/cerebro/bruriah"
+    "C:\\Program Files\\cerebro\\bruriah" if _WINDOWS else "/Users/x/Library/Application Support/cerebro/bruriah"
 )
 
 _MCP_SERVERS_RENDERERS = {
@@ -58,11 +57,16 @@ def test_manifest_rejects_relative_command() -> None:
     assert excinfo.value.code == "command_not_absolute"
 
 
-@pytest.mark.parametrize("bad_command", [
-    # Built on the platform prefix so the ABSOLUTE check passes and the metacharacter check
-    # is what actually rejects these -- otherwise Windows would fail them for the wrong reason.
-    f"{_PREFIX}bruriah; rm -rf /", f"{_PREFIX}$(whoami)", f"{_PREFIX}`id`",
-])
+@pytest.mark.parametrize(
+    "bad_command",
+    [
+        # Built on the platform prefix so the ABSOLUTE check passes and the metacharacter check
+        # is what actually rejects these -- otherwise Windows would fail them for the wrong reason.
+        f"{_PREFIX}bruriah; rm -rf /",
+        f"{_PREFIX}$(whoami)",
+        f"{_PREFIX}`id`",
+    ],
+)
 def test_manifest_rejects_shell_metacharacters_in_command(bad_command: str) -> None:
     with pytest.raises(ClientError) as excinfo:
         LaunchManifest(command=bad_command)
@@ -325,8 +329,12 @@ def test_capability_annotation_never_alters_rendered_output() -> None:
 
 
 def test_text_fallback_always_available_regardless_of_structured_output_support() -> None:
-    degraded = [c for c, cap in CLIENT_CAPABILITIES.items() if cap.structured_output == StructuredOutputSupport.DEGRADED]
-    detected = [c for c, cap in CLIENT_CAPABILITIES.items() if cap.structured_output == StructuredOutputSupport.DETECTED]
+    degraded = [
+        c for c, cap in CLIENT_CAPABILITIES.items() if cap.structured_output == StructuredOutputSupport.DEGRADED
+    ]
+    detected = [
+        c for c, cap in CLIENT_CAPABILITIES.items() if cap.structured_output == StructuredOutputSupport.DETECTED
+    ]
     assert degraded and detected  # both states are represented among the six clients
     for client_id in [*degraded, *detected]:
         # Every renderer produces valid JSON regardless of the client's structured-output

@@ -226,9 +226,7 @@ def _metadata(config: BuildConfig, manifest_hash: str, build_id: str) -> dict[st
         "service_version": config.service_version,
         "mcp_range": config.mcp_range,
         "embedding_identity": config.embedding_identity,
-        "embedding_fingerprint": hashlib.sha256(
-            config.embedding_fingerprint.encode()
-        ).hexdigest(),
+        "embedding_fingerprint": hashlib.sha256(config.embedding_fingerprint.encode()).hexdigest(),
         "ranking_config": config.ranking_config,
         "policy_hash": hashlib.sha256(config.policy_path.read_bytes()).hexdigest(),
         "corpus_manifest_hash": manifest_hash,
@@ -256,9 +254,7 @@ def _compatible(previous: sqlite3.Connection, config: BuildConfig) -> bool:
             "parser_version": config.parser_version,
             "ref_version": REF_VERSION,
             "embedding_identity": config.embedding_identity,
-            "embedding_fingerprint": hashlib.sha256(
-                config.embedding_fingerprint.encode()
-            ).hexdigest(),
+            "embedding_fingerprint": hashlib.sha256(config.embedding_fingerprint.encode()).hexdigest(),
         }.items()
     )
 
@@ -274,8 +270,7 @@ def _stored_document(
         metadata,
     )
     row = source.execute(
-        "SELECT document_ref, relative_path, source_hash, metadata FROM documents "
-        "WHERE relative_path = ?",
+        "SELECT document_ref, relative_path, source_hash, metadata FROM documents WHERE relative_path = ?",
         (document.relative_path,),
     ).fetchone()
     passages = source.execute(
@@ -303,9 +298,7 @@ def _stored_document(
         row != expected_document
         or len(passages) != len(expected_passages)
         or any(
-            stored[:-1] != expected
-            or not isinstance(stored[-1], bytes)
-            or len(stored[-1]) != dimensions * 4
+            stored[:-1] != expected or not isinstance(stored[-1], bytes) or len(stored[-1]) != dimensions * 4
             for stored, expected in zip(passages, expected_passages, strict=True)
         )
     ):
@@ -338,9 +331,7 @@ def _validate_candidate(
         database.execute("SELECT count(*) FROM passages").fetchone()[0],
     )
     has_corpus_stats = (
-        database.execute(
-            "SELECT count(*) FROM sqlite_master WHERE type='table' AND name='corpus_stats'"
-        ).fetchone()[0]
+        database.execute("SELECT count(*) FROM sqlite_master WHERE type='table' AND name='corpus_stats'").fetchone()[0]
         > 0
     )
     if (
@@ -349,14 +340,10 @@ def _validate_candidate(
         or counts != (len(manifest), len(documents), sum(len(item.passages) for item in documents))
         or (
             has_corpus_stats
-            and dict(database.execute("SELECT key, num_value FROM corpus_stats").fetchall()).get(
-                "total_documents"
-            )
+            and dict(database.execute("SELECT key, num_value FROM corpus_stats").fetchall()).get("total_documents")
             != float(counts[2])
         )
-        or database.execute(
-            "SELECT relative_path, source_hash FROM manifest ORDER BY relative_path"
-        ).fetchall()
+        or database.execute("SELECT relative_path, source_hash FROM manifest ORDER BY relative_path").fetchall()
         != manifest
         or dict(database.execute("SELECT key, value FROM index_meta")) != metadata
         or any(_stored_document(database, document, config.embedding_dimensions) is None for document in documents)
@@ -402,9 +389,7 @@ def _activation_metadata(database: sqlite3.Connection, config: BuildConfig) -> d
     return metadata
 
 
-def _validate_database(
-    database: sqlite3.Connection, config: BuildConfig, policy: CorpusPolicy
-) -> dict[str, str]:
+def _validate_database(database: sqlite3.Connection, config: BuildConfig, policy: CorpusPolicy) -> dict[str, str]:
     try:
         metadata = _activation_metadata(database, config)
         documents = [parse_document(path, config.root, policy) for path in policy.discover(config.root)]
@@ -439,9 +424,7 @@ def _representative_queries(database: sqlite3.Connection) -> None:
             raise IndexLifecycleError("representative_query_failed")
 
 
-def validate_candidate(
-    database: sqlite3.Connection, config: BuildConfig, policy: CorpusPolicy
-) -> dict[str, str]:
+def validate_candidate(database: sqlite3.Connection, config: BuildConfig, policy: CorpusPolicy) -> dict[str, str]:
     return _validate_database(database, config, policy)
 
 
@@ -452,9 +435,7 @@ _POINTER_ENTRY_KEYS = frozenset({"database", "build_id"})
 
 
 def _read_pointer(pointer: Path) -> dict[str, Any]:
-    return read_pointer(
-        pointer, entry_keys=_POINTER_ENTRY_KEYS, name_key="database", error=IndexLifecycleError
-    )
+    return read_pointer(pointer, entry_keys=_POINTER_ENTRY_KEYS, name_key="database", error=IndexLifecycleError)
 
 
 _write_pointer = write_pointer
@@ -539,10 +520,7 @@ def _validated_entry(
         # process finished reading. Every use here is read-only, so there is no transaction to
         # keep; closing is the whole intent.
         with closing(_open_descriptor(path, descriptor)) as database:
-            metadata = (
-                _validate_stored(database, config)
-                if canonical else _activation_metadata(database, config)
-            )
+            metadata = _validate_stored(database, config) if canonical else _activation_metadata(database, config)
         if not _identity_matches(path, identity):
             raise IndexLifecycleError("active_target_changed_during_validation")
         return path, metadata
@@ -705,9 +683,7 @@ def rollback_active(pointer: Path, config: BuildConfig) -> ActivationResult:
         raise IndexLifecycleError("no_retained_index")
     selected_path, metadata = _validated_entry(pointer, value["retained"][0], config)
     selected = _entry(selected_path, metadata)
-    current_path, current_metadata = _validated_entry(
-        pointer, value["active"], config, canonical=False
-    )
+    current_path, current_metadata = _validated_entry(pointer, value["active"], config, canonical=False)
     current = _entry(current_path, current_metadata)
     durable = _write_pointer(pointer, selected, [current, *value["retained"][1:]])
     return ActivationResult(selected_path, metadata["build_id"], durable)
@@ -852,28 +828,30 @@ def _build_premise_and_alternative_records(
         ranked = sorted(
             range(len(candidates)),
             key=lambda i: (
-                candidates[i]["github_issue"]
-                if candidates[i]["github_issue"] is not None
-                else float("inf"),
+                candidates[i]["github_issue"] if candidates[i]["github_issue"] is not None else float("inf"),
                 i,
             ),
         )
         winner = candidates[ranked[0]]
         for loser_index in ranked[1:]:
             loser = candidates[loser_index]
-            dropped.append(DroppedPremise(
-                premise_id=pid,
-                document_ref=loser["document_ref"],
-                relative_path=loser["relative_path"],
-                reason="shadowed_by_lower_github_issue",
-            ))
+            dropped.append(
+                DroppedPremise(
+                    premise_id=pid,
+                    document_ref=loser["document_ref"],
+                    relative_path=loser["relative_path"],
+                    reason="shadowed_by_lower_github_issue",
+                )
+            )
         if pid in premises_map:
-            dropped.append(DroppedPremise(
-                premise_id=pid,
-                document_ref=winner["document_ref"],
-                relative_path=winner["relative_path"],
-                reason="shadowed_by_repository_premise",
-            ))
+            dropped.append(
+                DroppedPremise(
+                    premise_id=pid,
+                    document_ref=winner["document_ref"],
+                    relative_path=winner["relative_path"],
+                    reason="shadowed_by_repository_premise",
+                )
+            )
         else:
             premises_map[pid] = winner
 
@@ -885,12 +863,14 @@ def _build_premise_and_alternative_records(
             # premise a repository-authored document declared. `repo_premises` still names exactly
             # those ids, unaffected by any mutation a later legitimate invalidation makes below.
             if doc.metadata.source == "github" and inv_id_clean in repo_premises:
-                dropped.append(DroppedPremise(
-                    premise_id=inv_id_clean,
-                    document_ref=doc.document_ref,
-                    relative_path=doc.relative_path,
-                    reason="github_invalidation_ignored",
-                ))
+                dropped.append(
+                    DroppedPremise(
+                        premise_id=inv_id_clean,
+                        document_ref=doc.document_ref,
+                        relative_path=doc.relative_path,
+                        reason="github_invalidation_ignored",
+                    )
+                )
                 continue
             inv_by = doc.metadata.commit or doc.document_ref
             if inv_id_clean in premises_map:
@@ -934,32 +914,26 @@ def _build_premise_and_alternative_records(
             disposition = alt.get("disposition", "rejected")
             reason = alt.get("reason", "")
             premises_list = alt.get("premises", [])
-            alt_rows.append((
-                name,
-                disposition,
-                reason,
-                json.dumps(premises_list),
-                doc.document_ref,
-            ))
+            alt_rows.append(
+                (
+                    name,
+                    disposition,
+                    reason,
+                    json.dumps(premises_list),
+                    doc.document_ref,
+                )
+            )
 
     return premise_rows, alt_rows, dropped
 
 
 def _build_lexical_index(database: sqlite3.Connection) -> None:
-    rows = database.execute(
-        "SELECT ref, search_text FROM passages ORDER BY ref"
-    ).fetchall()
+    rows = database.execute("SELECT ref, search_text FROM passages ORDER BY ref").fetchall()
     total_documents = len(rows)
     if total_documents == 0:
-        database.execute(
-            "INSERT INTO corpus_stats VALUES ('total_documents', 0.0, NULL)"
-        )
-        database.execute(
-            "INSERT INTO corpus_stats VALUES ('average_length', 0.0, NULL)"
-        )
-        database.execute(
-            "INSERT INTO corpus_stats VALUES ('corpus_language', NULL, NULL)"
-        )
+        database.execute("INSERT INTO corpus_stats VALUES ('total_documents', 0.0, NULL)")
+        database.execute("INSERT INTO corpus_stats VALUES ('average_length', 0.0, NULL)")
+        database.execute("INSERT INTO corpus_stats VALUES ('corpus_language', NULL, NULL)")
         return
 
     df: dict[str, int] = defaultdict(int)
@@ -1050,14 +1024,9 @@ def build_candidate(
                 reused += 1
                 passage_count += len(document.passages)
                 continue
-            texts = [
-                f"{config.passage_prefix}{passage.search_text}"
-                for passage in document.passages
-            ]
+            texts = [f"{config.passage_prefix}{passage.search_text}" for passage in document.passages]
             vectors = embedder(texts)
-            if len(vectors) != len(texts) or any(
-                len(vector) != config.embedding_dimensions * 4 for vector in vectors
-            ):
+            if len(vectors) != len(texts) or any(len(vector) != config.embedding_dimensions * 4 for vector in vectors):
                 raise ValueError("invalid_embedding_output")
             doc_metadata = json.dumps(document.metadata.__dict__, sort_keys=True)
             database.execute(
@@ -1101,7 +1070,12 @@ def build_candidate(
         database = None
         os.replace(temporary, destination)
         return BuildResult(
-            destination, build_id, manifest_hash, len(documents), passage_count, reused,
+            destination,
+            build_id,
+            manifest_hash,
+            len(documents),
+            passage_count,
+            reused,
             tuple(dropped_premises),
         )
     except BaseException:

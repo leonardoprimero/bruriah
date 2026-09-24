@@ -116,9 +116,9 @@ def _tamper(raw: bytes, mutate) -> bytes:
 def _embed(raw: bytes, index: int, payload: dict) -> bytes:
     """Replace one embedded pack's bytes without touching its manifest -- the tamper a digest check
     exists to catch."""
-    return _tamper(raw, lambda data: data["packs"][index].__setitem__(
-        "source", base64.b64encode(_bytes(payload)).decode()
-    ))
+    return _tamper(
+        raw, lambda data: data["packs"][index].__setitem__("source", base64.b64encode(_bytes(payload)).decode())
+    )
 
 
 # --- compile -------------------------------------------------------------------------------------
@@ -144,11 +144,17 @@ def test_compile_is_deterministic_regardless_of_source_order(tmp_path: Path) -> 
     second.mkdir()
     forward = compile_skillset(
         [_source(first, _pack()), _source(first, _second())],
-        first / "gen.json", ROOTS, SECOND_APPROVALS, today=TODAY,
+        first / "gen.json",
+        ROOTS,
+        SECOND_APPROVALS,
+        today=TODAY,
     )
     backward = compile_skillset(
         [_source(second, _second()), _source(second, _pack())],
-        second / "gen.json", ROOTS, SECOND_APPROVALS, today=TODAY,
+        second / "gen.json",
+        ROOTS,
+        SECOND_APPROVALS,
+        today=TODAY,
     )
     assert (first / "gen.json").read_bytes() == (second / "gen.json").read_bytes()
     assert forward.build_id == backward.build_id
@@ -239,7 +245,9 @@ def test_embedded_signature_is_re_verified_not_assumed(tmp_path: Path) -> None:
     manifest_path = tmp_path / "bruriah.skills.manifest.json"
     manifest_path.write_bytes(_manifest(raw, payload, key=Ed25519PrivateKey.generate()))
     source = SkillSource(pack_path, manifest_path)
-    assert _code(compile_skillset, [source], tmp_path / "gen.json", ROOTS, APPROVALS, today=TODAY) == "invalid_signature"
+    assert (
+        _code(compile_skillset, [source], tmp_path / "gen.json", ROOTS, APPROVALS, today=TODAY) == "invalid_signature"
+    )
     # And the same rogue manifest swapped into an already-built generation, which is the path a
     # rollback takes: compile can never produce this, so only re-verification at validate catches it.
     rogue = base64.b64encode(_manifest(raw, payload, key=Ed25519PrivateKey.generate())).decode()
@@ -289,9 +297,7 @@ def test_embedded_pack_cannot_exceed_the_single_pack_ceiling(tmp_path: Path) -> 
     # through it, so a generation would otherwise be a way past a limit the direct loader applies.
     raw = _tamper(
         _generation(tmp_path),
-        lambda data: data["packs"][0].__setitem__(
-            "source", base64.b64encode(b"{" + b"x" * 70_000).decode()
-        ),
+        lambda data: data["packs"][0].__setitem__("source", base64.b64encode(b"{" + b"x" * 70_000).decode()),
     )
     assert _code(_validate, raw) == "pack_too_large"
 
@@ -313,7 +319,8 @@ def test_approval_is_bound_to_the_current_body_digest(tmp_path: Path) -> None:
 def test_a_second_pack_needs_its_own_approval(tmp_path: Path) -> None:
     raw = _generation(tmp_path, _pack(), _second(), approvals=SECOND_APPROVALS)
     assert _validate(raw, approvals=SECOND_APPROVALS).skill_set.skill_ids == (
-        "security.threat-model", "design.ui-review",
+        "security.threat-model",
+        "design.ui-review",
     )
     assert _code(_validate, raw, approvals=APPROVALS) == "skill_not_approved"
 
@@ -377,9 +384,7 @@ def _built(tmp_path: Path, name: str, **overrides: Any) -> Path:
     workspace = tmp_path / f".src-{name}"
     workspace.mkdir()
     destination = tmp_path / f"skillset-{name}.json"
-    compile_skillset(
-        [_source(workspace, _pack(**overrides))], destination, ROOTS, APPROVALS, today=TODAY
-    )
+    compile_skillset([_source(workspace, _pack(**overrides))], destination, ROOTS, APPROVALS, today=TODAY)
     return destination
 
 
@@ -483,9 +488,9 @@ def test_symlinked_pointer_is_refused(tmp_path: Path) -> None:
 def test_traversal_in_the_pointer_is_refused(tmp_path: Path) -> None:
     pointer = tmp_path / "active.json"
     _promote(_built(tmp_path, "one"), pointer)
-    pointer.write_text(json.dumps(
-        {"version": 1, "active": {"skillset": "../escape.json", "build_id": "x"}, "retained": []}
-    ))
+    pointer.write_text(
+        json.dumps({"version": 1, "active": {"skillset": "../escape.json", "build_id": "x"}, "retained": []})
+    )
     assert _code(_promote, _built(tmp_path, "two", maintainer="Second"), pointer) == "invalid_active_pointer"
     assert _code(read_active, pointer) == "invalid_active_pointer"
 
@@ -691,12 +696,18 @@ def test_a_missing_pointer_means_inactive_not_broken(tmp_path: Path) -> None:
     ("break_it", "code"),
     [
         (lambda p, g: p.write_text("{not json"), "invalid_active_pointer"),
-        (lambda p, g: p.write_text(json.dumps(
-            {"version": 1, "active": {"skillset": "../escape.json", "build_id": "x"}, "retained": []}
-        )), "invalid_active_pointer"),
-        (lambda p, g: p.write_text(json.dumps(
-            {"version": 1, "active": {"skillset": "absent.json", "build_id": "x"}, "retained": []}
-        )), "invalid_active_target"),
+        (
+            lambda p, g: p.write_text(
+                json.dumps({"version": 1, "active": {"skillset": "../escape.json", "build_id": "x"}, "retained": []})
+            ),
+            "invalid_active_pointer",
+        ),
+        (
+            lambda p, g: p.write_text(
+                json.dumps({"version": 1, "active": {"skillset": "absent.json", "build_id": "x"}, "retained": []})
+            ),
+            "invalid_active_target",
+        ),
         (lambda p, g: g.write_bytes(b"{not a generation"), "malformed_pack"),
     ],
 )

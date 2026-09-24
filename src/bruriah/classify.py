@@ -48,26 +48,98 @@ class RequestClassification:
 # Requirement "Domain-Sensitive Outcomes and Unsupported-Domain Abstention" names exactly these
 # five domain families as requiring distinct treatment; anything else stays "general", or, if it
 # names a specific unsupported profession, "unsupported" (never a nearest-match guess).
-_LAW_WORDS = frozenset({
-    "law", "legal", "lawsuit", "contract", "regulation", "statute", "liability", "compliance",
-    "ley", "demanda", "contrato", "normativa", "estatuto", "responsabilidad",
-})
-_ACCOUNTING_WORDS = frozenset({
-    "tax", "taxes", "accounting", "audit", "invoice", "bookkeeping", "vat", "payroll", "filing",
-    "impuesto", "impuestos", "contabilidad", "auditoria", "auditoría", "factura", "nomina", "nómina", "iva",
-})
-_CYBERSECURITY_WORDS = frozenset({
-    "vulnerability", "exploit", "malware", "pentest", "penetration", "cve", "breach", "firewall",
-    "vulnerabilidad", "explotar", "brecha", "cortafuegos", "seguridad",
-})
-_PROGRAMMING_WORDS = frozenset({
-    "code", "python", "javascript", "api", "bug", "compile", "framework", "sdk", "repository",
-    "codigo", "código", "programacion", "programación", "libreria", "librería", "repositorio",
-})
-_UX_WORDS = frozenset({
-    "ux", "ui", "accessibility", "usability", "wireframe", "interaction", "usabilidad",
-    "accesibilidad", "diseño", "interfaz", "wireframes",
-})
+_LAW_WORDS = frozenset(
+    {
+        "law",
+        "legal",
+        "lawsuit",
+        "contract",
+        "regulation",
+        "statute",
+        "liability",
+        "compliance",
+        "ley",
+        "demanda",
+        "contrato",
+        "normativa",
+        "estatuto",
+        "responsabilidad",
+    }
+)
+_ACCOUNTING_WORDS = frozenset(
+    {
+        "tax",
+        "taxes",
+        "accounting",
+        "audit",
+        "invoice",
+        "bookkeeping",
+        "vat",
+        "payroll",
+        "filing",
+        "impuesto",
+        "impuestos",
+        "contabilidad",
+        "auditoria",
+        "auditoría",
+        "factura",
+        "nomina",
+        "nómina",
+        "iva",
+    }
+)
+_CYBERSECURITY_WORDS = frozenset(
+    {
+        "vulnerability",
+        "exploit",
+        "malware",
+        "pentest",
+        "penetration",
+        "cve",
+        "breach",
+        "firewall",
+        "vulnerabilidad",
+        "explotar",
+        "brecha",
+        "cortafuegos",
+        "seguridad",
+    }
+)
+_PROGRAMMING_WORDS = frozenset(
+    {
+        "code",
+        "python",
+        "javascript",
+        "api",
+        "bug",
+        "compile",
+        "framework",
+        "sdk",
+        "repository",
+        "codigo",
+        "código",
+        "programacion",
+        "programación",
+        "libreria",
+        "librería",
+        "repositorio",
+    }
+)
+_UX_WORDS = frozenset(
+    {
+        "ux",
+        "ui",
+        "accessibility",
+        "usability",
+        "wireframe",
+        "interaction",
+        "usabilidad",
+        "accesibilidad",
+        "diseño",
+        "interfaz",
+        "wireframes",
+    }
+)
 # This list catches only EXPLICITLY-NAMED unsupported professions, so their risk reads as
 # `unknown` rather than a bare `low`. It is NOT — and cannot be — a complete answer to the spec's
 # "Arbitrary unsupported profession" scenario: an open-ended profession space cannot be enumerated
@@ -76,46 +148,119 @@ _UX_WORDS = frozenset({
 # availability, which is a registry question owned by 6B-2/6B-3, not by this pure classifier. The
 # real abstention backstop is domain-agnostic ("no local pack or evidence found") and MUST run in
 # 6B-3 for `general` exactly as for `unsupported`.
-_UNSUPPORTED_PROFESSION_WORDS = frozenset({
-    "medical", "medicine", "doctor", "diagnosis", "prescription", "veterinary", "veterinarian",
-    "notary", "immigration", "structural", "architect", "architecture",
-    "medico", "médico", "medicina", "diagnostico", "diagnóstico", "receta", "veterinario",
-    "veterinaria", "notario", "inmigracion", "inmigración", "estructural", "arquitecto",
-})
+_UNSUPPORTED_PROFESSION_WORDS = frozenset(
+    {
+        "medical",
+        "medicine",
+        "doctor",
+        "diagnosis",
+        "prescription",
+        "veterinary",
+        "veterinarian",
+        "notary",
+        "immigration",
+        "structural",
+        "architect",
+        "architecture",
+        "medico",
+        "médico",
+        "medicina",
+        "diagnostico",
+        "diagnóstico",
+        "receta",
+        "veterinario",
+        "veterinaria",
+        "notario",
+        "inmigracion",
+        "inmigración",
+        "estructural",
+        "arquitecto",
+    }
+)
 _DOMAIN_KEYWORDS: tuple[tuple[Domain, frozenset[str]], ...] = (
-    ("law", _LAW_WORDS), ("accounting", _ACCOUNTING_WORDS), ("cybersecurity", _CYBERSECURITY_WORDS),
-    ("programming", _PROGRAMMING_WORDS), ("ux_design", _UX_WORDS),
+    ("law", _LAW_WORDS),
+    ("accounting", _ACCOUNTING_WORDS),
+    ("cybersecurity", _CYBERSECURITY_WORDS),
+    ("programming", _PROGRAMMING_WORDS),
+    ("ux_design", _UX_WORDS),
 )
 
 # Requirement "Read-Only Informational Boundary and Host Actions", scenario "Consequential
 # action requested": credentials, a write, execution, or licensed judgment must route/abstain
 # rather than be answered. Flagging intent here is the signal 6B-3 will use for that decision.
-_CONSEQUENTIAL_ACTION_WORDS = frozenset({
-    "install", "uninstall", "delete", "purchase", "buy", "transfer", "execute", "deploy",
-    "authenticate", "login",
-    "instalar", "desinstalar", "eliminar", "borrar", "comprar", "transferir", "ejecutar", "autenticar",
-})
+_CONSEQUENTIAL_ACTION_WORDS = frozenset(
+    {
+        "install",
+        "uninstall",
+        "delete",
+        "purchase",
+        "buy",
+        "transfer",
+        "execute",
+        "deploy",
+        "authenticate",
+        "login",
+        "instalar",
+        "desinstalar",
+        "eliminar",
+        "borrar",
+        "comprar",
+        "transferir",
+        "ejecutar",
+        "autenticar",
+    }
+)
 # Requirement "Local Knowledge and Capability Discovery": discovering skills, MCP servers,
 # tools, libraries, datasets, and methods is a distinct claim shape from an evidence lookup.
-_CAPABILITY_WORDS = frozenset({
-    "tool", "library", "skill", "package", "mcp", "server", "dataset", "method",
-    "herramienta", "biblioteca", "paquete", "servidor", "metodo", "método",
-})
+_CAPABILITY_WORDS = frozenset(
+    {
+        "tool",
+        "library",
+        "skill",
+        "package",
+        "mcp",
+        "server",
+        "dataset",
+        "method",
+        "herramienta",
+        "biblioteca",
+        "paquete",
+        "servidor",
+        "metodo",
+        "método",
+    }
+)
 # Requirement "Read-Only Informational Boundary and Host Actions": Bruriah "SHALL provide
 # evidence-linked information, not legal, accounting, security, medical, or other professional
 # conclusions." Detecting a request FOR such a conclusion is classification, not concluding.
-_PROFESSIONAL_CONCLUSION_WORDS = frozenset({
-    "confirm", "liable", "guarantee", "guaranteed", "definitively", "legally",
-    "confirmá", "confirmar", "garantizado", "definitivamente", "legalmente",
-})
+_PROFESSIONAL_CONCLUSION_WORDS = frozenset(
+    {
+        "confirm",
+        "liable",
+        "guarantee",
+        "guaranteed",
+        "definitively",
+        "legally",
+        "confirmá",
+        "confirmar",
+        "garantizado",
+        "definitivamente",
+        "legalmente",
+    }
+)
 
 # "law and accounting MUST require jurisdiction and applicable/effective date" -> regulated;
 # cybersecurity distinguishes evidence from authorization/incident judgment -> high; programming
 # and UX are version- or standard-bound but not licensed professions -> medium; an unrecognized
 # domain carries no assessable risk -> unknown, never a silently inferred "low" default.
 _DOMAIN_RISK: dict[Domain, RiskLevel] = {
-    "law": "regulated", "accounting": "regulated", "cybersecurity": "high",
-    "programming": "medium", "ux_design": "medium", "general": "low", "unsupported": "unknown",
+    "law": "regulated",
+    "accounting": "regulated",
+    "cybersecurity": "high",
+    "programming": "medium",
+    "ux_design": "medium",
+    "general": "low",
+    "unsupported": "unknown",
 }
 
 
@@ -171,8 +316,11 @@ def classify(request: InvestigationRequest) -> RequestClassification:
     # request's dedicated structured field, never guessed from free text.
     jurisdiction = request.jurisdiction if request.jurisdiction else "unknown"
     return RequestClassification(
-        intent=_intent(words), domain=domain, claim_type=_claim_type(words),
-        risk=_DOMAIN_RISK[domain], jurisdiction=jurisdiction,
+        intent=_intent(words),
+        domain=domain,
+        claim_type=_claim_type(words),
+        risk=_DOMAIN_RISK[domain],
+        jurisdiction=jurisdiction,
     )
 
 

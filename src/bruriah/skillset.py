@@ -17,7 +17,12 @@ from pydantic import Field, ValidationError
 from . import __version__ as _ROUTER_VERSION
 from .packs import MAX_PACK_BYTES, ClosedModel, PackError, encode_pack, parse_pack_bytes
 from .pointer import (
-    controlled_file, flush_validated, identity_matches, read_pointer, serialized, write_pointer,
+    controlled_file,
+    flush_validated,
+    identity_matches,
+    read_pointer,
+    serialized,
+    write_pointer,
 )
 from .skills import SkillPack, SkillSet, load_skill_pack_bytes
 
@@ -41,9 +46,7 @@ MAX_SKILLSET_BYTES = 1_048_576
 # roughly eleven embedded packs. A set that outgrows this is a packaging decision to make explicitly,
 # never a ceiling to raise quietly.
 
-Base64Blob = Annotated[
-    str, Field(min_length=4, max_length=MAX_SKILLSET_BYTES, pattern=r"^[A-Za-z0-9+/]+={0,2}$")
-]
+Base64Blob = Annotated[str, Field(min_length=4, max_length=MAX_SKILLSET_BYTES, pattern=r"^[A-Za-z0-9+/]+={0,2}$")]
 
 
 class SkillSetError(ValueError):
@@ -324,9 +327,7 @@ class SkillSetActivation:
 
 
 def _read_pointer(pointer: Path) -> dict[str, Any]:
-    return read_pointer(
-        pointer, entry_keys=_POINTER_ENTRY_KEYS, name_key="skillset", error=SkillSetError
-    )
+    return read_pointer(pointer, entry_keys=_POINTER_ENTRY_KEYS, name_key="skillset", error=SkillSetError)
 
 
 def _controlled_file(pointer: Path, name: str) -> tuple[Path, int, tuple[int, int, int, int]]:
@@ -488,12 +489,19 @@ def recover_skillset(
     for entry in [value["active"], *value["retained"]]:
         try:
             path, raw = _entry_bytes(pointer, entry)
-            survivors.append((
-                path,
-                validate_skillset_bytes(
-                    raw, trust_roots, approvals, today=today, router_version=router_version, minimum_versions=minimum_versions
-                ),
-            ))
+            survivors.append(
+                (
+                    path,
+                    validate_skillset_bytes(
+                        raw,
+                        trust_roots,
+                        approvals,
+                        today=today,
+                        router_version=router_version,
+                        minimum_versions=minimum_versions,
+                    ),
+                )
+            )
         except SkillSetError:
             continue
     if not survivors:
@@ -592,10 +600,13 @@ def list_generations(pointer: Path) -> GenerationInventory:
     active = pointer.parent / value["active"]["skillset"]
     retained = tuple(pointer.parent / item["skillset"] for item in value["retained"])
     referenced = {active.name, *(item.name for item in retained)}
-    unreferenced = tuple(sorted(
-        item for item in pointer.parent.glob("skillset-*.json")
-        if item.is_file() and not item.is_symlink() and item.name not in referenced
-    ))
+    unreferenced = tuple(
+        sorted(
+            item
+            for item in pointer.parent.glob("skillset-*.json")
+            if item.is_file() and not item.is_symlink() and item.name not in referenced
+        )
+    )
     return GenerationInventory(active, retained, unreferenced)
 
 

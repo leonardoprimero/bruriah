@@ -14,8 +14,16 @@ from pathlib import Path
 from conftest import requires_posix_permissions
 
 from bruriah.cache import (
-    CacheEntry, CacheStats, PruneSummary, build_cache_entry, cache_key, cache_stats, find_by_ref,
-    prune_expired, read_cache, write_cache_atomic,
+    CacheEntry,
+    CacheStats,
+    PruneSummary,
+    build_cache_entry,
+    cache_key,
+    cache_stats,
+    find_by_ref,
+    prune_expired,
+    read_cache,
+    write_cache_atomic,
 )
 from bruriah.contracts import EvidenceRecord
 
@@ -24,11 +32,20 @@ _RETRIEVED_AT = datetime(2026, 7, 24, 12, 0, 0, tzinfo=timezone.utc)
 
 def _evidence(**overrides: object) -> EvidenceRecord:
     payload = dict(
-        ref="live:sha256:" + "a" * 32, kind="captured_live", publisher="example.test",
-        locator="https://example.test:443/page", citation_locator="https://example.test:443/page",
-        digest="sha256:" + "b" * 64, extraction_method="raw_lines", authority="unknown",
-        authority_rationale="live_fetch_unassessed", freshness="unknown", license="unknown",
-        reuse="unknown", conflict="unknown", retrieved_at=_RETRIEVED_AT,
+        ref="live:sha256:" + "a" * 32,
+        kind="captured_live",
+        publisher="example.test",
+        locator="https://example.test:443/page",
+        citation_locator="https://example.test:443/page",
+        digest="sha256:" + "b" * 64,
+        extraction_method="raw_lines",
+        authority="unknown",
+        authority_rationale="live_fetch_unassessed",
+        freshness="unknown",
+        license="unknown",
+        reuse="unknown",
+        conflict="unknown",
+        retrieved_at=_RETRIEVED_AT,
     )
     payload.update(overrides)
     return EvidenceRecord(**payload)
@@ -41,8 +58,12 @@ def _entry(**overrides: object) -> CacheEntry:
     max_excerpt_chars = overrides.pop("max_excerpt_chars", 20_000)
     retrieved_at = overrides.pop("retrieved_at", _RETRIEVED_AT)
     return build_cache_entry(
-        evidence, retrieved_at=retrieved_at, ttl=ttl, body=body,
-        max_excerpt_chars=max_excerpt_chars, policy_version="1.0.0",
+        evidence,
+        retrieved_at=retrieved_at,
+        ttl=ttl,
+        body=body,
+        max_excerpt_chars=max_excerpt_chars,
+        policy_version="1.0.0",
     )
 
 
@@ -117,7 +138,8 @@ def test_corrupt_cache_file_is_treated_as_a_miss_not_a_crash(tmp_path: Path) -> 
     cache_dir = tmp_path / "cache"
     cache_dir.mkdir(parents=True)
     (cache_dir / f"{cache_key('https://example.test:443/page')}.json").write_text(
-        "{not valid json", encoding="utf-8",
+        "{not valid json",
+        encoding="utf-8",
     )
     lookup = read_cache(cache_dir, "https://example.test:443/page", now=_RETRIEVED_AT)
     assert not lookup.hit and not lookup.expired and lookup.entry is None
@@ -134,20 +156,33 @@ def test_a_pre_contract_v2_entry_with_free_text_authority_rationale_reads_as_a_m
     cache_dir = tmp_path / "cache"
     cache_dir.mkdir(parents=True)
     stale_evidence = {
-        "ref": "live:sha256:" + "a" * 32, "kind": "captured_live", "publisher": "example.test",
-        "locator": "https://example.test:443/page", "citation_locator": "https://example.test:443/page",
-        "digest": "sha256:" + "b" * 64, "extraction_method": "raw_lines", "authority": "unknown",
+        "ref": "live:sha256:" + "a" * 32,
+        "kind": "captured_live",
+        "publisher": "example.test",
+        "locator": "https://example.test:443/page",
+        "citation_locator": "https://example.test:443/page",
+        "digest": "sha256:" + "b" * 64,
+        "extraction_method": "raw_lines",
+        "authority": "unknown",
         "authority_rationale": "Fetched from example.test with no assessment performed.",
-        "freshness": "unknown", "license": "unknown", "reuse": "unknown", "conflict": "unknown",
-        "provenance_chain": [], "redirect_chain": [], "uncertainty": [],
+        "freshness": "unknown",
+        "license": "unknown",
+        "reuse": "unknown",
+        "conflict": "unknown",
+        "provenance_chain": [],
+        "redirect_chain": [],
+        "uncertainty": [],
     }
     payload = {
         "evidence": stale_evidence,
         "expires_at": (_RETRIEVED_AT + timedelta(hours=1)).isoformat(),
-        "excerpt": "x", "excerpt_only": False, "policy_version": "1.0.0",
+        "excerpt": "x",
+        "excerpt_only": False,
+        "policy_version": "1.0.0",
     }
     (cache_dir / f"{cache_key('https://example.test:443/page')}.json").write_text(
-        json.dumps(payload), encoding="utf-8",
+        json.dumps(payload),
+        encoding="utf-8",
     )
     lookup = read_cache(cache_dir, "https://example.test:443/page", now=_RETRIEVED_AT)
     assert not lookup.hit and not lookup.expired and lookup.entry is None
@@ -157,7 +192,8 @@ def test_cache_entry_missing_required_field_is_treated_as_a_miss(tmp_path: Path)
     cache_dir = tmp_path / "cache"
     cache_dir.mkdir(parents=True)
     (cache_dir / f"{cache_key('https://example.test:443/page')}.json").write_text(
-        '{"evidence": {}, "excerpt": "x"}', encoding="utf-8",
+        '{"evidence": {}, "excerpt": "x"}',
+        encoding="utf-8",
     )
     lookup = read_cache(cache_dir, "https://example.test:443/page", now=_RETRIEVED_AT)
     assert not lookup.hit and lookup.entry is None
@@ -211,7 +247,9 @@ def test_prune_expired_keeps_a_live_entry(tmp_path: Path) -> None:
     cache_dir = tmp_path / "cache"
     write_cache_atomic(cache_dir, "https://example.test:443/page", _entry(ttl=timedelta(hours=1)))
     summary = prune_expired(
-        cache_dir, now=_RETRIEVED_AT + timedelta(minutes=30), ttl=timedelta(hours=1),
+        cache_dir,
+        now=_RETRIEVED_AT + timedelta(minutes=30),
+        ttl=timedelta(hours=1),
     )
     assert summary == PruneSummary(scanned=1, removed=0, corrupt=0, bytes_reclaimed=0)
     assert _path(cache_dir, "https://example.test:443/page").exists()
@@ -232,7 +270,8 @@ def test_prune_expired_removes_an_entry_with_an_implausible_future_expiry(tmp_pa
     `now` relative to a real deletion boundary."""
     cache_dir = tmp_path / "cache"
     tampered = dataclasses.replace(
-        _entry(ttl=timedelta(hours=1)), expires_at=_RETRIEVED_AT + timedelta(days=365),
+        _entry(ttl=timedelta(hours=1)),
+        expires_at=_RETRIEVED_AT + timedelta(days=365),
     )
     write_cache_atomic(cache_dir, "https://example.test:443/page", tampered)
     summary = prune_expired(cache_dir, now=_RETRIEVED_AT, ttl=timedelta(hours=1))
@@ -280,7 +319,9 @@ def test_write_cache_atomic_self_prunes_expired_entries_on_a_later_write(tmp_pat
 def test_write_cache_atomic_self_prune_never_deletes_the_entry_just_written(tmp_path: Path) -> None:
     cache_dir = tmp_path / "cache"
     write_cache_atomic(
-        cache_dir, "https://example.test:443/page", _entry(ttl=timedelta(seconds=0)),  # zero-ttl edge
+        cache_dir,
+        "https://example.test:443/page",
+        _entry(ttl=timedelta(seconds=0)),  # zero-ttl edge
     )
     assert _path(cache_dir, "https://example.test:443/page").exists()
 
@@ -330,7 +371,9 @@ def test_self_prune_at_write_never_evicts_a_newer_live_entry_on_an_out_of_order_
 
 def test_cache_stats_empty_or_missing_dir_returns_zero(tmp_path: Path) -> None:
     assert cache_stats(tmp_path / "does-not-exist", now=_RETRIEVED_AT) == CacheStats(
-        entries=0, expired=0, total_bytes=0,
+        entries=0,
+        expired=0,
+        total_bytes=0,
     )
 
 
@@ -372,8 +415,11 @@ def test_find_by_ref_reports_an_expired_entry_as_expired_and_withholds_it(tmp_pa
     # "Had it, it aged out" is a different answer from "never had it", and neither is grounds for
     # handing back stale content -- the same split `read_cache` already makes.
     now = datetime(2026, 7, 24, 12, 0, 0, tzinfo=timezone.utc)
-    write_cache_atomic(tmp_path, "https://one.example:443/a",
-                       _entry(evidence=_evidence(ref="live:sha256:" + "c" * 32), retrieved_at=now))
+    write_cache_atomic(
+        tmp_path,
+        "https://one.example:443/a",
+        _entry(evidence=_evidence(ref="live:sha256:" + "c" * 32), retrieved_at=now),
+    )
 
     found = find_by_ref(tmp_path, "live:sha256:" + "c" * 32, now=now + timedelta(days=3))
     assert found.hit is False
@@ -385,8 +431,11 @@ def test_find_by_ref_misses_cleanly_on_an_unknown_ref_and_an_absent_directory(tm
     now = datetime(2026, 7, 24, 12, 0, 0, tzinfo=timezone.utc)
     assert find_by_ref(tmp_path / "never-created", "live:sha256:" + "d" * 32, now=now).hit is False
 
-    write_cache_atomic(tmp_path, "https://one.example:443/a",
-                       _entry(evidence=_evidence(ref="live:sha256:" + "e" * 32), retrieved_at=now))
+    write_cache_atomic(
+        tmp_path,
+        "https://one.example:443/a",
+        _entry(evidence=_evidence(ref="live:sha256:" + "e" * 32), retrieved_at=now),
+    )
     miss = find_by_ref(tmp_path, "live:sha256:" + "f" * 32, now=now)
     assert miss.hit is False and miss.expired is False and miss.entry is None
 
@@ -397,8 +446,11 @@ def test_find_by_ref_skips_a_corrupt_entry_instead_of_raising(tmp_path: Path) ->
     now = datetime(2026, 7, 24, 12, 0, 0, tzinfo=timezone.utc)
     (tmp_path).mkdir(parents=True, exist_ok=True)
     (tmp_path / "0000corrupt.json").write_text("{not json", encoding="utf-8")
-    write_cache_atomic(tmp_path, "https://one.example:443/a",
-                       _entry(evidence=_evidence(ref="live:sha256:" + "9" * 32), retrieved_at=now))
+    write_cache_atomic(
+        tmp_path,
+        "https://one.example:443/a",
+        _entry(evidence=_evidence(ref="live:sha256:" + "9" * 32), retrieved_at=now),
+    )
 
     found = find_by_ref(tmp_path, "live:sha256:" + "9" * 32, now=now)
     assert found.hit and found.entry is not None

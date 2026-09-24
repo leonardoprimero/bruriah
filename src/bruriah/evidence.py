@@ -92,7 +92,10 @@ def verify_extract_digest(record: EvidenceRecord, extract: str) -> bool:
 
 
 def wrap_evidence(
-    record: EvidenceRecord, extract: str, *, require_digest_match: bool = False,
+    record: EvidenceRecord,
+    extract: str,
+    *,
+    require_digest_match: bool = False,
 ) -> UntrustedEvidence:
     """Build one untrusted envelope. Typed: rejects a non-`EvidenceRecord` source, a non-`str`
     or oversized extract, or (opt-in) a tampered/fabricated digest, instead of trusting caller
@@ -180,7 +183,10 @@ def _jurisdiction_applicable(jurisdictions: Sequence[str], requested: str | None
 
 
 def _is_applicable(
-    item: EvidenceClaim, jurisdiction: str | None, as_of: date | None, requested_version: str | None,
+    item: EvidenceClaim,
+    jurisdiction: str | None,
+    as_of: date | None,
+    requested_version: str | None,
 ) -> bool:
     record = item.envelope.record
     if item.source is not None and not _jurisdiction_applicable(item.source.jurisdictions, jurisdiction):
@@ -191,7 +197,8 @@ def _is_applicable(
         if record.expires_at is not None and record.expires_at < as_of:
             return False
     if (
-        requested_version is not None and item.applies_to_version is not None
+        requested_version is not None
+        and item.applies_to_version is not None
         and item.applies_to_version != requested_version
     ):
         return False
@@ -212,8 +219,13 @@ def _classify_conflict(a: EvidenceClaim, b: EvidenceClaim) -> ConflictClass:
 
 
 def _assess_claim_inner(
-    claim_text: str, evidence_claims: Sequence[EvidenceClaim], *,
-    jurisdiction: str | None, as_of: date | None, requested_version: str | None, today: date,
+    claim_text: str,
+    evidence_claims: Sequence[EvidenceClaim],
+    *,
+    jurisdiction: str | None,
+    as_of: date | None,
+    requested_version: str | None,
+    today: date,
 ) -> ClaimAssessment:
     if not isinstance(claim_text, str) or not claim_text:
         raise EvidenceError("invalid_claim_text")
@@ -225,8 +237,9 @@ def _assess_claim_inner(
         raise EvidenceError("invalid_today_type")
 
     if not evidence_claims:
-        return ClaimAssessment(claim_text=claim_text, state="insufficient", jurisdiction=jurisdiction,
-                                uncertainty=["no_evidence"])
+        return ClaimAssessment(
+            claim_text=claim_text, state="insufficient", jurisdiction=jurisdiction, uncertainty=["no_evidence"]
+        )
 
     applicable: list[EvidenceClaim] = []
     non_applicable: list[EvidenceClaim] = []
@@ -242,8 +255,13 @@ def _assess_claim_inner(
             reasons.append("missing_effective_date")
         if not reasons:
             reasons.append("no_applicable_evidence")
-        return ClaimAssessment(claim_text=claim_text, state="insufficient", jurisdiction=jurisdiction,
-                                non_applicable_refs=non_applicable_refs, uncertainty=reasons)
+        return ClaimAssessment(
+            claim_text=claim_text,
+            state="insufficient",
+            jurisdiction=jurisdiction,
+            non_applicable_refs=non_applicable_refs,
+            uncertainty=reasons,
+        )
 
     groups: dict[str, list[EvidenceClaim]] = {}
     for item in applicable:
@@ -254,15 +272,21 @@ def _assess_claim_inner(
         # (guarantee #4). Superseding (e.g. a newer effective date) is flagged via "time", never
         # silently auto-preferred.
         ordered = list(groups.values())
-        classes: list[ConflictClass] = sorted({
-            _classify_conflict(ordered[i][0], ordered[j][0])
-            for i in range(len(ordered)) for j in range(i + 1, len(ordered))
-        })
+        classes: list[ConflictClass] = sorted(
+            {
+                _classify_conflict(ordered[i][0], ordered[j][0])
+                for i in range(len(ordered))
+                for j in range(i + 1, len(ordered))
+            }
+        )
         return ClaimAssessment(
-            claim_text=claim_text, state="conflicted", jurisdiction=jurisdiction,
+            claim_text=claim_text,
+            state="conflicted",
+            jurisdiction=jurisdiction,
             supporting_refs=[item.envelope.record.ref for item in ordered[0]],
             conflicting_refs=[item.envelope.record.ref for group in ordered[1:] for item in group],
-            non_applicable_refs=non_applicable_refs, conflict_classes=classes,
+            non_applicable_refs=non_applicable_refs,
+            conflict_classes=classes,
             uncertainty=["evidence_disagrees"],
         )
 
@@ -272,7 +296,8 @@ def _assess_claim_inner(
         (
             resolve_authority(item.source),
             assess_freshness(
-                item.envelope.record, today=today,
+                item.envelope.record,
+                today=today,
                 freshness_days=item.source.freshness_days if item.source else None,
             ),
             item,
@@ -282,34 +307,52 @@ def _assess_claim_inner(
 
     if all(authority == "unknown" for (authority, _rationale), _freshness, _item in assessed):
         return ClaimAssessment(
-            claim_text=claim_text, state="unknown", jurisdiction=jurisdiction, supporting_refs=refs,
-            non_applicable_refs=non_applicable_refs, extracted_claim=group[0].normalized_claim,
+            claim_text=claim_text,
+            state="unknown",
+            jurisdiction=jurisdiction,
+            supporting_refs=refs,
+            non_applicable_refs=non_applicable_refs,
+            extracted_claim=group[0].normalized_claim,
             uncertainty=["authority_unknown"],
         )
 
     current = [
-        (authority, rationale, item) for (authority, rationale), freshness, item in assessed
+        (authority, rationale, item)
+        for (authority, rationale), freshness, item in assessed
         if authority != "unknown" and freshness == "current"
     ]
     if not current:
         return ClaimAssessment(
-            claim_text=claim_text, state="insufficient", jurisdiction=jurisdiction, supporting_refs=refs,
-            non_applicable_refs=non_applicable_refs, extracted_claim=group[0].normalized_claim,
+            claim_text=claim_text,
+            state="insufficient",
+            jurisdiction=jurisdiction,
+            supporting_refs=refs,
+            non_applicable_refs=non_applicable_refs,
+            extracted_claim=group[0].normalized_claim,
             uncertainty=["no_current_authoritative_evidence"],
         )
 
     corroboration = len({item.envelope.record.publisher for _authority, _rationale, item in current})
     return ClaimAssessment(
-        claim_text=claim_text, state="supported", jurisdiction=jurisdiction, supporting_refs=refs,
-        non_applicable_refs=non_applicable_refs, extracted_claim=group[0].normalized_claim,
-        corroboration=corroboration, authority_rationale=current[0][1],
+        claim_text=claim_text,
+        state="supported",
+        jurisdiction=jurisdiction,
+        supporting_refs=refs,
+        non_applicable_refs=non_applicable_refs,
+        extracted_claim=group[0].normalized_claim,
+        corroboration=corroboration,
+        authority_rationale=current[0][1],
     )
 
 
 def assess_claim(
-    claim_text: str, evidence_claims: Sequence[EvidenceClaim], *,
-    jurisdiction: str | None = None, as_of: date | None = None,
-    requested_version: str | None = None, today: date,
+    claim_text: str,
+    evidence_claims: Sequence[EvidenceClaim],
+    *,
+    jurisdiction: str | None = None,
+    as_of: date | None = None,
+    requested_version: str | None = None,
+    today: date,
 ) -> ClaimAssessment:
     """Total, typed claim-ledger entry point (guarantee #6): never raises. Deterministic --
     identical arguments always yield an identical `ClaimAssessment`. A typed `EvidenceError` or
@@ -317,8 +360,12 @@ def assess_claim(
     reason -- never a manufactured `supported` (abstention discipline, guarantee #5)."""
     try:
         return _assess_claim_inner(
-            claim_text, evidence_claims, jurisdiction=jurisdiction, as_of=as_of,
-            requested_version=requested_version, today=today,
+            claim_text,
+            evidence_claims,
+            jurisdiction=jurisdiction,
+            as_of=as_of,
+            requested_version=requested_version,
+            today=today,
         )
     except EvidenceError as error:
         return ClaimAssessment(claim_text="unassessable_claim", state="unknown", uncertainty=[error.code])
@@ -331,13 +378,25 @@ def render_claim_record(assessment: ClaimAssessment) -> ClaimRecord:
     `InvestigationResult.claims` uses (Slice 11 wiring). One direction only: the frozen model is
     never enriched in place."""
     return ClaimRecord(
-        text=assessment.claim_text, state=assessment.state,
-        supporting_refs=assessment.supporting_refs, conflicting_refs=assessment.conflicting_refs,
+        text=assessment.claim_text,
+        state=assessment.state,
+        supporting_refs=assessment.supporting_refs,
+        conflicting_refs=assessment.conflicting_refs,
     )
 
 
 __all__ = [
-    "ClaimAssessment", "ClaimState", "ConflictClass", "EvidenceClaim", "EvidenceError",
-    "FreshnessState", "UntrustedEvidence", "assess_claim", "assess_freshness", "render_claim_record",
-    "resolve_authority", "verify_extract_digest", "wrap_evidence",
+    "ClaimAssessment",
+    "ClaimState",
+    "ConflictClass",
+    "EvidenceClaim",
+    "EvidenceError",
+    "FreshnessState",
+    "UntrustedEvidence",
+    "assess_claim",
+    "assess_freshness",
+    "render_claim_record",
+    "resolve_authority",
+    "verify_extract_digest",
+    "wrap_evidence",
 ]

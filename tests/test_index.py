@@ -91,18 +91,14 @@ def test_candidate_declares_schema_metadata_manifest_and_model_identity(tmp_path
     assert result.reused_documents == 0
     with closing(open_candidate(candidate)) as database:
         metadata = dict(database.execute("SELECT key, value FROM index_meta"))
-        manifest = database.execute(
-            "SELECT relative_path, source_hash FROM manifest ORDER BY relative_path"
-        ).fetchall()
+        manifest = database.execute("SELECT relative_path, source_hash FROM manifest ORDER BY relative_path").fetchall()
         assert json.loads(metadata["embedding_identity"]) == {
             "dimensions": 3,
             "fingerprint": json.loads(FINGERPRINT),
             "model": "test/minilm",
             "revision": "snapshot-a",
         }
-        assert metadata["embedding_fingerprint"] == hashlib.sha256(
-            FINGERPRINT.encode()
-        ).hexdigest()
+        assert metadata["embedding_fingerprint"] == hashlib.sha256(FINGERPRINT.encode()).hexdigest()
         assert metadata["schema_version"] == "1"
         assert metadata["parser_version"] == "corpus-v2"
         assert metadata["ref_version"] == "v1"
@@ -212,8 +208,7 @@ def test_a_github_document_never_replaces_a_repository_premise(tmp_path: Path) -
     root = tmp_path / "vault"
     _write_md(
         root / "public" / "adr.md",
-        'premises:\n  - id: scale-premise\n    statement: "Write volume stays under 10k/s"\n'
-        "    status: active\n",
+        'premises:\n  - id: scale-premise\n    statement: "Write volume stays under 10k/s"\n    status: active\n',
     )
     _write_md(
         root / "public" / "2026-01-01-issue-9-attack.md",
@@ -251,8 +246,7 @@ def test_a_github_invalidation_never_changes_a_repository_premise(tmp_path: Path
     root = tmp_path / "vault"
     _write_md(
         root / "public" / "adr.md",
-        'premises:\n  - id: scale-premise\n    statement: "Write volume stays under 10k/s"\n'
-        "    status: active\n",
+        'premises:\n  - id: scale-premise\n    statement: "Write volume stays under 10k/s"\n    status: active\n',
     )
     _write_md(
         root / "public" / "2026-01-01-issue-9-attack.md",
@@ -290,8 +284,7 @@ def test_a_repository_invalidation_still_flips_a_repository_premise(tmp_path: Pa
     root = tmp_path / "vault"
     _write_md(
         root / "public" / "adr.md",
-        'premises:\n  - id: scale-premise\n    statement: "Write volume stays under 10k/s"\n'
-        "    status: active\n",
+        'premises:\n  - id: scale-premise\n    statement: "Write volume stays under 10k/s"\n    status: active\n',
     )
     _write_md(
         root / "public" / "invalidate.md",
@@ -307,8 +300,7 @@ def test_a_repository_invalidation_still_flips_a_repository_premise(tmp_path: Pa
     assert result.dropped_premises == ()
     with closing(open_candidate(candidate)) as database:
         row = database.execute(
-            "SELECT status, invalidated_by, invalidation_document_ref FROM premises "
-            "WHERE premise_id = ?",
+            "SELECT status, invalidated_by, invalidation_document_ref FROM premises WHERE premise_id = ?",
             ("scale-premise",),
         ).fetchone()
         assert row == ("invalidated", "a1b2c3d4e5f6", document_ref_for("public/invalidate.md"))
@@ -323,8 +315,7 @@ def test_a_github_invalidation_still_flips_a_github_tier_premise(tmp_path: Path)
     root = tmp_path / "vault"
     _write_md(
         root / "public" / "g1-issue-9-declare.md",
-        "bruriah_source: github\nissue: 9\n"
-        'premises:\n  - id: other-premise\n    statement: "From github"\n',
+        'bruriah_source: github\nissue: 9\npremises:\n  - id: other-premise\n    statement: "From github"\n',
     )
     _write_md(
         root / "public" / "g2-issue-10-invalidate.md",
@@ -340,8 +331,7 @@ def test_a_github_invalidation_still_flips_a_github_tier_premise(tmp_path: Path)
     assert result.dropped_premises == ()
     with closing(open_candidate(candidate)) as database:
         row = database.execute(
-            "SELECT status, invalidated_by, invalidation_document_ref FROM premises "
-            "WHERE premise_id = ?",
+            "SELECT status, invalidated_by, invalidation_document_ref FROM premises WHERE premise_id = ?",
             ("other-premise",),
         ).fetchone()
         assert row == (
@@ -360,13 +350,11 @@ def test_two_github_documents_declaring_the_same_premise_id_the_lowest_issue_num
     root = tmp_path / "vault"
     _write_md(
         root / "public" / "2026-01-01-issue-30-a.md",
-        "bruriah_source: github\nissue: 30\n"
-        'premises:\n  - id: scale-premise\n    statement: "From issue 30"\n',
+        'bruriah_source: github\nissue: 30\npremises:\n  - id: scale-premise\n    statement: "From issue 30"\n',
     )
     _write_md(
         root / "public" / "2026-06-01-issue-4-b.md",
-        "bruriah_source: github\nissue: 4\n"
-        'premises:\n  - id: scale-premise\n    statement: "From issue 4"\n',
+        'bruriah_source: github\nissue: 4\npremises:\n  - id: scale-premise\n    statement: "From issue 4"\n',
     )
     policy_path = tmp_path / "policy.yaml"
     policy_path.write_text("version: 1\ninclude: ['public/**']\nexclude: []\n", encoding="utf-8")
@@ -380,9 +368,7 @@ def test_two_github_documents_declaring_the_same_premise_id_the_lowest_issue_num
     assert result.dropped_premises[0].reason == "shadowed_by_lower_github_issue"
 
     with closing(open_candidate(candidate)) as database:
-        row = database.execute(
-            "SELECT statement FROM premises WHERE premise_id = ?", ("scale-premise",)
-        ).fetchone()
+        row = database.execute("SELECT statement FROM premises WHERE premise_id = ?", ("scale-premise",)).fetchone()
         assert row == ("From issue 4",)
 
 
@@ -413,9 +399,7 @@ def test_every_passage_is_indexed_under_its_title_and_ancestry_and_stored_bare(
     with closing(open_candidate(candidate)) as database:
         stored = {
             (row[0], row[1]): (row[2], row[3])
-            for row in database.execute(
-                "SELECT relative_path, heading_path, text, search_text FROM passages"
-            )
+            for row in database.execute("SELECT relative_path, heading_path, text, search_text FROM passages")
         }
 
     # An H3: the title and both ancestors, then the section, whose own heading is not repeated.
@@ -469,15 +453,11 @@ def test_incremental_build_reuses_only_compatible_unchanged_documents(tmp_path: 
     build_candidate(config(root, policy_path), first, policy, fake_embeddings)
     (root / "public/two.md").write_text("# Two\nChanged.\n", encoding="utf-8")
 
-    result = build_candidate(
-        config(root, policy_path), second, policy, fake_embeddings, previous=first
-    )
+    result = build_candidate(config(root, policy_path), second, policy, fake_embeddings, previous=first)
 
     assert result.reused_documents == 1
     with closing(open_candidate(second)) as database:
-        rows = database.execute(
-            "SELECT relative_path, text, vector FROM passages ORDER BY relative_path"
-        ).fetchall()
+        rows = database.execute("SELECT relative_path, text, vector FROM passages ORDER BY relative_path").fetchall()
     assert rows[0][1:] == ("# One\nFirst passage.\n", fake_embeddings(["# One\nFirst passage.\n"])[0])
     assert rows[1][1] == "# Two\nChanged.\n"
 
@@ -487,9 +467,7 @@ def test_incremental_build_reuses_only_compatible_unchanged_documents(tmp_path: 
     # marker is what makes that refusal automatic -- one full rebuild, then reuse resumes.
     incompatible = replace(config(root, policy_path), parser_version="corpus-v1")
     third = tmp_path / "third.sqlite3"
-    assert build_candidate(
-        incompatible, third, policy, fake_embeddings, previous=second
-    ).reused_documents == 0
+    assert build_candidate(incompatible, third, policy, fake_embeddings, previous=second).reused_documents == 0
 
 
 def test_the_active_pointer_resolves_to_a_reusable_previous_index(tmp_path: Path) -> None:
@@ -531,9 +509,7 @@ def test_a_previous_index_that_cannot_be_opened_is_not_reused_rather_than_fatal(
         (missing, tmp_path / "from-missing.sqlite3"),
         (not_a_database, tmp_path / "from-garbage.sqlite3"),
     ):
-        result = build_candidate(
-            config(root, policy_path), candidate, policy, fake_embeddings, previous=previous
-        )
+        result = build_candidate(config(root, policy_path), candidate, policy, fake_embeddings, previous=previous)
         assert result.reused_documents == 0
         assert result.documents == 2
 
@@ -584,9 +560,7 @@ def test_deleted_documents_and_incompatible_embeddings_are_not_reused(tmp_path: 
         embedder = lambda texts, size=changed.embedding_dimensions: [b"x" * (size * 4) for _ in texts]
         assert build_candidate(changed, candidate, policy, embedder, previous=first).reused_documents == 0
         with closing(open_candidate(candidate)) as database:
-            assert database.execute("SELECT relative_path FROM documents").fetchall() == [
-                ("public/one.md",)
-            ]
+            assert database.execute("SELECT relative_path FROM documents").fetchall() == [("public/one.md",)]
 
 
 @pytest.mark.parametrize(
@@ -612,9 +586,7 @@ def test_semantically_invalid_reused_rows_are_rebuilt(tmp_path: Path, corruption
 
     assert result.reused_documents == 1
     with closing(open_candidate(second)) as database:
-        assert database.execute(
-            "SELECT count(*) FROM passages WHERE length(vector) != 12"
-        ).fetchone() == (0,)
+        assert database.execute("SELECT count(*) FROM passages WHERE length(vector) != 12").fetchone() == (0,)
         assert database.execute("SELECT count(*) FROM passages").fetchone() == (2,)
 
 
@@ -640,9 +612,7 @@ def test_fastembed_fingerprint_binds_pooling_source_snapshot_and_artifact(tmp_pa
     }
 
 
-def test_only_the_pooling_notice_is_swallowed_on_model_construction(
-    tmp_path: Path, monkeypatch, recwarn
-) -> None:
+def test_only_the_pooling_notice_is_swallowed_on_model_construction(tmp_path: Path, monkeypatch, recwarn) -> None:
     """fastembed says, every time a model is built, that it now pools by mean instead of CLS. That
     lands mid-quickstart and reads like a fault, and the change it reports already invalidates an
     index through `embedding_fingerprint` rather than needing to be read. So it is filtered -- by
@@ -658,9 +628,7 @@ def test_only_the_pooling_notice_is_swallowed_on_model_construction(
     )
 
     def _noisy(model_name: str):
-        warnings.warn(
-            f"The model {model_name} now uses mean pooling instead of CLS embedding.", UserWarning
-        )
+        warnings.warn(f"The model {model_name} now uses mean pooling instead of CLS embedding.", UserWarning)
         warnings.warn("a different fastembed problem, with no backstop", UserWarning)
         return SimpleNamespace(model=backend, embed=lambda texts: [], embedding_size=3)
 
@@ -729,9 +697,7 @@ def test_invalid_or_incompatible_promotion_keeps_last_known_good(tmp_path: Path)
     old_snapshot = snapshot_active(pointer, config(root, policy_path))
     build_candidate(config(root, policy_path), invalid, policy, fake_embeddings)
     with closing(sqlite3.connect(invalid)) as database, database:
-        database.execute(
-            "UPDATE passages SET vector = X'00' WHERE ref = (SELECT ref FROM passages LIMIT 1)"
-        )
+        database.execute("UPDATE passages SET vector = X'00' WHERE ref = (SELECT ref FROM passages LIMIT 1)")
     changed = replace(config(root, policy_path), parser_version="corpus-v1")
     build_candidate(changed, incompatible, policy, fake_embeddings)
 
@@ -762,9 +728,7 @@ def test_edited_policy_promotes_and_discards_the_unretainable_generation(tmp_pat
     first_activation = promote_candidate(first, pointer, config(root, policy_path), policy)
     assert first_activation.retention_discarded is False
 
-    policy_path.write_text(
-        "version: 1\ninclude: ['public/**']\nexclude: ['drafts/**']\n", encoding="utf-8"
-    )
+    policy_path.write_text("version: 1\ninclude: ['public/**']\nexclude: ['drafts/**']\n", encoding="utf-8")
     edited = CorpusPolicy.load(policy_path)
     second_result = build_candidate(config(root, policy_path), second, edited, fake_embeddings)
 
@@ -789,9 +753,11 @@ def test_prune_removes_only_generations_the_pointer_does_not_reference(tmp_path:
     root, policy = write_corpus(tmp_path)
     policy_path = tmp_path / "policy.yaml"
     pointer = tmp_path / "active.json"
-    first, second, third = (tmp_path / f"candidate-{'ab' * 16}.sqlite3",
-                            tmp_path / f"candidate-{'cd' * 16}.sqlite3",
-                            tmp_path / f"candidate-{'ef' * 16}.sqlite3")
+    first, second, third = (
+        tmp_path / f"candidate-{'ab' * 16}.sqlite3",
+        tmp_path / f"candidate-{'cd' * 16}.sqlite3",
+        tmp_path / f"candidate-{'ef' * 16}.sqlite3",
+    )
     for candidate in (first, second, third):
         build_candidate(config(root, policy_path), candidate, policy, fake_embeddings)
         promote_candidate(candidate, pointer, config(root, policy_path), policy, retain=1)
@@ -862,10 +828,7 @@ def test_rollback_and_recovery_restore_retained_index_without_rebuild(tmp_path: 
     (root / "public/two.md").write_text("# Two\nChanged.\n", encoding="utf-8")
     promote_candidate(second, pointer, config(root, policy_path), policy)
     with closing(sqlite3.connect(second)) as database, database:
-        database.execute(
-            "UPDATE passages SET source_hash = 'corrupt' "
-            "WHERE ref = (SELECT ref FROM passages LIMIT 1)"
-        )
+        database.execute("UPDATE passages SET source_hash = 'corrupt' WHERE ref = (SELECT ref FROM passages LIMIT 1)")
 
     (root / "public/two.md").write_text("# Two\nSecond passage.\n", encoding="utf-8")
     recovered = recover_active(pointer, config(root, policy_path))
@@ -885,12 +848,18 @@ def test_active_target_rejects_escape_corruption_and_missing_file(tmp_path: Path
     result = build_candidate(config(root, policy_path), outside, policy, fake_embeddings)
     pointer = store / "active.json"
     (store / "escape.sqlite3").symlink_to(outside)
-    pointer.write_text(json.dumps({"version": 1, "active": {
-        "database": "../outside.sqlite3", "build_id": result.build_id}, "retained": []}))
+    pointer.write_text(
+        json.dumps(
+            {"version": 1, "active": {"database": "../outside.sqlite3", "build_id": result.build_id}, "retained": []}
+        )
+    )
     with pytest.raises(IndexLifecycleError, match="invalid_active_pointer"):
         snapshot_active(pointer, config(root, policy_path))
-    pointer.write_text(json.dumps({"version": 1, "active": {
-        "database": "escape.sqlite3", "build_id": result.build_id}, "retained": []}))
+    pointer.write_text(
+        json.dumps(
+            {"version": 1, "active": {"database": "escape.sqlite3", "build_id": result.build_id}, "retained": []}
+        )
+    )
     with pytest.raises(IndexLifecycleError) as escape:
         snapshot_active(pointer, config(root, policy_path))
     assert escape.value.code == "invalid_active_target"
@@ -957,10 +926,12 @@ def test_promotion_reports_directory_fsync_outcome_and_runs_smoke_gate(
     # this a test of the flag's honesty rather than of one platform's plumbing.
     if os.name == "posix":
         real_fsync = os.fsync
+
         def fail_directory_fsync(file_descriptor: int) -> None:
             if stat.S_ISDIR(os.fstat(file_descriptor).st_mode):
                 raise OSError("injected directory fsync failure")
             real_fsync(file_descriptor)
+
         monkeypatch.setattr(index_module.os, "fsync", fail_directory_fsync)
         outcome = promote_candidate(second, pointer, config(root, policy_path), policy)
         assert not outcome.durable
@@ -1031,16 +1002,17 @@ def test_promotion_rejects_candidate_path_swap_after_validation(
     assert swap_succeeded or os.name != "posix"
 
 
-@pytest.mark.parametrize("corruption", [
-    "UPDATE passages SET start_line = 999 WHERE ref = (SELECT ref FROM passages LIMIT 1)",
-    "DELETE FROM passages WHERE ref = (SELECT ref FROM passages LIMIT 1)",
-    "UPDATE passages SET text = 'stale' WHERE ref = (SELECT ref FROM passages LIMIT 1)",
-    "UPDATE passages SET relative_path = 'stale.md' WHERE ref = (SELECT ref FROM passages LIMIT 1)",
-    "UPDATE passages SET source_hash = 'stale' WHERE ref = (SELECT ref FROM passages LIMIT 1)",
-])
-def test_snapshot_rejects_noncanonical_passage_semantics(
-    tmp_path: Path, corruption: str
-) -> None:
+@pytest.mark.parametrize(
+    "corruption",
+    [
+        "UPDATE passages SET start_line = 999 WHERE ref = (SELECT ref FROM passages LIMIT 1)",
+        "DELETE FROM passages WHERE ref = (SELECT ref FROM passages LIMIT 1)",
+        "UPDATE passages SET text = 'stale' WHERE ref = (SELECT ref FROM passages LIMIT 1)",
+        "UPDATE passages SET relative_path = 'stale.md' WHERE ref = (SELECT ref FROM passages LIMIT 1)",
+        "UPDATE passages SET source_hash = 'stale' WHERE ref = (SELECT ref FROM passages LIMIT 1)",
+    ],
+)
+def test_snapshot_rejects_noncanonical_passage_semantics(tmp_path: Path, corruption: str) -> None:
     root, policy = write_corpus(tmp_path)
     policy_path = tmp_path / "policy.yaml"
     candidate = tmp_path / "candidate.sqlite3"
@@ -1101,16 +1073,17 @@ def test_concurrent_readers_and_promoters_keep_complete_history(tmp_path: Path) 
     policy_path = tmp_path / "policy.yaml"
     pointer = tmp_path / "active.json"
     candidates = [tmp_path / f"candidate-{number}.sqlite3" for number in range(3)]
-    results = [build_candidate(config(root, policy_path), path, policy, fake_embeddings)
-               for path in candidates]
+    results = [build_candidate(config(root, policy_path), path, policy, fake_embeddings) for path in candidates]
     promote_candidate(candidates[0], pointer, config(root, policy_path), policy)
     barrier = threading.Barrier(9)
+
     def read_old() -> str:
         with snapshot_active(pointer, config(root, policy_path)) as snapshot:
             barrier.wait()
             for _ in range(50):
                 assert snapshot.database.execute("SELECT count(*) FROM passages").fetchone() == (2,)
             return snapshot.build_id
+
     with ThreadPoolExecutor(max_workers=10) as pool:
         readers = [pool.submit(read_old) for _ in range(8)]
         barrier.wait()
@@ -1235,18 +1208,36 @@ def test_differing_embedding_prefixes_prevent_document_reuse(tmp_path: Path) -> 
     second_candidate = tmp_path / "second.sqlite3"
 
     cfg_first = BuildConfig(
-        root=root, policy_path=policy_path, schema_version=1, parser_version="corpus-v2",
-        service_version="0.1.0", mcp_range=">=1.28.1,<2", embedding_model="test/minilm",
-        embedding_revision="snapshot-a", embedding_dimensions=3, embedding_fingerprint=FINGERPRINT,
-        ranking_config="rrf-v1", passage_prefix="passage: ", query_prefix="query: ",
+        root=root,
+        policy_path=policy_path,
+        schema_version=1,
+        parser_version="corpus-v2",
+        service_version="0.1.0",
+        mcp_range=">=1.28.1,<2",
+        embedding_model="test/minilm",
+        embedding_revision="snapshot-a",
+        embedding_dimensions=3,
+        embedding_fingerprint=FINGERPRINT,
+        ranking_config="rrf-v1",
+        passage_prefix="passage: ",
+        query_prefix="query: ",
     )
     build_candidate(cfg_first, first_candidate, policy, fake_embeddings)
 
     cfg_second = BuildConfig(
-        root=root, policy_path=policy_path, schema_version=1, parser_version="corpus-v2",
-        service_version="0.1.0", mcp_range=">=1.28.1,<2", embedding_model="test/minilm",
-        embedding_revision="snapshot-a", embedding_dimensions=3, embedding_fingerprint=FINGERPRINT,
-        ranking_config="rrf-v1", passage_prefix="", query_prefix="",
+        root=root,
+        policy_path=policy_path,
+        schema_version=1,
+        parser_version="corpus-v2",
+        service_version="0.1.0",
+        mcp_range=">=1.28.1,<2",
+        embedding_model="test/minilm",
+        embedding_revision="snapshot-a",
+        embedding_dimensions=3,
+        embedding_fingerprint=FINGERPRINT,
+        ranking_config="rrf-v1",
+        passage_prefix="",
+        query_prefix="",
     )
     result = build_candidate(cfg_second, second_candidate, policy, fake_embeddings, previous=first_candidate)
     assert result.reused_documents == 0
@@ -1261,15 +1252,11 @@ def test_candidate_builds_precomputed_lexical_index(tmp_path: Path) -> None:
     assert result.passages == 2
 
     with closing(open_candidate(candidate)) as database:
-        stats = dict(
-            database.execute("SELECT key, num_value FROM corpus_stats").fetchall()
-        )
+        stats = dict(database.execute("SELECT key, num_value FROM corpus_stats").fetchall())
         assert stats["total_documents"] == 2.0
         assert stats["average_length"] == 3.0
 
-        dfs = dict(
-            database.execute("SELECT term, df FROM term_df").fetchall()
-        )
+        dfs = dict(database.execute("SELECT term, df FROM term_df").fetchall())
         assert dfs["passage"] == 2
         assert dfs["first"] == 1
         assert dfs["second"] == 1
@@ -1286,5 +1273,3 @@ def test_candidate_builds_precomputed_lexical_index(tmp_path: Path) -> None:
         passage_postings = [p for p in postings if p[0] == "passage"]
         assert len(passage_postings) == 2
         assert {p[2] for p in passage_postings} == {1}
-
-

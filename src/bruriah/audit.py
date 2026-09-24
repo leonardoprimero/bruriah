@@ -15,12 +15,24 @@ from pathlib import Path
 from typing import Literal
 
 AuditDecision = Literal[
-    "disabled", "not_warranted", "cached", "fetched", "refused", "degraded", "error",
+    "disabled",
+    "not_warranted",
+    "cached",
+    "fetched",
+    "refused",
+    "degraded",
+    "error",
 ]
 DestinationClass = Literal["public_https", "none"]
 _RECORD_FIELDS = (
-    "request_id", "destination_host", "destination_class", "decision", "code",
-    "bytes_transferred", "elapsed_ms", "timestamp",
+    "request_id",
+    "destination_host",
+    "destination_class",
+    "decision",
+    "code",
+    "bytes_transferred",
+    "elapsed_ms",
+    "timestamp",
 )
 
 

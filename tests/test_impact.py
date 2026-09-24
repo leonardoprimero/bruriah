@@ -61,10 +61,7 @@ class TestAnalyzeImpact:
         (repo / "tokens.py").write_text("tokens code")
         (repo / "session.py").write_text("session code")
         subprocess.run(["git", "add", "."], cwd=repo, check=True)
-        msg = (
-            "feat(auth): unified token and session model\n\n"
-            "We build a unified auth model across tokens and sessions."
-        )
+        msg = "feat(auth): unified token and session model\n\nWe build a unified auth model across tokens and sessions."
         subprocess.run(["git", "commit", "-m", msg], cwd=repo, check=True)
         commit1 = subprocess.run(
             ["git", "rev-parse", "HEAD"], cwd=repo, check=True, capture_output=True, text=True

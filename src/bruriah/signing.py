@@ -86,9 +86,7 @@ def load_public(key_path: Path) -> str:
     return _encode_public(_load_private(key_path))
 
 
-def sign_pack(
-    key_path: Path, signer: str, pack_path: Path, manifest_path: Path | None = None
-) -> Path:
+def sign_pack(key_path: Path, signer: str, pack_path: Path, manifest_path: Path | None = None) -> Path:
     """Sign `pack_path` and write its release manifest, returning the manifest path.
 
     `pack_id` and `version` are read FROM THE PACK, never taken as arguments. A manifest whose
@@ -119,9 +117,7 @@ def sign_pack(
     # against a digest. Text mode translates "\n" to the platform separator on write, so a manifest
     # produced on Windows would be CRLF, hash differently from the identical manifest produced
     # anywhere else, and fail its own verification. Machine-verified bytes get written explicitly.
-    destination.write_text(
-        json.dumps(manifest, indent=2, sort_keys=True) + "\n", encoding="utf-8", newline="\n"
-    )
+    destination.write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n", encoding="utf-8", newline="\n")
     return destination
 
 
@@ -138,9 +134,7 @@ def _load_private(key_path: Path) -> Ed25519PrivateKey:
 
 
 def _encode_public(key: Ed25519PrivateKey) -> str:
-    return base64.b64encode(
-        key.public_key().public_bytes(Encoding.Raw, PublicFormat.Raw)
-    ).decode("ascii")
+    return base64.b64encode(key.public_key().public_bytes(Encoding.Raw, PublicFormat.Raw)).decode("ascii")
 
 
 __all__ = [

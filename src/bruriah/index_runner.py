@@ -14,6 +14,7 @@ that has nothing to do with argument parsing. This module is the fix: `run_index
 `_embedding_fingerprint`, `run_index`) so existing imports of `bruriah.cli.run_index` and friends
 keep working unchanged.
 """
+
 from __future__ import annotations
 
 import hashlib
@@ -86,9 +87,7 @@ def _default_embedder_factory(model_name: str) -> tuple[Embedder, str, int]:
         #
         # Matched by message, never by category: any OTHER warning fastembed raises has no such
         # backstop and must still reach the user.
-        warnings.filterwarnings(
-            "ignore", message=".*mean pooling instead of CLS.*", category=UserWarning
-        )
+        warnings.filterwarnings("ignore", message=".*mean pooling instead of CLS.*", category=UserWarning)
         model = TextEmbedding(model_name=model_name)
     fingerprint = _embedding_fingerprint(model)
 
@@ -99,7 +98,11 @@ def _default_embedder_factory(model_name: str) -> tuple[Embedder, str, int]:
 
 
 def run_index(
-    paths: PlatformPaths, root: Path, policy_path: Path, *, model_name: str,
+    paths: PlatformPaths,
+    root: Path,
+    policy_path: Path,
+    *,
+    model_name: str,
     embedder_factory: EmbedderFactory = _default_embedder_factory,
     query_prefix: str | None = None,
     passage_prefix: str | None = None,
@@ -127,17 +130,23 @@ def run_index(
     # identity, so a patch bump would refuse the user's existing snapshot and force a full re-embed
     # of their corpus. It moves when the snapshot contract moves, and it has not moved.
     config = BuildConfig(
-        root=root, policy_path=policy_path, schema_version=1, parser_version="corpus-v2",
-        service_version="0.1.0", mcp_range=">=1.28.1,<2", embedding_model=model_name,
-        embedding_revision=revision, embedding_dimensions=dimensions,
-        embedding_fingerprint=fingerprint, ranking_config="rrf-v1",
-        query_prefix=resolved_query_prefix, passage_prefix=resolved_passage_prefix,
+        root=root,
+        policy_path=policy_path,
+        schema_version=1,
+        parser_version="corpus-v2",
+        service_version="0.1.0",
+        mcp_range=">=1.28.1,<2",
+        embedding_model=model_name,
+        embedding_revision=revision,
+        embedding_dimensions=dimensions,
+        embedding_fingerprint=fingerprint,
+        ranking_config="rrf-v1",
+        query_prefix=resolved_query_prefix,
+        passage_prefix=resolved_passage_prefix,
     )
     pointer = paths.data_dir / "active.json"
     candidate_path = paths.data_dir / f"candidate-{uuid.uuid4().hex}.sqlite3"
-    result = build_candidate(
-        config, candidate_path, policy, embed, previous=active_database(pointer)
-    )
+    result = build_candidate(config, candidate_path, policy, embed, previous=active_database(pointer))
     activation = promote_candidate(candidate_path, pointer, config, policy)
     if activation.retention_discarded:
         print(

@@ -49,9 +49,12 @@ Hostname = Annotated[str, Field(pattern=r"^[a-z0-9]([a-z0-9.-]{0,251}[a-z0-9])?$
 RelPath = Annotated[str, Field(min_length=1, max_length=256, pattern=r"^[A-Za-z0-9._/-]+$")]
 Tier = Literal["first_party", "third_party", "local"]
 _FORBIDDEN_SEGMENTS = frozenset({"", ".", ".."})
+
+
 class FilesystemAccess(ClosedModel):
     read_paths: list[RelPath] = []
     write_paths: list[RelPath] = []
+
     @model_validator(mode="after")
     def safe_paths(self) -> "FilesystemAccess":
         for value in [*self.read_paths, *self.write_paths]:
@@ -60,21 +63,29 @@ class FilesystemAccess(ClosedModel):
             if any(segment in _FORBIDDEN_SEGMENTS for segment in value.split("/")):
                 raise ValueError("unsafe_path")
         return self
+
+
 class NetworkAccess(ClosedModel):
     # Exact hosts only. A wildcard is not expressible because `*` is outside `Hostname`'s character
     # class, so "allow everything" cannot be declared even by a signed pack.
     hosts: list[Hostname] = []
     schemes: list[Literal["https"]] = []
+
+
 class SubprocessAccess(ClosedModel):
     # Basenames, never a shell string: `Identifier` admits no space, slash, pipe, or semicolon.
     programs: list[Identifier] = []
+
+
 class PermissionEnvelope(ClosedModel):
     """Default-deny by ABSENCE: every dimension defaults to an empty collection and empty means
     deny. There is no "allow all" token in any dimension, so a broader grant cannot be written."""
+
     filesystem: FilesystemAccess = FilesystemAccess()
     network: NetworkAccess = NetworkAccess()
     subprocess: SubprocessAccess = SubprocessAccess()
     secrets: list[Identifier] = []  # named handles the host resolves; never secret values
+
     def grants_nothing(self) -> bool:
         return not (
             self.filesystem.read_paths
@@ -84,6 +95,8 @@ class PermissionEnvelope(ClosedModel):
             or self.subprocess.programs
             or self.secrets
         )
+
+
 class SkillPolicy(ClosedModel):
     skill_id: Identifier
     version: Version
@@ -102,6 +115,7 @@ class SkillPolicy(ClosedModel):
     license: Text
     advisories: list[Text] = []
     limitations: list[Text] = []
+
     @model_validator(mode="after")
     def prose_only_envelope(self) -> "SkillPolicy":
         """A prose skill is instructions for a model, so a sandbox cannot verify its behaviour. The
@@ -120,6 +134,8 @@ class SkillPolicy(ClosedModel):
         if envelope.filesystem.write_paths:
             raise ValueError("prose_skill_declares_filesystem_write")
         return self
+
+
 class SkillPack(ClosedModel):
     schema_version: Literal["1"]
     pack_id: Identifier
@@ -136,6 +152,7 @@ class SkillPack(ClosedModel):
     license: Text
     provenance: Text
     skills: list[SkillPolicy]
+
     @model_validator(mode="after")
     def coherent(self) -> "SkillPack":
         if not self.skills:
@@ -146,13 +163,17 @@ class SkillPack(ClosedModel):
         if len(set(identifiers)) != len(identifiers):
             raise ValueError("duplicate_skill_id")
         return self
+
+
 @dataclass(frozen=True)
 class SkillSet:
     """Frozen, deterministically ordered set of loaded skill packs. Mirrors `registries.Registry`:
     same construction discipline, same collision codes, same sort order, so there is one way to
     build a trusted collection in this codebase rather than two."""
+
     packs: tuple[SkillPack, ...]
     skills: tuple[SkillPolicy, ...]
+
     @classmethod
     def from_packs(cls, packs: list[SkillPack]) -> "SkillSet":
         ordered = tuple(sorted(packs, key=lambda item: item.pack_id))
@@ -164,16 +185,17 @@ class SkillSet:
                 if skill.skill_id in seen:
                     raise PackError("duplicate_skill_id")
                 seen.add(skill.skill_id)
-        skills = tuple(
-            item for pack in ordered for item in sorted(pack.skills, key=lambda value: value.skill_id)
-        )
+        skills = tuple(item for pack in ordered for item in sorted(pack.skills, key=lambda value: value.skill_id))
         return cls(ordered, skills)
+
     @property
     def pack_ids(self) -> tuple[str, ...]:
         return tuple(item.pack_id for item in self.packs)
+
     @property
     def skill_ids(self) -> tuple[str, ...]:
         return tuple(item.skill_id for item in self.skills)
+
     def resolve(self, skill_id: object) -> SkillPolicy | None:
         """Exact match only. Absent means `None`, never a fabricated or nearest-match record -- the
         loaded set is the sole source of truth, exactly as `resolve_capability` behaves."""
@@ -183,7 +205,11 @@ class SkillSet:
             if skill.skill_id == skill_id:
                 return skill
         return None
+
+
 ManifestReader = Callable[[], bytes]
+
+
 def load_skill_pack_bytes(
     raw: bytes,
     suffix: str,
@@ -244,6 +270,8 @@ def load_skill_pack_bytes(
     check_router_compatibility(pack.min_router_version, pack.max_router_version, router_version)
     check_version_floor(pack.pack_id, pack.version, minimum_versions)
     return pack
+
+
 def load_skill_pack(
     pack_path: Path,
     manifest_path: Path | None,
@@ -270,6 +298,8 @@ def load_skill_pack(
         allow_unsigned_local=allow_unsigned_local,
         enforce_currency=enforce_currency,
     )
+
+
 def reject_executable_payload(data: dict) -> None:
     """A candidate declaring a non-prose payload is REFUSED with its own code, never silently
     dropped or coerced to prose. Closed-model validation alone would report `malformed_pack`, which
@@ -277,6 +307,8 @@ def reject_executable_payload(data: dict) -> None:
     for skill in data.get("skills", []) if isinstance(data, dict) else []:
         if isinstance(skill, dict) and skill.get("payload") not in (None, "prose"):
             raise PackError("payload_unsupported")
+
+
 __all__ = [
     "Digest",
     "FilesystemAccess",

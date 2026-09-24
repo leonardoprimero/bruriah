@@ -80,10 +80,10 @@ def _parse_blame_porcelain(blame_output: str) -> list[tuple[int, str, str, str]]
                     i += 1
                     break
                 if sub_line.startswith("author "):
-                    commit_authors.setdefault(sha, sub_line[len("author "):].strip())
+                    commit_authors.setdefault(sha, sub_line[len("author ") :].strip())
                 elif sub_line.startswith("author-time "):
                     try:
-                        epoch = int(sub_line[len("author-time "):].strip())
+                        epoch = int(sub_line[len("author-time ") :].strip())
                         commit_dates.setdefault(
                             sha,
                             datetime.fromtimestamp(epoch, tz=timezone.utc).strftime("%Y-%m-%d"),
@@ -174,9 +174,7 @@ def compute_file_lens(
     # Batch query documents table for all unique SHAs
     sha_to_doc: dict[str, tuple[str, str]] = {}  # sha -> (doc_ref, subject)
     try:
-        rows = database.execute(
-            "SELECT document_ref, metadata FROM documents"
-        ).fetchall()
+        rows = database.execute("SELECT document_ref, metadata FROM documents").fetchall()
         for doc_ref, meta_json in rows:
             try:
                 meta = json.loads(meta_json)
@@ -206,9 +204,7 @@ def compute_file_lens(
     doc_alerts: dict[str, tuple[str, str, str, int]] = {}  # doc_ref -> (relation, succ_title, succ_sha, gen)
     has_lineage = False
     try:
-        row = database.execute(
-            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='lineage'"
-        ).fetchone()
+        row = database.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='lineage'").fetchone()
         has_lineage = row is not None
     except sqlite3.DatabaseError:
         pass
@@ -261,40 +257,46 @@ def compute_file_lens(
                 relation, succ_title, succ_sha, gen = doc_alerts[doc_ref]
                 stale_count += 1
                 status = relation  # "supersedes", "deprecates", "amends"
-                lenses.append(LineLens(
-                    line_start=start_line,
-                    line_end=end_line,
-                    commit_sha=sha[:8],
-                    author=author,
-                    date=date,
-                    decision_title=title,
-                    decision_ref=doc_ref,
-                    status=status,
-                    alert_relation=relation,
-                    successor_title=succ_title,
-                    successor_sha=succ_sha,
-                    generations=gen,
-                ))
+                lenses.append(
+                    LineLens(
+                        line_start=start_line,
+                        line_end=end_line,
+                        commit_sha=sha[:8],
+                        author=author,
+                        date=date,
+                        decision_title=title,
+                        decision_ref=doc_ref,
+                        status=status,
+                        alert_relation=relation,
+                        successor_title=succ_title,
+                        successor_sha=succ_sha,
+                        generations=gen,
+                    )
+                )
             else:
-                lenses.append(LineLens(
+                lenses.append(
+                    LineLens(
+                        line_start=start_line,
+                        line_end=end_line,
+                        commit_sha=sha[:8],
+                        author=author,
+                        date=date,
+                        decision_title=title,
+                        decision_ref=doc_ref,
+                        status="active",
+                    )
+                )
+        else:
+            lenses.append(
+                LineLens(
                     line_start=start_line,
                     line_end=end_line,
-                    commit_sha=sha[:8],
+                    commit_sha=sha[:8] if sha else "uncommitted",
                     author=author,
                     date=date,
-                    decision_title=title,
-                    decision_ref=doc_ref,
-                    status="active",
-                ))
-        else:
-            lenses.append(LineLens(
-                line_start=start_line,
-                line_end=end_line,
-                commit_sha=sha[:8] if sha else "uncommitted",
-                author=author,
-                date=date,
-                status="unindexed",
-            ))
+                    status="unindexed",
+                )
+            )
 
     total_lines = parsed_lines[-1][0] if parsed_lines else 0
     return FileLensResult(

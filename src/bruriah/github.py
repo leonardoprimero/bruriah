@@ -204,10 +204,7 @@ def dismiss_previous_reviews(token: str, context: PRContext, bot_login: str = "g
                 continue
 
             dismiss_url = f"{url}/{review_id}/dismissals"
-            dismiss_payload = {
-                "message": "Dismissing previous architectural review.",
-                "event": "DISMISS"
-            }
+            dismiss_payload = {"message": "Dismissing previous architectural review.", "event": "DISMISS"}
             try:
                 _github_api("PUT", dismiss_url, token, dismiss_payload)
                 dismissed_count += 1

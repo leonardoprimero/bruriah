@@ -15,7 +15,10 @@ _EXPIRY_WARNING_DAYS = 90
 
 
 def run_doctor(
-    paths: PlatformPaths, *, today: date | None = None, now: datetime | None = None,
+    paths: PlatformPaths,
+    *,
+    today: date | None = None,
+    now: datetime | None = None,
 ) -> dict[str, Any]:
     """Read-only: resolved dirs, registry load, snapshot open, cache stats. Never creates/writes
     anything -- including the cache: `cache.cache_stats` only reads (never calls
@@ -25,10 +28,13 @@ def run_doctor(
     effective_today = today or date.today()
     effective_now = now or datetime.now(timezone.utc)
     report: dict[str, Any] = {
-        "config_dir": str(paths.config_dir), "data_dir": str(paths.data_dir),
+        "config_dir": str(paths.config_dir),
+        "data_dir": str(paths.data_dir),
         "dirs_exist": {
-            "config": paths.config_dir.is_dir(), "data": paths.data_dir.is_dir(),
-            "cache": paths.cache_dir.is_dir(), "log": paths.log_dir.is_dir(),
+            "config": paths.config_dir.is_dir(),
+            "data": paths.data_dir.is_dir(),
+            "cache": paths.cache_dir.is_dir(),
+            "log": paths.log_dir.is_dir(),
         },
         "network_enabled": paths.network_enabled,
         # Surfaced because six first-party skills ship and the default admits five: without this,
@@ -46,21 +52,23 @@ def run_doctor(
         # refuses everywhere else. Saying so out loud is the honest version.
         "owner_only_file_modes": os.name == "posix",
         "warnings": (
-            [] if os.name == "posix" else
-            ["this platform does not enforce owner-only file modes; private data is protected by "
-             "the user profile directory's inherited permissions, which bruriah does not verify"]
+            []
+            if os.name == "posix"
+            else [
+                "this platform does not enforce owner-only file modes; private data is protected by "
+                "the user profile directory's inherited permissions, which bruriah does not verify"
+            ]
         ),
     }
     try:
         registry = load_registry(effective_today)
         report["registry"] = {
-            "status": "ok", "pack_ids": list(registry.pack_ids),
+            "status": "ok",
+            "pack_ids": list(registry.pack_ids),
             # Per pack, because the registry loading is no longer the same question as every pack
             # in it still being able to speak. Without this the operator sees `status: ok` on the
             # day a domain stopped being routed and has nothing to connect the two.
-            "pack_currency": {
-                pack_id: registry.currency_of(pack_id) for pack_id in registry.pack_ids
-            },
+            "pack_currency": {pack_id: registry.currency_of(pack_id) for pack_id in registry.pack_ids},
         }
         for pack in registry.packs:
             days_left = (pack.reviewed_at + timedelta(days=pack.freshness_days) - effective_today).days
@@ -84,11 +92,11 @@ def run_doctor(
         report["snapshot"] = {"status": "error", "code": error.code}
     stats = cache.cache_stats(paths.cache_dir, now=effective_now)
     report["cache"] = {
-        "entries": stats.entries, "expired": stats.expired, "total_bytes": stats.total_bytes,
+        "entries": stats.entries,
+        "expired": stats.expired,
+        "total_bytes": stats.total_bytes,
     }
-    report["healthy"] = (
-        report["registry"].get("status") == "ok" and report["snapshot"].get("status") == "ok"
-    )
+    report["healthy"] = report["registry"].get("status") == "ok" and report["snapshot"].get("status") == "ok"
     return report
 
 

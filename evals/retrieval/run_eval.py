@@ -14,6 +14,7 @@ Usage:
     python evals/retrieval/run_eval.py
     python evals/retrieval/run_eval.py --dataset dataset-v2.jsonl --out-prefix report-v3
 """
+
 from __future__ import annotations
 
 import argparse
@@ -105,9 +106,7 @@ def load_dataset(path: Path) -> list[QueryRecord]:
 def score_engine(results: list[SearchResult], record: QueryRecord) -> EngineQueryScore:
     ranked_notes = [result.relative_path for result in results]
     top1 = results[0] if results else None
-    first_correct_rank = next(
-        (result.rank for result in results if result.relative_path in record.must_include), None
-    )
+    first_correct_rank = next((result.rank for result in results if result.relative_path in record.must_include), None)
     return EngineQueryScore(
         ranked_notes=ranked_notes,
         top1_note=top1.relative_path if top1 else None,
@@ -150,7 +149,12 @@ def run(dataset: list[QueryRecord], adapters: dict[str, object]) -> RunResult:
     per_query_rows: list[dict[str, object]] = []
 
     for record in dataset:
-        row: dict[str, object] = {"id": record.id, "query": record.query, "type": record.type, "language": record.language}
+        row: dict[str, object] = {
+            "id": record.id,
+            "query": record.query,
+            "type": record.type,
+            "language": record.language,
+        }
         for engine in ENGINES:
             results = adapters[engine].search(record.query, k=K)
             score = score_engine(results, record)
@@ -236,9 +240,7 @@ def _fmt(value: object) -> str:
     return str(value)
 
 
-def render_markdown(
-    result: RunResult, meta: dict[str, object], dataset: list[QueryRecord], out_prefix: str
-) -> str:
+def render_markdown(result: RunResult, meta: dict[str, object], dataset: list[QueryRecord], out_prefix: str) -> str:
     lines: list[str] = []
     lines.append(f"# Cerebro Retrieval Eval — NEW vs LEGACY ({out_prefix})")
     lines.append("")
@@ -263,12 +265,16 @@ def render_markdown(
         new_value = result.aggregate_overall["new"][metric]
         delta = new_value - legacy_value if legacy_value is not None and new_value is not None else None
         lines.append(f"| {metric} | {_fmt(legacy_value)} | {_fmt(new_value)} | {_fmt(delta)} |")
-    lines.append(f"| n queries | {result.aggregate_overall['legacy']['n']} | {result.aggregate_overall['new']['n']} | |")
+    lines.append(
+        f"| n queries | {result.aggregate_overall['legacy']['n']} | {result.aggregate_overall['new']['n']} | |"
+    )
     lines.append("")
 
     lines.append("## By query type")
     lines.append("")
-    lines.append("| Type | n | Legacy recall@5 | New recall@5 | Legacy recall@10 | New recall@10 | Legacy MRR@10 | New MRR@10 | Legacy nDCG@10 | New nDCG@10 |")
+    lines.append(
+        "| Type | n | Legacy recall@5 | New recall@5 | Legacy recall@10 | New recall@10 | Legacy MRR@10 | New MRR@10 | Legacy nDCG@10 | New nDCG@10 |"
+    )
     lines.append("|---|---|---|---|---|---|---|---|---|---|")
     for query_type in sorted(result.aggregate_by_type):
         legacy = result.aggregate_by_type[query_type]["legacy"]
@@ -282,7 +288,9 @@ def render_markdown(
 
     lines.append("## By language")
     lines.append("")
-    lines.append("| Language | n | Legacy recall@5 | New recall@5 | Legacy recall@10 | New recall@10 | Legacy MRR@10 | New MRR@10 | Legacy nDCG@10 | New nDCG@10 |")
+    lines.append(
+        "| Language | n | Legacy recall@5 | New recall@5 | Legacy recall@10 | New recall@10 | Legacy MRR@10 | New MRR@10 | Legacy nDCG@10 | New nDCG@10 |"
+    )
     lines.append("|---|---|---|---|---|---|---|---|---|---|")
     for language in sorted(result.aggregate_by_language):
         legacy = result.aggregate_by_language[language]["legacy"]
@@ -304,9 +312,7 @@ def render_markdown(
 
     lines.append("## Cross-lingual recall@10 delta (cross_lingual − same-language baseline)")
     lines.append("")
-    lines.append(
-        f"Baseline = mean recall@10 over `{'`, `'.join(sorted(POSITIVE_BASELINE_TYPES))}` queries."
-    )
+    lines.append(f"Baseline = mean recall@10 over `{'`, `'.join(sorted(POSITIVE_BASELINE_TYPES))}` queries.")
     lines.append("")
     lines.append("| Engine | Delta |")
     lines.append("|---|---|")
@@ -335,7 +341,9 @@ def render_markdown(
         "top-1 scores — higher is better separation."
     )
     lines.append("")
-    lines.append("| Engine | Abstention median top-1 | Positive median top-1 | Positive p25 top-1 | Below-p25 fraction | n abstention | n positive |")
+    lines.append(
+        "| Engine | Abstention median top-1 | Positive median top-1 | Positive p25 top-1 | Below-p25 fraction | n abstention | n positive |"
+    )
     lines.append("|---|---|---|---|---|---|---|")
     for engine in ENGINES:
         separation = result.abstention_separation[engine]
@@ -348,7 +356,9 @@ def render_markdown(
 
     lines.append("## Per-query results")
     lines.append("")
-    lines.append("| ID | Type | Lang | Query | Legacy first-correct-rank | Legacy top-1 note | New first-correct-rank | New top-1 note |")
+    lines.append(
+        "| ID | Type | Lang | Query | Legacy first-correct-rank | Legacy top-1 note | New first-correct-rank | New top-1 note |"
+    )
     lines.append("|---|---|---|---|---|---|---|---|")
     for row in result.per_query:
         legacy = row["legacy"]
@@ -419,15 +429,19 @@ def main() -> int:
         "new_snapshot_build_id": new_build_id,
     }
 
-    report_json = {"meta": meta, "aggregate": {
-        "overall": result.aggregate_overall,
-        "by_type": result.aggregate_by_type,
-        "by_language": result.aggregate_by_language,
-        "exact_name_recall_at_3": result.exact_name_recall_at_3,
-        "cross_lingual_recall_delta": result.cross_lingual_recall_delta,
-        "ambiguous_diversity": result.ambiguous_diversity,
-        "abstention_separation": result.abstention_separation,
-    }, "per_query": result.per_query}
+    report_json = {
+        "meta": meta,
+        "aggregate": {
+            "overall": result.aggregate_overall,
+            "by_type": result.aggregate_by_type,
+            "by_language": result.aggregate_by_language,
+            "exact_name_recall_at_3": result.exact_name_recall_at_3,
+            "cross_lingual_recall_delta": result.cross_lingual_recall_delta,
+            "ambiguous_diversity": result.ambiguous_diversity,
+            "abstention_separation": result.abstention_separation,
+        },
+        "per_query": result.per_query,
+    }
 
     report_json_path.write_text(json.dumps(report_json, indent=2, ensure_ascii=False, sort_keys=True), encoding="utf-8")
     report_md_path.write_text(render_markdown(result, meta, dataset, args.out_prefix), encoding="utf-8")

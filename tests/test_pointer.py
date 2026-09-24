@@ -39,6 +39,7 @@ def lock_is_free(lock_path: Path) -> bool:
     finally:
         os.close(descriptor)
 
+
 from bruriah import pointer as pointer_module
 from bruriah.pointer import (
     activation_lock,
@@ -175,7 +176,11 @@ def test_write_pointer_is_atomic_deterministic_and_leaves_no_temp_files(tmp_path
     assert write_pointer(target, active, [{"database": "old.sqlite3", "build_id": "b0"}]) is True
     raw = target.read_text(encoding="utf-8")
     assert raw.endswith("\n")
-    assert json.loads(raw) == {"version": 1, "active": active, "retained": [{"database": "old.sqlite3", "build_id": "b0"}]}
+    assert json.loads(raw) == {
+        "version": 1,
+        "active": active,
+        "retained": [{"database": "old.sqlite3", "build_id": "b0"}],
+    }
     # Deterministic serialization (sort_keys) so identical state produces identical bytes.
     write_pointer(target, active, [{"database": "old.sqlite3", "build_id": "b0"}])
     assert target.read_text(encoding="utf-8") == raw
@@ -202,9 +207,7 @@ def test_write_pointer_reports_reduced_durability_without_losing_the_write(
     # asserted on both; only the injected failure is POSIX-specific.
     if os.name != "posix":
         assert write_pointer(tmp_path / "active.json", {"database": "s.sqlite3", "build_id": "b1"}, [])
-        assert json.loads(
-            (tmp_path / "active.json").read_text(encoding="utf-8")
-        )["active"]["build_id"] == "b1"
+        assert json.loads((tmp_path / "active.json").read_text(encoding="utf-8"))["active"]["build_id"] == "b1"
         return
     target = tmp_path / "active.json"
     calls: list[int] = []

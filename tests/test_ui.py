@@ -189,9 +189,7 @@ class TestBuildDAGFromDatabase:
     def test_build_dag_without_lineage_table(self):
         conn = sqlite3.connect(":memory:")
         try:
-            conn.execute(
-                "CREATE TABLE documents (document_ref TEXT, relative_path TEXT, metadata TEXT)"
-            )
+            conn.execute("CREATE TABLE documents (document_ref TEXT, relative_path TEXT, metadata TEXT)")
             conn.execute("INSERT INTO documents VALUES ('doc:1', 'p1.md', '{}')")
             dag = build_dag_from_database(conn)
             assert len(dag.nodes) == 1
@@ -206,10 +204,12 @@ class TestUIHandler:
     def test_server(self):
         from http.server import HTTPServer
 
-        sample_json = json.dumps({
-            "nodes": [{"id": "doc:1", "label": "Test Node", "status": "active"}],
-            "edges": [],
-        })
+        sample_json = json.dumps(
+            {
+                "nodes": [{"id": "doc:1", "label": "Test Node", "status": "active"}],
+                "edges": [],
+            }
+        )
         handler = type("Handler", (_UIHandler,), {"dag_json": sample_json})
         server = HTTPServer(("127.0.0.1", 0), handler)
         port = server.server_address[1]
@@ -318,7 +318,15 @@ class TestUICli:
             """)
             conn.execute(
                 "INSERT INTO premises VALUES (?, ?, ?, ?, ?, ?, ?)",
-                ("single-tenant", "System runs single tenant", "invalidated", "doc:2", "Moved to multi-tenant", "doc:1", "doc:2"),
+                (
+                    "single-tenant",
+                    "System runs single tenant",
+                    "invalidated",
+                    "doc:2",
+                    "Moved to multi-tenant",
+                    "doc:1",
+                    "doc:2",
+                ),
             )
             conn.execute(
                 "INSERT INTO alternatives VALUES (?, ?, ?, ?, ?)",
@@ -334,4 +342,3 @@ class TestUICli:
             assert node1.alternatives[0]["name"] == "BasicAuth"
         finally:
             conn.close()
-

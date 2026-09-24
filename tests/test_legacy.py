@@ -113,9 +113,7 @@ def test_legacy_mcp_remains_queryable_without_mutating_database() -> None:
                         "title": "buscar_en_cerebroArguments",
                         "type": "object",
                     }
-                    result = await session.call_tool(
-                        "buscar_en_cerebro", {"consulta": "MCP", "k": 1}
-                    )
+                    result = await session.call_tool("buscar_en_cerebro", {"consulta": "MCP", "k": 1})
                     assert not result.isError
                     assert result.content
                     assert "Cerebro — 1 resultados" in result.content[0].text

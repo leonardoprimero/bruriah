@@ -5,6 +5,7 @@ Cases are grouped by grammar rule (see the module docstring in `bruriah.issue_li
 grammar reference and the reasoning behind the two exclusions -- code spans and the squash
 suffix). Every case is a pure input/output pair: no git, no network, no filesystem.
 """
+
 from __future__ import annotations
 
 import pytest
@@ -15,9 +16,15 @@ class TestClosingKeywords:
     @pytest.mark.parametrize(
         "keyword",
         [
-            "close", "closes", "closed",
-            "fix", "fixes", "fixed",
-            "resolve", "resolves", "resolved",
+            "close",
+            "closes",
+            "closed",
+            "fix",
+            "fixes",
+            "fixed",
+            "resolve",
+            "resolves",
+            "resolved",
         ],
     )
     def test_every_closing_keyword_case_insensitive(self, keyword: str) -> None:
@@ -27,14 +34,10 @@ class TestClosingKeywords:
             )
 
     def test_colon_form(self) -> None:
-        assert linked_issues("Fixes: #42", "") == (
-            IssueLink(number=42, kind="closes", repo=None, keyword="fixes"),
-        )
+        assert linked_issues("Fixes: #42", "") == (IssueLink(number=42, kind="closes", repo=None, keyword="fixes"),)
 
     def test_colon_no_space_form(self) -> None:
-        assert linked_issues("Fixes:#42", "") == (
-            IssueLink(number=42, kind="closes", repo=None, keyword="fixes"),
-        )
+        assert linked_issues("Fixes:#42", "") == (IssueLink(number=42, kind="closes", repo=None, keyword="fixes"),)
 
     def test_keyword_in_body(self) -> None:
         assert linked_issues("subject", "This closes #7 for good.") == (
@@ -42,9 +45,7 @@ class TestClosingKeywords:
         )
 
     def test_keyword_substring_inside_another_word_is_not_matched(self) -> None:
-        assert linked_issues("encloses #5", "") == (
-            IssueLink(number=5, kind="mentions", repo=None, keyword=None),
-        )
+        assert linked_issues("encloses #5", "") == (IssueLink(number=5, kind="mentions", repo=None, keyword=None),)
 
 
 class TestCrossRepoAndUrlForms:
@@ -54,16 +55,12 @@ class TestCrossRepoAndUrlForms:
         )
 
     def test_issue_url_form(self) -> None:
-        assert linked_issues(
-            "Closes https://github.com/octocat/Hello-World/issues/123", ""
-        ) == (
+        assert linked_issues("Closes https://github.com/octocat/Hello-World/issues/123", "") == (
             IssueLink(number=123, kind="closes", repo="octocat/Hello-World", keyword="closes"),
         )
 
     def test_pull_url_form(self) -> None:
-        assert linked_issues(
-            "Resolves https://github.com/octocat/Hello-World/pull/9", ""
-        ) == (
+        assert linked_issues("Resolves https://github.com/octocat/Hello-World/pull/9", "") == (
             IssueLink(number=9, kind="closes", repo="octocat/Hello-World", keyword="resolves"),
         )
 

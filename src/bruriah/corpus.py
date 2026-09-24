@@ -54,11 +54,7 @@ class CorpusPolicy:
 
     def discover(self, root: Path) -> tuple[Path, ...]:
         candidates = sorted(root.rglob("*.md"), key=lambda item: item.as_posix())
-        return tuple(
-            path
-            for path in candidates
-            if path.is_file() and self.exclusion_reason(path, root) is None
-        )
+        return tuple(path for path in candidates if path.is_file() and self.exclusion_reason(path, root) is None)
 
 
 @dataclass(frozen=True)
@@ -74,13 +70,10 @@ class RefAliases:
         aliases = data.get("aliases", {})
         tombstones = data.get("tombstones", [])
         if not isinstance(aliases, dict) or not all(
-            isinstance(key, str) and isinstance(value, str)
-            for key, value in aliases.items()
+            isinstance(key, str) and isinstance(value, str) for key, value in aliases.items()
         ):
             raise ValueError("invalid_alias_registry")
-        if not isinstance(tombstones, list) or not all(
-            isinstance(item, str) for item in tombstones
-        ):
+        if not isinstance(tombstones, list) or not all(isinstance(item, str) for item in tombstones):
             raise ValueError("invalid_alias_registry")
         return cls(MappingProxyType(dict(aliases)), frozenset(tombstones))
 
@@ -177,36 +170,44 @@ def _metadata(frontmatter: dict[str, Any]) -> SourceMetadata:
                 if not isinstance(premises_val, list):
                     premises_val = [premises_val]
                 premises_clean = [str(p).strip() for p in premises_val if p is not None and str(p).strip()]
-                alts.append({
-                    "name": str(item["name"]).strip(),
-                    "disposition": str(item.get("disposition", "rejected")).strip().lower(),
-                    "reason": str(item.get("reason", "")).strip(),
-                    "premises": premises_clean,
-                })
+                alts.append(
+                    {
+                        "name": str(item["name"]).strip(),
+                        "disposition": str(item.get("disposition", "rejected")).strip().lower(),
+                        "reason": str(item.get("reason", "")).strip(),
+                        "premises": premises_clean,
+                    }
+                )
 
     raw_premises = frontmatter.get("premises", [])
     premises: list[dict[str, Any]] = []
     if isinstance(raw_premises, list):
         for item in raw_premises:
             if isinstance(item, dict) and "id" in item:
-                premises.append({
-                    "id": str(item["id"]).strip(),
-                    "statement": str(item.get("statement", "")).strip(),
-                    "status": str(item.get("status", "active")).strip().lower(),
-                    "invalidated_by": str(item.get("invalidated_by", "")).strip() or None if item.get("invalidated_by") else None,
-                    "rationale": str(item.get("rationale", "")).strip() or None if item.get("rationale") else None,
-                })
+                premises.append(
+                    {
+                        "id": str(item["id"]).strip(),
+                        "statement": str(item.get("statement", "")).strip(),
+                        "status": str(item.get("status", "active")).strip().lower(),
+                        "invalidated_by": str(item.get("invalidated_by", "")).strip() or None
+                        if item.get("invalidated_by")
+                        else None,
+                        "rationale": str(item.get("rationale", "")).strip() or None if item.get("rationale") else None,
+                    }
+                )
             elif isinstance(item, str) and item.strip():
                 parts = item.split("|", 1)
                 pid = parts[0].strip()
                 stmt = parts[1].strip() if len(parts) > 1 else pid
-                premises.append({
-                    "id": pid,
-                    "statement": stmt,
-                    "status": "active",
-                    "invalidated_by": None,
-                    "rationale": None,
-                })
+                premises.append(
+                    {
+                        "id": pid,
+                        "statement": stmt,
+                        "status": "active",
+                        "invalidated_by": None,
+                        "rationale": None,
+                    }
+                )
 
     raw_inv = frontmatter.get("invalidated_premises", frontmatter.get("premise_invalidated", []))
     inv_items = raw_inv if isinstance(raw_inv, list) else [raw_inv]
@@ -318,9 +319,7 @@ def parse_document(path: Path, root: Path, policy: CorpusPolicy) -> Document:
     # present and always about the document.
     # Named apart from the loops below, which both bind a `title` of their own: this one is the
     # DOCUMENT's, and a section heading overwriting it would silently empty the prefix.
-    document_title = next(
-        (heading for _, level, heading in headings if level == 1 and heading), Path(relative).stem
-    )
+    document_title = next((heading for _, level, heading in headings if level == 1 and heading), Path(relative).stem)
 
     passages: list[Passage] = []
     stack: list[str] = []

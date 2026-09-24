@@ -7,6 +7,7 @@ the product that ships it.
 What these tests protect is the boundary: `ask` is a VIEWER, and adding it must not have widened
 the MCP surface or introduced a component that answers questions.
 """
+
 from __future__ import annotations
 
 import json
@@ -21,8 +22,10 @@ from bruriah import cli
 
 from test_cli import _fake_embedder_factory
 
-_PAD = ("The following section describes the behaviour of the service in detail, and it is "
-        "written in the same language as the rest of the corpus around it. ") * 4
+_PAD = (
+    "The following section describes the behaviour of the service in detail, and it is "
+    "written in the same language as the rest of the corpus around it. "
+) * 4
 
 
 @pytest.fixture
@@ -44,16 +47,16 @@ def indexed(tmp_path: Path):
     parser = cli._build_cli_parser()
     # The model NAME is recorded in the build descriptor and re-checked when deps are loaded, so
     # it has to match what the fake factory claims or activation fails `embedding_model_mismatch`.
-    index_args = parser.parse_args(["index", "--corpus-root", str(corpus), "--policy", str(policy),
-                                    "--model", "test/minilm", *argv])
+    index_args = parser.parse_args(
+        ["index", "--corpus-root", str(corpus), "--policy", str(policy), "--model", "test/minilm", *argv]
+    )
     assert cli._cmd_index(index_args, embedder_factory=_fake_embedder_factory) == 0
     return parser, argv
 
 
 def _ask(indexed, *arguments: str) -> int:
     parser, argv = indexed
-    return cli._cmd_ask(parser.parse_args(["ask", *arguments, *argv]),
-                        embedder_factory=_fake_embedder_factory)
+    return cli._cmd_ask(parser.parse_args(["ask", *arguments, *argv]), embedder_factory=_fake_embedder_factory)
 
 
 def test_it_lists_references_and_not_one_word_of_the_documents(indexed, capsys) -> None:
@@ -82,8 +85,7 @@ def test_the_suggested_read_command_survives_being_pasted(indexed, capsys) -> No
     question = "why did we choose the apple recipe over every other candidate recipe we tried"
     _ask(indexed, question)
     suggestion = next(
-        line.strip() for line in capsys.readouterr().out.splitlines()
-        if line.strip().startswith("bruriah ask")
+        line.strip() for line in capsys.readouterr().out.splitlines() if line.strip().startswith("bruriah ask")
     )
 
     parser, argv = indexed
@@ -126,11 +128,15 @@ def test_index_prune_clears_what_reindexing_stranded(indexed, capsys) -> None:
     corpus = next(path for path in data_dir.parent.iterdir() if path.name == "corpus")
     edited = data_dir.parent / "edited.yaml"
     edited.write_text("version: 1\ninclude: ['**']\nexclude: ['nothing/**']\n")
-    assert cli._cmd_index(
-        parser.parse_args(["index", "--corpus-root", str(corpus), "--policy", str(edited),
-                           "--model", "test/minilm", *argv]),
-        embedder_factory=_fake_embedder_factory,
-    ) == 0
+    assert (
+        cli._cmd_index(
+            parser.parse_args(
+                ["index", "--corpus-root", str(corpus), "--policy", str(edited), "--model", "test/minilm", *argv]
+            ),
+            embedder_factory=_fake_embedder_factory,
+        )
+        == 0
+    )
     stranded = sorted(data_dir.glob("candidate-*.sqlite3"))
     assert len(stranded) == 2, "the superseded generation should still be on disk"
     capsys.readouterr()
@@ -235,7 +241,9 @@ def test_ask_with_code_target_and_repo(tmp_path: Path, capsys) -> None:
     (repo / "storage.py").write_text("def init_db():\n    return 'sqlite'\n", encoding="utf-8")
     subprocess.run(["git", "add", "storage.py"], cwd=repo, check=True, capture_output=True)
     subprocess.run(["git", "commit", "-m", "feat: initial sqlite db"], cwd=repo, check=True, capture_output=True)
-    sha1 = subprocess.run(["git", "rev-parse", "HEAD"], cwd=repo, capture_output=True, text=True, check=True).stdout.strip()
+    sha1 = subprocess.run(
+        ["git", "rev-parse", "HEAD"], cwd=repo, capture_output=True, text=True, check=True
+    ).stdout.strip()
 
     sha2 = "99999999ccccddddeeeeffff0000111122223333"
 
@@ -273,17 +281,22 @@ We migrated to DuckDB for OLAP.
     policy.write_text("version: 1\ninclude: ['**']\nexclude: []\n", encoding="utf-8")
     argv = ["--data-dir", str(tmp_path / "data dir"), "--config-dir", str(tmp_path / "config dir")]
     parser = cli._build_cli_parser()
-    index_args = parser.parse_args(["index", "--corpus-root", str(corpus), "--policy", str(policy),
-                                    "--model", "test/minilm", *argv])
+    index_args = parser.parse_args(
+        ["index", "--corpus-root", str(corpus), "--policy", str(policy), "--model", "test/minilm", *argv]
+    )
     assert cli._cmd_index(index_args, embedder_factory=_fake_embedder_factory) == 0
 
-    ask_args = parser.parse_args([
-        "ask",
-        "why did we use sqlite",
-        "--code-target", "storage.py:1",
-        "--repo", str(repo),
-        *argv,
-    ])
+    ask_args = parser.parse_args(
+        [
+            "ask",
+            "why did we use sqlite",
+            "--code-target",
+            "storage.py:1",
+            "--repo",
+            str(repo),
+            *argv,
+        ]
+    )
     exit_code = cli._cmd_ask(ask_args, embedder_factory=_fake_embedder_factory)
     assert exit_code == 0
     out = capsys.readouterr().out
@@ -296,4 +309,3 @@ We migrated to DuckDB for OLAP.
     assert "freshness: current" in out
     assert "conflict:" in out
     assert "governing storage.py:1 has been supersedes" in out
-

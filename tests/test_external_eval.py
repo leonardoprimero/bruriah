@@ -40,11 +40,16 @@ def _every_question() -> list[dict]:
 
 @pytest.mark.parametrize("name, questions_path, excluded_path, questions, exclusions", CORPORA)
 def test_the_published_counts_are_still_true(
-    name: str, questions_path: Path, excluded_path: Path, questions: int, exclusions: int,
+    name: str,
+    questions_path: Path,
+    excluded_path: Path,
+    questions: int,
+    exclusions: int,
 ) -> None:
     assert len(_load(questions_path)) == questions, (
         f"README.md says {name} contributes {questions} questions; update the figure and the "
-        "paragraphs that reason from it, in this commit")
+        "paragraphs that reason from it, in this commit"
+    )
     assert len(_load(excluded_path)) == exclusions
 
 
@@ -87,6 +92,6 @@ def test_every_exclusion_names_the_rule_that_excluded_it() -> None:
     # Publishing the rejects without their reason would be a list nobody can check.
     allowed = {"too_short", "stack_trace", "release_note_only", "generic_no_subject"}
     for _n, _q, path, _a, _b in CORPORA:
-      for case in _load(path):
-        assert case["excluded_by"], case["id"]
-        assert set(case["excluded_by"]) <= allowed, case["excluded_by"]
+        for case in _load(path):
+            assert case["excluded_by"], case["id"]
+            assert set(case["excluded_by"]) <= allowed, case["excluded_by"]

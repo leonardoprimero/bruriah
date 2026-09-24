@@ -67,23 +67,13 @@ class TestParseUnifiedDiff:
 
     def test_pure_deletion_hunk(self) -> None:
         """A hunk with +N,0 is a pure deletion — no lines added on new side."""
-        diff = (
-            "diff --git a/src/old.py b/src/old.py\n"
-            "--- a/src/old.py\n"
-            "+++ b/src/old.py\n"
-            "@@ -10,3 +10,0 @@\n"
-        )
+        diff = "diff --git a/src/old.py b/src/old.py\n--- a/src/old.py\n+++ b/src/old.py\n@@ -10,3 +10,0 @@\n"
         result = parse_unified_diff(diff)
         assert result == {"src/old.py": []}
 
     def test_single_line_addition_no_count(self) -> None:
         """When count is omitted from hunk header, it defaults to 1."""
-        diff = (
-            "diff --git a/f.py b/f.py\n"
-            "--- a/f.py\n"
-            "+++ b/f.py\n"
-            "@@ -5 +5 @@\n"
-        )
+        diff = "diff --git a/f.py b/f.py\n--- a/f.py\n+++ b/f.py\n@@ -5 +5 @@\n"
         result = parse_unified_diff(diff)
         assert result == {"f.py": [5]}
 
@@ -92,25 +82,13 @@ class TestParseUnifiedDiff:
         assert result == {}
 
     def test_new_file(self) -> None:
-        diff = (
-            "diff --git a/new.py b/new.py\n"
-            "new file mode 100644\n"
-            "--- /dev/null\n"
-            "+++ b/new.py\n"
-            "@@ -0,0 +1,10 @@\n"
-        )
+        diff = "diff --git a/new.py b/new.py\nnew file mode 100644\n--- /dev/null\n+++ b/new.py\n@@ -0,0 +1,10 @@\n"
         result = parse_unified_diff(diff)
         assert result == {"new.py": list(range(1, 11))}
 
     def test_deduplication(self) -> None:
         """Lines should be deduplicated (edge case: overlapping hunks)."""
-        diff = (
-            "diff --git a/f.py b/f.py\n"
-            "--- a/f.py\n"
-            "+++ b/f.py\n"
-            "@@ -10,0 +11,2 @@\n"
-            "@@ -12,0 +14,1 @@\n"
-        )
+        diff = "diff --git a/f.py b/f.py\n--- a/f.py\n+++ b/f.py\n@@ -10,0 +11,2 @@\n@@ -12,0 +14,1 @@\n"
         result = parse_unified_diff(diff)
         assert result["f.py"] == sorted(set(result["f.py"]))
 
@@ -134,11 +112,15 @@ def _init_git_repo(path: Path) -> None:
     subprocess.run(["git", "init"], cwd=path, check=True, capture_output=True)
     subprocess.run(
         ["git", "config", "user.name", "Test Author"],
-        cwd=path, check=True, capture_output=True,
+        cwd=path,
+        check=True,
+        capture_output=True,
     )
     subprocess.run(
         ["git", "config", "user.email", "test@example.com"],
-        cwd=path, check=True, capture_output=True,
+        cwd=path,
+        check=True,
+        capture_output=True,
     )
 
 
@@ -149,7 +131,11 @@ def _create_commit(repo: Path, filename: str, content: str, msg: str) -> str:
     subprocess.run(["git", "add", filename], cwd=repo, check=True, capture_output=True)
     subprocess.run(["git", "commit", "-m", msg], cwd=repo, check=True, capture_output=True)
     return subprocess.run(
-        ["git", "rev-parse", "HEAD"], cwd=repo, capture_output=True, text=True, check=True,
+        ["git", "rev-parse", "HEAD"],
+        cwd=repo,
+        capture_output=True,
+        text=True,
+        check=True,
     ).stdout.strip()
 
 
@@ -277,7 +263,9 @@ class TestFormatSummary:
             stale_warnings=(),
             clean_files=(
                 FileGovernance(
-                    file_path="src/a.py", conforms=True, status="clean",
+                    file_path="src/a.py",
+                    conforms=True,
+                    status="clean",
                 ),
             ),
             unindexed_files=(),
@@ -293,9 +281,7 @@ class TestFormatSummary:
 
 
 class TestBuildReview:
-    def _make_drift_report(
-        self, *, with_drift: bool = True
-    ) -> DriftReport:
+    def _make_drift_report(self, *, with_drift: bool = True) -> DriftReport:
         if with_drift:
             return DriftReport(
                 repo_path="/repo",
@@ -447,12 +433,8 @@ class TestBuildReviewWithLineComments:
         repo.mkdir()
         _init_git_repo(repo)
 
-        sha_initial = _create_commit(
-            repo, "src/core/storage.py", "# storage v1\n", "feat: pure sqlite storage"
-        )
-        sha_succ = _create_commit(
-            repo, "src/core/cloud.py", "# cloud storage\n", "feat: cloud native storage"
-        )
+        sha_initial = _create_commit(repo, "src/core/storage.py", "# storage v1\n", "feat: pure sqlite storage")
+        sha_succ = _create_commit(repo, "src/core/cloud.py", "# cloud storage\n", "feat: cloud native storage")
 
         # Modify storage.py after the supersession
         (repo / "src/core/storage.py").write_text("# storage v2 edit\n", encoding="utf-8")
@@ -496,7 +478,19 @@ class TestBuildReviewWithLineComments:
             )
             db.execute(
                 "INSERT INTO passages VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                ("p1", "doc-storage-v1", "storage.md", "[]", 1, 5, text_initial, "h1", meta_initial, text_initial, b"vec"),
+                (
+                    "p1",
+                    "doc-storage-v1",
+                    "storage.md",
+                    "[]",
+                    1,
+                    5,
+                    text_initial,
+                    "h1",
+                    meta_initial,
+                    text_initial,
+                    b"vec",
+                ),
             )
 
             meta_succ = json.dumps({"commit": sha_succ, "verification_date": "2026-06-01"})
@@ -545,7 +539,11 @@ class TestBuildReviewWithLineComments:
 
             changed_lines = {"src/core/storage.py": [1]}
             review = build_review(
-                report, repo, db, changed_lines, line_comments=True,
+                report,
+                repo,
+                db,
+                changed_lines,
+                line_comments=True,
             )
 
             # Should have at least the file-level comment
@@ -561,7 +559,8 @@ class TestBuildReviewWithLineComments:
 
 
 _FINGERPRINT = (
-    '{"artifact":"model.onnx","artifact_sha256":"' + "a" * 64
+    '{"artifact":"model.onnx","artifact_sha256":"'
+    + "a" * 64
     + '","pooling":"mean","runtime":"fastembed==0.8.0","snapshot":"snapshot-a","source":"example/model"}'
 )
 
@@ -607,12 +606,18 @@ Decided to use raw sqlite3 connection pooling.
         policy_path.write_text("version: 1\ninclude: ['**']\nexclude: []\n", encoding="utf-8")
 
         paths = resolve_paths(
-            cli_config_dir=tmp_path / "config", cli_data_dir=tmp_path / "data",
-            cli_cache_dir=tmp_path / "cache", cli_log_dir=tmp_path / "log", env={},
+            cli_config_dir=tmp_path / "config",
+            cli_data_dir=tmp_path / "data",
+            cli_cache_dir=tmp_path / "cache",
+            cli_log_dir=tmp_path / "log",
+            env={},
         )
         cli.run_init(paths)
         cli.run_index(
-            paths, root, policy_path, model_name="test/minilm",
+            paths,
+            root,
+            policy_path,
+            model_name="test/minilm",
             embedder_factory=_fake_embedder_factory,
         )
 
@@ -620,16 +625,23 @@ Decided to use raw sqlite3 connection pooling.
         _create_commit(repo, "src/core/storage.py", "# v2 modified\n", "feat: modify storage")
 
         capsys.readouterr()
-        code = cli.bruriah_main([
-            "review",
-            "HEAD~1..HEAD",
-            "--repo", str(repo),
-            "--config-dir", str(paths.config_dir),
-            "--data-dir", str(paths.data_dir),
-            "--cache-dir", str(paths.cache_dir),
-            "--log-dir", str(paths.log_dir),
-            "--no-line-comments",
-        ])
+        code = cli.bruriah_main(
+            [
+                "review",
+                "HEAD~1..HEAD",
+                "--repo",
+                str(repo),
+                "--config-dir",
+                str(paths.config_dir),
+                "--data-dir",
+                str(paths.data_dir),
+                "--cache-dir",
+                str(paths.cache_dir),
+                "--log-dir",
+                str(paths.log_dir),
+                "--no-line-comments",
+            ]
+        )
         out = capsys.readouterr().out
         assert code == 0
         assert "Bruriah Architectural Review" in out
@@ -664,29 +676,42 @@ Decided to use raw sqlite3 connection pooling.
         policy_path.write_text("version: 1\ninclude: ['**']\nexclude: []\n", encoding="utf-8")
 
         paths = resolve_paths(
-            cli_config_dir=tmp_path / "config", cli_data_dir=tmp_path / "data",
-            cli_cache_dir=tmp_path / "cache", cli_log_dir=tmp_path / "log", env={},
+            cli_config_dir=tmp_path / "config",
+            cli_data_dir=tmp_path / "data",
+            cli_cache_dir=tmp_path / "cache",
+            cli_log_dir=tmp_path / "log",
+            env={},
         )
         cli.run_init(paths)
         cli.run_index(
-            paths, root, policy_path, model_name="test/minilm",
+            paths,
+            root,
+            policy_path,
+            model_name="test/minilm",
             embedder_factory=_fake_embedder_factory,
         )
 
         _create_commit(repo, "src/core/storage.py", "# v2 modified\n", "feat: modify storage")
 
         capsys.readouterr()
-        code = cli.bruriah_main([
-            "review",
-            "HEAD~1..HEAD",
-            "--repo", str(repo),
-            "--config-dir", str(paths.config_dir),
-            "--data-dir", str(paths.data_dir),
-            "--cache-dir", str(paths.cache_dir),
-            "--log-dir", str(paths.log_dir),
-            "--json",
-            "--no-line-comments",
-        ])
+        code = cli.bruriah_main(
+            [
+                "review",
+                "HEAD~1..HEAD",
+                "--repo",
+                str(repo),
+                "--config-dir",
+                str(paths.config_dir),
+                "--data-dir",
+                str(paths.data_dir),
+                "--cache-dir",
+                str(paths.cache_dir),
+                "--log-dir",
+                str(paths.log_dir),
+                "--json",
+                "--no-line-comments",
+            ]
+        )
         out = capsys.readouterr().out
         assert code == 0
         parsed = json.loads(out)
@@ -740,12 +765,18 @@ Cloud storage.
         policy_path.write_text("version: 1\ninclude: ['**']\nexclude: []\n", encoding="utf-8")
 
         paths = resolve_paths(
-            cli_config_dir=tmp_path / "config", cli_data_dir=tmp_path / "data",
-            cli_cache_dir=tmp_path / "cache", cli_log_dir=tmp_path / "log", env={},
+            cli_config_dir=tmp_path / "config",
+            cli_data_dir=tmp_path / "data",
+            cli_cache_dir=tmp_path / "cache",
+            cli_log_dir=tmp_path / "log",
+            env={},
         )
         cli.run_init(paths)
         cli.run_index(
-            paths, root, policy_path, model_name="test/minilm",
+            paths,
+            root,
+            policy_path,
+            model_name="test/minilm",
             embedder_factory=_fake_embedder_factory,
         )
 
@@ -753,17 +784,24 @@ Cloud storage.
         _create_commit(repo, "src/core/storage.py", "# edited after supersession\n", "feat: edit old storage")
 
         capsys.readouterr()
-        _ = cli.bruriah_main([
-            "review",
-            "HEAD~1..HEAD",
-            "--repo", str(repo),
-            "--config-dir", str(paths.config_dir),
-            "--data-dir", str(paths.data_dir),
-            "--cache-dir", str(paths.cache_dir),
-            "--log-dir", str(paths.log_dir),
-            "--strict",
-            "--no-line-comments",
-        ])
+        _ = cli.bruriah_main(
+            [
+                "review",
+                "HEAD~1..HEAD",
+                "--repo",
+                str(repo),
+                "--config-dir",
+                str(paths.config_dir),
+                "--data-dir",
+                str(paths.data_dir),
+                "--cache-dir",
+                str(paths.cache_dir),
+                "--log-dir",
+                str(paths.log_dir),
+                "--strict",
+                "--no-line-comments",
+            ]
+        )
         # With --strict and drift detected, should exit 1
         # (exit 1 means drift was detected and strict was on)
         # Note: if the file isn't governed by a superseded decision in the index,
@@ -780,12 +818,19 @@ Cloud storage.
         _init_git_repo(repo)
         _create_commit(repo, "f.py", "x\n", "init")
 
-        code = cli.bruriah_main([
-            "review",
-            "--repo", str(repo),
-            "--config-dir", str(tmp_path / "config"),
-            "--data-dir", str(tmp_path / "data"),
-            "--cache-dir", str(tmp_path / "cache"),
-            "--log-dir", str(tmp_path / "log"),
-        ])
+        code = cli.bruriah_main(
+            [
+                "review",
+                "--repo",
+                str(repo),
+                "--config-dir",
+                str(tmp_path / "config"),
+                "--data-dir",
+                str(tmp_path / "data"),
+                "--cache-dir",
+                str(tmp_path / "cache"),
+                "--log-dir",
+                str(tmp_path / "log"),
+            ]
+        )
         assert code == 1  # no_revision_specified error

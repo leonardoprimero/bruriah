@@ -81,12 +81,22 @@ _ALLOWED_MIME_PREFIXES = ("text/",)
 _ALLOWED_MIME_EXACT = frozenset({"application/pdf", "application/json"})
 _USER_AGENT = "bruriah/1 (+policy-gated, local-only research)"
 _CHUNK_SIZE = 65_536
-_BLOCKED_CODES = frozenset({
-    "unsupported_scheme", "unsupported_method", "invalid_url", "host_not_allowlisted",
-    "dangerous_ip_blocked", "invalid_ip", "content_type_not_allowed",
-    "raw_bytes_limit_exceeded", "decompressed_limit_exceeded", "redirect_count_exceeded",
-    "network_request_count_exceeded", "unsupported_content_encoding",
-})
+_BLOCKED_CODES = frozenset(
+    {
+        "unsupported_scheme",
+        "unsupported_method",
+        "invalid_url",
+        "host_not_allowlisted",
+        "dangerous_ip_blocked",
+        "invalid_ip",
+        "content_type_not_allowed",
+        "raw_bytes_limit_exceeded",
+        "decompressed_limit_exceeded",
+        "redirect_count_exceeded",
+        "network_request_count_exceeded",
+        "unsupported_content_encoding",
+    }
+)
 
 
 class FetchError(ValueError):
@@ -164,8 +174,12 @@ def _validate_ip(raw_ip: str) -> None:
         raise FetchError("invalid_ip") from error
     if (
         raw_ip in _METADATA_IPS
-        or address.is_loopback or address.is_private or address.is_link_local
-        or address.is_multicast or address.is_reserved or address.is_unspecified
+        or address.is_loopback
+        or address.is_private
+        or address.is_link_local
+        or address.is_multicast
+        or address.is_reserved
+        or address.is_unspecified
         or not address.is_global
     ):
         raise FetchError("dangerous_ip_blocked")
@@ -209,8 +223,14 @@ class _PinnedHTTPSConnection(http.client.HTTPSConnection):
 
 
 def _fetch_one_hop(
-    url: str, method: str, allowlist: frozenset[str], resolver: Resolver, connect: ConnectionFactory,
-    ssl_context: ssl.SSLContext, deadline: float, clock: Callable[[], float],
+    url: str,
+    method: str,
+    allowlist: frozenset[str],
+    resolver: Resolver,
+    connect: ConnectionFactory,
+    ssl_context: ssl.SSLContext,
+    deadline: float,
+    clock: Callable[[], float],
 ) -> tuple[http.client.HTTPSConnection, http.client.HTTPResponse, str]:
     """Fully validate `url`'s destination (scheme, allowlist, DNS resolved ONCE, every resolved
     IP), open one TLS connection pinned to the first validated numeric IP with `server_hostname
@@ -233,9 +253,12 @@ def _fetch_one_hop(
     connection = _PinnedHTTPSConnection(tls_socket, host, port, remaining)
     try:
         connection.request(
-            method, path_qs,
+            method,
+            path_qs,
             headers={
-                "Host": host, "User-Agent": _USER_AGENT, "Accept-Encoding": "gzip, deflate",
+                "Host": host,
+                "User-Agent": _USER_AGENT,
+                "Accept-Encoding": "gzip, deflate",
                 "Connection": "close",
             },
         )
@@ -257,7 +280,10 @@ def _decompressor(encoding: str) -> Any:
 
 
 def _read_bounded_body(
-    response: http.client.HTTPResponse, max_bytes: int, deadline: float, clock: Callable[[], float],
+    response: http.client.HTTPResponse,
+    max_bytes: int,
+    deadline: float,
+    clock: Callable[[], float],
     usage: _Usage,
 ) -> bytes:
     """Stream the body in fixed chunks, enforcing BOTH the raw/compressed byte ceiling and the
@@ -349,9 +375,18 @@ def _status_for(code: str) -> Literal["disabled", "blocked", "error"]:
 
 
 def _fetch_inner(
-    url: str, method: str, budgets: Budgets, *, network_enabled: bool, allowlist: frozenset[str],
-    resolver: Resolver, connect: ConnectionFactory, ssl_context: ssl.SSLContext,
-    clock: Callable[[], float], retrieved_at: datetime, usage: _Usage,
+    url: str,
+    method: str,
+    budgets: Budgets,
+    *,
+    network_enabled: bool,
+    allowlist: frozenset[str],
+    resolver: Resolver,
+    connect: ConnectionFactory,
+    ssl_context: ssl.SSLContext,
+    clock: Callable[[], float],
+    retrieved_at: datetime,
+    usage: _Usage,
 ) -> FetchResult:
     if not network_enabled:
         raise FetchError("network_disabled")
@@ -369,7 +404,14 @@ def _fetch_inner(
         hops_made += 1
         usage.requests = hops_made
         connection, response, canonical = _fetch_one_hop(
-            current_url, method, allowlist, resolver, connect, ssl_context, deadline, clock,
+            current_url,
+            method,
+            allowlist,
+            resolver,
+            connect,
+            ssl_context,
+            deadline,
+            clock,
         )
         try:
             redirect_chain.append(canonical)
@@ -388,27 +430,36 @@ def _fetch_inner(
             if not _content_type_allowed(content_type):
                 _discard_body(response, usage)
                 raise FetchError("content_type_not_allowed")
-            body = (
-                b"" if method == "HEAD"
-                else _read_bounded_body(response, budgets.max_bytes, deadline, clock, usage)
-            )
+            body = b"" if method == "HEAD" else _read_bounded_body(response, budgets.max_bytes, deadline, clock, usage)
         finally:
             connection.close()
 
         digest_hex = hashlib.sha256(body).hexdigest()
         evidence = EvidenceRecord(
-            ref=f"live:sha256:{digest_hex[:32]}", kind="captured_live",
-            publisher=urlsplit(canonical).hostname or "unknown", locator=canonical,
-            citation_locator=canonical, digest=f"sha256:{digest_hex}",
-            extraction_method=_extraction_method(content_type), redirect_chain=redirect_chain[:-1],
-            retrieved_at=retrieved_at, authority="unknown",
+            ref=f"live:sha256:{digest_hex[:32]}",
+            kind="captured_live",
+            publisher=urlsplit(canonical).hostname or "unknown",
+            locator=canonical,
+            citation_locator=canonical,
+            digest=f"sha256:{digest_hex}",
+            extraction_method=_extraction_method(content_type),
+            redirect_chain=redirect_chain[:-1],
+            retrieved_at=retrieved_at,
+            authority="unknown",
             authority_rationale="live_fetch_unassessed",
-            freshness="unknown", license="unknown", conflict="unknown",
+            freshness="unknown",
+            license="unknown",
+            conflict="unknown",
         )
         return FetchResult(
-            status="ok", code="ok", evidence=evidence, body=body,
-            content_type=content_type or None, redirect_chain=tuple(redirect_chain),
-            requests_made=usage.requests, bytes_read=usage.bytes_read,
+            status="ok",
+            code="ok",
+            evidence=evidence,
+            body=body,
+            content_type=content_type or None,
+            redirect_chain=tuple(redirect_chain),
+            requests_made=usage.requests,
+            bytes_read=usage.bytes_read,
         )
 
     raise FetchError("redirect_count_exceeded")
@@ -437,23 +488,34 @@ def fetch(
     usage = _Usage()
     try:
         return _fetch_inner(
-            url, method, budgets, network_enabled=network_enabled, allowlist=allowlist,
-            resolver=resolver, connect=connect,
+            url,
+            method,
+            budgets,
+            network_enabled=network_enabled,
+            allowlist=allowlist,
+            resolver=resolver,
+            connect=connect,
             ssl_context=ssl_context or ssl.create_default_context(),
-            clock=clock, retrieved_at=retrieved_at or datetime.now(timezone.utc), usage=usage,
+            clock=clock,
+            retrieved_at=retrieved_at or datetime.now(timezone.utc),
+            usage=usage,
         )
     except FetchError as error:
         # `usage` survives the unwind, which is the whole reason it is a mutable argument rather
         # than a return value: a call refused after three hops and half a megabyte has to report
         # that it spent them.
         return FetchResult(
-            status=_status_for(error.code), code=error.code,
-            requests_made=usage.requests, bytes_read=usage.bytes_read,
+            status=_status_for(error.code),
+            code=error.code,
+            requests_made=usage.requests,
+            bytes_read=usage.bytes_read,
         )
     except Exception:  # Backstop (#10): no bare exception may ever escape `fetch()`.
         return FetchResult(
-            status="error", code="internal_error",
-            requests_made=usage.requests, bytes_read=usage.bytes_read,
+            status="error",
+            code="internal_error",
+            requests_made=usage.requests,
+            bytes_read=usage.bytes_read,
         )
 
 

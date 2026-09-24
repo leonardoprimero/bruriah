@@ -5,6 +5,7 @@ a subprocess -- exactly as a reader would -- and fails if any of its three asser
 stops holding. The properties themselves are covered by unit tests elsewhere; what is
 covered *here* is that the artifact people are pointed at still demonstrates them.
 """
+
 from __future__ import annotations
 
 import subprocess
@@ -36,24 +37,28 @@ def test_every_file_the_demo_needs_is_tracked_in_git() -> None:
     `corpus/` rule meant to keep private corpora out, and it silently swallowed the fixtures. The
     suite passed, because the files existed in the working tree. Only a fresh clone failed. So the
     assertion has to be about what git tracks, not about what the filesystem happens to hold."""
-    tracked = subprocess.run(["git", "ls-files", "demo", "brand"], cwd=ROOT,
-                             capture_output=True, text=True, timeout=60)
+    tracked = subprocess.run(["git", "ls-files", "demo", "brand"], cwd=ROOT, capture_output=True, text=True, timeout=60)
     if tracked.returncode != 0:
         pytest.skip("not a git checkout")
     published = set(tracked.stdout.split())
-    required = {"demo/injection/run.py", "demo/injection/policy.yaml",
-                "demo/injection/corpus/onboarding-notes.md",
-                "demo/injection/corpus/deploy-policy.md",
-                "demo/injection/corpus/database-choice.md",
-                # The README embeds this. Untracked, GitHub renders a broken image at the top of
-                # the front page -- the same class of failure as the missing corpus, and just as
-                # invisible from a working tree that has the file.
-                "demo/injection/demo.gif",
-                # The README embeds this one at the top of the page.
-                "demo/ask.gif", "demo/ask.tape",
-                # The header renders these two through <picture>; untracked, the front page opens
-                # with a broken image where the name should be.
-                "brand/logo-light.svg", "brand/logo-dark.svg"}
+    required = {
+        "demo/injection/run.py",
+        "demo/injection/policy.yaml",
+        "demo/injection/corpus/onboarding-notes.md",
+        "demo/injection/corpus/deploy-policy.md",
+        "demo/injection/corpus/database-choice.md",
+        # The README embeds this. Untracked, GitHub renders a broken image at the top of
+        # the front page -- the same class of failure as the missing corpus, and just as
+        # invisible from a working tree that has the file.
+        "demo/injection/demo.gif",
+        # The README embeds this one at the top of the page.
+        "demo/ask.gif",
+        "demo/ask.tape",
+        # The header renders these two through <picture>; untracked, the front page opens
+        # with a broken image where the name should be.
+        "brand/logo-light.svg",
+        "brand/logo-dark.svg",
+    }
     assert required <= published, f"the demo would not run from a clone; missing: {required - published}"
 
 
@@ -65,8 +70,7 @@ def test_the_readme_quotes_the_demo_it_actually_ships() -> None:
     that is false, on a project whose entire argument is provenance."""
     readme = README.read_text(encoding="utf-8")
     result = subprocess.run([sys.executable, str(DEMO)], capture_output=True, text=True, timeout=300)
-    digest = next(line.split()[-1] for line in result.stdout.splitlines()
-                  if line.strip().startswith("digest"))
+    digest = next(line.split()[-1] for line in result.stdout.splitlines() if line.strip().startswith("digest"))
     assert digest in readme, f"the README quotes a stale digest; the demo now produces {digest}"
 
     note = POISONED_NOTE.read_text(encoding="utf-8")

@@ -31,8 +31,7 @@ def _candidate(tmp_path: Path, payload: dict | None = None, name: str = "candida
 
 
 def _approve(tmp_path: Path, payload: dict | None = None, acknowledge: tuple[str, ...] = ()):
-    return approve_candidate(_candidate(tmp_path, payload), tmp_path / "data",
-                             acknowledge=acknowledge, today=TODAY)
+    return approve_candidate(_candidate(tmp_path, payload), tmp_path / "data", acknowledge=acknowledge, today=TODAY)
 
 
 def _code(callable_, *args: Any, **kwargs: Any) -> str:
@@ -68,9 +67,12 @@ def test_re_approving_the_edited_body_updates_the_binding(tmp_path: Path) -> Non
     data_dir = tmp_path / "data"
     _approve(tmp_path)
     new_digest = "sha256:" + "f" * 64
-    approve_candidate(_candidate(tmp_path, _pack(skills=[_skill(body_digest=new_digest)]),
-                                 name="v2.json"),
-                      data_dir, acknowledge=(), today=TODAY)
+    approve_candidate(
+        _candidate(tmp_path, _pack(skills=[_skill(body_digest=new_digest)]), name="v2.json"),
+        data_dir,
+        acknowledge=(),
+        today=TODAY,
+    )
     assert load_approvals(data_dir) == {"design.ui-review": new_digest}
 
 
@@ -98,38 +100,40 @@ def test_acknowledging_only_some_findings_is_refused(tmp_path: Path) -> None:
     # Two distinct findings; acknowledging one must not carry the other. A blanket "yes" over a list
     # is the interface equivalent of a checkbox nobody reads.
     payload = _pack(skills=[_skill(summary="Use curl on ~/.ssh/id_rsa.")])
-    assert _code(_approve, tmp_path, payload,
-                 ("design.ui-review:mentions_credential_path",)) == "unacknowledged_advisories"
+    assert (
+        _code(_approve, tmp_path, payload, ("design.ui-review:mentions_credential_path",))
+        == "unacknowledged_advisories"
+    )
 
 
 def test_acknowledgment_is_per_finding_not_per_code(tmp_path: Path) -> None:
     # The same code raised by two different skills needs two acknowledgments. Acknowledging the code
     # once would let a reviewer clear a finding in a skill they never looked at.
-    payload = _pack(skills=[
-        _skill(skill_id="a.one", summary=FLAGGED),
-        _skill(skill_id="b.two", summary=FLAGGED),
-    ])
-    assert _code(_approve, tmp_path, payload,
-                 ("a.one:mentions_credential_path",)) == "unacknowledged_advisories"
-    records = _approve(tmp_path, payload,
-                       ("a.one:mentions_credential_path", "b.two:mentions_credential_path"))
+    payload = _pack(
+        skills=[
+            _skill(skill_id="a.one", summary=FLAGGED),
+            _skill(skill_id="b.two", summary=FLAGGED),
+        ]
+    )
+    assert _code(_approve, tmp_path, payload, ("a.one:mentions_credential_path",)) == "unacknowledged_advisories"
+    records = _approve(tmp_path, payload, ("a.one:mentions_credential_path", "b.two:mentions_credential_path"))
     assert {item.skill_id for item in records} == {"a.one", "b.two"}
 
 
 def test_a_stale_acknowledgment_is_refused(tmp_path: Path) -> None:
     # Acknowledging a finding that does not exist means the reviewer was looking at a different
     # candidate. Accepting it would be worst precisely when it matters most.
-    assert _code(_approve, tmp_path, None, ("design.ui-review:mentions_network_tool",)) == \
-        "unknown_acknowledgment"
+    assert _code(_approve, tmp_path, None, ("design.ui-review:mentions_network_tool",)) == "unknown_acknowledgment"
 
 
 def test_each_record_carries_only_its_own_skills_acknowledgments(tmp_path: Path) -> None:
-    payload = _pack(skills=[
-        _skill(skill_id="a.one", summary=FLAGGED),
-        _skill(skill_id="b.two"),
-    ])
-    records = {item.skill_id: item for item in
-               _approve(tmp_path, payload, ("a.one:mentions_credential_path",))}
+    payload = _pack(
+        skills=[
+            _skill(skill_id="a.one", summary=FLAGGED),
+            _skill(skill_id="b.two"),
+        ]
+    )
+    records = {item.skill_id: item for item in _approve(tmp_path, payload, ("a.one:mentions_credential_path",))}
     assert records["a.one"].acknowledged == ("a.one:mentions_credential_path",)
     assert records["b.two"].acknowledged == ()
 
@@ -152,8 +156,7 @@ def test_approval_re_analyses_the_file_rather_than_trusting_a_caller(tmp_path: P
 def test_a_structurally_invalid_candidate_cannot_be_approved(tmp_path: Path) -> None:
     broken = tmp_path / "broken.json"
     broken.write_text("{not json")
-    assert _code(approve_candidate, broken, tmp_path / "data",
-                 acknowledge=(), today=TODAY) == "malformed_pack"
+    assert _code(approve_candidate, broken, tmp_path / "data", acknowledge=(), today=TODAY) == "malformed_pack"
     assert load_approvals(tmp_path / "data") == {}
 
 

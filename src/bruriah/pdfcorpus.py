@@ -26,6 +26,7 @@ What this buys:
 Pages with no text (cover graphics, blank separator pages, pure image scans without text layer)
 are skipped and honestly reported in coverage statistics.
 """
+
 from __future__ import annotations
 
 import hashlib
@@ -77,9 +78,7 @@ def build(source: Path, out: Path) -> PdfCorpusResult:
     recording provenance (source file path, page number, extractor version, source SHA-256).
     """
     if pypdf is None:
-        raise SystemExit(
-            "error: PDF extraction requires pypdf. Install it with: pip install 'bruriah[pdf]'"
-        )
+        raise SystemExit("error: PDF extraction requires pypdf. Install it with: pip install 'bruriah[pdf]'")
 
     if not source.exists():
         raise SystemExit(f"error: source path does not exist: {source}")
@@ -140,12 +139,7 @@ def build(source: Path, out: Path) -> PdfCorpusResult:
                 "status: active\n"
                 "---\n\n"
             )
-            document = (
-                frontmatter
-                + f"# {title_base} - Page {page_num}\n\n"
-                + text
-                + "\n"
-            )
+            document = frontmatter + f"# {title_base} - Page {page_num}\n\n" + text + "\n"
             doc_filename = f"{base_slug}-p{page_num:03d}.md"
             (out / doc_filename).write_text(document, encoding="utf-8", newline="\n")
             written += 1

@@ -131,8 +131,7 @@ def test_duplicate_headings_renames_and_tombstones_are_explicit(tmp_path: Path) 
 
     aliases_path = tmp_path / "ref-aliases.json"
     aliases_path.write_text(
-        '{"version":1,"aliases":{"chunk:v1:old":"chunk:v1:new"},'
-        '"tombstones":["chunk:v1:gone"]}',
+        '{"version":1,"aliases":{"chunk:v1:old":"chunk:v1:new"},"tombstones":["chunk:v1:gone"]}',
         encoding="utf-8",
     )
     aliases = RefAliases.load(aliases_path)
@@ -153,12 +152,13 @@ def test_real_corpus_rebuild_is_stable_and_non_destructive() -> None:
     paths = policy.discover(VAULT_ROOT)
     assert paths
 
-    forward = {document.relative_path: document for document in (
-        parse_document(path, VAULT_ROOT, policy) for path in paths
-    )}
-    reverse = {document.relative_path: document for document in (
-        parse_document(path, VAULT_ROOT, policy) for path in reversed(paths)
-    )}
+    forward = {
+        document.relative_path: document for document in (parse_document(path, VAULT_ROOT, policy) for path in paths)
+    }
+    reverse = {
+        document.relative_path: document
+        for document in (parse_document(path, VAULT_ROOT, policy) for path in reversed(paths))
+    }
 
     assert forward == reverse
     assert all(path.resolve().is_relative_to(VAULT_ROOT.resolve()) for path in paths)

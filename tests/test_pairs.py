@@ -25,8 +25,11 @@ _WHEN = datetime(2026, 7, 20, 12, 0, 0, tzinfo=timezone.utc)
 def _commit(**overrides) -> Commit:
     payload = dict(
         sha="0af3d9c2aaaabbbbccccddddeeeeffff00001111",
-        author_name="Pierre-Yves Ricau", author_login="pyricau",
-        authored_at=_WHEN, subject="fix the leak", body="closes #2301",
+        author_name="Pierre-Yves Ricau",
+        author_login="pyricau",
+        authored_at=_WHEN,
+        subject="fix the leak",
+        body="closes #2301",
     )
     payload.update(overrides)
     return Commit(**payload)
@@ -34,8 +37,11 @@ def _commit(**overrides) -> Commit:
 
 def _issue(**overrides) -> Issue:
     payload = dict(
-        number=2301, title="ToastEventListener leak", author_login="andronaline",
-        created_at=_WHEN - timedelta(days=9), is_pull_request=False,
+        number=2301,
+        title="ToastEventListener leak",
+        author_login="andronaline",
+        created_at=_WHEN - timedelta(days=9),
+        is_pull_request=False,
     )
     payload.update(overrides)
     return Issue(**payload)
@@ -44,16 +50,19 @@ def _issue(**overrides) -> Issue:
 # --- condition 1: the body names what it closes -------------------------------------------------
 
 
-@pytest.mark.parametrize("body, expected", [
-    ("closes #2301", [2301]),
-    ("Fixes: #12", [12]),
-    ("resolved #7 and closed #8", [7, 8]),
-    ("Closes issue #99", [99]),
-    ("closes #5 and later closes #5 again", [5]),          # deduplicated, order preserved
-    ("see #4 for context", []),                            # a mention is not a claim to close
-    ("", []),
-    ("closes the gap described at length in a long paragraph that eventually mentions #4", []),
-])
+@pytest.mark.parametrize(
+    "body, expected",
+    [
+        ("closes #2301", [2301]),
+        ("Fixes: #12", [12]),
+        ("resolved #7 and closed #8", [7, 8]),
+        ("Closes issue #99", [99]),
+        ("closes #5 and later closes #5 again", [5]),  # deduplicated, order preserved
+        ("see #4 for context", []),  # a mention is not a claim to close
+        ("", []),
+        ("closes the gap described at length in a long paragraph that eventually mentions #4", []),
+    ],
+)
 def test_parse_closes(body: str, expected: list[int]) -> None:
     assert parse_closes(body) == expected
 
@@ -112,21 +121,26 @@ def test_without_logins_a_name_match_is_treated_as_the_same_person() -> None:
 
 
 def test_without_logins_a_genuinely_different_name_still_passes() -> None:
-    assert independence(
-        _commit(author_login=None, author_name="Pierre-Yves Ricau"),
-        _issue(author_login="andronaline"),
-    ) is None
+    assert (
+        independence(
+            _commit(author_login=None, author_name="Pierre-Yves Ricau"),
+            _issue(author_login="andronaline"),
+        )
+        is None
+    )
 
 
 # --- ground truth is matched by sha, never by rebuilding the filename ---------------------------
 
 
 def test_corpus_index_maps_sha_to_the_name_ground_truth_records() -> None:
-    index = corpus_index([
-        "2026-07-25-0af3d9c2-fix-the-leak.md",
-        "2026-07-26-1b2c3d4e-discount-the-lexical-leg.md",
-        "not-a-corpus-file.txt",
-    ])
+    index = corpus_index(
+        [
+            "2026-07-25-0af3d9c2-fix-the-leak.md",
+            "2026-07-26-1b2c3d4e-discount-the-lexical-leg.md",
+            "not-a-corpus-file.txt",
+        ]
+    )
     assert index["0af3d9c2"] == "2026-07-25-fix-the-leak.md"
     assert index["1b2c3d4e"] == "2026-07-26-discount-the-lexical-leg.md"
     assert len(index) == 2
@@ -153,10 +167,10 @@ def test_build_keeps_an_independent_pair_with_the_issue_title_as_the_question() 
 
 def test_build_reports_every_rejection_with_its_reason() -> None:
     commits = [
-        _commit(body="closes #1"),                                    # self-authored
-        _commit(body="closes #2"),                                    # unresolvable
-        _commit(body="closes #3"),                                    # a PR
-        _commit(body="closes #4"),                                    # kept
+        _commit(body="closes #1"),  # self-authored
+        _commit(body="closes #2"),  # unresolvable
+        _commit(body="closes #3"),  # a PR
+        _commit(body="closes #4"),  # kept
     ]
     issues = {
         1: _issue(number=1, author_login="pyricau"),
@@ -174,8 +188,7 @@ def test_build_reports_every_rejection_with_its_reason() -> None:
 def test_a_commit_absent_from_the_corpus_is_reported_not_paired() -> None:
     # Pairing a question with a document the corpus does not contain would score as a permanent
     # miss and read as a retrieval failure.
-    kept, rejected = build([_commit(sha="ffffffffffffffffffffffffffffffffffffffff")],
-                           {2301: _issue()}, _CORPUS)
+    kept, rejected = build([_commit(sha="ffffffffffffffffffffffffffffffffffffffff")], {2301: _issue()}, _CORPUS)
     assert kept == []
     assert rejected[0].reason == "commit is not in the derived corpus"
 
@@ -208,8 +221,7 @@ def test_one_issue_closed_by_two_commits_is_one_question_with_a_partial_credit_a
     """
     corpus = {"aaaaaaaa": "2022-04-03-fix-the-leak.md", "bbbbbbbb": "2026-02-26-fix-the-race.md"}
     early = _commit(sha="aaaaaaaa" + "0" * 32, authored_at=_WHEN, body="closes #2301")
-    late = _commit(sha="bbbbbbbb" + "0" * 32, authored_at=_WHEN + timedelta(days=1400),
-                   body="closes #2301")
+    late = _commit(sha="bbbbbbbb" + "0" * 32, authored_at=_WHEN + timedelta(days=1400), body="closes #2301")
     # Fed newest-first, the order `git log` actually produces, so the ordering is real work.
     kept, rejected = build([late, early], {2301: _issue()}, corpus)
     assert rejected == []

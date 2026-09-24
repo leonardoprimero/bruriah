@@ -15,6 +15,7 @@ retrieval, over the *same* index, with the one difference that defines the commo
 pipeline shape: it puts passage TEXT into the model's context. The bytes are taken
 from this project's own `read_evidence`, so the comparison cannot be rigged.
 """
+
 from __future__ import annotations
 
 import io
@@ -59,10 +60,19 @@ def build(corpus: Path, root: Path):
     paths = cli.resolve_paths(env=env)
     stdout, sys.stdout = sys.stdout, io.StringIO()  # the build report is noise here
     try:
-        code = cli.bruriah_main(["index", "--corpus-root", str(corpus),
-                                 "--policy", str(HERE / "policy.yaml"),
-                                 "--data-dir", str(paths.data_dir),
-                                 "--config-dir", str(paths.config_dir)])
+        code = cli.bruriah_main(
+            [
+                "index",
+                "--corpus-root",
+                str(corpus),
+                "--policy",
+                str(HERE / "policy.yaml"),
+                "--data-dir",
+                str(paths.data_dir),
+                "--config-dir",
+                str(paths.config_dir),
+            ]
+        )
     finally:
         sys.stdout = stdout
     if code != 0:
@@ -110,8 +120,7 @@ def main() -> int:
 
         def decisions(value: dict) -> dict:
             """Everything the router DECIDED, as opposed to what it retrieved."""
-            return {key: value[key] for key in ("status", "host_actions", "gaps", "claims",
-                                                "conflicts", "warnings")}
+            return {key: value[key] for key in ("status", "host_actions", "gaps", "claims", "conflicts", "warnings")}
 
         print("The note claims to supersede every policy in the corpus. With it and without it,")
         print(f"the routing decision is identical: {decisions(payload) == decisions(after)}")
@@ -120,9 +129,12 @@ def main() -> int:
         # "Identical" is only interesting if the comparison could have come out otherwise. A
         # decision function that returns the same thing for everything would pass the check above
         # while proving nothing at all, so the resolution is measured rather than assumed.
-        elsewhere = investigate(InvestigationRequest(
-            task="what are the employment law requirements for firing someone in Argentina",
-            host_skills=[]), poisoned).model_dump(mode="json")
+        elsewhere = investigate(
+            InvestigationRequest(
+                task="what are the employment law requirements for firing someone in Argentina", host_skills=[]
+            ),
+            poisoned,
+        ).model_dump(mode="json")
         print("\nThat is only worth something if the comparison has resolution, so: the same")
         print("comparison over a different QUESTION does come out different --")
         print(f"  this corpus, deployment question: status={payload['status']}, gaps={payload['gaps']}")

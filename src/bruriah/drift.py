@@ -163,8 +163,8 @@ def analyze_architectural_drift(
             sha_str = active_sha[:12] if active_sha else (active_ref or "")
             rec = (
                 f'Ensure your changes adhere to "{active_subj or "active decision"}". '
-                f'If this change updates the architecture, include trailer: '
-                f'Amends: {sha_str}'
+                f"If this change updates the architecture, include trailer: "
+                f"Amends: {sha_str}"
             )
 
             stale_warnings.append(

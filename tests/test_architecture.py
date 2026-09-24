@@ -11,6 +11,7 @@ This walks the AST of every module under `src/bruriah` (never imports them, so i
 an offending import would itself fail at runtime) and fails if any module outside the CLI adapter
 imports `bruriah.cli` (absolute) or `.cli` (package-relative from `src/bruriah`).
 """
+
 from __future__ import annotations
 
 import ast

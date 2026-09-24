@@ -10,6 +10,7 @@ it was told, on the front page, to run a file they did not have.
 This wrapper stays so the command in older notes and shell histories keeps working. It calls the
 same code the subcommand does -- there is no second implementation to drift.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -26,8 +27,9 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--repo", type=Path, default=Path("."), help="repository to read")
     parser.add_argument("--out", type=Path, required=True, help="directory to write documents into")
     parser.add_argument("--limit", type=int, default=None, help="most recent N commits only")
-    parser.add_argument("--revision", default="HEAD", metavar="REV",
-                        help="derive the corpus as of this commit (default HEAD)")
+    parser.add_argument(
+        "--revision", default="HEAD", metavar="REV", help="derive the corpus as of this commit (default HEAD)"
+    )
     args = parser.parse_args(argv)
 
     print("note: `scripts/git_corpus.py` is deprecated; use `bruriah corpus`.", file=sys.stderr)

@@ -1,4 +1,5 @@
 """Interactive terminal demonstration of Bruriah's Counterfactual Memory engine."""
+
 from __future__ import annotations
 
 import json
@@ -38,11 +39,13 @@ def _alternative_name(ref: str, deps: ServiceDeps) -> str:
     name = disclosure.get("name") if isinstance(disclosure, dict) else None
     return name if isinstance(name, str) else ref
 
+
 _SRC = Path(__file__).resolve().parent
 _DATA = _SRC / "data"
 
 FINGERPRINT = (
-    '{"artifact":"model.onnx","artifact_sha256":"' + "a" * 64
+    '{"artifact":"model.onnx","artifact_sha256":"'
+    + "a" * 64
     + '","pooling":"mean","runtime":"fastembed==0.8.0","snapshot":"snapshot-a","source":"example/model"}'
 )
 
@@ -179,8 +182,13 @@ We evaluated FastMCP and rejected it. Supporting premise: fastmcp-no-forbid.
                 out.write("  " + _format_red(f"🛑 VERDICT: {cf1.verdict}", use_color) + "\n")
                 out.write(f"  Matched Alternative: {_alternative_name(cf1.matched_alternative_ref, deps1)}\n")
                 out.write(f"  Rationale: {resolve_counterfactual_refs_for_humans(cf1.rationale, repo1)}\n")
-                out.write(f"  Conflicts: {[resolve_counterfactual_refs_for_humans(c, repo1) for c in res1.conflicts]}\n\n")
-                out.write(_format_green("RESULT: Agent is warned and flagged with an architectural conflict!", use_color) + "\n")
+                out.write(
+                    f"  Conflicts: {[resolve_counterfactual_refs_for_humans(c, repo1) for c in res1.conflicts]}\n\n"
+                )
+                out.write(
+                    _format_green("RESULT: Agent is warned and flagged with an architectural conflict!", use_color)
+                    + "\n"
+                )
             else:
                 out.write("  No counterfactual assessment generated.\n")
 
@@ -225,8 +233,16 @@ FastMCP v2.0 added strict extra='forbid' validation. Premise fastmcp-no-forbid i
                 out.write("  " + _format_yellow(f"🔄 VERDICT: {cf2.verdict}", use_color) + "\n")
                 out.write(f"  Matched Alternative: {_alternative_name(cf2.matched_alternative_ref, deps2)}\n")
                 out.write(f"  Rationale: {resolve_counterfactual_refs_for_humans(cf2.rationale, repo2)}\n")
-                out.write(f"  Conflicts: {[resolve_counterfactual_refs_for_humans(c, repo2) for c in res2.conflicts]}\n\n")
-                out.write(_format_green("RESULT: Bruriah tracks premise invalidation and signals that FastMCP now requires reevaluation!", use_color) + "\n")
+                out.write(
+                    f"  Conflicts: {[resolve_counterfactual_refs_for_humans(c, repo2) for c in res2.conflicts]}\n\n"
+                )
+                out.write(
+                    _format_green(
+                        "RESULT: Bruriah tracks premise invalidation and signals that FastMCP now requires reevaluation!",
+                        use_color,
+                    )
+                    + "\n"
+                )
             else:
                 out.write("  No counterfactual assessment generated.\n")
 
@@ -235,5 +251,5 @@ FastMCP v2.0 added strict extra='forbid' validation. Premise fastmcp-no-forbid i
     out.write("To use Bruriah in your project:\n")
     out.write("  1. Initialize:   bruriah init --repo .\n")
     out.write("  2. Explore DAG:  bruriah ui\n")
-    out.write("  3. Ask queries:  bruriah ask \"why did we avoid X\"\n\n")
+    out.write('  3. Ask queries:  bruriah ask "why did we avoid X"\n\n')
     return 0

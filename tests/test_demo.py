@@ -19,7 +19,8 @@ from bruriah.registries import Registry
 from bruriah.service import InvestigateService, ServiceDeps, read
 
 FINGERPRINT = (
-    '{"artifact":"model.onnx","artifact_sha256":"' + "a" * 64
+    '{"artifact":"model.onnx","artifact_sha256":"'
+    + "a" * 64
     + '","pooling":"mean","runtime":"fastembed==0.8.0","snapshot":"snapshot-a","source":"example/model"}'
 )
 _SRC = Path(__file__).resolve().parents[1] / "src"
@@ -29,8 +30,10 @@ _DATA = _SRC / "bruriah" / "data"
 def _real_registry() -> Registry:
     roots = json.loads((_DATA / "trust-roots.json").read_text())
     pack = load_pack(
-        _DATA / "research-policy.json", _DATA / "research-policy.manifest.json",
-        roots, today=date(2026, 7, 23),
+        _DATA / "research-policy.json",
+        _DATA / "research-policy.manifest.json",
+        roots,
+        today=date(2026, 7, 23),
     )
     return Registry.from_packs([pack])
 
@@ -50,7 +53,6 @@ def test_run_demo_non_interactive():
     assert "Step 3: Premise Invalidation & Re-evaluation" in output
     assert "🔄 VERDICT: premise_changed_requires_reevaluation" in output
     assert "Demo completed successfully!" in output
-
 
 
 def test_demo_cli_dispatch():
@@ -95,9 +97,16 @@ We evaluated FastMCP and rejected it.
     policy_path.write_text("version: 1\ninclude: ['public/**']\nexclude: []\n", encoding="utf-8")
     policy = CorpusPolicy.load(policy_path)
     config = BuildConfig(
-        root=tmp_path / "vault", policy_path=policy_path, schema_version=1, parser_version="corpus-v2",
-        service_version="0.1.0", mcp_range=">=1.28.1,<2", embedding_model="test/minilm",
-        embedding_revision="snapshot-a", embedding_dimensions=3, embedding_fingerprint=FINGERPRINT,
+        root=tmp_path / "vault",
+        policy_path=policy_path,
+        schema_version=1,
+        parser_version="corpus-v2",
+        service_version="0.1.0",
+        mcp_range=">=1.28.1,<2",
+        embedding_model="test/minilm",
+        embedding_revision="snapshot-a",
+        embedding_dimensions=3,
+        embedding_fingerprint=FINGERPRINT,
         ranking_config="rrf-v1",
     )
     candidate = tmp_path / "candidate.sqlite3"

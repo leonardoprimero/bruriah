@@ -17,6 +17,7 @@ including them adds noise without reasoning. Merge commits are skipped for the s
 
 Nothing is written to the repository being read. This script only reads.
 """
+
 from __future__ import annotations
 
 import re
@@ -34,9 +35,7 @@ _MAX_BODY = 16_000
 
 def _git(repo: Path, *args: str) -> str:
     try:
-        result = subprocess.run(
-            ["git", *args], cwd=repo, capture_output=True, text=True, check=True
-        )
+        result = subprocess.run(["git", *args], cwd=repo, capture_output=True, text=True, check=True)
     except FileNotFoundError:
         raise SystemExit("error: git is not on PATH")
     except subprocess.CalledProcessError as error:
@@ -60,7 +59,10 @@ def _require_commit(repo: Path, revision: str) -> None:
     try:
         subprocess.run(
             ["git", "rev-parse", "--verify", "--quiet", f"{revision}^{{commit}}"],
-            cwd=repo, capture_output=True, text=True, check=True,
+            cwd=repo,
+            capture_output=True,
+            text=True,
+            check=True,
         )
     except FileNotFoundError:
         raise SystemExit("error: git is not on PATH")
@@ -98,9 +100,7 @@ class CorpusResult:
     examined: int
 
 
-def build(
-    repo: Path, out: Path, limit: int | None = None, *, revision: str = "HEAD"
-) -> CorpusResult:
+def build(repo: Path, out: Path, limit: int | None = None, *, revision: str = "HEAD") -> CorpusResult:
     """Write one document per commit that carries reasoning.
 
     Returns what was written AND what was read, because the gap between them is the single thing
@@ -117,20 +117,22 @@ def build(
     below it describes, with nothing on the page to tell them why."""
     _require_commit(repo, revision)
     fmt = (
-        _SEPARATOR_FMT.join([
-            "%H",
-            "%aI",
-            "%an",
-            "%s",
-            "%(trailers:key=Supersedes,valueonly=true)",
-            "%(trailers:key=Deprecates,valueonly=true)",
-            "%(trailers:key=Amends,valueonly=true)",
-            "%(trailers:key=Alternative-Rejected,valueonly=true)",
-            "%(trailers:key=Rejection-Reason,valueonly=true)",
-            "%(trailers:key=Premise,valueonly=true)",
-            "%(trailers:key=Premise-Invalidated,valueonly=true)",
-            "%b",
-        ])
+        _SEPARATOR_FMT.join(
+            [
+                "%H",
+                "%aI",
+                "%an",
+                "%s",
+                "%(trailers:key=Supersedes,valueonly=true)",
+                "%(trailers:key=Deprecates,valueonly=true)",
+                "%(trailers:key=Amends,valueonly=true)",
+                "%(trailers:key=Alternative-Rejected,valueonly=true)",
+                "%(trailers:key=Rejection-Reason,valueonly=true)",
+                "%(trailers:key=Premise,valueonly=true)",
+                "%(trailers:key=Premise-Invalidated,valueonly=true)",
+                "%b",
+            ]
+        )
         + _RECORD_FMT
     )
     args = ["log", "--no-merges", f"--format={fmt}"]
@@ -145,8 +147,18 @@ def build(
         if len(parts) < 12:
             continue
         (
-            sha, when, author, subject, raw_supersedes, raw_deprecates, raw_amends,
-            raw_alt_rejected, raw_rejection_reason, raw_premise, raw_premise_inv, body,
+            sha,
+            when,
+            author,
+            subject,
+            raw_supersedes,
+            raw_deprecates,
+            raw_amends,
+            raw_alt_rejected,
+            raw_rejection_reason,
+            raw_premise,
+            raw_premise_inv,
+            body,
         ) = (part.strip() for part in parts[:12])
         examined += 1
         if not body:
@@ -210,30 +222,24 @@ def build(
             alt_section = (
                 "\n## Evaluated Alternatives\n"
                 + "".join(
-                    f"- **{alt}** (rejected): "
-                    + (rejection_reasons[i] if i < len(rejection_reasons) else "")
-                    + "\n"
+                    f"- **{alt}** (rejected): " + (rejection_reasons[i] if i < len(rejection_reasons) else "") + "\n"
                     for i, alt in enumerate(alt_rejected)
                 )
                 + "\n"
             )
 
         document = (
-            frontmatter
-            + f"# {subject}\n\n"
+            frontmatter + f"# {subject}\n\n"
             f"**Decided:** {when[:10]} · **Commit:** `{sha[:12]}` · **Author:** {author}\n\n"
             f"{body[:_MAX_BODY]}\n"
             f"{alt_section}\n"
-            "## Files this decision touched\n"
-            + "".join(f"- `{item}`\n" for item in sorted(set(files))[:12])
+            "## Files this decision touched\n" + "".join(f"- `{item}`\n" for item in sorted(set(files))[:12])
         )
         # LF explicitly: these documents are hashed byte-for-byte by `parse_document`
         # (`source_hash`), so letting text mode rewrite the separators would make an index built
         # from a Windows-generated corpus disagree with one built from the same commits anywhere
         # else -- same history, different digests, for no reason a reader could ever see.
-        (out / f"{when[:10]}-{sha[:8]}-{_slug(subject)}.md").write_text(
-            document, encoding="utf-8", newline="\n"
-        )
+        (out / f"{when[:10]}-{sha[:8]}-{_slug(subject)}.md").write_text(document, encoding="utf-8", newline="\n")
         written += 1
     return CorpusResult(written, examined)
 
@@ -252,9 +258,7 @@ class WalkedCommit:
     body: str
 
 
-def walk_commits(
-    repo: Path, limit: int | None = None, *, revision: str = "HEAD"
-) -> tuple[WalkedCommit, ...]:
+def walk_commits(repo: Path, limit: int | None = None, *, revision: str = "HEAD") -> tuple[WalkedCommit, ...]:
     """Every non-merge commit at `revision`, sha/date/subject/body only, INCLUDING commits `build`
     would skip for lacking a body -- `github_corpus` (`bruriah corpus --github`) needs to see a
     squash-merge subject's `(#N)` suffix even when nothing follows it.

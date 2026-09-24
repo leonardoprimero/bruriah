@@ -16,6 +16,7 @@ distinction is what made it expressible at all; it is not what made it work.
 
 No I/O, no clock, no randomness: pure computation over its arguments, like `metrics.py` beside it.
 """
+
 from __future__ import annotations
 
 from collections.abc import Sequence

@@ -128,9 +128,7 @@ def _scan_vectors(
         raise RetrievalError(error.code) from error
 
 
-def _hydrate_passages(
-    database: sqlite3.Connection, refs: Sequence[str]
-) -> dict[str, _Passage]:
+def _hydrate_passages(database: sqlite3.Connection, refs: Sequence[str]) -> dict[str, _Passage]:
     try:
         return SnapshotRepository(database).hydrate_passages(refs)
     except RepositoryError as error:
@@ -223,8 +221,7 @@ def _vector_ranks(
     clock: Callable[[], float],
 ) -> tuple[dict[str, int] | None, bool]:
     items: list[tuple[str, bytes]] = [
-        (item.ref, item.vector) if isinstance(item, _Passage) else item
-        for item in passages
+        (item.ref, item.vector) if isinstance(item, _Passage) else item for item in passages
     ]
     return ranking.vector_ranks(
         items=items,
@@ -243,14 +240,11 @@ def _corpus_language(passages: list[_Passage]) -> str | None:
     rather than all of it keeps this a rounding error against the BM25 scan that follows.
     """
     return language.dominant(
-        passage.search_text[:_LANGUAGE_SAMPLE_CHARS]
-        for passage in passages[:_LANGUAGE_SAMPLE_PASSAGES]
+        passage.search_text[:_LANGUAGE_SAMPLE_CHARS] for passage in passages[:_LANGUAGE_SAMPLE_PASSAGES]
     )
 
 
-def _detect_corpus_language(
-    database: sqlite3.Connection, passages: list[_Passage] | None = None
-) -> str | None:
+def _detect_corpus_language(database: sqlite3.Connection, passages: list[_Passage] | None = None) -> str | None:
     try:
         return SnapshotRepository(database).detect_corpus_language(passages)
     except RepositoryError as error:
@@ -334,11 +328,15 @@ def _rerank_fused(
     fused_position = {entry[0]: index for index, entry in enumerate(fused)}
 
     try:
-        returned = list(rerank(
-            query,
-            [_document_text(grouped.get(document_ref, []), fused_position)[:_RERANK_MAX_CHARS]
-             for document_ref in head],
-        ))
+        returned = list(
+            rerank(
+                query,
+                [
+                    _document_text(grouped.get(document_ref, []), fused_position)[:_RERANK_MAX_CHARS]
+                    for document_ref in head
+                ],
+            )
+        )
     except Exception as error:  # noqa: BLE001 -- caller-supplied untrusted callable, as embed_query
         degradation.append(f"rerank_failed:{type(error).__name__}")
         return fused
@@ -366,9 +364,12 @@ def _rerank_fused(
     # Ties break on the position the document already held, so a reranker that scores two documents
     # identically cannot reorder them and two identical requests cannot disagree.
     ranked = [
-        document_ref for _score, _position, document_ref in sorted(
-            ((score, position, document_ref)
-             for position, (score, document_ref) in enumerate(zip(scores, head, strict=True))),
+        document_ref
+        for _score, _position, document_ref in sorted(
+            (
+                (score, position, document_ref)
+                for position, (score, document_ref) in enumerate(zip(scores, head, strict=True))
+            ),
             key=lambda item: (-item[0], item[1]),
         )
     ]
@@ -480,25 +481,21 @@ class SearchService:
         degradation: list[str] = []
 
         if not self._repo.has_lexical_index() or self._rerank is not None:
-            lexical_ranks, vector_ranks, corpus_language, candidates_scanned, passages, by_ref = (
-                self._search_full_scan(query, deadline, degradation)
+            lexical_ranks, vector_ranks, corpus_language, candidates_scanned, passages, by_ref = self._search_full_scan(
+                query, deadline, degradation
             )
         else:
-            lexical_ranks, vector_ranks, corpus_language, candidates_scanned, passages, by_ref = (
-                self._search_fast_path(query, deadline, degradation)
+            lexical_ranks, vector_ranks, corpus_language, candidates_scanned, passages, by_ref = self._search_fast_path(
+                query, deadline, degradation
             )
 
         lexical_weight = self._compute_lexical_weight(query, corpus_language, degradation)
         ordered = _fuse(lexical_ranks, vector_ranks, lexical_weight)
 
         if self._rerank is not None:
-            ordered = _rerank_fused(
-                ordered, passages, by_ref, query, self._rerank, deadline, self._clock, degradation
-            )
+            ordered = _rerank_fused(ordered, passages, by_ref, query, self._rerank, deadline, self._clock, degradation)
 
-        return self._paginate_and_hydrate(
-            ordered, by_ref, budgets, offset, candidates_scanned, degradation
-        )
+        return self._paginate_and_hydrate(ordered, by_ref, budgets, offset, candidates_scanned, degradation)
 
     def _search_full_scan(
         self,
@@ -529,9 +526,7 @@ class SearchService:
                 self._repo.database, _tokenize(query), deadline, self._clock
             )
         else:
-            lexical_ranks, lexical_stopped = _bm25_ranks(
-                passages, _tokenize(query), deadline, self._clock
-            )
+            lexical_ranks, lexical_stopped = _bm25_ranks(passages, _tokenize(query), deadline, self._clock)
         _leg_state(lexical_ranks, "lexical", degradation)
 
         vector_ranks, vector_stopped = self._compute_vector_ranks(passages, query, deadline, degradation)
@@ -607,11 +602,7 @@ class SearchService:
     ) -> float:
         lexical_weight = 1.0
         query_language = language.detect(query)
-        if (
-            query_language is not None
-            and corpus_language is not None
-            and query_language != corpus_language
-        ):
+        if query_language is not None and corpus_language is not None and query_language != corpus_language:
             lexical_weight = _CROSS_LINGUAL_LEXICAL_WEIGHT
             degradation.append(f"lexical_leg_discounted:{query_language}_query_{corpus_language}_corpus")
         return lexical_weight
@@ -721,12 +712,20 @@ def build_local_evidence_record(
     `_resolve_code_target_causality`, `_evaluate_counterfactual`) routes through this builder, so
     the boundary is enforced once rather than asserted per call site."""
     return EvidenceRecord(
-        ref=ref, kind="local", publisher=LOCAL_EVIDENCE_PUBLISHER,
-        locator=document_ref, citation_locator=f"{document_ref}#L{start_line}-{end_line}",
-        digest=f"sha256:{source_hash}", extraction_method=extraction_method,
+        ref=ref,
+        kind="local",
+        publisher=LOCAL_EVIDENCE_PUBLISHER,
+        locator=document_ref,
+        citation_locator=f"{document_ref}#L{start_line}-{end_line}",
+        digest=f"sha256:{source_hash}",
+        extraction_method=extraction_method,
         provenance_chain=list(provenance_chain),
-        authority=authority, authority_rationale=authority_rationale,
-        freshness=freshness, license=license, reuse=reuse, conflict=conflict,
+        authority=authority,
+        authority_rationale=authority_rationale,
+        freshness=freshness,
+        license=license,
+        reuse=reuse,
+        conflict=conflict,
         uncertainty=list(uncertainty),
     )
 
@@ -736,9 +735,13 @@ def to_evidence_records(outcome: RetrievalOutcome) -> list[EvidenceRecord]:
     this slice's conservative "unknown" -- never inferred from rank."""
     return [
         build_local_evidence_record(
-            ref=match.ref, document_ref=match.document_ref,
-            start_line=match.start_line, end_line=match.end_line, source_hash=match.source_hash,
-            authority="unknown", authority_rationale="not_assessed_by_retrieval",
+            ref=match.ref,
+            document_ref=match.document_ref,
+            start_line=match.start_line,
+            end_line=match.end_line,
+            source_hash=match.source_hash,
+            authority="unknown",
+            authority_rationale="not_assessed_by_retrieval",
         )
         for match in outcome.matches
     ]

@@ -25,7 +25,11 @@ import pytest
 from bruriah.classify import RequestClassification
 from bruriah.context import assemble_context, compact_to_budget
 from bruriah.contracts import (
-    Budgets, ClaimRecord, EvidenceRecord, InvestigationRequest, InvestigationResult,
+    Budgets,
+    ClaimRecord,
+    EvidenceRecord,
+    InvestigationRequest,
+    InvestigationResult,
 )
 from bruriah.evidence import EvidenceClaim, assess_claim, wrap_evidence
 from bruriah.lookup import LookupResult, SourceMatch
@@ -45,26 +49,50 @@ def _digest(content: str) -> str:
     return f"sha256:{hashlib.sha256(content.encode('utf-8')).hexdigest()}"
 
 
-def _evidence_record(ref: str = "local:1", *, publisher: str = "pub-a", digest_content: str = "content-a",
-                      **overrides: object) -> EvidenceRecord:
+def _evidence_record(
+    ref: str = "local:1", *, publisher: str = "pub-a", digest_content: str = "content-a", **overrides: object
+) -> EvidenceRecord:
     payload: dict[str, object] = dict(
-        ref=ref, kind="local", publisher=publisher, locator="doc.md", citation_locator="doc.md#1-2",
-        digest=_digest(digest_content), extraction_method="markdown_section",
-        authority="unknown", authority_rationale="raw_capture_unassessed",
-        freshness="unknown", license="unknown", conflict="unknown",
+        ref=ref,
+        kind="local",
+        publisher=publisher,
+        locator="doc.md",
+        citation_locator="doc.md#1-2",
+        digest=_digest(digest_content),
+        extraction_method="markdown_section",
+        authority="unknown",
+        authority_rationale="raw_capture_unassessed",
+        freshness="unknown",
+        license="unknown",
+        conflict="unknown",
     )
     payload.update(overrides)
     return EvidenceRecord(**payload)
 
 
-def _source_policy(source_id: str = "src-a", *, authority: str = "official",
-                    jurisdictions: tuple[str, ...] = ("GLOBAL",), freshness_days: int = 365,
-                    rationale: str = "Issued by an approved authority.") -> SourcePolicy:
+def _source_policy(
+    source_id: str = "src-a",
+    *,
+    authority: str = "official",
+    jurisdictions: tuple[str, ...] = ("GLOBAL",),
+    freshness_days: int = 365,
+    rationale: str = "Issued by an approved authority.",
+) -> SourcePolicy:
     return SourcePolicy(
-        source_id=source_id, publisher="Approved Publisher", authority=authority, rationale=rationale,
-        claim_types=["documentation"], jurisdictions=list(jurisdictions), temporal_rules="effective_at applies",
-        citation_rules="cite section", reuse_rules="cite only", freshness_days=freshness_days,
-        limitations=[], biases=[], conflicts=[], exclusions=[],
+        source_id=source_id,
+        publisher="Approved Publisher",
+        authority=authority,
+        rationale=rationale,
+        claim_types=["documentation"],
+        jurisdictions=list(jurisdictions),
+        temporal_rules="effective_at applies",
+        citation_rules="cite section",
+        reuse_rules="cite only",
+        freshness_days=freshness_days,
+        limitations=[],
+        biases=[],
+        conflicts=[],
+        exclusions=[],
     )
 
 
@@ -76,16 +104,22 @@ def _request(**overrides: object) -> InvestigationRequest:
 
 def _classification(**overrides: object) -> RequestClassification:
     payload: dict[str, object] = dict(
-        intent="investigate", domain="programming", claim_type="factual", risk="medium", jurisdiction="unknown",
+        intent="investigate",
+        domain="programming",
+        claim_type="factual",
+        risk="medium",
+        jurisdiction="unknown",
     )
     payload.update(overrides)
     return RequestClassification(**payload)
 
 
-def _source_match(source_id: str = "src-a", *, jurisdiction_applicable: bool = True,
-                   jurisdictions: tuple[str, ...] = ("GLOBAL",)) -> SourceMatch:
-    return SourceMatch(source=_source_policy(source_id, jurisdictions=jurisdictions),
-                        jurisdiction_applicable=jurisdiction_applicable)
+def _source_match(
+    source_id: str = "src-a", *, jurisdiction_applicable: bool = True, jurisdictions: tuple[str, ...] = ("GLOBAL",)
+) -> SourceMatch:
+    return SourceMatch(
+        source=_source_policy(source_id, jurisdictions=jurisdictions), jurisdiction_applicable=jurisdiction_applicable
+    )
 
 
 def _lookup_with_sources(*matches: SourceMatch) -> LookupResult:
@@ -203,9 +237,14 @@ def _ok_responder(body: bytes = b"Real page content from the loopback research p
 
 def _research_deps(tmp_path: Path, server: "_LocalTlsServer", **overrides: object) -> ResearchDeps:
     base: dict[str, object] = dict(
-        allowlist=_allowlist(server), cache_dir=tmp_path / "cache", audit_path=tmp_path / "audit" / "research.jsonl",
-        network_enabled=True, concurrency=ConcurrencyLimiter(4), resolver=_fake_public_resolver,
-        connect=_redirect_connect(server), ssl_context=_trusting_ssl_context(),
+        allowlist=_allowlist(server),
+        cache_dir=tmp_path / "cache",
+        audit_path=tmp_path / "audit" / "research.jsonl",
+        network_enabled=True,
+        concurrency=ConcurrencyLimiter(4),
+        resolver=_fake_public_resolver,
+        connect=_redirect_connect(server),
+        ssl_context=_trusting_ssl_context(),
     )
     base.update(overrides)
     return ResearchDeps(**base)
@@ -282,8 +321,9 @@ def test_no_evidence_at_all_under_proceed_names_gap_and_stays_partial() -> None:
 
 
 def test_regulated_domain_missing_context_names_gaps_and_escalates_request_jurisdiction() -> None:
-    classification = RequestClassification(intent="investigate", domain="law", claim_type="factual",
-                                            risk="regulated", jurisdiction="unknown")
+    classification = RequestClassification(
+        intent="investigate", domain="law", claim_type="factual", risk="regulated", jurisdiction="unknown"
+    )
     lookup = _lookup_with_sources(_source_match(jurisdictions=("US",)))
     req = _request()
     decision = route(classification, lookup, req)
@@ -301,8 +341,9 @@ def test_regulated_domain_missing_context_names_gaps_and_escalates_request_juris
 
 
 def test_arbitrary_unsupported_profession_abstains_with_consult_professional() -> None:
-    classification = RequestClassification(intent="investigate", domain="unsupported", claim_type="factual",
-                                            risk="unknown", jurisdiction="unknown")
+    classification = RequestClassification(
+        intent="investigate", domain="unsupported", claim_type="factual", risk="unknown", jurisdiction="unknown"
+    )
     decision = route(classification, _no_evidence_lookup(), _request())
     assert decision.outcome == "abstained"
 
@@ -315,8 +356,9 @@ def test_arbitrary_unsupported_profession_abstains_with_consult_professional() -
 
 
 def test_accounting_sources_not_jurisdiction_applicable_escalates_consult_professional() -> None:
-    classification = RequestClassification(intent="investigate", domain="accounting", claim_type="factual",
-                                            risk="regulated", jurisdiction="AR")
+    classification = RequestClassification(
+        intent="investigate", domain="accounting", claim_type="factual", risk="regulated", jurisdiction="AR"
+    )
     lookup = _lookup_with_sources(_source_match(jurisdiction_applicable=False, jurisdictions=("US",)))
     req = _request(jurisdiction="AR", as_of=_TODAY)
     decision = route(classification, lookup, req)
@@ -333,8 +375,9 @@ def test_accounting_sources_not_jurisdiction_applicable_escalates_consult_profes
 
 
 def test_consequential_action_requested_performs_no_action_and_escalates_inspect_capability() -> None:
-    classification = RequestClassification(intent="consequential_action", domain="programming",
-                                            claim_type="factual", risk="medium", jurisdiction="unknown")
+    classification = RequestClassification(
+        intent="consequential_action", domain="programming", claim_type="factual", risk="medium", jurisdiction="unknown"
+    )
     lookup = _lookup_with_sources(_source_match())
     req = _request()
     decision = route(classification, lookup, req)
@@ -350,8 +393,13 @@ def test_consequential_action_requested_performs_no_action_and_escalates_inspect
 
 
 def test_consequential_action_with_no_evidence_abstains_and_still_escalates() -> None:
-    classification = RequestClassification(intent="consequential_action", domain="unsupported",
-                                            claim_type="factual", risk="unknown", jurisdiction="unknown")
+    classification = RequestClassification(
+        intent="consequential_action",
+        domain="unsupported",
+        claim_type="factual",
+        risk="unknown",
+        jurisdiction="unknown",
+    )
     decision = route(classification, _no_evidence_lookup(), _request())
     assert decision.outcome == "abstained"
 
@@ -372,8 +420,11 @@ def test_research_fetched_evidence_folds_into_proceed_assembly(tmp_path: Path) -
     try:
         classification = _classification()
         lookup = _lookup_with_sources(_source_match())
-        req = InvestigationRequest(task="Find the current documented default timeout value.",
-                                    network_policy="public_https", budgets=Budgets(max_network_requests=5))
+        req = InvestigationRequest(
+            task="Find the current documented default timeout value.",
+            network_policy="public_https",
+            budgets=Budgets(max_network_requests=5),
+        )
         decision = route(classification, lookup, req)
         assert decision.outcome == "proceed"
 
@@ -396,8 +447,11 @@ def test_research_unavailable_outcomes_surface_web_search_and_fetch_public_url(t
     try:
         classification = _classification()
         lookup = _lookup_with_sources(_source_match())
-        req = InvestigationRequest(task="Investigate a documented programming API behavior.",
-                                    network_policy="public_https", budgets=Budgets(max_network_requests=5))
+        req = InvestigationRequest(
+            task="Investigate a documented programming API behavior.",
+            network_policy="public_https",
+            budgets=Budgets(max_network_requests=5),
+        )
         decision = route(classification, lookup, req)
         assert decision.outcome == "proceed"
         deps = _research_deps(tmp_path, server)
@@ -406,8 +460,7 @@ def test_research_unavailable_outcomes_surface_web_search_and_fetch_public_url(t
         assert no_url_outcome.status == "not_warranted"
         assert no_url_outcome.host_actions[0].kind == "web_search"
 
-        off_req = InvestigationRequest(task="Investigate a documented programming API behavior.",
-                                        network_policy="off")
+        off_req = InvestigationRequest(task="Investigate a documented programming API behavior.", network_policy="off")
         off_outcome = research(off_req, _url(server), deps)
         assert off_outcome.status == "disabled"
         assert off_outcome.host_actions[0].kind == "fetch_public_url"
@@ -429,9 +482,18 @@ def test_compact_to_budget_is_noop_when_already_within_budget() -> None:
     record = _evidence_record("only:1")
     claim = ClaimRecord(text="claim text", state="supported", supporting_refs=["only:1"], conflicting_refs=[])
     result = InvestigationResult(
-        schema_version="2", status="complete", request_id=f"sha256:{'a' * 64}", evidence=[record],
-        claims=[claim], conflicts=[], gaps=[], host_actions=[], warnings=[], degradation=[],
-        budgets=Budgets(), next_cursor=None,
+        schema_version="2",
+        status="complete",
+        request_id=f"sha256:{'a' * 64}",
+        evidence=[record],
+        claims=[claim],
+        conflicts=[],
+        gaps=[],
+        host_actions=[],
+        warnings=[],
+        degradation=[],
+        budgets=Budgets(),
+        next_cursor=None,
     )
     compacted = compact_to_budget(result, max_output_chars=100_000)
     assert compacted == result
@@ -440,17 +502,27 @@ def test_compact_to_budget_is_noop_when_already_within_budget() -> None:
 def test_compact_to_budget_drops_only_unprotected_evidence_keeps_refs_conflicts_warnings() -> None:
     protected = _evidence_record("keep:cited", digest_content="protected content referenced by a claim")
     padding = [
-        _evidence_record(f"drop:{i}", digest_content=f"padding evidence body number {i} " * 20)
-        for i in range(8)
+        _evidence_record(f"drop:{i}", digest_content=f"padding evidence body number {i} " * 20) for i in range(8)
     ]
-    claim = ClaimRecord(text="claim referencing protected evidence", state="conflicted",
-                         supporting_refs=["keep:cited"], conflicting_refs=[])
+    claim = ClaimRecord(
+        text="claim referencing protected evidence",
+        state="conflicted",
+        supporting_refs=["keep:cited"],
+        conflicting_refs=[],
+    )
     full = InvestigationResult(
-        schema_version="2", status="complete", request_id=f"sha256:{'b' * 64}",
-        evidence=[protected, *padding], claims=[claim],
+        schema_version="2",
+        status="complete",
+        request_id=f"sha256:{'b' * 64}",
+        evidence=[protected, *padding],
+        claims=[claim],
         conflicts=["Claim 'claim referencing protected evidence' has conflicting evidence (time)."],
-        gaps=["evidence_disagrees"], host_actions=[], warnings=["unverified_authority_evidence_present"],
-        degradation=[], budgets=Budgets(), next_cursor=None,
+        gaps=["evidence_disagrees"],
+        host_actions=[],
+        warnings=["unverified_authority_evidence_present"],
+        degradation=[],
+        budgets=Budgets(),
+        next_cursor=None,
     )
     protected_only = full.model_copy(update={"evidence": [protected]})
     threshold = len(protected_only.model_dump_json())
@@ -475,9 +547,18 @@ def test_compact_to_budget_never_drops_protected_evidence_even_if_still_over_bud
     protected = _evidence_record("keep:only", digest_content="the only evidence, and it is claim-cited")
     claim = ClaimRecord(text="claim", state="supported", supporting_refs=["keep:only"], conflicting_refs=[])
     result = InvestigationResult(
-        schema_version="2", status="complete", request_id=f"sha256:{'c' * 64}", evidence=[protected],
-        claims=[claim], conflicts=[], gaps=[], host_actions=[], warnings=["a safety warning"],
-        degradation=[], budgets=Budgets(), next_cursor=None,
+        schema_version="2",
+        status="complete",
+        request_id=f"sha256:{'c' * 64}",
+        evidence=[protected],
+        claims=[claim],
+        conflicts=[],
+        gaps=[],
+        host_actions=[],
+        warnings=["a safety warning"],
+        degradation=[],
+        budgets=Budgets(),
+        next_cursor=None,
     )
     compacted = compact_to_budget(result, max_output_chars=1)  # impossibly small budget
     assert compacted.evidence == [protected]  # never sacrificed
@@ -502,16 +583,19 @@ def test_assemble_context_end_to_end_forces_compaction_under_a_real_output_budge
     record, assessment = _supported_claim_fixture()
     padding_outcomes = [
         ResearchOutcome(
-            status="fetched", code="ok",
-            evidence=_evidence_record(f"live:{i}", kind="captured_live",
-                                       digest_content=f"live captured body padding {i} " * 15),
+            status="fetched",
+            code="ok",
+            evidence=_evidence_record(
+                f"live:{i}", kind="captured_live", digest_content=f"live captured body padding {i} " * 15
+            ),
             excerpt=f"live captured body padding {i} " * 15,
         )
         for i in range(6)
     ]
 
-    result = assemble_context(small_budget_req, decision, assessments=[assessment], evidence_pool=[record],
-                               research_outcomes=padding_outcomes)
+    result = assemble_context(
+        small_budget_req, decision, assessments=[assessment], evidence_pool=[record], research_outcomes=padding_outcomes
+    )
 
     refs = {item.ref for item in result.evidence}
     assert "core:claim" in refs  # the claim-cited ref survives real end-to-end compaction
@@ -528,8 +612,7 @@ def test_rollback_mode_forces_route_only_even_when_route_decision_would_proceed(
     decision = _proceeding_decision()
     record, assessment = _supported_claim_fixture()
 
-    result = assemble_context(_request(), decision, assessments=[assessment], evidence_pool=[record],
-                               mode="route_only")
+    result = assemble_context(_request(), decision, assessments=[assessment], evidence_pool=[record], mode="route_only")
 
     assert result.status == "route_only"
     assert result.evidence == []  # rollback assembles ONLY routing -- no conclusions, ever
@@ -538,8 +621,9 @@ def test_rollback_mode_forces_route_only_even_when_route_decision_would_proceed(
 
 
 def test_rollback_mode_keeps_a_genuinely_abstained_decision_abstained() -> None:
-    classification = RequestClassification(intent="investigate", domain="unsupported", claim_type="factual",
-                                            risk="unknown", jurisdiction="unknown")
+    classification = RequestClassification(
+        intent="investigate", domain="unsupported", claim_type="factual", risk="unknown", jurisdiction="unknown"
+    )
     decision = route(classification, _no_evidence_lookup(), _request())
     assert decision.outcome == "abstained"
 
@@ -555,10 +639,14 @@ def test_rollback_mode_keeps_a_genuinely_abstained_decision_abstained() -> None:
 
 
 def test_abstained_route_decision_discards_full_evidence_and_claims_even_when_provided(tmp_path: Path) -> None:
-    classification = RequestClassification(intent="investigate", domain="unsupported", claim_type="factual",
-                                            risk="unknown", jurisdiction="unknown")
-    req = InvestigationRequest(task="Investigate a documented programming API behavior.",
-                                network_policy="public_https", budgets=Budgets(max_network_requests=5))
+    classification = RequestClassification(
+        intent="investigate", domain="unsupported", claim_type="factual", risk="unknown", jurisdiction="unknown"
+    )
+    req = InvestigationRequest(
+        task="Investigate a documented programming API behavior.",
+        network_policy="public_https",
+        budgets=Budgets(max_network_requests=5),
+    )
     decision = route(classification, _no_evidence_lookup(), req)
     assert decision.outcome == "abstained"
 
@@ -568,8 +656,9 @@ def test_abstained_route_decision_discards_full_evidence_and_claims_even_when_pr
         outcome = research(req, _url(server), _research_deps(tmp_path, server))
         assert outcome.status == "fetched"
 
-        result = assemble_context(req, decision, assessments=[assessment], evidence_pool=[record],
-                                   research_outcomes=[outcome])
+        result = assemble_context(
+            req, decision, assessments=[assessment], evidence_pool=[record], research_outcomes=[outcome]
+        )
     finally:
         server.close()
 
@@ -579,11 +668,15 @@ def test_abstained_route_decision_discards_full_evidence_and_claims_even_when_pr
 
 
 def test_route_only_decision_discards_full_evidence_and_claims_even_when_provided(tmp_path: Path) -> None:
-    classification = RequestClassification(intent="investigate", domain="law", claim_type="factual",
-                                            risk="regulated", jurisdiction="unknown")
+    classification = RequestClassification(
+        intent="investigate", domain="law", claim_type="factual", risk="regulated", jurisdiction="unknown"
+    )
     lookup = _lookup_with_sources(_source_match(jurisdictions=("US",)))
-    req = InvestigationRequest(task="Investigate a documented programming API behavior.",
-                                network_policy="public_https", budgets=Budgets(max_network_requests=5))
+    req = InvestigationRequest(
+        task="Investigate a documented programming API behavior.",
+        network_policy="public_https",
+        budgets=Budgets(max_network_requests=5),
+    )
     decision = route(classification, lookup, req)
     assert decision.outcome == "route_only"
 
@@ -593,8 +686,9 @@ def test_route_only_decision_discards_full_evidence_and_claims_even_when_provide
         outcome = research(req, _url(server), _research_deps(tmp_path, server))
         assert outcome.status == "fetched"
 
-        result = assemble_context(req, decision, assessments=[assessment], evidence_pool=[record],
-                                   research_outcomes=[outcome])
+        result = assemble_context(
+            req, decision, assessments=[assessment], evidence_pool=[record], research_outcomes=[outcome]
+        )
     finally:
         server.close()
 
@@ -606,8 +700,11 @@ def test_route_only_decision_discards_full_evidence_and_claims_even_when_provide
 def test_rollback_route_only_discards_full_evidence_and_claims_even_when_provided(tmp_path: Path) -> None:
     classification = _classification()
     lookup = _lookup_with_sources(_source_match())
-    req = InvestigationRequest(task="Find the current documented default timeout value.",
-                                network_policy="public_https", budgets=Budgets(max_network_requests=5))
+    req = InvestigationRequest(
+        task="Find the current documented default timeout value.",
+        network_policy="public_https",
+        budgets=Budgets(max_network_requests=5),
+    )
     decision = route(classification, lookup, req)
     assert decision.outcome == "proceed"
 
@@ -617,8 +714,14 @@ def test_rollback_route_only_discards_full_evidence_and_claims_even_when_provide
         outcome = research(req, _url(server), _research_deps(tmp_path, server))
         assert outcome.status == "fetched"
 
-        result = assemble_context(req, decision, assessments=[assessment], evidence_pool=[record],
-                                   research_outcomes=[outcome], mode="route_only")
+        result = assemble_context(
+            req,
+            decision,
+            assessments=[assessment],
+            evidence_pool=[record],
+            research_outcomes=[outcome],
+            mode="route_only",
+        )
     finally:
         server.close()
 
@@ -646,11 +749,15 @@ def test_typed_total_backstop_never_raises_on_bad_argument_types() -> None:
 
     assert assemble_context(req, decision, assessments="not a sequence").warnings == ["invalid_assessments_type"]  # type: ignore[arg-type]
     assert assemble_context(req, decision, evidence_pool="not a sequence").warnings == ["invalid_evidence_pool_type"]  # type: ignore[arg-type]
-    assert assemble_context(req, decision, research_outcomes="not a sequence").warnings == ["invalid_research_outcomes_type"]  # type: ignore[arg-type]
+    assert assemble_context(req, decision, research_outcomes="not a sequence").warnings == [
+        "invalid_research_outcomes_type"
+    ]  # type: ignore[arg-type]
     assert assemble_context(req, decision, mode="bogus").warnings == ["invalid_mode"]  # type: ignore[arg-type]
     assert assemble_context(req, decision, assessments=["not an assessment"]).warnings == ["invalid_assessment_type"]  # type: ignore[arg-type]
     assert assemble_context(req, decision, evidence_pool=["not a record"]).warnings == ["invalid_evidence_pool_item"]  # type: ignore[arg-type]
-    assert assemble_context(req, decision, research_outcomes=["not an outcome"]).warnings == ["invalid_research_outcome_type"]  # type: ignore[arg-type]
+    assert assemble_context(req, decision, research_outcomes=["not an outcome"]).warnings == [
+        "invalid_research_outcome_type"
+    ]  # type: ignore[arg-type]
 
     record = _evidence_record("real:1")
     claim = EvidenceClaim(wrap_evidence(record, "content-a"), normalized_claim="x", source=None)
@@ -728,14 +835,20 @@ def test_compaction_measures_the_payload_it_actually_returns() -> None:
     # characters the measurement never saw. A result could therefore stop at "now it fits" and
     # cross back over the ceiling on the way out. The checked object and the returned object have
     # to be the same object.
-    records = [
-        _evidence_record(f"drop:{i}", digest_content=f"padding record {i} " + ("x" * 200))
-        for i in range(6)
-    ]
+    records = [_evidence_record(f"drop:{i}", digest_content=f"padding record {i} " + ("x" * 200)) for i in range(6)]
     result = InvestigationResult(
-        schema_version="2", status="complete", request_id=f"sha256:{'d' * 64}", evidence=records,
-        claims=[], conflicts=[], gaps=[], host_actions=[], warnings=[], degradation=[],
-        budgets=Budgets(), next_cursor=None,
+        schema_version="2",
+        status="complete",
+        request_id=f"sha256:{'d' * 64}",
+        evidence=records,
+        claims=[],
+        conflicts=[],
+        gaps=[],
+        host_actions=[],
+        warnings=[],
+        degradation=[],
+        budgets=Budgets(),
+        next_cursor=None,
     )
     full = len(result.model_dump_json())
     # Sweep a band of budgets so the assertion does not depend on one lucky stopping point.

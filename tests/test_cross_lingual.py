@@ -6,6 +6,7 @@ three, measured at 58% recall@3 for the vector leg alone against 33% for the equ
 These tests pin the discount, the disclosure, and -- most importantly -- the cases where the
 discount must NOT apply.
 """
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -13,17 +14,24 @@ from pathlib import Path
 from bruriah.retrieval import _CROSS_LINGUAL_LEXICAL_WEIGHT, _fuse, search
 from test_retrieval import _snapshot_for, embed_query
 
-_PAD = ("The following section describes the behaviour of the service in detail, and it is "
-        "written in the same language as the rest of the corpus around it. ") * 4
-_PAD_ES = ("La siguiente seccion describe el comportamiento del servicio con detalle, y esta "
-           "escrita en el mismo idioma que el resto del corpus que la rodea. ") * 4
+_PAD = (
+    "The following section describes the behaviour of the service in detail, and it is "
+    "written in the same language as the rest of the corpus around it. "
+) * 4
+_PAD_ES = (
+    "La siguiente seccion describe el comportamiento del servicio con detalle, y esta "
+    "escrita en el mismo idioma que el resto del corpus que la rodea. "
+) * 4
 
 
 def _english_corpus(tmp_path: Path):
-    return _snapshot_for(tmp_path, {
-        "apple.md": f"# Apple\nWhy we chose the apple pie recipe and what we rejected.\n{_PAD}\n",
-        "rocket.md": f"# Rocket\nThe rocket launch decision and the reasoning behind it.\n{_PAD}\n",
-    })
+    return _snapshot_for(
+        tmp_path,
+        {
+            "apple.md": f"# Apple\nWhy we chose the apple pie recipe and what we rejected.\n{_PAD}\n",
+            "rocket.md": f"# Rocket\nThe rocket launch decision and the reasoning behind it.\n{_PAD}\n",
+        },
+    )
 
 
 # --- the discount itself ---------------------------------------------------------------------
@@ -53,10 +61,13 @@ def test_an_unidentifiable_question_leaves_ranking_alone(tmp_path: Path) -> None
 def test_a_corpus_with_no_dominant_language_never_discounts(tmp_path: Path) -> None:
     # Half and half: there is no "the corpus language" to mismatch against, so the honest move is
     # to change nothing rather than pick a side and re-rank everyone's results on it.
-    with _snapshot_for(tmp_path, {
-        "en.md": f"# Apple\nWhy we chose the apple pie recipe.\n{_PAD}\n",
-        "es.md": f"# Manzana\nPor que elegimos la receta de tarta de manzana.\n{_PAD_ES}\n",
-    }) as active:
+    with _snapshot_for(
+        tmp_path,
+        {
+            "en.md": f"# Apple\nWhy we chose the apple pie recipe.\n{_PAD}\n",
+            "es.md": f"# Manzana\nPor que elegimos la receta de tarta de manzana.\n{_PAD_ES}\n",
+        },
+    ) as active:
         outcome = search(active, "por que elegimos la manzana", embed_query=embed_query)
     assert not any(item.startswith("lexical_leg_discounted:") for item in outcome.degradation)
 
@@ -73,12 +84,14 @@ def test_the_discount_reweights_evidence_and_never_removes_it(tmp_path: Path) ->
 
     The Spanish query here shares an identifier with the corpus, deliberately: with no shared token
     at all the lexical leg returns nothing and the assertion below would pass vacuously."""
-    with _snapshot_for(tmp_path, {
-        "apple.md": f"# Apple\nWhy we chose the apple recipe, decided in promote_candidate.\n{_PAD}\n",
-        "rocket.md": f"# Rocket\nThe rocket launch decision and the reasoning behind it.\n{_PAD}\n",
-    }) as active:
-        spanish = search(active, "por que elegimos promote_candidate para la receta",
-                         embed_query=embed_query)
+    with _snapshot_for(
+        tmp_path,
+        {
+            "apple.md": f"# Apple\nWhy we chose the apple recipe, decided in promote_candidate.\n{_PAD}\n",
+            "rocket.md": f"# Rocket\nThe rocket launch decision and the reasoning behind it.\n{_PAD}\n",
+        },
+    ) as active:
+        spanish = search(active, "por que elegimos promote_candidate para la receta", embed_query=embed_query)
     assert "lexical_leg_discounted:es_query_en_corpus" in spanish.degradation
     assert any(item.lexical_rank is not None for item in spanish.matches)
     assert any(item.vector_rank is not None for item in spanish.matches)
@@ -116,8 +129,7 @@ def test_a_discounted_lexical_leg_cannot_outvote_the_vector_leg() -> None:
     which is the entire cross-lingual fix, expressed as arithmetic rather than as a benchmark."""
     lexical, vector = {"far": 1, "near": 40}, {"near": 1, "far": 40}
     assert [ref for ref, _, _ in _fuse(lexical, vector, 1.0)] == ["far", "near"]
-    assert [ref for ref, _, _ in _fuse(lexical, vector, _CROSS_LINGUAL_LEXICAL_WEIGHT)] == \
-        ["near", "far"]
+    assert [ref for ref, _, _ in _fuse(lexical, vector, _CROSS_LINGUAL_LEXICAL_WEIGHT)] == ["near", "far"]
 
 
 def test_the_leg_still_separates_candidates_the_vector_leg_ranked_together() -> None:

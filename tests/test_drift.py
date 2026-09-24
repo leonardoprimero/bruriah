@@ -101,24 +101,32 @@ def test_analyze_architectural_drift(tmp_path: Path) -> None:
         meta_initial = json.dumps({"commit": sha_initial, "verification_date": "2026-01-01"})
         db.execute("INSERT INTO documents VALUES (?, ?, ?, ?)", ("doc-storage-v1", "storage.md", "hash1", meta_initial))
         text_initial = """# Pure SQLite Storage Architecture\n\n**Decided:** 2026-01-01 · **Commit:** `111111112222` · **Author:** Senior Architect\n\nPure SQLite.\n"""
-        db.execute("INSERT INTO passages VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                   ("p1", "doc-storage-v1", "storage.md", "[]", 1, 5, text_initial, "h1", meta_initial, text_initial, b"vec"))
+        db.execute(
+            "INSERT INTO passages VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            ("p1", "doc-storage-v1", "storage.md", "[]", 1, 5, text_initial, "h1", meta_initial, text_initial, b"vec"),
+        )
 
         meta_succ = json.dumps({"commit": sha_succ, "verification_date": "2026-06-01"})
         db.execute("INSERT INTO documents VALUES (?, ?, ?, ?)", ("doc-storage-v2", "cloud.md", "hash2", meta_succ))
         text_succ = """# Cloud-Native Storage Engine\n\n**Decided:** 2026-06-01 · **Commit:** `ccccccccdddd` · **Author:** Lead Architect\n\nCloud storage.\n"""
-        db.execute("INSERT INTO passages VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                   ("p2", "doc-storage-v2", "cloud.md", "[]", 1, 5, text_succ, "h2", meta_succ, text_succ, b"vec"))
+        db.execute(
+            "INSERT INTO passages VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            ("p2", "doc-storage-v2", "cloud.md", "[]", 1, 5, text_succ, "h2", meta_succ, text_succ, b"vec"),
+        )
 
         meta_router = json.dumps({"commit": sha_active, "verification_date": "2026-03-01"})
         db.execute("INSERT INTO documents VALUES (?, ?, ?, ?)", ("doc-api-v1", "router.md", "hash3", meta_router))
         text_router = """# API Routing Standards\n\n**Decided:** 2026-03-01 · **Commit:** `333333334444` · **Author:** API Team\n\nRouting.\n"""
-        db.execute("INSERT INTO passages VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                   ("p3", "doc-api-v1", "router.md", "[]", 1, 5, text_router, "h3", meta_router, text_router, b"vec"))
+        db.execute(
+            "INSERT INTO passages VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            ("p3", "doc-api-v1", "router.md", "[]", 1, 5, text_router, "h3", meta_router, text_router, b"vec"),
+        )
 
         # Storage v1 is superseded by Storage v2
-        db.execute("INSERT INTO lineage VALUES (?, ?, ?, ?)",
-                   ("doc-storage-v2", sha_initial[:8], "doc-storage-v1", "supersedes"))
+        db.execute(
+            "INSERT INTO lineage VALUES (?, ?, ?, ?)",
+            ("doc-storage-v2", sha_initial[:8], "doc-storage-v1", "supersedes"),
+        )
         db.commit()
 
         repo_layer = SnapshotRepository(db)
@@ -193,15 +201,18 @@ def test_format_drift_human_and_json() -> None:
 
 
 _FINGERPRINT = (
-    '{"artifact":"model.onnx","artifact_sha256":"' + "a" * 64
+    '{"artifact":"model.onnx","artifact_sha256":"'
+    + "a" * 64
     + '","pooling":"mean","runtime":"fastembed==0.8.0","snapshot":"snapshot-a","source":"example/model"}'
 )
 
 
 def _fake_embedder_factory(model_name: str):
     from array import array
+
     def embed(texts: list[str]) -> list[bytes]:
         return [array("f", (1.0, 0.0, 0.0)).tobytes() for _ in texts]
+
     return embed, _FINGERPRINT, 3
 
 
@@ -235,12 +246,19 @@ Decided to use raw sqlite3 connection pooling.
     policy_path.write_text("version: 1\ninclude: ['**']\nexclude: []\n", encoding="utf-8")
 
     paths = resolve_paths(
-        cli_config_dir=tmp_path / "config", cli_data_dir=tmp_path / "data",
-        cli_cache_dir=tmp_path / "cache", cli_log_dir=tmp_path / "log", env={},
+        cli_config_dir=tmp_path / "config",
+        cli_data_dir=tmp_path / "data",
+        cli_cache_dir=tmp_path / "cache",
+        cli_log_dir=tmp_path / "log",
+        env={},
     )
     cli.run_init(paths)
     cli.run_index(
-        paths, root, policy_path, model_name="test/minilm", embedder_factory=_fake_embedder_factory,
+        paths,
+        root,
+        policy_path,
+        model_name="test/minilm",
+        embedder_factory=_fake_embedder_factory,
     )
 
     # Modify storage.py in working tree
@@ -248,34 +266,47 @@ Decided to use raw sqlite3 connection pooling.
 
     # 1. Run drift --strict on clean active decision -> should exit 0
     capsys.readouterr()  # flush
-    code_clean = cli.bruriah_main([
-        "drift",
-        "--repo", str(repo),
-        "--config-dir", str(paths.config_dir),
-        "--data-dir", str(paths.data_dir),
-        "--cache-dir", str(paths.cache_dir),
-        "--log-dir", str(paths.log_dir),
-        "--strict",
-    ])
+    code_clean = cli.bruriah_main(
+        [
+            "drift",
+            "--repo",
+            str(repo),
+            "--config-dir",
+            str(paths.config_dir),
+            "--data-dir",
+            str(paths.data_dir),
+            "--cache-dir",
+            str(paths.cache_dir),
+            "--log-dir",
+            str(paths.log_dir),
+            "--strict",
+        ]
+    )
     out_clean = capsys.readouterr().out
     assert code_clean == 0
     assert "CLEAN GOVERNANCE" in out_clean
     assert "src/core/storage.py" in out_clean
 
     # 2. Run drift with --json
-    code_json = cli.bruriah_main([
-        "drift",
-        "--repo", str(repo),
-        "--config-dir", str(paths.config_dir),
-        "--data-dir", str(paths.data_dir),
-        "--cache-dir", str(paths.cache_dir),
-        "--log-dir", str(paths.log_dir),
-        "--json",
-    ])
+    code_json = cli.bruriah_main(
+        [
+            "drift",
+            "--repo",
+            str(repo),
+            "--config-dir",
+            str(paths.config_dir),
+            "--data-dir",
+            str(paths.data_dir),
+            "--cache-dir",
+            str(paths.cache_dir),
+            "--log-dir",
+            str(paths.log_dir),
+            "--json",
+        ]
+    )
     out_json = capsys.readouterr().out
     assert code_json == 0
     parsed = json.loads(out_json)
     assert parsed["has_drift"] is False
     assert len(parsed["clean_files"]) == 1
     assert parsed["clean_files"][0]["file_path"] == "src/core/storage.py"
-

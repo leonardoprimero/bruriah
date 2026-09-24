@@ -4,8 +4,12 @@ from datetime import date, datetime
 from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_serializer, model_validator
+
+
 class ClosedModel(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
+
+
 ShortText = Annotated[str, Field(min_length=1, max_length=4096)]
 Ref = Annotated[str, Field(min_length=1, max_length=256)]
 # T3 (investigate-boundary-v2): opaque, deterministic refs for counterfactual records -- the
@@ -34,6 +38,8 @@ AuthorityRationale = Literal[
     "counterfactual_alternative_evidence",
     "counterfactual_invalidated_premise_evidence",
 ]
+
+
 class Budgets(ClosedModel):
     max_evidence: Annotated[int, Field(ge=1, le=100)] = 20
     max_claims: Annotated[int, Field(ge=1, le=100)] = 20
@@ -45,17 +51,24 @@ class Budgets(ClosedModel):
     max_network_requests: Annotated[int, Field(ge=0, le=50)] = 10
     max_bytes: Annotated[int, Field(ge=1024, le=10_000_000)] = 1_000_000
     max_extracted_chars: Annotated[int, Field(ge=256, le=200_000)] = 20_000
+
+
 class CandidateMaterial(ClosedModel):
     locator: ShortText
     digest: Annotated[str, Field(pattern=r"^sha256:[0-9a-f]{64}$")]
+
+
 class HostSkill(ClosedModel):
     """One skill the HOST reports as installed. Typed rather than prose: `host_capabilities` is a
     free-text list, and parsing a sha256 out of prose is exactly the failure mode this project
     already documents for `CapabilityPolicy.integrity`. Typing it also lets an empty list mean
     "opted in with nothing installed", which prose cannot distinguish from "did not opt in"."""
+
     skill_id: Annotated[str, Field(pattern=r"^[a-z0-9][a-z0-9._-]{1,63}$")]
     version: Annotated[str, Field(pattern=r"^\d+\.\d+\.\d+$")]
     digest: Annotated[str, Field(pattern=r"^sha256:[0-9a-f]{64}$")]
+
+
 class PermissionDisclosure(ClosedModel):
     """What a skill's SIGNED PACK declares it needs, flattened for disclosure.
 
@@ -64,32 +77,53 @@ class PermissionDisclosure(ClosedModel):
     public contract does not inherit the pack schema's shape -- the same reason `EvidenceRecord`
     flattens `SourcePolicy` instead of embedding it. A test pins that this covers every dimension the
     envelope can express, so the two cannot silently drift apart."""
+
     filesystem_read: Annotated[list[ShortText], Field(max_length=32)] = []
     filesystem_write: Annotated[list[ShortText], Field(max_length=32)] = []
     network_hosts: Annotated[list[ShortText], Field(max_length=32)] = []
     network_schemes: Annotated[list[ShortText], Field(max_length=8)] = []
     programs: Annotated[list[ShortText], Field(max_length=32)] = []
     secrets: Annotated[list[ShortText], Field(max_length=32)] = []
+
+
 class InvestigationRequest(ClosedModel):
-    task: Annotated[ShortText, Field(description="The work task to investigate, in the requester's own words. This is matched against local knowledge; it is never executed and never treated as an instruction to obey.")]
-    outcome: Annotated[ShortText | None, Field(description="What a good result would look like, if known. Used to scope the investigation, not to steer which sources are selected.")] = None
+    task: Annotated[
+        ShortText,
+        Field(
+            description="The work task to investigate, in the requester's own words. This is matched against local knowledge; it is never executed and never treated as an instruction to obey."
+        ),
+    ]
+    outcome: Annotated[
+        ShortText | None,
+        Field(
+            description="What a good result would look like, if known. Used to scope the investigation, not to steer which sources are selected."
+        ),
+    ] = None
     jurisdiction: Annotated[str, Field(min_length=2, max_length=32)] | None = None
     as_of: date | None = None
-    risk_class: Annotated[Literal["low", "medium", "high", "regulated"], Field(description="How costly a wrong answer would be. `regulated` tightens the outcome: more is withheld and more is disclosed as uncertain.")] = "low"
+    risk_class: Annotated[
+        Literal["low", "medium", "high", "regulated"],
+        Field(
+            description="How costly a wrong answer would be. `regulated` tightens the outcome: more is withheld and more is disclosed as uncertain."
+        ),
+    ] = "low"
     network_policy: Literal["off", "public_https"] = "off"
     host_capabilities: Annotated[list[ShortText], Field(max_length=32)] = []
     candidate_material: Annotated[list[CandidateMaterial], Field(max_length=20)] = []
-    cursor: Annotated[
-        str,
-        Field(
-            min_length=1,
-            max_length=2048,
-            description=(
-                "Opaque token returned in a previous InvestigationResult.next_cursor to resume "
-                "and paginate subsequent evidence. Set to null on the initial request."
+    cursor: (
+        Annotated[
+            str,
+            Field(
+                min_length=1,
+                max_length=2048,
+                description=(
+                    "Opaque token returned in a previous InvestigationResult.next_cursor to resume "
+                    "and paginate subsequent evidence. Set to null on the initial request."
+                ),
             ),
-        ),
-    ] | None = None
+        ]
+        | None
+    ) = None
     host_skills: list[HostSkill] | None = Field(
         default=None,
         max_length=64,
@@ -112,6 +146,8 @@ class InvestigationRequest(ClosedModel):
         ),
     ] = None
     budgets: Budgets = Budgets()
+
+
 class EvidenceRecord(ClosedModel):
     ref: Ref
     kind: Literal["local", "captured_live", "source", "capability", "skill"]
@@ -119,9 +155,9 @@ class EvidenceRecord(ClosedModel):
     locator: ShortText
     citation_locator: ShortText
     digest: Annotated[str, Field(pattern=r"^sha256:[0-9a-f]{64}$")]
-    extraction_method: Literal[
-        "raw_lines", "markdown_section", "html_text", "pdf_text", "api_json", "unknown"
-    ] = "unknown"
+    extraction_method: Literal["raw_lines", "markdown_section", "html_text", "pdf_text", "api_json", "unknown"] = (
+        "unknown"
+    )
     provenance_chain: Annotated[list[ShortText], Field(max_length=10)] = []
     redirect_chain: Annotated[list[ShortText], Field(max_length=10)] = []
     pack_version: Annotated[str, Field(pattern=r"^\d+\.\d+\.\d+$")] | None = None
@@ -140,6 +176,7 @@ class EvidenceRecord(ClosedModel):
     conflict: Literal["none", "declared", "unknown"]
     uncertainty: Annotated[list[ShortText], Field(max_length=10)] = []
     envelope: PermissionDisclosure | None = None
+
     @model_validator(mode="after")
     def ordered_dates(self) -> "EvidenceRecord":
         for earlier, later in (("published_at", "updated_at"), ("effective_at", "expires_at")):
@@ -147,6 +184,7 @@ class EvidenceRecord(ClosedModel):
             if first and second and second < first:
                 raise ValueError("date_order_invalid")
         return self
+
     @model_serializer(mode="wrap")
     def _omit_absent_envelope(self, handler):
         """Drop `envelope` entirely when absent instead of emitting `null`.
@@ -160,11 +198,15 @@ class EvidenceRecord(ClosedModel):
         if data.get("envelope", "absent") is None:
             data.pop("envelope")
         return data
+
+
 class ClaimRecord(ClosedModel):
     text: ShortText
     state: Literal["supported", "conflicted", "insufficient", "unknown"]
     supporting_refs: list[Ref] = []
     conflicting_refs: list[Ref] = []
+
+
 class PremiseRecord(ClosedModel):
     """T3 (investigate-boundary-v2): opaque by construction -- `id`/`statement`/`rationale` were
     corpus-authored free text (`md-premise-id`/`md-premise-statement`/`md-premise-rationale`);
@@ -172,20 +214,26 @@ class PremiseRecord(ClosedModel):
     replaces `id`; `statement`/`rationale` are dropped from the wire entirely (a human view or an
     explicit `read_evidence` request resolves `ref` locally, T4); `invalidated_by` is now the
     validated sha or nothing, never the raw frontmatter value."""
+
     ref: PremiseRef
     status: Literal["active", "invalidated", "uncertain"]
     decision_ref: DocRef
     invalidated_by: CommitSha | None = None
     invalidated_in: DocRef | None = None
+
+
 class AlternativeRecord(ClosedModel):
     """T3: `name`/`reason` were corpus-authored free text (`md-alt-name`/`md-alt-reason`,
     `github-closing-comment`). `ref` replaces `name`; `reason` is dropped from the wire entirely
     (resolved locally, T4); `premises` becomes `premise_refs` -- opaque refs, never the raw
     premise ids a document's frontmatter lists."""
+
     ref: AlternativeRef
     disposition: Literal["rejected", "deferred", "superseded"]
     decision_ref: DocRef
     premise_refs: list[PremiseRef] = []
+
+
 class CounterfactualAssessment(ClosedModel):
     matched_alternative_ref: AlternativeRef
     decision_ref: DocRef
@@ -200,11 +248,22 @@ class CounterfactualAssessment(ClosedModel):
     # `service.py::_counterfactual_rationale`). Still `ShortText` on the wire (a template result,
     # not a closed enum): pinned in the `test_contracts.py` schema-regression allowlist.
     rationale: ShortText
+
+
 class HostAction(ClosedModel):
-    kind: Literal["web_search", "fetch_public_url", "inspect_capability", "request_jurisdiction",
-                 "consult_professional", "draft_skill_candidate", "install_skill"]
+    kind: Literal[
+        "web_search",
+        "fetch_public_url",
+        "inspect_capability",
+        "request_jurisdiction",
+        "consult_professional",
+        "draft_skill_candidate",
+        "install_skill",
+    ]
     reason: ShortText
     target: ShortText | None = None
+
+
 class InvestigationResult(ClosedModel):
     # T3 (investigate-boundary-v2): "1" -> "2" -- a breaking change to `alternatives`/
     # `premises`/`counterfactual_assessment` (opaque refs replace corpus-authored free text).
@@ -223,6 +282,8 @@ class InvestigationResult(ClosedModel):
     alternatives: list[AlternativeRecord] = []
     premises: list[PremiseRecord] = []
     counterfactual_assessment: CounterfactualAssessment | None = None
+
+
 class ReadRange(ClosedModel):
     # Character offsets, 1-indexed and inclusive -- NOT line numbers. This model is handed to the
     # host verbatim as `read_evidence`'s `inputSchema`, so the unit has to be stated here or it is
@@ -232,16 +293,20 @@ class ReadRange(ClosedModel):
     ref: Ref
     start: Annotated[int, Field(ge=1, description="1-indexed character offset, inclusive")]
     end: Annotated[int, Field(ge=1, description="1-indexed character offset, inclusive")]
+
     @model_validator(mode="after")
     def ordered(self) -> "ReadRange":
         if self.end < self.start:
             raise ValueError("range_reversed")
         return self
+
+
 class ReadRequest(ClosedModel):
     refs: Annotated[list[Ref], Field(min_length=1, max_length=10)]
     ranges: Annotated[list[ReadRange], Field(max_length=10)] = []
     cursor: Annotated[str, Field(min_length=1, max_length=2048)] | None = None
     budgets: Budgets = Budgets()
+
     @model_validator(mode="after")
     def valid_refs(self) -> "ReadRequest":
         if len(set(self.refs)) != len(self.refs):
@@ -249,6 +314,8 @@ class ReadRequest(ClosedModel):
         if any(item.ref not in self.refs for item in self.ranges):
             raise ValueError("range_ref_missing")
         return self
+
+
 class ReadItem(ClosedModel):
     ref: Ref
     status: Literal["ok", "missing_ref", "stale_ref", "expired_ref", "ineligible_ref", "invalid_range"]
@@ -263,9 +330,9 @@ class ReadItem(ClosedModel):
     captured_at: datetime | None = None
     # T4 (investigate-boundary-v2): "alternative"/"premise" resolve `alt:v1:`/`premise:v1:` refs
     # -- additive, so `ReadResult.schema_version` stays "1" (no existing kind changed shape).
-    evidence_kind: Literal[
-        "local", "captured_live", "source", "capability", "skill", "alternative", "premise"
-    ] | None = None
+    evidence_kind: (
+        Literal["local", "captured_live", "source", "capability", "skill", "alternative", "premise"] | None
+    ) = None
     locator: ShortText | None = None
     citation_locator: ShortText | None = None
     provenance_chain: Annotated[list[ShortText], Field(max_length=10)] = []
@@ -273,6 +340,8 @@ class ReadItem(ClosedModel):
     freshness: Literal["current", "stale", "expired", "unknown"] | None = None
     license: Literal["permitted", "restricted", "prohibited", "unknown"] | None = None
     conflict: Literal["none", "declared", "unknown"] | None = None
+
+
 class ReadResult(ClosedModel):
     schema_version: Literal["1"]
     request_id: Ref
@@ -280,6 +349,8 @@ class ReadResult(ClosedModel):
     warnings: list[ShortText]
     budgets: Budgets
     next_cursor: str | None = None
+
+
 __all__ = [
     "AlternativeRecord",
     "CounterfactualAssessment",

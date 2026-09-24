@@ -188,7 +188,9 @@ def discover(
         capabilities = registry.capabilities
 
     return LookupResult(
-        domain_supported=domain_supported, sources=sources, capabilities=capabilities,
+        domain_supported=domain_supported,
+        sources=sources,
+        capabilities=capabilities,
         skills=_domain_applicable_skills(skill_set, classification.domain),
         stale_pack_ids=_degraded_pack_ids(registry, classification.domain, "stale"),
         expired_pack_ids=_degraded_pack_ids(registry, classification.domain, "expired"),
@@ -238,5 +240,12 @@ def resolve_capability(capability_id: object, registry: Registry) -> CapabilityP
     return None
 
 
-__all__ = ["LookupError", "LookupResult", "SkillMatch", "SourceMatch", "discover",
-           "resolve_capability", "resolve_source"]
+__all__ = [
+    "LookupError",
+    "LookupResult",
+    "SkillMatch",
+    "SourceMatch",
+    "discover",
+    "resolve_capability",
+    "resolve_source",
+]

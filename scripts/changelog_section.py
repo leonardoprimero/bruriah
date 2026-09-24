@@ -12,6 +12,7 @@ Stdlib only, on purpose: this runs inside the release workflow after `dist/` has
 built, and pulling in a real Markdown parser for one regex's worth of work would be one more
 dependency the supply-chain comments in `.github/workflows/release.yml` would have to account for.
 """
+
 from __future__ import annotations
 
 import argparse

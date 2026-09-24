@@ -11,6 +11,7 @@ Any test that needs a real built index (the legacy `cerebro.db` or the
 `bruriah` active snapshot) SKIPS gracefully when that index is absent,
 so this suite passes on a fresh checkout with no indexes built.
 """
+
 from __future__ import annotations
 
 import hashlib
@@ -134,9 +135,7 @@ def test_ndcg_at_10_perfect_ranking_is_one() -> None:
 def test_ndcg_at_10_relevant_note_below_rank_one() -> None:
     expected_dcg = 2 / math.log2(3)
     expected_idcg = 2 / math.log2(2)
-    assert ndcg_at_10(["x", "a"], must_include=["a"], acceptable=[]) == pytest.approx(
-        expected_dcg / expected_idcg
-    )
+    assert ndcg_at_10(["x", "a"], must_include=["a"], acceptable=[]) == pytest.approx(expected_dcg / expected_idcg)
 
 
 def test_ndcg_at_10_graded_must_include_and_acceptable() -> None:
@@ -153,9 +152,7 @@ def test_ndcg_at_10_acceptable_notes_do_not_double_count_must_include() -> None:
     # "acceptable" containing the same note as "must_include" must not inflate IDCG.
     expected_dcg = 2 / math.log2(2)
     expected_idcg = 2 / math.log2(2)
-    assert ndcg_at_10(["a"], must_include=["a"], acceptable=["a"]) == pytest.approx(
-        expected_dcg / expected_idcg
-    )
+    assert ndcg_at_10(["a"], must_include=["a"], acceptable=["a"]) == pytest.approx(expected_dcg / expected_idcg)
 
 
 def test_ndcg_at_10_no_ground_truth_is_none() -> None:
@@ -252,7 +249,7 @@ def test_separation_is_scale_free_but_not_shape_free() -> None:
     did not contain. See evals/project-memory/README.md.
     """
     tight = [1.0 + 0.1 * ((index % 5) - 2) for index in range(20)]  # MAD 0.1
-    wide = [1.0 + 0.5 * ((index % 5) - 2) for index in range(20)]   # MAD 0.5, same median
+    wide = [1.0 + 0.5 * ((index % 5) - 2) for index in range(20)]  # MAD 0.5, same median
     assert separation([5.0, *tight]) == pytest.approx(5 * separation([5.0, *wide]))
 
 

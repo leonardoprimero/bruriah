@@ -79,20 +79,38 @@ class CandidateRecord:
 # Patterns are matched against the pack's own declared PROSE. They are signals for a reviewer, in
 # the reviewer's own words, and each one names what to go look at rather than what to conclude.
 _PATTERNS: tuple[tuple[str, str, re.Pattern[str]], ...] = (
-    ("mentions_credential_path", "references a path where credentials are usually kept",
-     re.compile(r"~/\.ssh|~/\.aws|~/\.gnupg|\.env\b|id_rsa|credentials\.json", re.IGNORECASE)),
-    ("mentions_shell_profile", "references a shell profile, which persists across sessions",
-     re.compile(r"\.bashrc|\.zshrc|\.bash_profile|\.profile\b", re.IGNORECASE)),
-    ("mentions_network_tool", "names a tool that moves data off the machine",
-     re.compile(r"\bcurl\b|\bwget\b|\bnc\b|\bscp\b|\brsync\b", re.IGNORECASE)),
-    ("mentions_encoding_and_transfer", "mentions encoding together with transfer, a common shape "
-     "for moving data out without it being readable in transit",
-     re.compile(r"base64.{0,80}(upload|post|send|http)|\b(upload|post|send)\b.{0,80}base64",
-                re.IGNORECASE | re.DOTALL)),
-    ("instructs_the_reader_to_ignore_guidance", "contains override phrasing aimed at the agent "
-     "rather than at the task",
-     re.compile(r"ignore (all )?(previous|prior|above)|disregard .{0,20}instruction|"
-                r"do not tell|without (telling|informing)", re.IGNORECASE)),
+    (
+        "mentions_credential_path",
+        "references a path where credentials are usually kept",
+        re.compile(r"~/\.ssh|~/\.aws|~/\.gnupg|\.env\b|id_rsa|credentials\.json", re.IGNORECASE),
+    ),
+    (
+        "mentions_shell_profile",
+        "references a shell profile, which persists across sessions",
+        re.compile(r"\.bashrc|\.zshrc|\.bash_profile|\.profile\b", re.IGNORECASE),
+    ),
+    (
+        "mentions_network_tool",
+        "names a tool that moves data off the machine",
+        re.compile(r"\bcurl\b|\bwget\b|\bnc\b|\bscp\b|\brsync\b", re.IGNORECASE),
+    ),
+    (
+        "mentions_encoding_and_transfer",
+        "mentions encoding together with transfer, a common shape "
+        "for moving data out without it being readable in transit",
+        re.compile(
+            r"base64.{0,80}(upload|post|send|http)|\b(upload|post|send)\b.{0,80}base64", re.IGNORECASE | re.DOTALL
+        ),
+    ),
+    (
+        "instructs_the_reader_to_ignore_guidance",
+        "contains override phrasing aimed at the agent rather than at the task",
+        re.compile(
+            r"ignore (all )?(previous|prior|above)|disregard .{0,20}instruction|"
+            r"do not tell|without (telling|informing)",
+            re.IGNORECASE,
+        ),
+    ),
 )
 
 
@@ -198,8 +216,9 @@ def _advisories(pack: SkillPack) -> tuple[Advisory, ...]:
     """Scan the pack's declared prose. Deterministic and order-stable: same pack, same advisories."""
     found: list[Advisory] = []
     for skill in pack.skills:
-        haystack = "\n".join([skill.summary, skill.provenance, skill.body_locator,
-                              *skill.advisories, *skill.limitations])
+        haystack = "\n".join(
+            [skill.summary, skill.provenance, skill.body_locator, *skill.advisories, *skill.limitations]
+        )
         for code, detail, pattern in _PATTERNS:
             if pattern.search(haystack):
                 found.append(Advisory(code=code, detail=detail, skill_id=skill.skill_id))

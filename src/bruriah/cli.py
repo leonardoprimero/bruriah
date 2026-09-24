@@ -223,9 +223,7 @@ def _index_summary_line(result: BuildResult) -> str:
         for dropped in result.dropped_premises:
             by_id.setdefault(dropped.premise_id, []).append(dropped)
         groups = "; ".join(
-            f"{premise_id} (" + ", ".join(
-                f"{dropped.relative_path}: {dropped.reason}" for dropped in drops
-            ) + ")"
+            f"{premise_id} (" + ", ".join(f"{dropped.relative_path}: {dropped.reason}" for dropped in drops) + ")"
             for premise_id, drops in by_id.items()
         )
         # "entries", never "declarations": a drop is either a losing premise declaration or an
@@ -776,7 +774,12 @@ def _cmd_index(
             passage_prefix=getattr(args, "passage_prefix", None),
         )
     except (
-        CorpusPolicyError, IndexLifecycleError, FileExistsError, ValueError, OSError, yaml.YAMLError,
+        CorpusPolicyError,
+        IndexLifecycleError,
+        FileExistsError,
+        ValueError,
+        OSError,
+        yaml.YAMLError,
         sqlite3.Error,
     ) as error:
         # yaml.YAMLError (a malformed --policy that exists) is neither ValueError nor OSError.

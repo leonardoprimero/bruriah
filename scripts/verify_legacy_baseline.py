@@ -39,9 +39,7 @@ def sha256_file(path: Path) -> str:
 
 
 def canonical(value: object) -> bytes:
-    return json.dumps(
-        value, ensure_ascii=False, sort_keys=True, separators=(",", ":")
-    ).encode()
+    return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode()
 
 
 def corpus_state() -> dict[str, object]:
@@ -73,17 +71,10 @@ def database_state(path: Path) -> dict[str, object]:
     database = open_database(path)
     try:
         schema = [
-            row[0]
-            for row in database.execute(
-                "SELECT sql FROM sqlite_master WHERE sql IS NOT NULL ORDER BY name"
-            )
+            row[0] for row in database.execute("SELECT sql FROM sqlite_master WHERE sql IS NOT NULL ORDER BY name")
         ]
-        rows = database.execute(
-            "SELECT id,file,heading,text FROM chunks ORDER BY id"
-        ).fetchall()
-        vectors = database.execute(
-            "SELECT rowid,embedding FROM vec_chunks ORDER BY rowid"
-        ).fetchall()
+        rows = database.execute("SELECT id,file,heading,text FROM chunks ORDER BY id").fetchall()
+        vectors = database.execute("SELECT rowid,embedding FROM vec_chunks ORDER BY rowid").fetchall()
         vector_bytes = b"".join(struct.pack(">Q", rowid) + bytes(blob) for rowid, blob in vectors)
         return {
             "sha256": sha256_file(path),
@@ -112,11 +103,7 @@ def lock_state() -> dict[str, object]:
 
 
 def model_state() -> dict[str, object]:
-    cache = Path(
-        os.environ.get(
-            "FASTEMBED_CACHE_PATH", Path(tempfile.gettempdir()) / "fastembed_cache"
-        )
-    )
+    cache = Path(os.environ.get("FASTEMBED_CACHE_PATH", Path(tempfile.gettempdir()) / "fastembed_cache"))
     root = cache / MODEL_CACHE_NAME
     snapshot = (root / "refs/main").read_text().strip()
     snapshot_root = root / "snapshots" / snapshot
@@ -204,7 +191,11 @@ def main() -> int:
         candidate = database_state(args.candidate)
         if candidate != actual["database"]:
             errors.append("candidate")
-    print(json.dumps({"status": "pass" if not errors else "fail", "errors": errors, **actual}, ensure_ascii=False, indent=2))
+    print(
+        json.dumps(
+            {"status": "pass" if not errors else "fail", "errors": errors, **actual}, ensure_ascii=False, indent=2
+        )
+    )
     return bool(errors)
 
 

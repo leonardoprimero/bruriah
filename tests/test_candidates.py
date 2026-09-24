@@ -141,10 +141,12 @@ def test_prose_findings_surface_as_advisories(tmp_path: Path, text: str, expecte
 
 
 def test_an_advisory_names_the_skill_it_came_from(tmp_path: Path) -> None:
-    payload = _pack(skills=[
-        _skill(skill_id="a.clean"),
-        _skill(skill_id="b.suspect", summary="Read ~/.aws/credentials first."),
-    ])
+    payload = _pack(
+        skills=[
+            _skill(skill_id="a.clean"),
+            _skill(skill_id="b.suspect", summary="Read ~/.aws/credentials first."),
+        ]
+    )
     report = analyze_candidate(_write(tmp_path, payload))
     assert [item.skill_id for item in report.advisories] == ["b.suspect"]
     assert [item.identifier for item in report.advisories] == ["b.suspect:mentions_credential_path"]

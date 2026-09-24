@@ -6,6 +6,7 @@ collected. This test makes the drift impossible to miss by asserting the README 
 `session.testscollected` from `conftest.py`'s `pytest_collection_finish` hook, whenever the run is
 a full one (see that hook's docstring for what "full" means and its known detection gap).
 """
+
 from __future__ import annotations
 
 import re
@@ -27,11 +28,8 @@ def test_readme_test_count_matches_collected(request: pytest.FixtureRequest) -> 
 
     text = README.read_text(encoding="utf-8")
     match = _TEST_COUNT_PATTERN.search(text)
-    assert match is not None, (
-        "README.md section 4 must state the test count as '**N tests**' so this check can find it"
-    )
+    assert match is not None, "README.md section 4 must state the test count as '**N tests**' so this check can find it"
     readme_count = int(match.group(1).replace(",", ""))
     assert readme_count == collected, (
-        f"README.md test count is {readme_count} but {collected} tests are collected; "
-        "update README.md section 4."
+        f"README.md test count is {readme_count} but {collected} tests are collected; update README.md section 4."
     )

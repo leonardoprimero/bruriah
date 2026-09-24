@@ -6,6 +6,7 @@ README.md for what each fixture represents): a `ResponseCache` is pre-seeded fro
 JSON, `network_enabled=False` proves the network path is never taken for a warm cache, and a
 scripted `Transport` proves the not-found path without ever opening a socket.
 """
+
 from __future__ import annotations
 
 import json
@@ -139,7 +140,11 @@ class TestBuildDocumentsIssue41:
         out = tmp_path / "out"
         commits = [_commit("a" * 40, "fix: race condition", "Closes #41.")]
         result = build_documents(
-            commits, out, repo="acme/widget", cache=cache, network_enabled=False,
+            commits,
+            out,
+            repo="acme/widget",
+            cache=cache,
+            network_enabled=False,
         )
         return out, result
 
@@ -213,7 +218,11 @@ class TestBuildDocumentsIssue100:
             _commit("c" * 40, "Add a per-build file lock (#101)", ""),
         ]
         result = build_documents(
-            commits, out, repo="acme/widget", cache=cache, network_enabled=False,
+            commits,
+            out,
+            repo="acme/widget",
+            cache=cache,
+            network_enabled=False,
         )
         return out, result
 
@@ -268,8 +277,12 @@ class TestCrossRepoLinksAreSkipped:
 
         commits = [_commit("d" * 40, "chore: note", "Fixes other/widget#77.")]
         result = build_documents(
-            commits, tmp_path / "out", repo="acme/widget", cache=cache,
-            network_enabled=True, transport=_never_called,
+            commits,
+            tmp_path / "out",
+            repo="acme/widget",
+            cache=cache,
+            network_enabled=True,
+            transport=_never_called,
         )
         assert result.documents_written == 0
         assert result.cross_repo_skipped == 1
@@ -289,8 +302,12 @@ class TestTimelineCrossReferenceFromAnotherRepoIsSkipped:
         cache.set("/repos/acme/widget/issues/200/timeline", _load("issue-200-timeline.json"))
         commits = [_commit("h" * 40, "fix: note the fork reference", "Closes #200.")]
         result = build_documents(
-            commits, tmp_path / "out", repo="acme/widget", cache=cache,
-            network_enabled=True, transport=transport,
+            commits,
+            tmp_path / "out",
+            repo="acme/widget",
+            cache=cache,
+            network_enabled=True,
+            transport=transport,
         )
         return tmp_path / "out", result
 
@@ -338,13 +355,17 @@ class TestCollectAlternativesDeduplicatesCrossReferences:
     def _ledger(self, tmp_path: Path, transport: Any) -> Any:
         cache = ResponseCache(tmp_path / "cache")
         return github_corpus._Ledger(
-            cache=cache, owner="acme", repo="widget", token=None, network_enabled=True,
-            transport=transport, clock=lambda: 0.0, sleep=lambda _seconds: None,
+            cache=cache,
+            owner="acme",
+            repo="widget",
+            token=None,
+            network_enabled=True,
+            transport=transport,
+            clock=lambda: 0.0,
+            sleep=lambda _seconds: None,
         )
 
-    def test_same_pr_cross_referenced_twice_yields_one_alternative_and_one_fetch(
-        self, tmp_path: Path
-    ) -> None:
+    def test_same_pr_cross_referenced_twice_yields_one_alternative_and_one_fetch(self, tmp_path: Path) -> None:
         fetch_counts: dict[str, int] = {}
 
         def transport(method: str, url: str, token: str | None) -> _RawResponse:
@@ -352,16 +373,20 @@ class TestCollectAlternativesDeduplicatesCrossReferences:
             if url.endswith("/issues/41/timeline"):
                 event = {
                     "event": "cross-referenced",
-                    "source": {"issue": {
-                        "number": 310,
-                        "html_url": "https://github.com/acme/widget/pull/310",
-                        "pull_request": {"merged_at": None},
-                    }},
+                    "source": {
+                        "issue": {
+                            "number": 310,
+                            "html_url": "https://github.com/acme/widget/pull/310",
+                            "pull_request": {"merged_at": None},
+                        }
+                    },
                 }
                 body: Any = [event, event]
             elif url.endswith("/pulls/310"):
                 body = {
-                    "title": "Fix: retry storm", "state": "closed", "merged_at": None,
+                    "title": "Fix: retry storm",
+                    "state": "closed",
+                    "merged_at": None,
                     "closed_at": "2026-08-01T00:00:00Z",
                 }
             elif url.endswith("/issues/310/comments"):
@@ -378,39 +403,45 @@ class TestCollectAlternativesDeduplicatesCrossReferences:
         assert alternatives[0]["name"] == "Fix: retry storm"
         assert fetch_counts["https://api.github.com/repos/acme/widget/pulls/310"] == 1
 
-    def test_two_distinct_prs_with_the_same_title_both_survive_disambiguated(
-        self, tmp_path: Path
-    ) -> None:
+    def test_two_distinct_prs_with_the_same_title_both_survive_disambiguated(self, tmp_path: Path) -> None:
         def transport(method: str, url: str, token: str | None) -> _RawResponse:
             if url.endswith("/issues/41/timeline"):
                 body: Any = [
                     {
                         "event": "cross-referenced",
-                        "source": {"issue": {
-                            "number": 320,
-                            "html_url": "https://github.com/acme/widget/pull/320",
-                            "pull_request": {"merged_at": None},
-                        }},
+                        "source": {
+                            "issue": {
+                                "number": 320,
+                                "html_url": "https://github.com/acme/widget/pull/320",
+                                "pull_request": {"merged_at": None},
+                            }
+                        },
                     },
                     {
                         "event": "cross-referenced",
-                        "source": {"issue": {
-                            "number": 321,
-                            "html_url": "https://github.com/acme/widget/pull/321",
-                            "pull_request": {"merged_at": None},
-                        }},
+                        "source": {
+                            "issue": {
+                                "number": 321,
+                                "html_url": "https://github.com/acme/widget/pull/321",
+                                "pull_request": {"merged_at": None},
+                            }
+                        },
                     },
                 ]
             elif url.endswith("/pulls/320"):
                 # Trailing whitespace a title should never have carried into the corpus.
                 body = {
-                    "title": "Fix: retry with backoff  ", "state": "closed", "merged_at": None,
+                    "title": "Fix: retry with backoff  ",
+                    "state": "closed",
+                    "merged_at": None,
                     "closed_at": "2026-08-01T00:00:00Z",
                 }
             elif url.endswith("/pulls/321"):
                 # Same title after normalization, spelled with a doubled internal space instead.
                 body = {
-                    "title": "Fix: retry  with backoff", "state": "closed", "merged_at": None,
+                    "title": "Fix: retry  with backoff",
+                    "state": "closed",
+                    "merged_at": None,
                     "closed_at": "2026-08-02T00:00:00Z",
                 }
             elif url.endswith("/comments"):
@@ -435,9 +466,7 @@ class TestCollectAlternativesDeduplicatesCrossReferences:
 
 
 class TestDuplicateAlternativesStillIndex:
-    def test_document_with_a_duplicate_cross_reference_indexes_without_error(
-        self, tmp_path: Path
-    ) -> None:
+    def test_document_with_a_duplicate_cross_reference_indexes_without_error(self, tmp_path: Path) -> None:
         cache = ResponseCache(tmp_path / "cache")
         cache.set("/repos/acme/widget/issues/300", _load("issue-300.json"))
         cache.set("/repos/acme/widget/issues/300/timeline", _load("issue-300-timeline.json"))
@@ -446,7 +475,11 @@ class TestDuplicateAlternativesStillIndex:
         out = tmp_path / "out"
         commits = [_commit("f" * 40, "fix: note", "Closes #300.")]
         result = build_documents(
-            commits, out, repo="acme/widget", cache=cache, network_enabled=False,
+            commits,
+            out,
+            repo="acme/widget",
+            cache=cache,
+            network_enabled=False,
         )
         assert result.documents_written == 1
 
@@ -455,25 +488,43 @@ class TestDuplicateAlternativesStillIndex:
         document = parse_document(doc_path, out, policy)
         assert len(document.metadata.alternatives) == 1
 
-        fingerprint = json.dumps({
-            "artifact": "model.onnx", "artifact_sha256": "a" * 64, "pooling": "mean",
-            "runtime": "fastembed==0.8.0", "snapshot": "snapshot-a", "source": "example/model",
-        }, sort_keys=True)
+        fingerprint = json.dumps(
+            {
+                "artifact": "model.onnx",
+                "artifact_sha256": "a" * 64,
+                "pooling": "mean",
+                "runtime": "fastembed==0.8.0",
+                "snapshot": "snapshot-a",
+                "source": "example/model",
+            },
+            sort_keys=True,
+        )
         policy_path = tmp_path / "policy.yaml"
         policy_path.write_text("version: 1\ninclude: ['*.md']\nexclude: []\n", encoding="utf-8")
         config = BuildConfig(
-            root=out, policy_path=policy_path, schema_version=1,
-            parser_version="corpus-v2", service_version="0.1.0", mcp_range=">=1.28.1,<2",
-            embedding_model="test/minilm", embedding_revision="snapshot-a",
-            embedding_dimensions=3, embedding_fingerprint=fingerprint, ranking_config="rrf-v1",
+            root=out,
+            policy_path=policy_path,
+            schema_version=1,
+            parser_version="corpus-v2",
+            service_version="0.1.0",
+            mcp_range=">=1.28.1,<2",
+            embedding_model="test/minilm",
+            embedding_revision="snapshot-a",
+            embedding_dimensions=3,
+            embedding_fingerprint=fingerprint,
+            ranking_config="rrf-v1",
         )
 
         def fake_embeddings(texts: list[str]) -> list[bytes]:
             import hashlib
+
             return [hashlib.sha256(text.encode()).digest()[:12] for text in texts]
 
         index_result = build_candidate(
-            config, tmp_path / "candidate.sqlite3", policy, fake_embeddings,
+            config,
+            tmp_path / "candidate.sqlite3",
+            policy,
+            fake_embeddings,
         )
         assert index_result.documents == 1
 
@@ -499,8 +550,12 @@ class TestSkipAndWarnOnFailure:
             _commit("a" * 40, "fix: race condition", "Closes #41."),
         ]
         result = build_documents(
-            commits, tmp_path / "out", repo="acme/widget", cache=cache,
-            network_enabled=True, transport=_transport,
+            commits,
+            tmp_path / "out",
+            repo="acme/widget",
+            cache=cache,
+            network_enabled=True,
+            transport=_transport,
         )
         assert result.documents_written == 1  # #41 still gets built
         assert result.issues_skipped == 1
@@ -521,9 +576,14 @@ class TestSkipAndWarnOnFailure:
             _commit("a" * 40, "fix: race condition", "Closes #41."),
         ]
         result = build_documents(
-            commits, tmp_path / "out", repo="acme/widget", cache=cache,
-            network_enabled=True, transport=_always_500,
-            clock=lambda: 0.0, sleep=lambda _seconds: None,
+            commits,
+            tmp_path / "out",
+            repo="acme/widget",
+            cache=cache,
+            network_enabled=True,
+            transport=_always_500,
+            clock=lambda: 0.0,
+            sleep=lambda _seconds: None,
         )
         assert result.documents_written == 1
         assert result.issues_skipped == 1
@@ -539,7 +599,11 @@ class TestSkipAndWarnOnFailure:
             _commit("a" * 40, "fix: race condition", "Closes #41."),
         ]
         result = build_documents(
-            commits, tmp_path / "out", repo="acme/widget", cache=cache, network_enabled=False,
+            commits,
+            tmp_path / "out",
+            repo="acme/widget",
+            cache=cache,
+            network_enabled=False,
         )
         assert result.documents_written == 1
         assert result.issues_skipped == 1
@@ -562,7 +626,12 @@ class TestManifest:
             _commit("d" * 40, "chore: note", "Fixes other/widget#77."),
         ]
         result = build_documents(
-            commits, out, repo="acme/widget", cache=cache, network_enabled=False, revision="deadbeef",
+            commits,
+            out,
+            repo="acme/widget",
+            cache=cache,
+            network_enabled=False,
+            revision="deadbeef",
         )
         manifest_path = out / "github-manifest.json"
         assert manifest_path == result.manifest_path
@@ -612,8 +681,14 @@ class TestRateLimitWindowStopsFurtherFetches:
             _commit("j" * 40, "chore: second uncached issue", "Fixes #901."),
         ]
         result = build_documents(
-            commits, tmp_path / "out", repo="acme/widget", cache=cache,
-            network_enabled=True, transport=_transport, clock=lambda: 0.0, sleep=lambda _s: None,
+            commits,
+            tmp_path / "out",
+            repo="acme/widget",
+            cache=cache,
+            network_enabled=True,
+            transport=_transport,
+            clock=lambda: 0.0,
+            sleep=lambda _s: None,
         )
 
         assert result.documents_written == 1  # #41, served entirely from cache
@@ -643,6 +718,10 @@ class TestClosesTargetThatIsItselfAPullRequest:
         cache.set("/repos/acme/widget/issues/50/timeline", [])
         commits = [_commit("a" * 40, "chore: track merged PR", "Closes #50.")]
         result = build_documents(
-            commits, tmp_path / "out", repo="acme/widget", cache=cache, network_enabled=False,
+            commits,
+            tmp_path / "out",
+            repo="acme/widget",
+            cache=cache,
+            network_enabled=False,
         )
         assert result.documents_written == 1

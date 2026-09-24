@@ -11,6 +11,7 @@ manually against a `--github`-built index instead, the way `evals/project-memory
 -- the filename regex, the commit-only filter, and the score-a-single-question arithmetic -- is
 pure and covered here.
 """
+
 from __future__ import annotations
 
 import sys
@@ -59,7 +60,8 @@ def test_commit_only_order_drops_github_documents_and_keeps_relative_order() -> 
         "2024-02-02-cafebabe-second-commit.md",
     ]
     assert ridr.commit_only_order(order) == [
-        "2024-01-01-deadbeef-first-commit.md", "2024-02-02-cafebabe-second-commit.md",
+        "2024-01-01-deadbeef-first-commit.md",
+        "2024-02-02-cafebabe-second-commit.md",
     ]
 
 
@@ -107,7 +109,10 @@ def test_render_reports_recall_and_own_issue_document_coverage() -> None:
     rows = [
         ridr.score_question("q1", ["truth1.md"], "truth1.md", "1"),
         ridr.score_question(
-            "q2", ["2026-01-01-issue-2-x.md", "truth2.md"], "truth2.md", "2",
+            "q2",
+            ["2026-01-01-issue-2-x.md", "truth2.md"],
+            "truth2.md",
+            "2",
         ),
     ]
 

@@ -22,6 +22,7 @@ API responses are cached to `--cache` so a second run costs nothing and so the e
 a published number stay on disk, reviewable, instead of living only in whatever GitHub returned
 that afternoon.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -65,10 +66,16 @@ def read_commits(repo: Path) -> list[Commit]:
         if len(parts) < 5:
             continue
         sha, author, when, subject, body = (part.strip() for part in parts[:5])
-        commits.append(Commit(
-            sha=sha, author_name=author, author_login=None,
-            authored_at=datetime.fromisoformat(when), subject=subject, body=body,
-        ))
+        commits.append(
+            Commit(
+                sha=sha,
+                author_name=author,
+                author_login=None,
+                authored_at=datetime.fromisoformat(when),
+                subject=subject,
+                body=body,
+            )
+        )
     return commits
 
 
@@ -96,10 +103,10 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--github", required=True, metavar="OWNER/NAME")
     parser.add_argument("--corpus", type=Path, required=True, help="output of `bruriah corpus`")
     parser.add_argument("--out", type=Path, required=True, help="candidate pairs, JSONL")
-    parser.add_argument("--rejected", type=Path, default=None,
-                        help="rejections with reasons (default: alongside --out)")
-    parser.add_argument("--cache", type=Path, default=None,
-                        help="API cache (default: alongside --out)")
+    parser.add_argument(
+        "--rejected", type=Path, default=None, help="rejections with reasons (default: alongside --out)"
+    )
+    parser.add_argument("--cache", type=Path, default=None, help="API cache (default: alongside --out)")
     args = parser.parse_args(argv)
 
     rejected_path = args.rejected or args.out.with_suffix(".rejected.jsonl")
@@ -112,8 +119,11 @@ def main(argv: list[str] | None = None) -> int:
 
     commits = read_commits(args.repo)
     candidates = [commit for commit in commits if parse_closes(commit.body)]
-    print(f"{len(commits)} non-merge commits · {len(candidates)} name an issue they close "
-          f"· {len(corpus)} corpus documents", file=sys.stderr)
+    print(
+        f"{len(commits)} non-merge commits · {len(candidates)} name an issue they close "
+        f"· {len(corpus)} corpus documents",
+        file=sys.stderr,
+    )
 
     # Only candidates need their GitHub login resolved, so the expensive lookup is bounded by how
     # many commits actually reference something rather than by the size of the history.
@@ -125,10 +135,16 @@ def main(argv: list[str] | None = None) -> int:
             raw = _gh("api", f"repos/{args.github}/commits/{commit.sha}", "--jq", "{login: .author.login}")
             entry = json.loads(raw) if raw else {"login": None}
             cache.put(key, entry)
-        resolved.append(Commit(
-            sha=commit.sha, author_name=commit.author_name, author_login=entry.get("login"),
-            authored_at=commit.authored_at, subject=commit.subject, body=commit.body,
-        ))
+        resolved.append(
+            Commit(
+                sha=commit.sha,
+                author_name=commit.author_name,
+                author_login=entry.get("login"),
+                authored_at=commit.authored_at,
+                subject=commit.subject,
+                body=commit.body,
+            )
+        )
         if index % 25 == 0:
             print(f"  resolved {index}/{len(candidates)} commit authors", file=sys.stderr)
             cache.save()
@@ -139,13 +155,19 @@ def main(argv: list[str] | None = None) -> int:
         key = f"issue:{number}"
         entry = cache.get(key)
         if entry is None:
-            raw = _gh("api", f"repos/{args.github}/issues/{number}", "--jq",
-                      "{title: .title, login: .user.login, created: .created_at, pr: (.pull_request != null)}")
+            raw = _gh(
+                "api",
+                f"repos/{args.github}/issues/{number}",
+                "--jq",
+                "{title: .title, login: .user.login, created: .created_at, pr: (.pull_request != null)}",
+            )
             entry = json.loads(raw) if raw else None
             cache.put(key, entry)
         if entry:
             issues[number] = Issue(
-                number=number, title=entry["title"], author_login=entry["login"],
+                number=number,
+                title=entry["title"],
+                author_login=entry["login"],
                 created_at=datetime.fromisoformat(entry["created"].replace("Z", "+00:00")),
                 is_pull_request=bool(entry["pr"]),
             )
@@ -171,8 +193,11 @@ def main(argv: list[str] | None = None) -> int:
     print(f"rejected {len(rejections)} -> {rejected_path}", file=sys.stderr)
     for reason, count in sorted(tally.items(), key=lambda item: -item[1]):
         print(f"  {count:5}  {reason}", file=sys.stderr)
-    print("\nThese are CANDIDATES: conditions 1-3. Condition 4 is a shape filter applied at "
-          "scoring time, and what it excludes is published alongside what it keeps.", file=sys.stderr)
+    print(
+        "\nThese are CANDIDATES: conditions 1-3. Condition 4 is a shape filter applied at "
+        "scoring time, and what it excludes is published alongside what it keeps.",
+        file=sys.stderr,
+    )
     return 0
 
 

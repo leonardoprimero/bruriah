@@ -63,7 +63,9 @@ def _create_commit(repo: Path, filename: str, content: str, msg: str) -> str:
     (repo / filename).write_text(content, encoding="utf-8")
     subprocess.run(["git", "add", filename], cwd=repo, check=True, capture_output=True)
     subprocess.run(["git", "commit", "-m", msg], cwd=repo, check=True, capture_output=True)
-    return subprocess.run(["git", "rev-parse", "HEAD"], cwd=repo, capture_output=True, text=True, check=True).stdout.strip()
+    return subprocess.run(
+        ["git", "rev-parse", "HEAD"], cwd=repo, capture_output=True, text=True, check=True
+    ).stdout.strip()
 
 
 def test_resolve_commit_for_target(tmp_path: Path) -> None:
@@ -139,8 +141,10 @@ We decided to use pure SQLite for all index tables to guarantee zero foreign dep
 ## Files this decision touched
 - `src/core/storage.py`
 """
-        db.execute("INSERT INTO passages VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                   ("p1", "doc-initial", "initial.md", "[]", 1, 10, doc1_text, "h1", meta_doc1, doc1_text, b"vec"))
+        db.execute(
+            "INSERT INTO passages VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            ("p1", "doc-initial", "initial.md", "[]", 1, 10, doc1_text, "h1", meta_doc1, doc1_text, b"vec"),
+        )
 
         meta_doc2 = json.dumps({"commit": sha_successor, "verification_date": "2026-06-01"})
         db.execute("INSERT INTO documents VALUES (?, ?, ?, ?)", ("doc-successor", "successor.md", "hash2", meta_doc2))
@@ -150,11 +154,14 @@ We decided to use pure SQLite for all index tables to guarantee zero foreign dep
 
 Supersedes the initial storage decision with memory-mapped files.
 """
-        db.execute("INSERT INTO passages VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                   ("p2", "doc-successor", "successor.md", "[]", 1, 5, doc2_text, "h2", meta_doc2, doc2_text, b"vec"))
+        db.execute(
+            "INSERT INTO passages VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            ("p2", "doc-successor", "successor.md", "[]", 1, 5, doc2_text, "h2", meta_doc2, doc2_text, b"vec"),
+        )
 
-        db.execute("INSERT INTO lineage VALUES (?, ?, ?, ?)",
-                   ("doc-successor", sha_initial[:8], "doc-initial", "supersedes"))
+        db.execute(
+            "INSERT INTO lineage VALUES (?, ?, ?, ?)", ("doc-successor", sha_initial[:8], "doc-initial", "supersedes")
+        )
         db.commit()
 
         # 1. Lookup initial decision
@@ -177,7 +184,9 @@ Supersedes the initial storage decision with memory-mapped files.
             target="src/core/storage.py:10",
             file_path="src/core/storage.py",
             line=10,
-            line_commit=CommitInfo(sha=sha_initial, author="Senior Architect", date="2026-01-01", subject="Initial Architecture Decision"),
+            line_commit=CommitInfo(
+                sha=sha_initial, author="Senior Architect", date="2026-01-01", subject="Initial Architecture Decision"
+            ),
             governing_decision=decision,
             governing_commit=None,
             lineage_alerts=alerts,
@@ -233,26 +242,30 @@ def test_check_lineage_alerts_transitive_multi_hop(tmp_path: Path) -> None:
         meta_a = json.dumps({"commit": sha_a, "verification_date": "2026-01-01"})
         db.execute("INSERT INTO documents VALUES (?, ?, ?, ?)", ("doc-a", "a.md", "hash_a", meta_a))
         text_a = "# Generation 1 Architecture\n\nInitial design.\n"
-        db.execute("INSERT INTO passages VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                   ("p_a", "doc-a", "a.md", "[]", 1, 3, text_a, "ha", meta_a, text_a, b"v"))
+        db.execute(
+            "INSERT INTO passages VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            ("p_a", "doc-a", "a.md", "[]", 1, 3, text_a, "ha", meta_a, text_a, b"v"),
+        )
 
         meta_b = json.dumps({"commit": sha_b, "verification_date": "2026-03-01"})
         db.execute("INSERT INTO documents VALUES (?, ?, ?, ?)", ("doc-b", "b.md", "hash_b", meta_b))
         text_b = "# Generation 2 Architecture\n\nIntermediate rewrite.\n"
-        db.execute("INSERT INTO passages VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                   ("p_b", "doc-b", "b.md", "[]", 1, 3, text_b, "hb", meta_b, text_b, b"v"))
+        db.execute(
+            "INSERT INTO passages VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            ("p_b", "doc-b", "b.md", "[]", 1, 3, text_b, "hb", meta_b, text_b, b"v"),
+        )
 
         meta_c = json.dumps({"commit": sha_c, "verification_date": "2026-06-01"})
         db.execute("INSERT INTO documents VALUES (?, ?, ?, ?)", ("doc-c", "c.md", "hash_c", meta_c))
         text_c = "# Generation 3 Cloud-Native\n\nActive modern architecture.\n"
-        db.execute("INSERT INTO passages VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                   ("p_c", "doc-c", "c.md", "[]", 1, 3, text_c, "hc", meta_c, text_c, b"v"))
+        db.execute(
+            "INSERT INTO passages VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            ("p_c", "doc-c", "c.md", "[]", 1, 3, text_c, "hc", meta_c, text_c, b"v"),
+        )
 
         # Link: doc-a -> doc-b -> doc-c
-        db.execute("INSERT INTO lineage VALUES (?, ?, ?, ?)",
-                   ("doc-b", sha_a[:8], "doc-a", "supersedes"))
-        db.execute("INSERT INTO lineage VALUES (?, ?, ?, ?)",
-                   ("doc-c", sha_b[:8], "doc-b", "supersedes"))
+        db.execute("INSERT INTO lineage VALUES (?, ?, ?, ?)", ("doc-b", sha_a[:8], "doc-a", "supersedes"))
+        db.execute("INSERT INTO lineage VALUES (?, ?, ?, ?)", ("doc-c", sha_b[:8], "doc-b", "supersedes"))
         db.commit()
 
         alerts = check_lineage_alerts(db, "doc-a", sha_a)
@@ -294,14 +307,23 @@ def test_check_lineage_alerts_transitive_multi_hop(tmp_path: Path) -> None:
         assert len(alert_json["chain"]) == 2
 
 
-
 def test_trace_causal_archaeology_e2e(tmp_path: Path) -> None:
     repo = tmp_path / "repo"
     repo.mkdir()
     _init_git_repo(repo)
 
-    sha_feat = _create_commit(repo, "storage.py", "def connect():\n    return sqlite3.connect('app.db')\n", "feat(storage): initial sqlite storage")
-    sha_chore = _create_commit(repo, "storage.py", "def connect():\n    # chore formatting\n    return sqlite3.connect('app.db')\n", "style: format comment")
+    sha_feat = _create_commit(
+        repo,
+        "storage.py",
+        "def connect():\n    return sqlite3.connect('app.db')\n",
+        "feat(storage): initial sqlite storage",
+    )
+    sha_chore = _create_commit(
+        repo,
+        "storage.py",
+        "def connect():\n    # chore formatting\n    return sqlite3.connect('app.db')\n",
+        "style: format comment",
+    )
 
     # Set up index database with decision for sha_feat only (sha_chore was not indexed)
     db_path = tmp_path / "index.sqlite3"
@@ -331,8 +353,10 @@ Decided to use raw sqlite3 connection pooling.
 ## Files this decision touched
 - `storage.py`
 """
-        db.execute("INSERT INTO passages VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                   ("p1", "doc-feat", "feat.md", "[]", 1, 10, feat_text, "h1", meta_feat, feat_text, b"vec"))
+        db.execute(
+            "INSERT INTO passages VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            ("p1", "doc-feat", "feat.md", "[]", 1, 10, feat_text, "h1", meta_feat, feat_text, b"vec"),
+        )
         db.commit()
 
         # Trace line 2 (# chore formatting)

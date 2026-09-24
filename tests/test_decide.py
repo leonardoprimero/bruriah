@@ -104,18 +104,27 @@ class TestDecideCli:
         from bruriah.cli import _build_cli_parser
 
         parser = _build_cli_parser()
-        args = parser.parse_args([
-            "decide",
-            "--title", "feat: adopt OAuth2",
-            "--problem", "session vulnerability",
-            "--solution", "use OAuth2",
-            "--invariants", "inv1", "inv2",
-            "--alternative", "OptionA:TradeoffA:WhyA",
-            "--supersedes", "11223344",
-            "--commit",
-            "--adr",
-            "--json",
-        ])
+        args = parser.parse_args(
+            [
+                "decide",
+                "--title",
+                "feat: adopt OAuth2",
+                "--problem",
+                "session vulnerability",
+                "--solution",
+                "use OAuth2",
+                "--invariants",
+                "inv1",
+                "inv2",
+                "--alternative",
+                "OptionA:TradeoffA:WhyA",
+                "--supersedes",
+                "11223344",
+                "--commit",
+                "--adr",
+                "--json",
+            ]
+        )
         assert args.title == "feat: adopt OAuth2"
         assert args.problem == "session vulnerability"
         assert args.solution == "use OAuth2"
@@ -136,12 +145,17 @@ class TestDecideCli:
             invariants=("inv1",),
         )
         with patch("bruriah.cli.run_decide", return_value=(sample_record, None)):
-            code = bruriah_main([
-                "decide",
-                "--title", "feat: title",
-                "--problem", "prob",
-                "--solution", "sol",
-            ])
+            code = bruriah_main(
+                [
+                    "decide",
+                    "--title",
+                    "feat: title",
+                    "--problem",
+                    "prob",
+                    "--solution",
+                    "sol",
+                ]
+            )
             assert code == 0
             captured = capsys.readouterr()
             assert "feat: title" in captured.out
@@ -158,13 +172,18 @@ class TestDecideCli:
             invariants=("inv1",),
         )
         with patch("bruriah.cli.run_decide", return_value=(sample_record, None)):
-            code = bruriah_main([
-                "decide",
-                "--title", "feat: title",
-                "--problem", "prob",
-                "--solution", "sol",
-                "--adr",
-            ])
+            code = bruriah_main(
+                [
+                    "decide",
+                    "--title",
+                    "feat: title",
+                    "--problem",
+                    "prob",
+                    "--solution",
+                    "sol",
+                    "--adr",
+                ]
+            )
             assert code == 0
             captured = capsys.readouterr()
             assert "# ADR: feat: title" in captured.out
@@ -180,13 +199,18 @@ class TestDecideCli:
             invariants=("inv1",),
         )
         with patch("bruriah.cli.run_decide", return_value=(sample_record, None)):
-            code = bruriah_main([
-                "decide",
-                "--title", "feat: title",
-                "--problem", "prob",
-                "--solution", "sol",
-                "--json",
-            ])
+            code = bruriah_main(
+                [
+                    "decide",
+                    "--title",
+                    "feat: title",
+                    "--problem",
+                    "prob",
+                    "--solution",
+                    "sol",
+                    "--json",
+                ]
+            )
             assert code == 0
             captured = capsys.readouterr()
             data = json.loads(captured.out)
@@ -200,4 +224,3 @@ class TestDecideCli:
             assert code == 1
             captured = capsys.readouterr()
             assert "missing_required_fields" in captured.err
-

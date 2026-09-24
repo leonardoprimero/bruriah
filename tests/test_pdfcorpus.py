@@ -9,6 +9,7 @@ Verifies that:
 5. End-to-end: derived PDF Markdown passes through the standard indexer without a single line
    of indexer modification, preserving the byte-for-byte locator contract.
 """
+
 from __future__ import annotations
 
 import hashlib
@@ -35,14 +36,14 @@ def _make_pdf(path: Path, pages: list[str]) -> Path:
         if text:
             stream = DecodedStreamObject()
             stream.set_data(f"BT /F1 12 Tf 50 250 Td ({text}) Tj ET".encode("latin1"))
-            font = DictionaryObject({
-                NameObject("/Type"): NameObject("/Font"),
-                NameObject("/Subtype"): NameObject("/Type1"),
-                NameObject("/BaseFont"): NameObject("/Helvetica"),
-            })
-            resources = DictionaryObject({
-                NameObject("/Font"): DictionaryObject({NameObject("/F1"): font})
-            })
+            font = DictionaryObject(
+                {
+                    NameObject("/Type"): NameObject("/Font"),
+                    NameObject("/Subtype"): NameObject("/Type1"),
+                    NameObject("/BaseFont"): NameObject("/Helvetica"),
+                }
+            )
+            resources = DictionaryObject({NameObject("/Font"): DictionaryObject({NameObject("/F1"): font})})
             page[NameObject("/Contents")] = stream
             page[NameObject("/Resources")] = resources
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -71,9 +72,7 @@ def test_pdfcorpus_single_file_extracts_pages_with_provenance(tmp_path: Path) ->
 
     result = pdfcorpus.build(pdf_path, out_dir)
 
-    assert (result.written, result.examined, result.files_examined, result.skipped_empty_pages) == (
-        2, 2, 1, 0
-    )
+    assert (result.written, result.examined, result.files_examined, result.skipped_empty_pages) == (2, 2, 1, 0)
     assert result.documents == 2
     assert result.pages == 2
 
@@ -118,9 +117,7 @@ def test_pdfcorpus_skips_blank_or_image_only_pages(tmp_path: Path) -> None:
 
     result = pdfcorpus.build(pdf_path, out_dir)
 
-    assert (result.written, result.examined, result.files_examined, result.skipped_empty_pages) == (
-        2, 3, 1, 1
-    )
+    assert (result.written, result.examined, result.files_examined, result.skipped_empty_pages) == (2, 3, 1, 1)
     written_files = sorted(out_dir.glob("*.md"))
     assert len(written_files) == 2
     assert written_files[0].name == "mixed-p001.md"
@@ -198,9 +195,7 @@ def test_pdfcorpus_end_to_end_indexing_and_byte_guarantee(tmp_path: Path) -> Non
 
     # Write standard policy
     policy_path = tmp_path / "policy.yaml"
-    policy_path.write_text(
-        "version: 1\ninclude: ['*.md', '**/*.md']\nexclude: []\n", encoding="utf-8"
-    )
+    policy_path.write_text("version: 1\ninclude: ['*.md', '**/*.md']\nexclude: []\n", encoding="utf-8")
     policy = CorpusPolicy.load(policy_path)
 
     # 1. Zero indexer modification: standard parse_document

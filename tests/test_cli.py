@@ -431,7 +431,9 @@ def test_cli_index_dispatch_builds_only_under_private_data_dir(tmp_path: Path) -
 
 
 def test_a_sqlite_error_during_index_is_a_typed_message_never_a_raw_traceback(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture,
 ) -> None:
     """premise-id-collision: `_cmd_index`'s except tuple did not include `sqlite3.Error`, so a
     corrupt or locked database file reaching that layer surfaced as a raw traceback instead of the
@@ -467,7 +469,8 @@ def _write_md(path: Path, frontmatter: str, body: str = "# Doc\nBody text for on
 
 
 def test_the_index_report_names_every_dropped_document_and_groups_by_premise_id(
-    tmp_path: Path, capsys: pytest.CaptureFixture,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture,
 ) -> None:
     """R3-summary-line-omits-document / R2-summary-duplicate-ids / R3-cli-drop-report-untested
     (review lineage review-aa1bc7b855f40f4c): the human summary line used to name only the dropped
@@ -481,23 +484,19 @@ def test_the_index_report_names_every_dropped_document_and_groups_by_premise_id(
     root = tmp_path / "vault"
     _write_md(
         root / "public" / "adr.md",
-        'premises:\n  - id: scale-premise\n    statement: "Write volume stays under 10k/s"\n'
-        "    status: active\n",
+        'premises:\n  - id: scale-premise\n    statement: "Write volume stays under 10k/s"\n    status: active\n',
     )
     _write_md(
         root / "public" / "g1-issue-9-redeclare.md",
-        "bruriah_source: github\nissue: 9\n"
-        'premises:\n  - id: scale-premise\n    statement: "Attacker override"\n',
+        'bruriah_source: github\nissue: 9\npremises:\n  - id: scale-premise\n    statement: "Attacker override"\n',
     )
     _write_md(
         root / "public" / "g2-issue-30-other-a.md",
-        "bruriah_source: github\nissue: 30\n"
-        'premises:\n  - id: other-premise\n    statement: "From issue 30"\n',
+        'bruriah_source: github\nissue: 30\npremises:\n  - id: other-premise\n    statement: "From issue 30"\n',
     )
     _write_md(
         root / "public" / "g3-issue-4-other-b.md",
-        "bruriah_source: github\nissue: 4\n"
-        'premises:\n  - id: other-premise\n    statement: "From issue 4"\n',
+        'bruriah_source: github\nissue: 4\npremises:\n  - id: other-premise\n    statement: "From issue 4"\n',
     )
     _write_md(
         root / "public" / "g4-issue-50-invalidate.md",
@@ -508,10 +507,14 @@ def test_the_index_report_names_every_dropped_document_and_groups_by_premise_id(
     args = cli._build_cli_parser().parse_args(
         [
             "index",
-            "--config-dir", str(tmp_path / "config"),
-            "--data-dir", str(tmp_path / "data"),
-            "--corpus-root", str(root),
-            "--policy", str(policy_path),
+            "--config-dir",
+            str(tmp_path / "config"),
+            "--data-dir",
+            str(tmp_path / "data"),
+            "--corpus-root",
+            str(root),
+            "--policy",
+            str(policy_path),
         ]
     )
 
@@ -552,8 +555,12 @@ def test_the_dropped_entry_count_is_grammatically_singular_for_exactly_one_drop(
     "entry"/"entries" fixes both, exercised directly against `_index_summary_line` (no build
     needed) for the boundary the mixed-corpus test above cannot show: exactly one drop."""
     result = index_module.BuildResult(
-        path=Path("/unused"), build_id="0" * 32, manifest_hash="0" * 64,
-        documents=1, passages=1, reused_documents=0,
+        path=Path("/unused"),
+        build_id="0" * 32,
+        manifest_hash="0" * 64,
+        documents=1,
+        passages=1,
+        reused_documents=0,
         dropped_premises=(
             index_module.DroppedPremise(
                 premise_id="scale-premise",

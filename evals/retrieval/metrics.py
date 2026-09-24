@@ -8,6 +8,7 @@ never on "what an engine returned" as a definition of correctness. See
 No wall-clock, no randomness, no I/O: every function is a pure computation
 over its arguments, so the same inputs always produce the same outputs.
 """
+
 from __future__ import annotations
 
 import math
@@ -65,9 +66,7 @@ def _relevance(note: str, must_include: Sequence[str], acceptable_only: Sequence
     return 0
 
 
-def ndcg_at_10(
-    ranked_notes: Sequence[str], must_include: Sequence[str], acceptable: Sequence[str]
-) -> float | None:
+def ndcg_at_10(ranked_notes: Sequence[str], must_include: Sequence[str], acceptable: Sequence[str]) -> float | None:
     """Graded nDCG@10 over the top 10 of `ranked_notes`.
 
     Relevance: 2 for a `must_include` note, 1 for an `acceptable` note not

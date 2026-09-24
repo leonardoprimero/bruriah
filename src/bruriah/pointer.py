@@ -59,9 +59,7 @@ def _read_pointer_text(pointer: Path) -> str:
         os.close(descriptor)
 
 
-def read_pointer(
-    pointer: Path, *, entry_keys: frozenset[str], name_key: str, error: ErrorType
-) -> dict[str, Any]:
+def read_pointer(pointer: Path, *, entry_keys: frozenset[str], name_key: str, error: ErrorType) -> dict[str, Any]:
     """Parse and structurally validate a pointer file. Rejects symlinked pointers, unexpected
     shapes, and any entry whose `name_key` value is not a bare filename (path traversal)."""
     if pointer.is_symlink():
@@ -89,14 +87,16 @@ def read_pointer(
     return value
 
 
-def write_pointer(
-    pointer: Path, active: dict[str, str], retained: list[dict[str, str]]
-) -> bool:
+def write_pointer(pointer: Path, active: dict[str, str], retained: list[dict[str, str]]) -> bool:
     """Atomically replace the pointer. Returns False when the parent-directory fsync fails, so the
     caller can report reduced durability rather than treating a written pointer as lost."""
     handle = tempfile.NamedTemporaryFile(
-        mode="w", encoding="utf-8", prefix=f".{pointer.name}.", suffix=".tmp",
-        dir=pointer.parent, delete=False,
+        mode="w",
+        encoding="utf-8",
+        prefix=f".{pointer.name}.",
+        suffix=".tmp",
+        dir=pointer.parent,
+        delete=False,
     )
     temporary = Path(handle.name)
     try:
@@ -145,9 +145,7 @@ def identity(file_descriptor: int) -> tuple[int, int, int, int]:
     return value.st_dev, value.st_ino, value.st_size, value.st_mtime_ns
 
 
-def controlled_file(
-    pointer: Path, name: str, *, error: ErrorType
-) -> tuple[Path, int, tuple[int, int, int, int]]:
+def controlled_file(pointer: Path, name: str, *, error: ErrorType) -> tuple[Path, int, tuple[int, int, int, int]]:
     """Open `name` beside `pointer` under symlink and containment control, returning its identity so
     the caller can detect a swap between validation and use."""
     path = pointer.parent / name
@@ -160,7 +158,8 @@ def controlled_file(
         # lifetime. That surplus is what lets `index.py` hand SQLite a PATH on Windows instead of
         # the `/dev/fd` entry POSIX requires -- the path provably still names this file.
         descriptor = (
-            winfs.open_pinned(path) if _WINDOWS  # pragma: no cover -- Windows-only
+            winfs.open_pinned(path)
+            if _WINDOWS  # pragma: no cover -- Windows-only
             else os.open(path, os.O_RDONLY | os.O_NOFOLLOW)
         )
         file_identity = identity(descriptor)
@@ -231,11 +230,14 @@ def activation_lock(pointer: Path):
 
 def serialized(pointer_position: int):
     """Serialize an operation on the pointer at `args[pointer_position]` under an exclusive lock."""
+
     def decorate(operation):
         def locked(*args, **kwargs):
             with activation_lock(args[pointer_position]):
                 return operation(*args, **kwargs)
+
         return locked
+
     return decorate
 
 

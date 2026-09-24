@@ -19,7 +19,8 @@ from bruriah.service import InvestigateService, ServiceDeps, read
 from pydantic import ValidationError
 
 FINGERPRINT = (
-    '{"artifact":"model.onnx","artifact_sha256":"' + "a" * 64
+    '{"artifact":"model.onnx","artifact_sha256":"'
+    + "a" * 64
     + '","pooling":"mean","runtime":"fastembed==0.8.0","snapshot":"snapshot-a","source":"example/model"}'
 )
 _SRC = Path(__file__).resolve().parents[1] / "src"
@@ -170,9 +171,7 @@ We evaluated FastMCP and rejected it due to schema derivation dropping fields wi
     with snapshot_active(pointer, config) as active:
         deps = ServiceDeps(registry=_real_registry(), snapshot=active)
         service = InvestigateService(deps)
-        result = service.investigate(
-            InvestigationRequest(task="migrate server to FastMCP framework")
-        )
+        result = service.investigate(InvestigationRequest(task="migrate server to FastMCP framework"))
 
         adr_ref = _doc_ref("public/adr-01.md")
         alt_ref = alternative_ref_for(adr_ref, "FastMCP")
@@ -183,10 +182,7 @@ We evaluated FastMCP and rejected it due to schema derivation dropping fields wi
         assert result.counterfactual_assessment.decision_ref == adr_ref
         assert result.counterfactual_assessment.verdict == "repeat_of_rejected_architecture"
         assert len(result.counterfactual_assessment.supporting_evidence) > 0
-        assert any(
-            f"Task matches rejected architecture {alt_ref} under active premises" in c
-            for c in result.conflicts
-        )
+        assert any(f"Task matches rejected architecture {alt_ref} under active premises" in c for c in result.conflicts)
         assert len(result.alternatives) == 1
         assert result.alternatives[0].ref == alt_ref
         assert result.alternatives[0].disposition == "rejected"
@@ -276,9 +272,7 @@ Upstream released FastMCP 2.0 with strict schema forbid support.
     with snapshot_active(pointer, config) as active:
         deps = ServiceDeps(registry=_real_registry(), snapshot=active)
         service = InvestigateService(deps)
-        result = service.investigate(
-            InvestigationRequest(task="migrate server to FastMCP framework")
-        )
+        result = service.investigate(InvestigationRequest(task="migrate server to FastMCP framework"))
 
         adr_ref = _doc_ref("public/adr-01.md")
         invalidator_ref = _doc_ref("public/adr-02.md")
@@ -290,8 +284,7 @@ Upstream released FastMCP 2.0 with strict schema forbid support.
         assert result.counterfactual_assessment.verdict == "premise_changed_requires_reevaluation"
         assert len(result.counterfactual_assessment.supporting_evidence) >= 1
         assert any(
-            f"Historical rejection of {alt_ref} questioned: premise {premise_ref} was invalidated "
-            "by f6e5d4c3b2a1" in c
+            f"Historical rejection of {alt_ref} questioned: premise {premise_ref} was invalidated by f6e5d4c3b2a1" in c
             for c in result.conflicts
         )
         assert len(result.premises) == 1
@@ -340,9 +333,16 @@ Decision content.
     policy_path.write_text("version: 1\ninclude: ['public/**']\nexclude: []\n", encoding="utf-8")
     policy = CorpusPolicy.load(policy_path)
     config = BuildConfig(
-        root=tmp_path / "vault", policy_path=policy_path, schema_version=1, parser_version="corpus-v2",
-        service_version="0.1.0", mcp_range=">=1.28.1,<2", embedding_model="test/minilm",
-        embedding_revision="snapshot-a", embedding_dimensions=3, embedding_fingerprint=FINGERPRINT,
+        root=tmp_path / "vault",
+        policy_path=policy_path,
+        schema_version=1,
+        parser_version="corpus-v2",
+        service_version="0.1.0",
+        mcp_range=">=1.28.1,<2",
+        embedding_model="test/minilm",
+        embedding_revision="snapshot-a",
+        embedding_dimensions=3,
+        embedding_fingerprint=FINGERPRINT,
         ranking_config="rrf-v1",
     )
     candidate = tmp_path / "candidate.sqlite3"
@@ -353,9 +353,7 @@ Decision content.
     with snapshot_active(pointer, config) as active:
         deps = ServiceDeps(registry=_real_registry(), snapshot=active)
         service = InvestigateService(deps)
-        result = service.investigate(
-            InvestigationRequest(task="migrate server to a completely different framework")
-        )
+        result = service.investigate(InvestigationRequest(task="migrate server to a completely different framework"))
 
         assert result.counterfactual_assessment is None
         assert result.alternatives == []
@@ -403,9 +401,16 @@ Decision content.
     policy_path.write_text("version: 1\ninclude: ['public/**']\nexclude: []\n", encoding="utf-8")
     policy = CorpusPolicy.load(policy_path)
     config = BuildConfig(
-        root=tmp_path / "vault", policy_path=policy_path, schema_version=1, parser_version="corpus-v2",
-        service_version="0.1.0", mcp_range=">=1.28.1,<2", embedding_model="test/minilm",
-        embedding_revision="snapshot-a", embedding_dimensions=3, embedding_fingerprint=FINGERPRINT,
+        root=tmp_path / "vault",
+        policy_path=policy_path,
+        schema_version=1,
+        parser_version="corpus-v2",
+        service_version="0.1.0",
+        mcp_range=">=1.28.1,<2",
+        embedding_model="test/minilm",
+        embedding_revision="snapshot-a",
+        embedding_dimensions=3,
+        embedding_fingerprint=FINGERPRINT,
         ranking_config="rrf-v1",
     )
     candidate = tmp_path / "candidate.sqlite3"
@@ -416,9 +421,7 @@ Decision content.
     with snapshot_active(pointer, config) as active:
         deps = ServiceDeps(registry=_real_registry(), snapshot=active)
         service = InvestigateService(deps)
-        result = service.investigate(
-            InvestigationRequest(task="migrate server to Kubernetes framework")
-        )
+        result = service.investigate(InvestigationRequest(task="migrate server to Kubernetes framework"))
 
         assert result.counterfactual_assessment is not None
         kubernetes_ref = _doc_ref("public/adr-kubernetes.md")
@@ -476,9 +479,7 @@ Decision content.
     with snapshot_active(pointer, config) as active:
         deps = ServiceDeps(registry=_real_registry(), snapshot=active)
         service = InvestigateService(deps)
-        result = service.investigate(
-            InvestigationRequest(task="unrelated task about database backups")
-        )
+        result = service.investigate(InvestigationRequest(task="unrelated task about database backups"))
 
         assert result.counterfactual_assessment is None
         assert result.alternatives == []
@@ -524,9 +525,16 @@ extra="forbid". {padding}
     policy_path.write_text("version: 1\ninclude: ['public/**']\nexclude: []\n", encoding="utf-8")
     policy = CorpusPolicy.load(policy_path)
     config = BuildConfig(
-        root=tmp_path / "vault", policy_path=policy_path, schema_version=1, parser_version="corpus-v2",
-        service_version="0.1.0", mcp_range=">=1.28.1,<2", embedding_model="test/minilm",
-        embedding_revision="snapshot-a", embedding_dimensions=3, embedding_fingerprint=FINGERPRINT,
+        root=tmp_path / "vault",
+        policy_path=policy_path,
+        schema_version=1,
+        parser_version="corpus-v2",
+        service_version="0.1.0",
+        mcp_range=">=1.28.1,<2",
+        embedding_model="test/minilm",
+        embedding_revision="snapshot-a",
+        embedding_dimensions=3,
+        embedding_fingerprint=FINGERPRINT,
         ranking_config="rrf-v1",
     )
     candidate = tmp_path / "candidate.sqlite3"
@@ -562,7 +570,7 @@ def test_the_alt_and_premise_refs_investigate_returns_round_trip_through_read_ev
         alt_content = json.loads(alt_item.content)
         assert alt_content["name"] == "FastMCP"
         assert alt_content["disposition"] == "rejected"
-        assert "extra=\"forbid\"" in alt_content["reason"]
+        assert 'extra="forbid"' in alt_content["reason"]
         assert alt_content["decision_ref"] == adr_ref
         assert alt_content["premise_refs"] == [premise_ref]
 
@@ -689,9 +697,7 @@ def test_an_alt_next_cursor_continues_through_the_same_branch_to_the_end(tmp_pat
         assert first.status == "ok" and first.truncated is True
         assert first.next_cursor is not None
 
-        second = read(
-            ReadRequest(refs=[alt_ref], budgets=budgets, cursor=first.next_cursor), deps
-        ).items[0]
+        second = read(ReadRequest(refs=[alt_ref], budgets=budgets, cursor=first.next_cursor), deps).items[0]
         assert second.status == "ok"
         assert second.evidence_kind == "alternative"
         assert second.truncated is False
@@ -721,9 +727,7 @@ def test_a_premise_next_cursor_continues_through_the_same_branch_to_the_end(tmp_
         assert first.status == "ok" and first.truncated is True
         assert first.next_cursor is not None
 
-        second = read(
-            ReadRequest(refs=[premise_ref], budgets=budgets, cursor=first.next_cursor), deps
-        ).items[0]
+        second = read(ReadRequest(refs=[premise_ref], budgets=budgets, cursor=first.next_cursor), deps).items[0]
         assert second.status == "ok"
         assert second.evidence_kind == "premise"
         assert second.truncated is False

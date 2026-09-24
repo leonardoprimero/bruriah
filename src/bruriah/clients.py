@@ -86,12 +86,7 @@ def _is_env_pair(entry: object) -> bool:
     """`True` only for a well-shaped `(name, value)` pair of strings -- used to type-validate
     every `env` entry BEFORE unpacking it, so a malformed entry (wrong length, non-tuple, non-str
     members) raises this module's typed `ClientError` instead of an untyped unpacking error."""
-    return (
-        isinstance(entry, tuple)
-        and len(entry) == 2
-        and isinstance(entry[0], str)
-        and isinstance(entry[1], str)
-    )
+    return isinstance(entry, tuple) and len(entry) == 2 and isinstance(entry[0], str) and isinstance(entry[1], str)
 
 
 @dataclass(frozen=True)
@@ -195,32 +190,42 @@ class ClientCapability:
 
 CLIENT_CAPABILITIES: dict[ClientId, ClientCapability] = {
     ClientId.CLAUDE_CODE: ClientCapability(
-        ClientId.CLAUDE_CODE, "Claude Code", ".mcp.json (project) or user scope via `claude mcp add`",
+        ClientId.CLAUDE_CODE,
+        "Claude Code",
+        ".mcp.json (project) or user scope via `claude mcp add`",
         StructuredOutputSupport.DETECTED,
         "Claude Code consumes structuredContent directly; text fallback is unused in practice "
         "but still returned and still valid.",
     ),
     ClientId.OPENCODE: ClientCapability(
-        ClientId.OPENCODE, "OpenCode", "opencode.json (project) or ~/.config/opencode/opencode.json",
+        ClientId.OPENCODE,
+        "OpenCode",
+        "opencode.json (project) or ~/.config/opencode/opencode.json",
         StructuredOutputSupport.DEGRADED,
         "OpenCode's local MCP config combines executable and arguments into one `command` array "
         "and does not document structuredContent consumption; core behavior (tools/list, "
         "tools/call, text fallback) is unaffected either way.",
     ),
     ClientId.CURSOR: ClientCapability(
-        ClientId.CURSOR, "Cursor", ".cursor/mcp.json (project) or ~/.cursor/mcp.json (global)",
+        ClientId.CURSOR,
+        "Cursor",
+        ".cursor/mcp.json (project) or ~/.cursor/mcp.json (global)",
         StructuredOutputSupport.DETECTED,
         "Cursor follows the same mcpServers shape as Claude Code and is expected to consume "
         "structuredContent; text fallback remains available regardless.",
     ),
     ClientId.GEMINI: ClientCapability(
-        ClientId.GEMINI, "Gemini CLI", "~/.gemini/settings.json or .gemini/settings.json (project)",
+        ClientId.GEMINI,
+        "Gemini CLI",
+        "~/.gemini/settings.json or .gemini/settings.json (project)",
         StructuredOutputSupport.DETECTED,
         "Gemini CLI adopted the mcpServers convention; core two-tool behavior is unaffected by "
         "any schema keyword it does not enforce client-side.",
     ),
     ClientId.ANTIGRAVITY: ClientCapability(
-        ClientId.ANTIGRAVITY, "Antigravity", "~/.antigravity/mcp_config.json (best-effort -- verify locally)",
+        ClientId.ANTIGRAVITY,
+        "Antigravity",
+        "~/.antigravity/mcp_config.json (best-effort -- verify locally)",
         StructuredOutputSupport.DEGRADED,
         "Antigravity's exact on-disk config path could not be verified from first principles at "
         "authoring time; this renders the standard mcpServers shape as a best-effort starting "
@@ -228,7 +233,9 @@ CLIENT_CAPABILITIES: dict[ClientId, ClientCapability] = {
         "docs before relying on this snippet -- see docs/client-guidance.md.",
     ),
     ClientId.GENERIC_STDIO: ClientCapability(
-        ClientId.GENERIC_STDIO, "Generic stdio MCP client", "host-specific -- consult that host's MCP documentation",
+        ClientId.GENERIC_STDIO,
+        "Generic stdio MCP client",
+        "host-specific -- consult that host's MCP documentation",
         StructuredOutputSupport.DEGRADED,
         "Assume only tools/list and tools/call (A-Cross-Client Core Equivalence's minimum); the "
         "canonical JSON text fallback is required reading for any host that does not surface "

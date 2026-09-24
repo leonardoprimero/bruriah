@@ -7,6 +7,7 @@ Runs entirely against synthetic `{"id", "rank"}` / `{"id", "document_rank"}` ran
 index, no corpus, no network -- because the arithmetic under test (recall, MRR, the exact McNemar
 sign test, rank-bucket movement) does not depend on how a rank file was produced.
 """
+
 from __future__ import annotations
 
 import json
@@ -78,14 +79,20 @@ def test_compare_reports_recall_mrr_and_top3_movement(tmp_path: Path) -> None:
 
     by_id = {row["id"]: row for row in rows}
     assert by_id["q1"] == {
-        "id": "q1", "baseline_rank": 2, "candidate_rank": 5,
-        "baseline_bucket": "1-3", "candidate_bucket": "4-10",
+        "id": "q1",
+        "baseline_rank": 2,
+        "candidate_rank": 5,
+        "baseline_bucket": "1-3",
+        "candidate_bucket": "4-10",
     }
     assert by_id["q2"]["baseline_bucket"] == "11-40"
     assert by_id["q2"]["candidate_bucket"] == "1-3"
     assert by_id["q4"] == {
-        "id": "q4", "baseline_rank": None, "candidate_rank": None,
-        "baseline_bucket": "41+", "candidate_bucket": "41+",
+        "id": "q4",
+        "baseline_rank": None,
+        "candidate_rank": None,
+        "baseline_bucket": "41+",
+        "candidate_bucket": "41+",
     }
 
 
@@ -102,10 +109,19 @@ def test_main_prints_json_and_writes_movement_rows(tmp_path: Path, capsys: pytes
     )
     out = tmp_path / "movement.jsonl"
 
-    exit_code = report_paired.main([
-        "--corpus", "test-corpus", "--baseline", str(baseline), "--candidate", str(candidate),
-        "--out", str(out), "--json",
-    ])
+    exit_code = report_paired.main(
+        [
+            "--corpus",
+            "test-corpus",
+            "--baseline",
+            str(baseline),
+            "--candidate",
+            str(candidate),
+            "--out",
+            str(out),
+            "--json",
+        ]
+    )
 
     assert exit_code == 0
     result = json.loads(capsys.readouterr().out)
