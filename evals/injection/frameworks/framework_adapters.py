@@ -3,6 +3,11 @@
 `frameworks-compare` dependency group (pinned `llama-index-core` and `langchain-core`) is
 imported; everything comparable without a framework lives in `compare.py`.
 
+Named `framework_adapters`, not `adapters`: the evals trees share one flat `sys.path`
+namespace and `evals/retrieval/adapters.py` already claims that module name -- whichever tree
+imported first would silently shadow the other (the same collision that keeps the runner named
+`compare.py` instead of a second `run.py`).
+
 Symmetric raw-text ingestion, on purpose: both adapters load each corpus file's exact text into
 one framework Document with the file name as metadata, rather than going through each
 framework's file loader. A markdown loader that parses front-matter differently would turn a

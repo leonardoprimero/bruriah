@@ -333,7 +333,9 @@ def render_markdown(results: Sequence[FrameworkCaseResult]) -> str:
 def main() -> int:
     # The optional dependency group, imported only here; resolved at runtime through the
     # sys.path insertion at the top of this module, like every cross-module import in evals/.
-    from adapters import ADAPTERS  # pyright: ignore[reportMissingImports]
+    # `framework_adapters`, not `adapters`: evals/retrieval/adapters.py already claims that
+    # flat module name (see framework_adapters.py's docstring).
+    from framework_adapters import ADAPTERS  # pyright: ignore[reportMissingImports]
 
     results = run_comparison(ADAPTERS)
     REPORT_JSON_PATH.write_text(render_json(results), encoding="utf-8")

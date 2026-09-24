@@ -255,7 +255,11 @@ def test_render_is_deterministic_for_equal_results() -> None:
 
 
 def _load_adapters() -> "list[FrameworkAdapter]":
-    from adapters import ADAPTERS
+    # `framework_adapters`, never `adapters`: `tests/test_retrieval_eval.py` puts
+    # `evals/retrieval` on the same flat sys.path, and its `adapters.py` would shadow (or be
+    # shadowed by) any module of that name depending on which test module imported first --
+    # exactly the collision that keeps the comparison runner named `compare.py` and not `run.py`.
+    from framework_adapters import ADAPTERS
 
     return list(ADAPTERS)
 
