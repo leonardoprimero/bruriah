@@ -6,7 +6,7 @@
 **TDD:** strict (global session configuration). Runner: `uv run pytest -q -p no:cacheprovider`
 **Delivery strategy:** `ask-on-risk`. Forecast ~1,500 authored changed lines, over budget. Slicing
 is decided at delivery time, because nothing is pushed before the fix lands (see Disclosure).
-**RDD:** enabled for this repo. Last reviewed boundary: 6d7e25d.
+**RDD:** enabled for this repo. Last reviewed boundary: dfe879a (all work reviewed).
 **Release:** 2.0.0. Contract break: `InvestigationResult.schema_version` "1" → "2".
 **Disclosure:** local only, never pushed, until this branch closes every measured channel.
 Benchmark, fix and before/after numbers ship together.
@@ -499,6 +499,17 @@ Rejected: filtering the text (a slug is printable and still an instruction); a s
   (R2-t41-test-demo-duplicated-fixture-helpers) and the optional T4 two-resolution-paths cleanup in
   `demo.py` (R2-t4-demo-two-alt-resolution-paths) -- both already recorded as optional, neither
   touched by this task's scope.
+
+- RDD review of T5 (b937eb6..a8c930f): high risk, consent granted by the user,
+  lineage review-66899866f638f13c approved and acknowledged. Before it, the parent corrected
+  the CHANGELOG: it had said 1.6.0 "closed the leaks a first probe found" (1.6.0 fixed the
+  `--agent` renderings, and the investigate_work channels were known and held back), and it
+  overclaimed "no real-world alternative name is affected". Findings: R2/R3 no-string-name test
+  overclaim (fixed in dfe879a by parametrizing absent/int/null/list), and
+  R2-t5-premise-test-duplicates-fixture-padding (left as optional).
+- Delivery note: `evals/injection/README.md` and the CHANGELOG cite branch commit SHAs. A
+  squash or rebase merge would rewrite them and leave the citations dangling; the delivery
+  method has to preserve them or the citations have to be updated in the merge.
 
 ## Next step
 
