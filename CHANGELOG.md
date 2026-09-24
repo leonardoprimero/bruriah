@@ -3,7 +3,7 @@
 Notable changes, newest first. This project follows [semantic versioning](https://semver.org/),
 and the entries here name what changed for *you* rather than which files moved.
 
-## [2.0.1] — 2026-09-23
+## [2.0.1] — 2026-09-24
 
 ### Fixed: a conflicting premise declaration can no longer replace another silently
 - `bruriah index` collected premises in a dict keyed by `premise_id`; when two documents declared
@@ -37,8 +37,14 @@ and the entries here name what changed for *you* rather than which files moved.
 - `bruriah index`'s human summary line now names the source document for every dropped premise
   (previously it listed only the premise id) and groups drops by premise id, so a premise dropped
   more than once -- a losing redeclaration and an ignored invalidation, for example -- shows each
-  document and reason instead of collapsing into one undifferentiated count. The JSON
-  `dropped_premises` output already named each document; it is unchanged.
+  document and reason instead of collapsing into one undifferentiated count. It also no longer
+  calls every drop a "declaration": an ignored invalidation is a drop too, so the line now reads
+  "Dropped N GitHub premise entry/entries". The JSON `dropped_premises` output already named each
+  document; it is unchanged.
+- `SourceMetadata`'s trust tier now validates itself at construction: anything other than
+  `"repository"` or `"github"` raises, rather than being silently treated as the lower-trust
+  GitHub tier by the code that branches on it. Defense in depth -- nothing in this codebase
+  constructs it with any other value -- for a field a `Literal` type only enforces statically.
 
 ### Migration
 - **A corpus that already has two repository documents declaring the same premise id** stops
