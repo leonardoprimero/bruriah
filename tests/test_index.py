@@ -19,7 +19,7 @@ from conftest import requires_vault
 
 import bruriah.index as index_module
 import bruriah.index_runner as index_runner_module
-from bruriah.corpus import CorpusPolicy, parse_document
+from bruriah.corpus import CorpusPolicy, document_ref_for, parse_document
 import bruriah.cli as cli_module
 from bruriah.cli import _embedding_fingerprint
 from bruriah.index import (
@@ -277,6 +277,78 @@ def test_a_github_invalidation_never_changes_a_repository_premise(tmp_path: Path
             ("scale-premise",),
         ).fetchone()
         assert row == ("Write volume stays under 10k/s", "active", None)
+
+
+def test_a_repository_invalidation_still_flips_a_repository_premise(tmp_path: Path) -> None:
+    """premise-id-collision follow-up (review lineage review-c2885675bd293875,
+    R3-invalidation-allowed-paths-untested): coverage, not RED -- this already passes on the
+    trust-tiered invalidation guard (`test_a_github_invalidation_never_changes_a_repository_
+    premise` only proved the BLOCKED path). A repository-tier `invalidated_premises` entry
+    targeting a repository-tier premise is not a cross-tier case at all, so the guard must not
+    touch it: the premise still flips to `invalidated`, with `invalidated_by`/
+    `invalidation_document_ref` set exactly as before this feature."""
+    root = tmp_path / "vault"
+    _write_md(
+        root / "public" / "adr.md",
+        'premises:\n  - id: scale-premise\n    statement: "Write volume stays under 10k/s"\n'
+        "    status: active\n",
+    )
+    _write_md(
+        root / "public" / "invalidate.md",
+        "commit: a1b2c3d4e5f6\ninvalidated_premises:\n  - scale-premise\n",
+    )
+    policy_path = tmp_path / "policy.yaml"
+    policy_path.write_text("version: 1\ninclude: ['public/**']\nexclude: []\n", encoding="utf-8")
+    policy = CorpusPolicy.load(policy_path)
+    candidate = tmp_path / "candidate.sqlite3"
+
+    result = build_candidate(config(root, policy_path), candidate, policy, fake_embeddings)
+
+    assert result.dropped_premises == ()
+    with closing(open_candidate(candidate)) as database:
+        row = database.execute(
+            "SELECT status, invalidated_by, invalidation_document_ref FROM premises "
+            "WHERE premise_id = ?",
+            ("scale-premise",),
+        ).fetchone()
+        assert row == ("invalidated", "a1b2c3d4e5f6", document_ref_for("public/invalidate.md"))
+
+
+def test_a_github_invalidation_still_flips_a_github_tier_premise(tmp_path: Path) -> None:
+    """premise-id-collision follow-up (review lineage review-c2885675bd293875,
+    R3-invalidation-allowed-paths-untested): coverage, not RED. A GitHub-tier `invalidated_
+    premises` entry targeting a premise no repository document claims (here, a premise a GitHub
+    document itself declared and won outright) is not the guarded case: it still flips to
+    `invalidated`, with `invalidated_by`/`invalidation_document_ref` set."""
+    root = tmp_path / "vault"
+    _write_md(
+        root / "public" / "g1-issue-9-declare.md",
+        "bruriah_source: github\nissue: 9\n"
+        'premises:\n  - id: other-premise\n    statement: "From github"\n',
+    )
+    _write_md(
+        root / "public" / "g2-issue-10-invalidate.md",
+        "bruriah_source: github\nissue: 10\ninvalidated_premises:\n  - other-premise\n",
+    )
+    policy_path = tmp_path / "policy.yaml"
+    policy_path.write_text("version: 1\ninclude: ['public/**']\nexclude: []\n", encoding="utf-8")
+    policy = CorpusPolicy.load(policy_path)
+    candidate = tmp_path / "candidate.sqlite3"
+
+    result = build_candidate(config(root, policy_path), candidate, policy, fake_embeddings)
+
+    assert result.dropped_premises == ()
+    with closing(open_candidate(candidate)) as database:
+        row = database.execute(
+            "SELECT status, invalidated_by, invalidation_document_ref FROM premises "
+            "WHERE premise_id = ?",
+            ("other-premise",),
+        ).fetchone()
+        assert row == (
+            "invalidated",
+            document_ref_for("public/g2-issue-10-invalidate.md"),
+            document_ref_for("public/g2-issue-10-invalidate.md"),
+        )
 
 
 def test_two_github_documents_declaring_the_same_premise_id_the_lowest_issue_number_wins(
