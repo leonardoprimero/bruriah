@@ -228,9 +228,12 @@ def _index_summary_line(result: BuildResult) -> str:
             ) + ")"
             for premise_id, drops in by_id.items()
         )
-        line += (
-            f". Dropped {len(result.dropped_premises)} GitHub premise declaration(s): {groups}"
-        )
+        # "entries", never "declarations": a drop is either a losing premise declaration or an
+        # ignored invalidation (`github_invalidation_ignored`), and the earlier wording claimed
+        # every drop was a declaration even when it was not.
+        count = len(result.dropped_premises)
+        entry_word = "entry" if count == 1 else "entries"
+        line += f". Dropped {count} GitHub premise {entry_word}: {groups}"
     return line
 
 
@@ -790,10 +793,11 @@ def _cmd_index(
         # they find out when it was not: a full re-embed after a model or parser change shows up
         # here as zero, on the run that took the time.
         "reused_documents": result.reused_documents,
-        # A GitHub-sourced premise declaration or invalidation that lost to a higher-trust or
-        # lower-issue-number one (`index._build_premise_and_alternative_records`) is dropped rather
-        # than applied -- reported here, by id and source document, so the drop is visible instead
-        # of silent.
+        # A GitHub-sourced premise declaration that lost to a higher-trust (repository) or
+        # lower-issue-number one, or a GitHub-sourced invalidation that targeted a repository-tier
+        # premise -- never one targeting a GitHub-tier premise, which still applies normally
+        # (`index._build_premise_and_alternative_records`) -- is dropped rather than applied.
+        # Reported here, by id and source document, so the drop is visible instead of silent.
         "dropped_premises": [
             {
                 "premise_id": dropped.premise_id,

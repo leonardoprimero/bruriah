@@ -17,6 +17,7 @@ import anyio
 import platformdirs
 import pytest
 
+import bruriah.index as index_module
 from conftest import requires_vault
 from bruriah import __version__ as bruriah_version
 from bruriah import cache, cli, clients, packs
@@ -538,10 +539,34 @@ def test_the_index_report_names_every_dropped_document_and_groups_by_premise_id(
     ]
 
     assert captured.err.strip().endswith(
-        ". Dropped 3 GitHub premise declaration(s): "
+        ". Dropped 3 GitHub premise entries: "
         "scale-premise (public/g1-issue-9-redeclare.md: shadowed_by_repository_premise, "
         "public/g4-issue-50-invalidate.md: github_invalidation_ignored); "
         "other-premise (public/g2-issue-30-other-a.md: shadowed_by_lower_github_issue)"
+    )
+
+
+def test_the_dropped_entry_count_is_grammatically_singular_for_exactly_one_drop() -> None:
+    """R2/R3/R4 summary label (review lineage review-c2885675bd293875): "declaration(s)" used to
+    both mislabel an invalidation as a declaration and never distinguish one drop from several.
+    "entry"/"entries" fixes both, exercised directly against `_index_summary_line` (no build
+    needed) for the boundary the mixed-corpus test above cannot show: exactly one drop."""
+    result = index_module.BuildResult(
+        path=Path("/unused"), build_id="0" * 32, manifest_hash="0" * 64,
+        documents=1, passages=1, reused_documents=0,
+        dropped_premises=(
+            index_module.DroppedPremise(
+                premise_id="scale-premise",
+                document_ref="doc:v1:unused",
+                relative_path="public/g1-issue-9-redeclare.md",
+                reason="shadowed_by_repository_premise",
+            ),
+        ),
+    )
+    line = cli._index_summary_line(result)
+    assert line.endswith(
+        ". Dropped 1 GitHub premise entry: "
+        "scale-premise (public/g1-issue-9-redeclare.md: shadowed_by_repository_premise)"
     )
 
 
