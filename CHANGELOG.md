@@ -5,17 +5,20 @@ and the entries here name what changed for *you* rather than which files moved.
 
 ## [2.0.0] — 2026-09-23
 
-A security release and a breaking one: `investigate_work` now holds, measurably, the boundary
-1.6.0 only partially closed. Every author-controlled value that used to reach the serialized
+A security release and a breaking one: `investigate_work` now holds, measurably, the boundary its
+documentation always promised. Every author-controlled value that used to reach the serialized
 response as text now leaves it as an opaque reference.
 
 ### Fixed: `investigate_work` closes the last of the measured retrieval-boundary leaks
-- 1.6.0 closed the leaks a first probe found; a wider, hermetic benchmark
-  (`evals/injection/`, see [`evals/injection/README.md`](evals/injection/README.md)) then measured
-  17 attacker-controlled surfaces across markdown front-matter, the file name, git commits, GitHub
-  closing comments, and the code-target and lineage paths, and found the real exposure was larger:
-  **13/17** attacker-controlled surfaces reached the response (Attack Success Rate, ASR) at that
-  widened baseline.
+- 1.6.0 fixed this class of defect in the `--agent` renderings of `brief`, `guard` and `heal`.
+  The same class was already known to affect `investigate_work`'s response at that time. Because
+  the fix needed a contract break, it was deliberately left out of 1.6.0 and out of its public
+  changelog until it was ready. It ships here, together with the measurement that proves it.
+- A hermetic benchmark (`evals/injection/`, see
+  [`evals/injection/README.md`](evals/injection/README.md)) measures 17 attacker-controlled surfaces
+  across markdown front-matter, the file name, git commits, GitHub closing comments, and the
+  code-target and lineage paths. Against the pre-fix code, **13/17** of them reached the response
+  (Attack Success Rate, ASR).
 - Closing the evidence locators and closing the authority-rationale vocabulary to a fixed set of
   codes (below) brought that to **7/17**. Closing the alternative/premise/counterfactual shapes to
   opaque references and fixed wording (below) brought it to **0/17**. Every case, and its paired
@@ -68,8 +71,9 @@ response as text now leaves it as an opaque reference.
 - **A 1.x cache entry** with a free-text `authority_rationale` value is not compatible with the
   2.x closed vocabulary. It reads as a cache miss and is re-fetched, never as an error.
 - **Alternative name matching** now requires the name to carry a token of at least 3 characters; a
-  name shorter than that (or with no such token) stops matching a task by name. No currently known
-  real-world alternative name is affected.
+  name shorter than that (or with no such token) stops matching a task by name. None of the 20
+  scenarios in `evals/counterfactual/` is affected; a corpus that relies on such a name should
+  rename the alternative.
 
 ## [1.6.0] — 2026-09-22
 
