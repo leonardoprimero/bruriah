@@ -49,15 +49,15 @@ indexing until they are fixed. Today it indexes wrong data silently. This goes i
 
 ## Tasks
 
-- [ ] **T0 — RED.** Tests for: two repository documents with the same premise id (typed error that
+- [x] **T0 — RED.** Tests for: two repository documents with the same premise id (typed error that
   names both); a GitHub document redeclaring a repository premise (the repository premise
   survives unchanged, the drop is reported, the counterfactual verdict is unchanged); two GitHub
   documents with the same id (lowest number wins, the other is reported); a duplicate alternative
   name in one document (typed error); a `sqlite3.Error` during `bruriah index` (typed message,
-  no traceback).
-- [ ] **T1 — Implementation**, including the report surface.
-- [ ] **T2 — Docs.** CHANGELOG entry for 2.0.1 (fix plus migration note), and the premise
-  semantics in docs/openspec where they claim global uniqueness.
+  no traceback). — `05520cf`
+- [x] **T1 — Implementation**, including the report surface. — `be31653`
+- [x] **T2 — Docs.** CHANGELOG entry for 2.0.1 (fix plus migration note), and the premise
+  semantics in docs/openspec where they claim global uniqueness. — `7cb75b3`
 
 ## Acceptance criteria
 
@@ -74,7 +74,43 @@ indexing until they are fixed. Today it indexes wrong data silently. This goes i
 
 - 2026-09-23: mapped by one read-only agent; the parent confirmed in index.py:780-816 that
   conflicting declarations overwrite silently rather than crash.
+- 2026-09-23: T0 RED confirmed by stashing the implementation (source files only, tests kept) and
+  observing every new/changed test fail on its intended assertion (`AttributeError:
+  'BuildResult' object has no attribute 'dropped_premises'`, `AttributeError: 'SourceMetadata'
+  object has no attribute 'source'`, `DID NOT RAISE IndexLifecycleError`,
+  `'bruriah_source: github' not in frontmatter`, `'bruriah: error: OperationalError'` missing the
+  `index_failed:` prefix). Implementation restored (`git stash pop`) and every one of those tests
+  observed GREEN before committing.
+- 2026-09-23: design item 4 said "wraps `sqlite3.Error` in `IndexLifecycleError`"; implemented
+  instead as adding `sqlite3.Error` to `_cmd_index`'s existing exception tuple that already
+  converts every other build-failure type into `CliError(f"index_failed:...")` — the same
+  acceptance criterion (typed message, no traceback) via the pattern the CLI layer already uses
+  for `CorpusPolicyError`/`IndexLifecycleError`/`ValueError`/`OSError`/`yaml.YAMLError`, rather
+  than introducing a new conversion inside `index.py` itself.
+- 2026-09-23: full verification run (see below). SHAs: docs `905537c`, tests (T0) `05520cf`,
+  implementation (T1) `be31653`, docs/changelog (T2) `7cb75b3`.
+
+### Verification results
+- `uv run pytest -q -p no:cacheprovider`: 1724 passed, 0 failed, 18 skipped (baseline was 1717/0/18;
+  net +7 tests, matching the README pin update to 1,742).
+- `uv run ruff check src tests evals scripts demo`: all checks passed.
+- `uv run mypy src`: no issues found in 63 source files.
+- `uv run python evals/injection/run.py`: 0/17 (unchanged).
+- `uv run python evals/counterfactual/runner.py`: 20/20 (unchanged).
+- `uv run bruriah index` on a throwaway corpus with a duplicate repository premise id:
+  `bruriah: error: index_failed:duplicate_premise_id:scale-premise:public/a.md:public/b.md`
+  (exit 1, no traceback).
+- `uv run bruriah index` on a throwaway corpus with a repository premise and a GitHub redeclaration:
+  human summary line ends with `. Dropped 1 GitHub premise declaration(s) that lost to a
+  higher-trust or lower-numbered source: scale-premise`; JSON summary includes
+  `"dropped_premises": [{"document": "public/2026-01-01-issue-9-attack.md", "premise_id":
+  "scale-premise", "reason": "shadowed_by_repository_premise"}]` (exit 0).
+- Attribution check (`git log --format=%B main..HEAD | rg "Co-Authored-By|Claude-Session"`): empty.
+- README's pinned test count (section 4) updated from 1,735 to 1,742.
 
 ## Next step
 
-T0–T2 via one bounded writer.
+Delivery: work-unit commits are on `fix/premise-id-collision`, ready for the user to push/open a
+PR under ordinary repository policy. RDD review was not run in this session (native review runs
+only on the user's own invocation of the receipt-driven-development flow; it was not requested
+here). No open questions or pending checks.
