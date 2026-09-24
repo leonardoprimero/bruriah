@@ -6,7 +6,7 @@
 **TDD:** strict (global session configuration). Runner: `uv run pytest -q -p no:cacheprovider`
 **Delivery strategy:** `ask-on-risk`. Forecast ~1,500 authored changed lines, over budget. Slicing
 is decided at delivery time, because nothing is pushed before the fix lands (see Disclosure).
-**RDD:** enabled for this repo. Last reviewed boundary: 13307ce.
+**RDD:** enabled for this repo. Last reviewed boundary: 6d7e25d.
 **Release:** 2.0.0. Contract break: `InvestigationResult.schema_version` "1" → "2".
 **Disclosure:** local only, never pushed, until this branch closes every measured channel.
 Benchmark, fix and before/after numbers ship together.
@@ -73,7 +73,11 @@ Rejected: filtering the text (a slug is printable and still an instruction); a s
   coverage the T4 review found missing, extracted the shared body between
   `_read_alternative_one`/`_read_premise_one`, and corrected the T4 Progress bullet's test-count
   arithmetic and a wrong type name.
-- [ ] **T5 — Proof and docs.** The benchmark at ASR 0 with its report; `demo/injection/run.py`,
+- [ ] **T5 — Proof and docs.** Opens with T4.1's review follow-ups: assert the truncation
+  precondition in the demo fallback test (read status ok with `truncated=True`;
+  R3-demo-truncation-precondition-unasserted); unit tests for the decode, shape and missing-name
+  fallbacks; one premise-ref window test; keyword arguments at the `_read_disclosure_one` call
+  sites. Then: The benchmark at ASR 0 with its report; `demo/injection/run.py`,
   the README section, docs, `evals/counterfactual/runner.py`, the CHANGELOG 2.0.0 entry,
   `evals/injection/README.md` with the before/after numbers. The CHANGELOG carries a migration
   note: user-authored packs with `max_router_version` "1.9.9" are rejected by a 2.x router
@@ -437,6 +441,13 @@ Rejected: filtering the text (a slug is printable and still an instruction); a s
   unifying them would mean routing embedded-ref substitution through `read_evidence` too, which
   touches `cli.py`'s identical use of the same shared resolver for `doc:v1:` refs; not cheap or
   clearly net simpler, so left for a later task if it comes up again).
+
+- RDD review of T4.1 (13307ce..6d7e25d): high risk, consent granted by the user, lineage
+  review-a5a7ca454aabd855 approved and acknowledged. Findings (test quality only):
+  R3-demo-truncation-precondition-unasserted (WARNING), R2-t41-disclosure-helper-positional-str-args,
+  R2-t41-test-demo-duplicated-fixture-helpers, R3-demo-decode-and-shape-fallbacks-uncovered,
+  R3-premise-read-window-after-refactor-uncovered. The cheap ones are carried into T5; the
+  fixture-helper deduplication is left as optional.
 
 ## Next step
 
