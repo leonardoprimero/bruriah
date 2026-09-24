@@ -485,15 +485,20 @@ Decision content.
         assert result.premises == []
 
 
-def _build_alternative_and_premise_snapshot(tmp_path: Path):
-    """Fixture shared by the T4/T4.1 (investigate-boundary-v2) round-trip and read-path tests:
-    one document declaring an alternative and its supporting premise, indexed for real. Based on
-    `test_investigate_counterfactual_repeat_rejected`'s corpus shape, with the `reason` and body
-    padded past 256 characters (T4.1) so a `Budgets(max_extracted_chars=...)`/`max_output_chars=
-    ...)` small enough to force truncation still clears each field's own `ge=256` floor."""
+def _build_alternative_and_premise_snapshot(tmp_path: Path, *, premise_rationale: str | None = None):
+    """Fixture shared by the T4/T4.1/T5 (investigate-boundary-v2) round-trip and read-path
+    tests: one document declaring an alternative and its supporting premise, indexed for real.
+    Based on `test_investigate_counterfactual_repeat_rejected`'s corpus shape, with the `reason`
+    and body padded past 256 characters (T4.1) so a `Budgets(max_extracted_chars=...)`/
+    `max_output_chars=...)` small enough to force truncation still clears each field's own
+    `ge=256` floor. `premise_rationale` (T5) optionally pads the premise's own disclosure past
+    that same floor for tests exercising the `premise:` read branch under a tiny budget; the
+    default (`None`) omits the frontmatter field entirely, leaving every pre-T5 caller's fixture
+    byte-identical."""
     padding = "Additional operational context repeated for length only. " * 8
     vault = tmp_path / "vault" / "public"
     vault.mkdir(parents=True)
+    rationale_line = f'    rationale: "{premise_rationale}"\n' if premise_rationale is not None else ""
     (vault / "adr-01.md").write_text(
         f"""---
 commit: a1b2c3d4e5f6
@@ -507,7 +512,7 @@ premises:
   - id: fastmcp-no-forbid
     statement: FastMCP lacks extra="forbid"
     status: active
----
+{rationale_line}---
 # ADR 001: Reject FastMCP
 We evaluated FastMCP and rejected it due to schema derivation dropping fields without
 extra="forbid". {padding}
@@ -689,6 +694,38 @@ def test_an_alt_next_cursor_continues_through_the_same_branch_to_the_end(tmp_pat
         ).items[0]
         assert second.status == "ok"
         assert second.evidence_kind == "alternative"
+        assert second.truncated is False
+        assert first.content + second.content == full.content
+
+
+def test_a_premise_next_cursor_continues_through_the_same_branch_to_the_end(tmp_path: Path) -> None:
+    """T5: mirrors `test_an_alt_next_cursor_continues_through_the_same_branch_to_the_end` for a
+    `premise:` ref, guarding the shared `_read_disclosure_one` from the premise side -- truncation
+    under a tiny item budget mints a `next_cursor`, and feeding it back routes through the same
+    premise branch (dispatch is on the ref's prefix, never on cursor presence) to return the
+    remainder, the two windows concatenating back to the full disclosure content."""
+    padding = "Additional operational context repeated for length only. " * 8
+    pointer, config = _build_alternative_and_premise_snapshot(tmp_path, premise_rationale=padding)
+    with snapshot_active(pointer, config) as active:
+        deps = ServiceDeps(registry=_real_registry(), snapshot=active)
+        service = InvestigateService(deps)
+        result = service.investigate(InvestigationRequest(task="migrate server to FastMCP framework"))
+        premise_ref = result.premises[0].ref
+
+        full = read(ReadRequest(refs=[premise_ref]), deps).items[0]
+        chunk = (len(full.content) + 1) // 2  # two reads of this size exactly cover the content
+        assert chunk >= 1
+
+        budgets = Budgets(max_extracted_chars=chunk)
+        first = read(ReadRequest(refs=[premise_ref], budgets=budgets), deps).items[0]
+        assert first.status == "ok" and first.truncated is True
+        assert first.next_cursor is not None
+
+        second = read(
+            ReadRequest(refs=[premise_ref], budgets=budgets, cursor=first.next_cursor), deps
+        ).items[0]
+        assert second.status == "ok"
+        assert second.evidence_kind == "premise"
         assert second.truncated is False
         assert first.content + second.content == full.content
 

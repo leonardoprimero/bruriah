@@ -10,13 +10,13 @@ from unittest.mock import patch
 import pytest
 
 from bruriah.cli import bruriah_main
-from bruriah.contracts import InvestigationRequest
+from bruriah.contracts import Budgets, InvestigationRequest, ReadItem, ReadRequest, ReadResult
 from bruriah.corpus import CorpusPolicy
 from bruriah.demo import _alternative_name, run_demo
 from bruriah.index import BuildConfig, build_candidate, promote_candidate, snapshot_active
 from bruriah.packs import load_pack
 from bruriah.registries import Registry
-from bruriah.service import InvestigateService, ServiceDeps
+from bruriah.service import InvestigateService, ServiceDeps, read
 
 FINGERPRINT = (
     '{"artifact":"model.onnx","artifact_sha256":"' + "a" * 64
@@ -68,7 +68,13 @@ def test_alternative_name_falls_back_to_the_ref_when_the_read_is_truncated(tmp_p
     `read_evidence`'s default 20,000-char output budget makes the alternative's JSON disclosure
     come back truncated (`item.truncated=True`, `item.content` cut off mid-string, not valid
     JSON). `_alternative_name` must degrade to the raw ref rather than crash on
-    `json.JSONDecodeError`."""
+    `json.JSONDecodeError`.
+
+    R3-demo-truncation-precondition-unasserted (T5): the fixture is only exercising the
+    truncated-read fallback if the read for this ref actually comes back truncated -- asserted
+    directly here before the fallback assertion, so a change that stopped truncating (a larger
+    default budget, a shorter fixture reason) would fail this test for the right reason instead
+    of silently no longer testing what it claims to."""
     vault = tmp_path / "vault" / "public"
     vault.mkdir(parents=True)
     long_reason = "Too verbose to summarize in a short sentence. " * 1000
@@ -106,4 +112,44 @@ We evaluated FastMCP and rejected it.
         assert result.counterfactual_assessment is not None
         ref = result.counterfactual_assessment.matched_alternative_ref
 
+        precondition = read(ReadRequest(refs=[ref]), deps).items[0]
+        assert precondition.status == "ok"
+        assert precondition.truncated is True
+
         assert _alternative_name(ref, deps) == ref
+
+
+def _ok_read_result(ref: str, content: str) -> ReadResult:
+    item = ReadItem(ref=ref, status="ok", content=content, truncated=False, evidence_kind="alternative")
+    return ReadResult(schema_version="1", request_id="stub-request", items=[item], warnings=[], budgets=Budgets())
+
+
+def test_alternative_name_falls_back_to_the_ref_when_the_disclosure_is_not_json(monkeypatch) -> None:
+    """T5: `_alternative_name` must degrade to the raw ref, not raise, when a complete
+    (non-truncated) `ok` read's content is not valid JSON at all."""
+    ref = "alt:v1:" + "a" * 64
+    monkeypatch.setattr("bruriah.demo.read", lambda request, deps: _ok_read_result(ref, "not json at all"))
+
+    assert _alternative_name(ref, deps=None) == ref  # type: ignore[arg-type]
+
+
+def test_alternative_name_falls_back_to_the_ref_when_the_disclosure_is_not_an_object(monkeypatch) -> None:
+    """T5: valid JSON that decodes to something other than an object (a list, here) has no
+    `name` to read, so `_alternative_name` falls back to the raw ref rather than crash on
+    `.get`."""
+    ref = "alt:v1:" + "b" * 64
+    monkeypatch.setattr("bruriah.demo.read", lambda request, deps: _ok_read_result(ref, "[1, 2, 3]"))
+
+    assert _alternative_name(ref, deps=None) == ref  # type: ignore[arg-type]
+
+
+def test_alternative_name_falls_back_to_the_ref_when_the_object_has_no_string_name(monkeypatch) -> None:
+    """T5: a well-formed JSON object missing a string `name` field (either absent entirely or
+    present with a non-string value) falls back to the raw ref rather than returning a non-string
+    or `None`."""
+    ref = "alt:v1:" + "c" * 64
+    monkeypatch.setattr(
+        "bruriah.demo.read", lambda request, deps: _ok_read_result(ref, json.dumps({"disposition": "rejected"}))
+    )
+
+    assert _alternative_name(ref, deps=None) == ref  # type: ignore[arg-type]
