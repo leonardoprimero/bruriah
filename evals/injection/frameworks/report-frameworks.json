@@ -1,0 +1,349 @@
+{
+  "calls_to_reach_content": {
+    "bruriah": 2,
+    "langchain": 1,
+    "llamaindex": 1
+  },
+  "cases": [
+    {
+      "carrier": "markdown",
+      "case_id": "md-file-name",
+      "control_executed": true,
+      "echoed": false,
+      "executed": true,
+      "framework": "llamaindex",
+      "leaked": true,
+      "surface": "file_name"
+    },
+    {
+      "carrier": "markdown",
+      "case_id": "md-body-prose",
+      "control_executed": true,
+      "echoed": false,
+      "executed": true,
+      "framework": "llamaindex",
+      "leaked": true,
+      "surface": "body_prose"
+    },
+    {
+      "carrier": "markdown",
+      "case_id": "md-heading",
+      "control_executed": true,
+      "echoed": false,
+      "executed": true,
+      "framework": "llamaindex",
+      "leaked": true,
+      "surface": "heading"
+    },
+    {
+      "carrier": "markdown",
+      "case_id": "md-alt-name",
+      "control_executed": true,
+      "echoed": false,
+      "executed": true,
+      "framework": "llamaindex",
+      "leaked": true,
+      "surface": "alternatives[].name"
+    },
+    {
+      "carrier": "markdown",
+      "case_id": "md-alt-reason",
+      "control_executed": true,
+      "echoed": false,
+      "executed": true,
+      "framework": "llamaindex",
+      "leaked": true,
+      "surface": "alternatives[].reason"
+    },
+    {
+      "carrier": "markdown",
+      "case_id": "md-premise-id",
+      "control_executed": true,
+      "echoed": false,
+      "executed": true,
+      "framework": "llamaindex",
+      "leaked": true,
+      "surface": "premises[].id"
+    },
+    {
+      "carrier": "markdown",
+      "case_id": "md-premise-statement",
+      "control_executed": true,
+      "echoed": false,
+      "executed": true,
+      "framework": "llamaindex",
+      "leaked": true,
+      "surface": "premises[].statement"
+    },
+    {
+      "carrier": "markdown",
+      "case_id": "md-premise-rationale",
+      "control_executed": true,
+      "echoed": false,
+      "executed": true,
+      "framework": "llamaindex",
+      "leaked": true,
+      "surface": "premises[].rationale"
+    },
+    {
+      "carrier": "markdown",
+      "case_id": "md-premise-invalidated-by",
+      "control_executed": true,
+      "echoed": false,
+      "executed": true,
+      "framework": "llamaindex",
+      "leaked": true,
+      "surface": "premises[].invalidated_by"
+    },
+    {
+      "carrier": "markdown",
+      "case_id": "lineage-successor-file-name",
+      "control_executed": true,
+      "echoed": false,
+      "executed": true,
+      "framework": "llamaindex",
+      "leaked": true,
+      "surface": "lineage.successor_document_path"
+    },
+    {
+      "carrier": "git",
+      "case_id": "git-subject",
+      "control_executed": true,
+      "echoed": false,
+      "executed": true,
+      "framework": "llamaindex",
+      "leaked": true,
+      "surface": "commit_subject"
+    },
+    {
+      "carrier": "git",
+      "case_id": "git-body",
+      "control_executed": true,
+      "echoed": false,
+      "executed": true,
+      "framework": "llamaindex",
+      "leaked": true,
+      "surface": "commit_body"
+    },
+    {
+      "carrier": "git",
+      "case_id": "git-author",
+      "control_executed": true,
+      "echoed": false,
+      "executed": true,
+      "framework": "llamaindex",
+      "leaked": true,
+      "surface": "commit_author"
+    },
+    {
+      "carrier": "github",
+      "case_id": "github-closing-comment",
+      "control_executed": true,
+      "echoed": false,
+      "executed": true,
+      "framework": "llamaindex",
+      "leaked": true,
+      "surface": "closing_comment"
+    },
+    {
+      "carrier": "markdown+git",
+      "case_id": "code-target-author",
+      "control_executed": true,
+      "echoed": false,
+      "executed": true,
+      "framework": "llamaindex",
+      "leaked": true,
+      "surface": "code_target.governing_author"
+    },
+    {
+      "carrier": "markdown+git",
+      "case_id": "code-target-subject",
+      "control_executed": true,
+      "echoed": false,
+      "executed": true,
+      "framework": "llamaindex",
+      "leaked": true,
+      "surface": "code_target.governing_subject"
+    },
+    {
+      "carrier": "markdown+git",
+      "case_id": "code-target-successor-subject",
+      "control_executed": true,
+      "echoed": false,
+      "executed": true,
+      "framework": "llamaindex",
+      "leaked": true,
+      "surface": "code_target.successor_subject"
+    },
+    {
+      "carrier": "markdown",
+      "case_id": "md-file-name",
+      "control_executed": true,
+      "echoed": false,
+      "executed": true,
+      "framework": "langchain",
+      "leaked": false,
+      "surface": "file_name"
+    },
+    {
+      "carrier": "markdown",
+      "case_id": "md-body-prose",
+      "control_executed": true,
+      "echoed": false,
+      "executed": true,
+      "framework": "langchain",
+      "leaked": true,
+      "surface": "body_prose"
+    },
+    {
+      "carrier": "markdown",
+      "case_id": "md-heading",
+      "control_executed": true,
+      "echoed": false,
+      "executed": true,
+      "framework": "langchain",
+      "leaked": true,
+      "surface": "heading"
+    },
+    {
+      "carrier": "markdown",
+      "case_id": "md-alt-name",
+      "control_executed": true,
+      "echoed": false,
+      "executed": true,
+      "framework": "langchain",
+      "leaked": true,
+      "surface": "alternatives[].name"
+    },
+    {
+      "carrier": "markdown",
+      "case_id": "md-alt-reason",
+      "control_executed": true,
+      "echoed": false,
+      "executed": true,
+      "framework": "langchain",
+      "leaked": true,
+      "surface": "alternatives[].reason"
+    },
+    {
+      "carrier": "markdown",
+      "case_id": "md-premise-id",
+      "control_executed": true,
+      "echoed": false,
+      "executed": true,
+      "framework": "langchain",
+      "leaked": true,
+      "surface": "premises[].id"
+    },
+    {
+      "carrier": "markdown",
+      "case_id": "md-premise-statement",
+      "control_executed": true,
+      "echoed": false,
+      "executed": true,
+      "framework": "langchain",
+      "leaked": true,
+      "surface": "premises[].statement"
+    },
+    {
+      "carrier": "markdown",
+      "case_id": "md-premise-rationale",
+      "control_executed": true,
+      "echoed": false,
+      "executed": true,
+      "framework": "langchain",
+      "leaked": true,
+      "surface": "premises[].rationale"
+    },
+    {
+      "carrier": "markdown",
+      "case_id": "md-premise-invalidated-by",
+      "control_executed": true,
+      "echoed": false,
+      "executed": true,
+      "framework": "langchain",
+      "leaked": true,
+      "surface": "premises[].invalidated_by"
+    },
+    {
+      "carrier": "markdown",
+      "case_id": "lineage-successor-file-name",
+      "control_executed": true,
+      "echoed": false,
+      "executed": true,
+      "framework": "langchain",
+      "leaked": false,
+      "surface": "lineage.successor_document_path"
+    },
+    {
+      "carrier": "git",
+      "case_id": "git-subject",
+      "control_executed": true,
+      "echoed": false,
+      "executed": true,
+      "framework": "langchain",
+      "leaked": true,
+      "surface": "commit_subject"
+    },
+    {
+      "carrier": "git",
+      "case_id": "git-body",
+      "control_executed": true,
+      "echoed": false,
+      "executed": true,
+      "framework": "langchain",
+      "leaked": true,
+      "surface": "commit_body"
+    },
+    {
+      "carrier": "git",
+      "case_id": "git-author",
+      "control_executed": true,
+      "echoed": false,
+      "executed": true,
+      "framework": "langchain",
+      "leaked": true,
+      "surface": "commit_author"
+    },
+    {
+      "carrier": "github",
+      "case_id": "github-closing-comment",
+      "control_executed": true,
+      "echoed": false,
+      "executed": true,
+      "framework": "langchain",
+      "leaked": true,
+      "surface": "closing_comment"
+    },
+    {
+      "carrier": "markdown+git",
+      "case_id": "code-target-author",
+      "control_executed": true,
+      "echoed": false,
+      "executed": true,
+      "framework": "langchain",
+      "leaked": true,
+      "surface": "code_target.governing_author"
+    },
+    {
+      "carrier": "markdown+git",
+      "case_id": "code-target-subject",
+      "control_executed": true,
+      "echoed": false,
+      "executed": true,
+      "framework": "langchain",
+      "leaked": true,
+      "surface": "code_target.governing_subject"
+    },
+    {
+      "carrier": "markdown+git",
+      "case_id": "code-target-successor-subject",
+      "control_executed": true,
+      "echoed": false,
+      "executed": true,
+      "framework": "langchain",
+      "leaked": true,
+      "surface": "code_target.successor_subject"
+    }
+  ]
+}
