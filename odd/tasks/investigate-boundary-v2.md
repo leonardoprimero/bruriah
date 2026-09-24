@@ -6,7 +6,7 @@
 **TDD:** strict (global session configuration). Runner: `uv run pytest -q -p no:cacheprovider`
 **Delivery strategy:** `ask-on-risk`. Forecast ~1,500 authored changed lines, over budget. Slicing
 is decided at delivery time, because nothing is pushed before the fix lands (see Disclosure).
-**RDD:** enabled for this repo. Last reviewed boundary: ea8d999.
+**RDD:** enabled for this repo. Last reviewed boundary: 13307ce.
 **Release:** 2.0.0. Contract break: `InvestigationResult.schema_version` "1" → "2".
 **Disclosure:** local only, never pushed, until this branch closes every measured channel.
 Benchmark, fix and before/after numbers ship together.
@@ -68,6 +68,11 @@ Rejected: filtering the text (a slug is printable and still an instruction); a s
   real `alt:v1:`/`premise:v1:` ref resolves back to its stored row and an unknown ref does not
   (R3-cf-ref-reverse-resolution-uncovered). Repository lookups by ref, the new `evidence_kind`
   values, `src/bruriah/demo.py` dereferencing through them.
+- [x] **T4.1 — T4 review follow-ups.** (eea4052 demo fallback fix, 55e8ae8 read-path tests,
+  0ead46f shared read body) Fixed the crash on a truncated alternative read, added the read-path
+  coverage the T4 review found missing, extracted the shared body between
+  `_read_alternative_one`/`_read_premise_one`, and corrected the T4 Progress bullet's test-count
+  arithmetic and a wrong type name.
 - [ ] **T5 — Proof and docs.** The benchmark at ASR 0 with its report; `demo/injection/run.py`,
   the README section, docs, `evals/counterfactual/runner.py`, the CHANGELOG 2.0.0 entry,
   `evals/injection/README.md` with the before/after numbers. The CHANGELOG carries a migration
@@ -397,14 +402,14 @@ Rejected: filtering the text (a slug is printable and still an instruction); a s
   `investigate()` response returned (never guessed from the ref formula) resolve through
   `read_evidence` to the stored name/reason/statement; a well-formed but unresolvable ref on
   either kind reads as `missing_ref` with `content=None`; a malformed ref is already rejected by
-  `AlternativeRef`'s existing `alt:v1:[0-9a-f]{64}` pattern (T3), exercised here as coverage
-  rather than a new validation. One MCP-level test (`tests/test_mcp_contract.py`) checks the
-  published `read_evidence` `outputSchema`'s `evidence_kind` enum names both new kinds and that a
-  real `alt:` ref resolves over an actual protocol session. Closes
-  R3-cf-ref-reverse-resolution-uncovered.
+  `AlternativeRecord`'s `ref` field pattern (`AlternativeRef` = `alt:v1:[0-9a-f]{64}`, from T3),
+  exercised here by constructing an `AlternativeRecord` directly, as coverage rather than a new
+  validation. One MCP-level test (`tests/test_mcp_contract.py`) checks the published
+  `read_evidence` `outputSchema`'s `evidence_kind` enum names both new kinds and that a real
+  `alt:` ref resolves over an actual protocol session. Closes R3-cf-ref-reverse-resolution-uncovered.
 
   Checks: `uv run pytest -q -p no:cacheprovider` 1704 passed, 0 failed, 18 skipped (1700 baseline
-  + 4 round-trip tests + 1 MCP test — the shared-resolver commit added none). `uv run ruff check
+  + 3 round-trip tests + 1 MCP test — the shared-resolver commit added none). `uv run ruff check
   src tests evals scripts demo` clean. `uv run mypy src` clean. `uv run python
   evals/injection/run.py` run twice, byte-identical JSON and Markdown reports both times, ASR
   0.000, all 17 cases executed/control_executed. `uv run python demo/injection/run.py` exits 0,
@@ -412,8 +417,26 @@ Rejected: filtering the text (a slug is printable and still an instruction); a s
   to the pre-T4 baseline. README's pinned test count moved 1,718 -> 1,722. Attribution check
   (`git log --format=%B 08de47b..HEAD | rg "Co-Authored-By|Claude-Session"`) printed nothing.
 
-- RDD review of T4 (ea8d999..f427eea): not yet run at write time -- run it before this branch's
-  next delivery decision, per this repo's enabled RDD.
+- RDD review of T4 (08de47b..13307ce): high risk, consent granted by the user, lineage
+  review-5a68a72beb56f4fd approved and acknowledged. Findings and what T4.1 fixed:
+  R3-demo-alt-name-truncated-json (`_alternative_name` crashed with `json.JSONDecodeError` on a
+  truncated read; now checks `truncated`, catches the decode error, and handles a missing `name`
+  key -- eea4052); R3-cf-read-window-paths-uncovered and R3-malformed-ref-read-path-uncovered
+  (the `alt:`/`premise:` read paths had no direct tests for an invalid range, item-budget
+  truncation, next-cursor continuation, mixed-ref remaining-budget accounting, or a
+  prefix-carrying malformed ref -- all already correct, now covered -- 55e8ae8);
+  R2-t4-read-alt-premise-duplicated-body (`_read_alternative_one`/`_read_premise_one`'s shared
+  windowing/cursor/digest/`ReadItem` body extracted into `_read_disclosure_one` -- 0ead46f);
+  R2-t4-test-count-arithmetic-inconsistent and R3-task-log-test-count-inconsistent (this
+  document's T4 Progress bullet said "1700 baseline + 4 round-trip tests" for a total that is
+  actually 1700 + 3 + 1 = 1704, and named `AlternativeRef` where the test actually constructs
+  `AlternativeRecord` -- both corrected in place, no code change). Left as-is:
+  R2-t4-demo-two-alt-resolution-paths (optional; `demo.py` keeps two resolution paths --
+  `_alternative_name` via `read_evidence` for the bare `matched_alternative_ref`, and the shared
+  `resolve_counterfactual_refs_for_humans` for refs embedded inside `rationale`/`conflicts` --
+  unifying them would mean routing embedded-ref substitution through `read_evidence` too, which
+  touches `cli.py`'s identical use of the same shared resolver for `doc:v1:` refs; not cheap or
+  clearly net simpler, so left for a later task if it comes up again).
 
 ## Next step
 
