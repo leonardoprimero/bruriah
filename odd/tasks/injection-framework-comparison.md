@@ -117,21 +117,27 @@ etc. -- the harness shape should admit them later, but no speculative abstractio
 
 ## Tasks
 
-- [ ] **T0 -- RED.** `tests/test_injection_frameworks.py`: specify the adapter contract
+- [x] **T0 -- RED.** (f3a03e7; RED observed: `ModuleNotFoundError: No module named 'compare'`)
+  `tests/test_injection_frameworks.py`: specify the adapter contract
   (build index from a case's corpus dir, run task, return serialized tool output + retrieved
   document identities for the executed-proof), the control-run provenance, the executed-path
   invariant, and the report shape. Module-level `skipif` when the group is absent.
-- [ ] **T1 -- LlamaIndex adapter.** `MockEmbedding`, in-memory index over each case's
-  `corpus_dir`, `RetrieverTool`-equivalent output serialization, `k` = corpus size. Verify
-  design decision 4 against the pinned version; record the result here.
-- [ ] **T2 -- LangChain adapter.** `DeterministicFakeEmbedding` + `InMemoryVectorStore` +
-  `create_retriever_tool` defaults, same invariants. Verify design decision 4 against the
-  pinned version; record the result here.
-- [ ] **T3 -- Runner and report.** `evals/injection/frameworks/run.py` over the same 17
-  `CASES`; `report-frameworks.{json,md}` with the comparison table (per-surface outcome per
-  row, plus the "calls to reach content" column). Byte-identical across runs.
-- [ ] **T4 -- Docs.** `evals/injection/README.md` comparison section with the wording rules of
-  design decision 9; root README table; CHANGELOG.
+- [x] **T1 -- LlamaIndex adapter.** (a2440a8) `MockEmbedding`, in-memory index over each case's
+  `corpus_dir`, `RetrieverTool` output serialization, `k` = node count. Design decision 4
+  verified against `llama-index-core==0.14.25`: no retrieved-content mitigation on the
+  retriever-tool path; `RetrieverTool.call` concatenates `get_content(MetadataMode.LLM)`, so
+  LLM-visible metadata (including the file name) reaches the model by default.
+- [x] **T2 -- LangChain adapter.** (a2440a8) `DeterministicFakeEmbedding` + `InMemoryVectorStore`
+  + `create_retriever_tool` defaults, same invariants. Design decision 4 verified against
+  `langchain-core==1.6.4`: no retrieved-content mitigation on the retriever-tool path; the
+  default `document_prompt` formats `page_content` alone, joined by `document_separator`.
+- [x] **T3 -- Runner and report.** (a2440a8 runner as `compare.py`, ff3dd5b reports)
+  `evals/injection/frameworks/compare.py` over the same 17 `CASES`;
+  `report-frameworks.{json,md}` with the comparison table (per-surface outcome per row, plus
+  the "calls to reach content" column). Byte-identical across runs, verified by running twice.
+- [x] **T4 -- Docs.** `evals/injection/README.md` comparison section with the wording rules of
+  design decision 9; root README "Compared, not asserted" paragraph; CHANGELOG under
+  Unreleased.
 
 ## Acceptance criteria
 
@@ -152,4 +158,36 @@ etc. -- the harness shape should admit them later, but no speculative abstractio
 ## Progress / evidence
 
 - 2026-09-24: ODD doc created. API exploration done against current docs (context7); findings
-  recorded above. Branch not yet created.
+  recorded above.
+- 2026-09-24: T0-T4 done on `feat/injection-framework-comparison` (9391db7 doc, 520dd59 group,
+  f3a03e7 RED, a2440a8 GREEN, ff3dd5b reports). TDD strict: RED observed at collection
+  (`ModuleNotFoundError: No module named 'compare'`) before any implementation existed.
+- Runner named `compare.py`, not `run.py`: the whole `evals/injection` tree shares one
+  `sys.path` namespace and `tests/test_injection_eval.py` already imports the core runner as
+  module `run` -- a second `run` module would collide in `sys.modules`.
+- The same collision then bit the adapters module anyway, caught by the full suite (not by the
+  module's own tests, which pass in isolation): `evals/retrieval/adapters.py` claims the flat
+  name `adapters`, and whichever test module imported first shadowed the other, in BOTH
+  directions depending on collection order. Renamed to `framework_adapters.py`; the lesson --
+  a new module in any evals tree needs a repo-unique flat name, and only the full suite proves
+  it -- is recorded in that module's docstring.
+- One design decision taken during implementation and recorded in `adapters.py`'s docstring:
+  SYMMETRIC RAW-TEXT INGESTION. Both adapters load each corpus file's exact text into one
+  framework Document (file name as metadata) instead of using each framework's file loader,
+  because a markdown loader that parses front-matter differently would turn a loader
+  idiosyncrasy into a row difference. The only variable between rows is what each framework's
+  default TOOL serialization places into the model context -- which is where the two genuinely
+  differ, and the ground-truth pin records it.
+- Measured (and pinned in `tests/test_injection_frameworks.py`): llamaindex 17/17 leaked;
+  langchain 15/17 leaked with `md-file-name` and `lineage-successor-file-name` held (marker
+  carried only in a file name, which its default `document_prompt` never formats); bruriah 0/17
+  from the committed core report. No echoes. Every case and control executed.
+- The executed-path invariant translates to: every corpus file represented in the retrieved
+  set, in both the poisoned and the control run, or `run_comparison` raises `NotExecutedError`.
+  A `NotComparableError` guards the fixture mapping itself: a marker that never became
+  ingestable text (file name or content) fails loudly instead of crediting a framework with a
+  hold it was never asked to enforce.
+- Checks at ff3dd5b: `tests/test_injection_frameworks.py` 16 passed (with the group installed;
+  logic section alone runs without it); ruff clean over src/tests/evals/scripts; mypy clean
+  over src and over both new modules directly; `compare.py` run twice produces byte-identical
+  reports.

@@ -3,6 +3,22 @@
 Notable changes, newest first. This project follows [semantic versioning](https://semver.org/),
 and the entries here name what changed for *you* rather than which files moved.
 
+## [Unreleased]
+
+### Added: framework comparison rows on the injection benchmark
+- The same 17 attacker surfaces now also run through the typical agent retrieval-as-tool pattern
+  of LlamaIndex (`RetrieverTool`, pinned `llama-index-core`) and LangChain
+  (`create_retriever_tool`, pinned `langchain-core`), at each framework's defaults, with the
+  identical fixtures, markers, control-run provenance, and executed-path invariant as the core
+  benchmark. Measured: llamaindex 17/17, langchain 15/17 (its default `document_prompt` formats
+  `page_content` alone, so the two file-name-carried surfaces hold), bruriah 0/17 — at a stated
+  cost of two calls to reach retrieved content against the frameworks' one. A retriever tool
+  returns retrieved text to the model by design; the rows measure that architectural property,
+  never framework quality, and the report's wording is pinned to that framing by test.
+- New optional `frameworks-compare` dependency group, pinned exactly and never installed by CI:
+  the comparison runner (`evals/injection/frameworks/compare.py`) and its tests skip cleanly
+  without it, and the core benchmark's committed reports never depend on it.
+
 ## [2.0.1] — 2026-09-24
 
 ### Fixed: a conflicting premise declaration can no longer replace another silently

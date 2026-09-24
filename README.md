@@ -167,6 +167,15 @@ serialized response. Attack Success Rate is **0/17** as of 2.0.0, down from 13/1
 baseline. See [`evals/injection/README.md`](evals/injection/README.md) for the method, the threat
 model, and the full before/after table.
 
+**Compared, not asserted.** The same 17 cases run through the typical agent retrieval-as-tool
+pattern of LlamaIndex (17/17) and LangChain (15/17) at their defaults — not because either
+framework is doing anything wrong (a retriever tool returns retrieved text to the model *by
+design*; neither claims this boundary), but because 0/17 only means something next to what the
+standard architecture does with the same corpus. The trade is stated in the same table: Bruriah's
+agent needs two calls to reach retrieved content, a retriever tool needs one. See the
+[framework comparison](evals/injection/README.md#framework-comparison-what-does-each-architecture-return-to-the-model)
+for the per-surface rows.
+
 **Scope, stated plainly:** this measures `investigate_work`'s serialized response, a structural
 property checkable without a model in the loop — it does not simulate an agent acting on injected
 text, and it does not cover `read_evidence`'s own output, which returns corpus text by design once
@@ -208,7 +217,7 @@ We evaluate Bruriah against real codebases and publish negative results alongsid
 | **Rejected alternatives from GitHub (236 questions)** | **115 recovered** from `square/leakcanary` (17) and `emilk/egui` (98); 34 of 236 questions carry a counterfactual | Opt-in via `bruriah corpus --github`, measured 2026-09-21; see [Issue ingestion, measured 2026-09-21](evals/project-memory/README.md#issue-ingestion-measured-2026-09-21) |
 | **Query Latency** | **≈46µs per passage** (linear) | 1,000 passages in 45ms, 16,000 in 734ms on M4 Pro |
 | **Index Size** | **≈5 KB per passage** | 16k passages ≈ 79 MB SQLite database |
-| **Test Suite** | **1,750 tests** · 0 failures · skips only when an environment prerequisite is absent | Full matrix on Python 3.12, 3.13, 3.14 across Linux, macOS, and Windows |
+| **Test Suite** | **1,766 tests** · 0 failures · skips only when an environment prerequisite is absent | Full matrix on Python 3.12, 3.13, 3.14 across Linux, macOS, and Windows |
 
 > **Want the full methodology and ablations?**  
 > Read our in-depth evaluation report: [**Evaluation Methodology & Benchmarks (`evals/project-memory/README.md`)**](evals/project-memory/README.md).
