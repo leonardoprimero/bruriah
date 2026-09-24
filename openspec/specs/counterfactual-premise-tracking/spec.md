@@ -10,6 +10,13 @@ Instead of treating past architectural decisions as permanent dogmatic prohibiti
 
 ## Core Domain Models
 
+> As of 2.0.0, the fields below describe the domain model Bruriah parses from the corpus, not
+> the wire shape `investigate_work` returns. `PremiseRecord`/`AlternativeRecord`/
+> `CounterfactualAssessment` are opaque by construction on the wire (`ref`/
+> `matched_alternative_ref`, as `alt:v1:`/`premise:v1:` hashes); `name`, `statement`, `reason`
+> and free-text `rationale` are corpus-authored text and reach a caller only through an explicit
+> `read_evidence` call on the ref, never inside `investigate_work`'s own response.
+
 ### 1. Premise Record (`PremiseRecord`)
 A contextual constraint, dependency limitation, or environmental invariant that was assumed true at the moment of decision:
 
@@ -33,7 +40,8 @@ An architectural approach, library, or pattern evaluated alongside or in contras
 ### 3. Counterfactual Risk (`CounterfactualAssessment`)
 Structured evaluation returned during investigation when a task or code target matches a rejected alternative:
 
-- `matched_alternative`: Name of the matched alternative.
+- `matched_alternative_ref`: Opaque reference (`alt:v1:<hash>`) to the matched alternative; the
+  name is not on the wire, and resolves only via an explicit `read_evidence` call on the ref.
 - `decision_ref`: Reference to the governing decision where it was evaluated.
 - `verdict`: One of:
   - `repeat_of_rejected_architecture`: All supporting premises remain `active`. Reintroducing this pattern repeats a verified historical mistake.
