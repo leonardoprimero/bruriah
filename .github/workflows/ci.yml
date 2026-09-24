@@ -86,6 +86,8 @@ jobs:
       - run: uv sync --locked
       - name: ruff check
         run: uv run --no-sync ruff check src tests
+      - name: ruff format --check
+        run: uv run --no-sync ruff format --check src tests evals scripts demo
 
   typecheck:
     name: static type checks
