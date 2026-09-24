@@ -73,15 +73,9 @@ Rejected: filtering the text (a slug is printable and still an instruction); a s
   coverage the T4 review found missing, extracted the shared body between
   `_read_alternative_one`/`_read_premise_one`, and corrected the T4 Progress bullet's test-count
   arithmetic and a wrong type name.
-- [ ] **T5 — Proof and docs.** Opens with T4.1's review follow-ups: assert the truncation
-  precondition in the demo fallback test (read status ok with `truncated=True`;
-  R3-demo-truncation-precondition-unasserted); unit tests for the decode, shape and missing-name
-  fallbacks; one premise-ref window test; keyword arguments at the `_read_disclosure_one` call
-  sites. Then: The benchmark at ASR 0 with its report; `demo/injection/run.py`,
-  the README section, docs, `evals/counterfactual/runner.py`, the CHANGELOG 2.0.0 entry,
-  `evals/injection/README.md` with the before/after numbers. The CHANGELOG carries a migration
-  note: user-authored packs with `max_router_version` "1.9.9" are rejected by a 2.x router
-  (`incompatible_pack`) until their authors widen the window and re-sign (R4-001).
+- [x] **T5 — Proof and docs.** (2499eb8 keyword-arg refactor, e6d09e9 test follow-ups, 58a2b42
+  CHANGELOG, cff568b injection benchmark README, 1d3aa9f investigation-contract docs) Opened with
+  T4.1's review follow-ups, closed with the 2.0.0 public-facing docs.
 
 ## Acceptance criteria
 
@@ -449,8 +443,63 @@ Rejected: filtering the text (a slug is printable and still an instruction); a s
   R3-premise-read-window-after-refactor-uncovered. The cheap ones are carried into T5; the
   fixture-helper deduplication is left as optional.
 
+- 2026-09-23: T5 (2499eb8, e6d09e9, 58a2b42, cff568b, 1d3aa9f) via one bounded writer, TDD strict
+  where behavior was involved.
+
+  **Part A, test follow-ups from the T4.1 review.** `_read_disclosure_one`'s two call sites now
+  pass every argument by keyword (2499eb8, no behavior change, closes
+  R2-t41-disclosure-helper-positional-str-args). `tests/test_demo.py`'s truncated-alternative-read
+  test now asserts its precondition directly (`status == "ok"` and `truncated is True`) before
+  relying on it for the raw-ref fallback assertion (closes
+  R3-demo-truncation-precondition-unasserted); three new unit tests stub `bruriah.demo.read` to
+  cover `_alternative_name`'s other fallbacks (content that is not JSON, JSON that is not an
+  object, an object with no string `name`); one new `premise:` truncation-plus-cursor-continuation
+  test in `tests/test_counterfactual.py` mirrors the existing `alt:` one, guarding the shared
+  `_read_disclosure_one` from the premise side (`_build_alternative_and_premise_snapshot` gained
+  an optional `premise_rationale` padding parameter, default `None`, so every pre-T5 caller's
+  fixture stays byte-identical) (e6d09e9). Checks: full suite 1714 passed / 0 failed / 18 skipped
+  (1710 baseline + 4 new tests); ruff and mypy clean. README's pinned test count moved 1,728 ->
+  1,732.
+
+  **Part B, 2.0.0 docs.** `CHANGELOG.md`'s `## [2.0.0] — 2026-09-23` entry (58a2b42) records the
+  security fix with its 13/17 -> 7/17 -> 0/17 numbers and the closed channel categories, the
+  breaking contract changes (`schema_version` "2", opaque evidence locators, closed
+  `authority_rationale`, opaque alternative/premise/counterfactual refs, fixed-wording
+  rationale/conflicts/claims), the new `alt:`/`premise:` read kinds, and a Migration section
+  (pinned policy packs, MCP clients reading the old free-text fields, 1.x cache entries reading as
+  a miss, the alternative-name-matching floor). `evals/injection/README.md` (cff568b, new) documents
+  the ASR definition (control-run-established, never string containment), the threat model by
+  surface category, the hermetic method, how to run it, the before/after table by stage with commit
+  references (`84a6b67`/`dfbf448`/`6860180`), and what the benchmark does not measure. The README's
+  investigation-boundary section, the counterfactual paper, the CLI/tools guide, the case study,
+  and the counterfactual-premise-tracking spec (1d3aa9f) were corrected to the opaque-ref shapes and
+  closed `authority_rationale` codes -- each stale example verified against either a real recorded
+  hash (`document_ref_for`/`alternative_ref_for`/`premise_ref_for` computed by hand for the paper's
+  illustrative alternative/premise) or, for the README's own worked example, the exact locator the
+  published demo (`demo/injection/run.py`) actually prints, re-run to confirm
+  (`doc:v1:9fe1772a133e6dca387eaaa506712283e5dabbc8daf5de9703f361384232ad28`) -- the digest itself
+  was already correct and unchanged. The counterfactual-premise-tracking spec keeps its domain-model
+  field names (`name`, `statement`, `reason` as parsed from the corpus) with a new note that the
+  wire contract is opaque; nothing else there was rewritten. `evals/counterfactual/runner.py` and
+  `demo/injection/run.py` needed no changes (both already migrated in T2/T3); re-run to confirm:
+  20/20 and exit 0 respectively.
+
+  Checks: `uv run pytest -q -p no:cacheprovider` 1714 passed, 0 failed, 18 skipped (unchanged
+  since Part A; Part B touched no tests). `uv run ruff check src tests evals scripts demo` clean.
+  `uv run mypy src` clean. `uv run python evals/injection/run.py` run twice, byte-identical JSON
+  and Markdown reports, ASR 0.000, matching the already-committed report (no diff). `uv run python
+  scripts/changelog_section.py 2.0.0` prints the new section body. `uv run python
+  evals/counterfactual/runner.py`: 20/20. `uv run python demo/injection/run.py`: exits 0, all three
+  assertions hold. `tests/test_readme_claims.py` and `tests/test_injection_demo.py` (which pins the
+  README's quoted digest and hostile-note sentences against the live demo output) both pass.
+  Attribution check (`git log --format=%B b937eb6..HEAD | rg "Co-Authored-By|Claude-Session"`)
+  printed nothing.
+
+  **Left as-is:** the optional T4.1 fixture-helper deduplication in `tests/test_demo.py`
+  (R2-t41-test-demo-duplicated-fixture-helpers) and the optional T4 two-resolution-paths cleanup in
+  `demo.py` (R2-t4-demo-two-alt-resolution-paths) -- both already recorded as optional, neither
+  touched by this task's scope.
+
 ## Next step
 
-T5 (proof and docs): the benchmark at ASR 0 with its report, `demo/injection/run.py`, the README
-section, docs, `evals/counterfactual/runner.py`, and the CHANGELOG 2.0.0 entry with its
-`max_router_version` migration note (R4-001) — see the Tasks section for the full T5 scope.
+Delivery: the user decides slicing, push and release timing.
