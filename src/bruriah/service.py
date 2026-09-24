@@ -1294,8 +1294,10 @@ def _read_alternative_one(
         "premise_refs": [premise_ref_for(pid) for pid in row.premises],
     })
     return _read_disclosure_one(
-        disclosure, "alternative", row.document_ref, f"{row.document_ref}#{row.name}",
-        ref, requested_range, cursor_start, item_cap, remaining_total, request_id,
+        disclosure=disclosure, evidence_kind="alternative", locator=row.document_ref,
+        citation_locator=f"{row.document_ref}#{row.name}", ref=ref,
+        requested_range=requested_range, cursor_start=cursor_start,
+        item_cap=item_cap, remaining_total=remaining_total, request_id=request_id,
     )
 
 
@@ -1317,8 +1319,10 @@ def _read_premise_one(
         "invalidated_in": row.invalidation_document_ref,
     })
     return _read_disclosure_one(
-        disclosure, "premise", row.document_ref, f"{row.document_ref}#{row.premise_id}",
-        ref, requested_range, cursor_start, item_cap, remaining_total, request_id,
+        disclosure=disclosure, evidence_kind="premise", locator=row.document_ref,
+        citation_locator=f"{row.document_ref}#{row.premise_id}", ref=ref,
+        requested_range=requested_range, cursor_start=cursor_start,
+        item_cap=item_cap, remaining_total=remaining_total, request_id=request_id,
     )
 
 
