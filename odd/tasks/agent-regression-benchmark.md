@@ -178,7 +178,7 @@ Also out of scope: a Codex or Cursor adapter, an LLM-judge column, a private-cor
   paired sign test) on hand-computed cases, and byte-identical report rendering.
 - [x] **T1 -- Harness.** (GREEN commit on this branch) `evals/agent_regression/`: trap loader, detector protocol, adapter
   interface, fake replay adapter, runner, metrics, report writers. GREEN for T0.
-- [ ] **T2 -- Claude Code adapter.** Headless invocation, tool allowlist, MCP registration per
+- [x] **T2 -- Claude Code adapter.** (see Progress, 2026-09-27) Headless invocation, tool allowlist, MCP registration per
   condition (writes the client config into the temporary clone, never into the user's), run
   record capture from the JSON output, budget enforcement. Tested with a stub `claude`
   executable on `PATH` that emits recorded JSON; the real binary is never invoked under pytest.
@@ -215,6 +215,24 @@ Also out of scope: a Codex or Cursor adapter, an LLM-judge column, a private-cor
 
 ## Progress / evidence
 
+- 2026-09-27: T2 by one bounded writer, strict TDD (RED at collection, GREEN, six reverted
+  mutations each caught by exactly one test). `evals/agent_regression/claude_code.py` (617 lines)
+  and `tests/test_agent_regression_claude_code.py` (81 tests). Two facts measured on Claude Code
+  2.1.283 before writing it: (1) a normal session loads the operator's hooks, plugins and 13 MCP
+  servers, including `cerebro` and `engram`, so every invocation runs `--bare` and non-baseline
+  conditions add `--strict-mcp-config`, with the init line's server list checked per run;
+  (2) `--bare` skips the OAuth login and answered "Not logged in", so a benchmark run needs
+  `ANTHROPIC_API_KEY` and the adapter fails closed without it. A trivial 3-turn probe under the
+  normal configuration cost USD 0.48 with ~196k context tokens loaded by the operator's setup;
+  bare mode will be far smaller, and T4 measures it. Full suite 1972 passed / 18 skipped; ruff
+  and mypy clean; README's pinned count 1,909 -> 1,990.
+  Follow-ups recorded, not fixed: an `AdapterError` mid-benchmark aborts `run_benchmark` and the
+  finished runs are not written (transcripts stay on disk) -- T5 should write run records
+  incrementally; transcripts carry the absolute cwd in the init line, so committing them in T5
+  needs a scrub or a decision to leave them out; proxy variables are not passed to the client;
+  under `prompted` the `CLAUDE.md` append appears in the diff, so T3 detectors must never match
+  on it. Review size: T2 is about 2,060 changed lines, over the chained-PR guidance; the PR
+  split can follow the commits (RED, GREEN, adapter).
 - 2026-09-27: T1 GREEN by one bounded writer: eight modules, 937 lines. Checks: full suite 1891
   passed / 18 skipped, the four sys.path-importing eval test modules green in one session, ruff
   check and format clean, mypy clean on src and on the package. `run.py` refuses to run without
