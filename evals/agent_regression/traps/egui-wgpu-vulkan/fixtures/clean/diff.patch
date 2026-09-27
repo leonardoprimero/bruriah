@@ -1,0 +1,15 @@
+diff --git a/crates/egui-wgpu/src/lib.rs b/crates/egui-wgpu/src/lib.rs
+index 1eb975aee9..8984eadeb1 100644
+--- a/crates/egui-wgpu/src/lib.rs
++++ b/crates/egui-wgpu/src/lib.rs
+@@ -169,7 +169,9 @@
+                         "No wgpu adapter found. This could be because DYLD_LIBRARY_PATH causes dylibs to be loaded that interfere with Metal device creation. Try restarting with DYLD_LIBRARY_PATH=''"
+                     );
+                 } else {
+-                    log::info!("No wgpu adapter found");
++                    log::warn!(
++                        "No wgpu adapter found. Update the GPU driver, or pick another backend at run-time with the WGPU_BACKEND environment variable (e.g. WGPU_BACKEND=gl)"
++                    );
+                 }
+             } else if available_adapters.len() == 1 {
+                 log::info!(
