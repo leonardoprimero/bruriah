@@ -171,12 +171,12 @@ Also out of scope: a Codex or Cursor adapter, an LLM-judge column, a private-cor
 
 ## Tasks
 
-- [ ] **T0 -- RED.** `tests/test_agent_regression_eval.py`: the harness API does not exist yet;
+- [x] **T0 -- RED.** (25237d6) `tests/test_agent_regression_eval.py`: the harness API does not exist yet;
   tests specify the trap model and loader, the detector contract (fires on regression fixture,
   silent on clean fixture, completion check independent of detection), the `AgentRun` record and
   its provenance fields, the metric arithmetic (RR, consult rate, heed rate, Wilson interval,
   paired sign test) on hand-computed cases, and byte-identical report rendering.
-- [ ] **T1 -- Harness.** `evals/agent_regression/`: trap loader, detector protocol, adapter
+- [x] **T1 -- Harness.** (GREEN commit on this branch) `evals/agent_regression/`: trap loader, detector protocol, adapter
   interface, fake replay adapter, runner, metrics, report writers. GREEN for T0.
 - [ ] **T2 -- Claude Code adapter.** Headless invocation, tool allowlist, MCP registration per
   condition (writes the client config into the temporary clone, never into the user's), run
@@ -215,6 +215,11 @@ Also out of scope: a Codex or Cursor adapter, an LLM-judge column, a private-cor
 
 ## Progress / evidence
 
+- 2026-09-27: T1 GREEN by one bounded writer: eight modules, 937 lines. Checks: full suite 1891
+  passed / 18 skipped, the four sys.path-importing eval test modules green in one session, ruff
+  check and format clean, mypy clean on src and on the package. `run.py` refuses to run without
+  `--dry-run` until T2. Choices settled: `load_trap` rejects unknown keys (T3 must add any new
+  field to `traps.py`); `AgentRun` has no transcript field yet (T2 adds it with the real client).
 - 2026-09-27: T0 RED written by one bounded writer (80 tests, `tests/test_agent_regression_eval.py`).
   The writer found a flat-module-name collision with `evals/retrieval/metrics.py`,
   `evals/retrieval/adapters.py` and `evals/injection/run.py` (all imported through `sys.path` by
