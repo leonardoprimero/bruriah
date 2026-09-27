@@ -222,6 +222,9 @@ Also out of scope: a Codex or Cursor adapter, an LLM-judge column, a private-cor
   below is void). (2) The scoped Bash allowlist was not read-only (`find -exec`, `rg --pre`,
   `diff.external` from an agent-writable `.git/config`) and every shell child inherited the API
   key; the shell is gone and `Bash` is disallowed. Strict TDD: 7 RED, 81 GREEN, test count unchanged.
+  Fix commit 3c8c74e; the review then closed approved with nine advisory, non-blocking findings
+  (incremental run-record writes, index cache keyed without the Bruriah version, orphaned client
+  on interrupt, lenient record validators) to take up in T5, not as a reason to re-review.
 - 2026-09-27: T2 by one bounded writer, strict TDD (RED at collection, GREEN, six reverted
   mutations each caught by exactly one test). `evals/agent_regression/claude_code.py` (617 lines)
   and `tests/test_agent_regression_claude_code.py` (81 tests). Two facts measured on Claude Code
