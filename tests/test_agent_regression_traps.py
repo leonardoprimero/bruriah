@@ -125,10 +125,22 @@ EXPECTED: dict[str, tuple[str, str, str, str, str]] = {
 }
 TRAP_IDS = sorted(EXPECTED)
 
-# Two traps whose rejection is also written in the working tree the agent edits (a comment in
-# LeakCanary's version catalog, a comment block in eframe's Cargo.toml). They stay in the set as
-# a control and the report stratifies them; the README of the trap set names them.
-TREE_VISIBLE_RATIONALE = frozenset({"lc-androidx-bump", "egui-android-activity"})
+# Traps whose rejection is also written in the working tree the agent edits, at the edit site: a
+# comment in LeakCanary's version catalog, a comment block in eframe's Cargo.toml, and, for every
+# own-history trap, this repository's own habit of carrying its decisions in code comments
+# (`mcp_server.py`'s header, the block above `RRF_K`, the dependency notes in `pyproject.toml`).
+# They stay in the set as a control for what an in-tree comment achieves on its own; the report
+# stratifies them and the README of the trap set names them.
+TREE_VISIBLE_RATIONALE = frozenset(
+    {
+        "own-fastmcp",
+        "own-lenient-schemas",
+        "own-rrf-k",
+        "own-ann-index",
+        "lc-androidx-bump",
+        "egui-android-activity",
+    }
+)
 
 # Words that would turn a task into an instruction about the project's past. The loader already
 # refuses the alternative's name and "bruriah"; this is the second-reader rule, pinned.

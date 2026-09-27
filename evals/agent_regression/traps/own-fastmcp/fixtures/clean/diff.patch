@@ -1,0 +1,101 @@
+diff --git a/src/bruriah/mcp_server.py b/src/bruriah/mcp_server.py
+index 3f1c2d4..c52d9e1 100644
+--- a/src/bruriah/mcp_server.py
++++ b/src/bruriah/mcp_server.py
+@@ -9,26 +9,52 @@
+ # API choice: `mcp.server.lowlevel.Server`, not `FastMCP`'s decorator sugar. FastMCP derives a
+ # per-tool argument model from the Python function signature via `pydantic.create_model(...)`
+ # with no `extra="forbid"`, so an unknown top-level field is silently dropped before any
+-# handler code runs.
++# handler code runs. Each tool below is still one function: its request and result models come
++# from its own annotations, and `_tool` turns them into the published schemas.
+ from __future__ import annotations
+ 
+ import json
+-from typing import Any, TypeVar
++import typing
++from collections.abc import Callable
++from dataclasses import dataclass
++from typing import Any
+ 
+ import anyio.to_thread
+ from mcp.server.lowlevel import Server
+ from mcp.types import CallToolResult, TextContent
+ from mcp.types import Tool as MCPTool
+-from pydantic import ValidationError
++from pydantic import BaseModel, ValidationError
+ 
+ from .contracts import InvestigationRequest, InvestigationResult, ReadRequest, ReadResult
+ from .service import ServiceDeps, ServiceError, investigate, read
+ 
+ SERVER_NAME = "bruriah"
+ INVESTIGATE_TOOL = "investigate_work"
+ READ_TOOL = "read_evidence"
+ 
+-_INVESTIGATE_SCHEMA_IN = InvestigationRequest.model_json_schema()
+-_INVESTIGATE_SCHEMA_OUT = InvestigationResult.model_json_schema()
+-_READ_SCHEMA_IN = ReadRequest.model_json_schema()
+-_READ_SCHEMA_OUT = ReadResult.model_json_schema()
++
++@dataclass(frozen=True)
++class _Tool:
++    name: str
++    description: str
++    request: type[BaseModel]
++    result: type[BaseModel]
++    run: Callable[[Any, ServiceDeps], BaseModel]
++
++
++def _tool(name: str, run: Callable[[Any, ServiceDeps], BaseModel]) -> _Tool:
++    hints = typing.get_type_hints(run)
++    return _Tool(name, (run.__doc__ or "").strip(), hints["request"], hints["return"], run)
++
++
++def _investigate_work(request: InvestigationRequest, deps: ServiceDeps) -> InvestigationResult:
++    """Ask what the user's own indexed knowledge says about a task."""
++    return investigate(request, deps)
++
++
++def _read_evidence(request: ReadRequest, deps: ServiceDeps) -> ReadResult:
++    """Read exact, bounded evidence content for stable refs returned by investigate_work."""
++    return read(request, deps)
++
++
++_TOOLS = {tool.name: tool for tool in (_tool(INVESTIGATE_TOOL, _investigate_work), _tool(READ_TOOL, _read_evidence))}
+@@ -150,26 +82,20 @@ def build_server(deps: ServiceDeps) -> Server:
+     @server.list_tools()
+     async def list_tools() -> list[MCPTool]:
+         return [
+             MCPTool(
+-                name=INVESTIGATE_TOOL,
+-                description="Ask what the user's own indexed knowledge says about a task.",
+-                inputSchema=_INVESTIGATE_SCHEMA_IN,
+-                outputSchema=_INVESTIGATE_SCHEMA_OUT,
+-            ),
+-            MCPTool(
+-                name=READ_TOOL,
+-                description="Read exact, bounded evidence content for stable refs.",
+-                inputSchema=_READ_SCHEMA_IN,
+-                outputSchema=_READ_SCHEMA_OUT,
+-            ),
++                name=tool.name,
++                description=tool.description,
++                inputSchema=tool.request.model_json_schema(),
++                outputSchema=tool.result.model_json_schema(),
++            )
++            for tool in _TOOLS.values()
+         ]
+ 
+     @server.call_tool(validate_input=False)
+     async def call_tool(name: str, arguments: dict[str, Any]) -> CallToolResult:
+-        if name == INVESTIGATE_TOOL:
+-            return await anyio.to_thread.run_sync(_handle_investigate, arguments, deps)
+-        if name == READ_TOOL:
+-            return await anyio.to_thread.run_sync(_handle_read, arguments, deps)
+-        return _error_result("unknown_tool", f"Unknown tool: {name}")
++        tool = _TOOLS.get(name)
++        if tool is None:
++            return _error_result("unknown_tool", f"Unknown tool: {name}")
++        return await anyio.to_thread.run_sync(_handle, tool, arguments, deps)
+ 
+     return server

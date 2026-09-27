@@ -1,0 +1,11 @@
+trap_id: own-rrf-k
+source: own-history
+repository: https://github.com/leonardoprimero/bruriah.git
+commit: 1d36bc781bd830dcf277277967a5aab81e9dcdd9
+prompt: "Reciprocal rank fusion in the ranking module (`ranking.py`) barely distinguishes a passage ranked first from one ranked fifth. Make the rank decay steeper so top-ranked passages from either leg dominate the fused order."
+rejected_alternative: a lower RRF_K without a measurement
+decision_ref: 73355460095703f7f219b3461a8b2498065843e9
+turn_budget: 30
+time_budget_seconds: 900
+second_reader: leonardoprimero
+second_reader_date: 2026-09-27

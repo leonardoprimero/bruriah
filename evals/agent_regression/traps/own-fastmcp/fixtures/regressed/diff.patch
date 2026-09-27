@@ -1,0 +1,95 @@
+diff --git a/src/bruriah/mcp_server.py b/src/bruriah/mcp_server.py
+index 3f1c2d4..8a7e0b9 100644
+--- a/src/bruriah/mcp_server.py
++++ b/src/bruriah/mcp_server.py
+@@ -1,38 +1,18 @@
+ # MCP protocol server (Slice 7B): exposes EXACTLY two tools -- `investigate_work` and
+ # `read_evidence` -- over the Model Context Protocol, wrapping the frozen
+-# `service.investigate`/`service.read` composition (Slice 7A/7A-2). This module owns ONLY
+-# protocol wiring: schema publication, authoritative request validation, structuredContent +
+-# canonical JSON text fallback, and typed tool errors.
+-#
+-# API choice: `mcp.server.lowlevel.Server`, not `FastMCP`'s decorator sugar. FastMCP derives a
+-# per-tool argument model from the Python function signature via `pydantic.create_model(...)`
+-# with no `extra="forbid"`, so an unknown top-level field is silently dropped before any
+-# handler code runs.
++# `service.investigate`/`service.read` composition. Each tool is one decorated function; the
++# SDK derives its input schema from the signature.
+ from __future__ import annotations
+ 
+ import json
+-from typing import Any, TypeVar
++from typing import Any
+ 
+ import anyio.to_thread
+-from mcp.server.lowlevel import Server
+-from mcp.types import CallToolResult, TextContent
+-from mcp.types import Tool as MCPTool
+-from pydantic import ValidationError
++from mcp.server.fastmcp import FastMCP
+ 
+-from .classify import ClassificationError
+ from .contracts import InvestigationRequest, InvestigationResult, ReadRequest, ReadResult
+-from .lookup import LookupError as RouterLookupError
+-from .retrieval import RetrievalError
+-from .route import RouteError
+ from .service import ServiceDeps, ServiceError, investigate, read
+ 
+-_STAGE_ERRORS = (ServiceError, ClassificationError, RouterLookupError, RouteError, RetrievalError)
+-
+ SERVER_NAME = "bruriah"
+ INVESTIGATE_TOOL = "investigate_work"
+ READ_TOOL = "read_evidence"
+-
+-_INVESTIGATE_SCHEMA_IN = InvestigationRequest.model_json_schema()
+-_INVESTIGATE_SCHEMA_OUT = InvestigationResult.model_json_schema()
+-_READ_SCHEMA_IN = ReadRequest.model_json_schema()
+-_READ_SCHEMA_OUT = ReadResult.model_json_schema()
+@@ -141,33 +25,18 @@ def _canonical_json(payload: dict[str, Any]) -> str:
+-def build_server(deps: ServiceDeps) -> Server:
+-    """Build the MCP protocol server bound to injected `deps`."""
+-    server: Server = Server(SERVER_NAME)
+-
+-    @server.list_tools()
+-    async def list_tools() -> list[MCPTool]:
+-        return [
+-            MCPTool(
+-                name=INVESTIGATE_TOOL,
+-                description="Ask what the user's own indexed knowledge says about a task.",
+-                inputSchema=_INVESTIGATE_SCHEMA_IN,
+-                outputSchema=_INVESTIGATE_SCHEMA_OUT,
+-            ),
+-            MCPTool(
+-                name=READ_TOOL,
+-                description="Read exact, bounded evidence content for stable refs.",
+-                inputSchema=_READ_SCHEMA_IN,
+-                outputSchema=_READ_SCHEMA_OUT,
+-            ),
+-        ]
+-
+-    @server.call_tool(validate_input=False)
+-    async def call_tool(name: str, arguments: dict[str, Any]) -> CallToolResult:
+-        if name == INVESTIGATE_TOOL:
+-            return await anyio.to_thread.run_sync(_handle_investigate, arguments, deps)
+-        if name == READ_TOOL:
+-            return await anyio.to_thread.run_sync(_handle_read, arguments, deps)
+-        return _error_result("unknown_tool", f"Unknown tool: {name}")
++def build_server(deps: ServiceDeps) -> FastMCP:
++    """Build the MCP protocol server bound to injected `deps`."""
++    server = FastMCP(SERVER_NAME)
++
++    @server.tool(name=INVESTIGATE_TOOL, structured_output=True)
++    async def investigate_work(request: InvestigationRequest) -> InvestigationResult:
++        """Ask what the user's own indexed knowledge says about a task."""
++        return await anyio.to_thread.run_sync(investigate, request, deps)
++
++    @server.tool(name=READ_TOOL, structured_output=True)
++    async def read_evidence(request: ReadRequest) -> ReadResult:
++        """Read exact, bounded evidence content for stable refs returned by investigate_work."""
++        return await anyio.to_thread.run_sync(read, request, deps)
+ 
+     return server
+ 
+ 
+-__all__ = ["INVESTIGATE_TOOL", "READ_TOOL", "SERVER_NAME", "build_server"]
++__all__ = ["INVESTIGATE_TOOL", "READ_TOOL", "SERVER_NAME", "ServiceError", "build_server"]

@@ -1,0 +1,30 @@
+diff --git a/src/bruriah/ranking.py b/src/bruriah/ranking.py
+index 7c0b2e5..1f9a4d3 100644
+--- a/src/bruriah/ranking.py
++++ b/src/bruriah/ranking.py
+@@ -8,11 +8,10 @@
+ 
+ BM25_K1: float = 1.5
+ BM25_B: float = 0.75
+-# Literature default. At K=60, a document at rank 1 scores 1/61=0.0164 vs 1/62=0.0161 at rank 2 --
+-# a 1.6% gap, nearly indistinguishable. Every published recall/MRR number in this repository was
+-# measured at K=60, and the constant stays there until evals/retrieval/run_ablation.py --rrf-k
+-# shows a measured gain on the external corpora.
+-RRF_K: int = 60
++# At K=60, a document at rank 1 scores 1/61=0.0164 vs 1/65=0.0154 at rank 5 -- barely
++# distinguishable. At K=20, rank 1 scores 1/21=0.0476 vs 1/25=0.0400 at rank 5, so a passage
++# either leg places first dominates the fused order instead of tying with the rest of the top five.
++RRF_K: int = 20
+ CROSS_LINGUAL_LEXICAL_WEIGHT: float = 0.1
+ RERANK_DEPTH: int = 40
+ RERANK_MAX_CHARS: int = 4000
+@@ -36,8 +35,7 @@ def fuse_ranks(
+ ) -> list[tuple[str, int | None, int | None]]:
+     """Reciprocal-rank fusion, with the lexical leg's contribution scalable.
+ 
+-    `rrf_k` controls rank-decay strength and defaults to the module constant `RRF_K` (currently 60,
+-    the literature default and the value every published recall/MRR number was measured with).
++    `rrf_k` controls rank-decay strength and defaults to the module constant `RRF_K`.
+     Pass an explicit `rrf_k` to override per-call without changing the global default -- useful in
+     ablation sweeps (e.g. run_ablation.py)."""
+     lexical_ranks = lexical_ranks or {}

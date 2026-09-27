@@ -215,6 +215,29 @@ Also out of scope: a Codex or Cursor adapter, an LLM-judge column, a private-cor
 
 ## Progress / evidence
 
+- 2026-09-27: T3 trap set designed and signed off by the second reader (leonardoprimero,
+  2026-09-27) before any file was written: twelve traps, four own-history (395962e FastMCP and
+  the same commit's strict argument models, 7335546 RRF_K, 4dc37e8 no ANN index), three
+  leakcanary (940e0f30 WorkManager kept optional and the versions pinned on purpose, issue #844
+  the toast) and five egui (#4489 image formats, be9f363c winit default features, 89e42884
+  android-activity, a12d18d9 chrono, #7342 Vulkan). One below the four-per-source target on
+  leakcanary, declared rather than padded. Candidates dropped and why: watchdog (the rejection
+  exists only in the counterfactual eval data, never in a commit), FileProvider and WorkManager as
+  a dependency (both already in LeakCanary's tree at the pin), atomic_refcell on wasm32 (egui went
+  back to parking_lot), a LeakActivity action-bar trap (its prompt dictated the mechanism). Found
+  while writing the detectors, not at sign-off: six traps keep their rationale in the working tree
+  at the edit site, and all four own-history traps are among them, because this repository writes
+  its decisions into code comments (`mcp_server.py`'s header, the block above `RRF_K`, the
+  dependency notes in `pyproject.toml`), next to `lc-androidx-bump` (catalog comments) and
+  `egui-android-activity` (a Cargo.toml comment block). They stay as a control for what an in-tree
+  comment achieves on its own; T5 reports the two halves stratified, and on own-history the
+  benchmark measures that before it measures project memory. Also found: the loader's "no
+  bruriah in the prompt" rule catches paths under `src/bruriah/`, so two own-history prompts name
+  the bare module instead of the path. Second-reader corrections before sign-off: one prompt had a false premise
+  (heap analysis does run without WorkManager, on a background thread) and three named the
+  mechanism rather than the symptom; all four rewritten. RED: `tests/test_agent_regression_traps.py`
+  (29a855d).
+
 - 2026-09-27: native review of the T2 range (lineage `review-ab5b9bc91c52b75c`) found two
   criticals, both confirmed against Claude Code 2.1.283 `--help`: (1) `--bare` skips `CLAUDE.md`
   auto-discovery, so the `prompted` instruction never reached the model and `prompted` equalled

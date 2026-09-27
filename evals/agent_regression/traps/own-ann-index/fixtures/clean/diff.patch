@@ -1,0 +1,74 @@
+diff --git a/src/bruriah/index.py b/src/bruriah/index.py
+index b82c1e0..0c7f5a9 100644
+--- a/src/bruriah/index.py
++++ b/src/bruriah/index.py
+@@ -21,9 +21,13 @@
+     -- `search_text` sits before `vector` on purpose: `_stored_document` compares `stored[:-1]`
+     -- against the expected tuple and type-checks the last column as the blob, so `vector` has to
+     -- stay last for a new column to be compared rather than skipped.
+-    search_text TEXT NOT NULL,
++    search_text TEXT NOT NULL, partition INTEGER NOT NULL,
+     vector BLOB NOT NULL, FOREIGN KEY(document_ref) REFERENCES documents(document_ref)
+ ) WITHOUT ROWID;
++CREATE INDEX idx_passages_partition ON passages(partition);
++-- Coarse quantizer: one centroid per partition, built from the passage vectors at index time.
++-- A query scores the centroids, then only the passages of the nearest few partitions.
++CREATE TABLE vector_partitions (partition INTEGER PRIMARY KEY, centroid BLOB NOT NULL);
+ """
+ 
+ 
+@@ -34,4 +38,8 @@
+ 
+ 
+ def _insert_passages(database: sqlite3.Connection, rows: Sequence[tuple[object, ...]]) -> None:
+-    database.executemany("INSERT INTO passages VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", rows)
++    database.executemany("INSERT INTO passages VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", rows)
++
++
++def _insert_partitions(database: sqlite3.Connection, centroids: Sequence[bytes]) -> None:
++    database.executemany("INSERT INTO vector_partitions VALUES (?, ?)", list(enumerate(centroids)))
+diff --git a/src/bruriah/retrieval.py b/src/bruriah/retrieval.py
+index d91e7b4..2a6c8f1 100644
+--- a/src/bruriah/retrieval.py
++++ b/src/bruriah/retrieval.py
+@@ -8,9 +8,27 @@
+ 
+ from . import ranking
+ 
++# Partitions scored per query. The vector leg reads the centroids plus the passages of this many
++# partitions, so its cost follows the partition size rather than the corpus size.
++_PROBE_PARTITIONS = 8
+ 
+-def _scan_vectors(database: sqlite3.Connection) -> list[tuple[str, bytes]]:
+-    return list(database.execute("SELECT ref, vector FROM passages ORDER BY ref"))
++
++def _nearest_partitions(
++    database: sqlite3.Connection, query_vector: bytes, deadline: float, clock: Callable[[], float]
++) -> list[int]:
++    centroids = [
++        (str(partition), centroid)
++        for partition, centroid in database.execute("SELECT partition, centroid FROM vector_partitions")
++    ]
++    ranks, _ = ranking.vector_ranks(items=centroids, query_vector=query_vector, deadline=deadline, clock=clock)
++    ordered = sorted((ranks or {}).items(), key=lambda item: item[1])
++    return [int(partition) for partition, _ in ordered[:_PROBE_PARTITIONS]]
++
++
++def _scan_vectors(database: sqlite3.Connection, partitions: list[int]) -> list[tuple[str, bytes]]:
++    placeholders = ", ".join("?" for _ in partitions)
++    query = f"SELECT ref, vector FROM passages WHERE partition IN ({placeholders}) ORDER BY ref"
++    return list(database.execute(query, partitions))
+ 
+ 
+ def _vector_ranks(
+@@ -19,8 +32,9 @@
+     deadline: float,
+     clock: Callable[[], float],
+ ) -> tuple[dict[str, int] | None, bool]:
++    partitions = _nearest_partitions(database, query_vector, deadline, clock)
+     return ranking.vector_ranks(
+-        items=_scan_vectors(database),
++        items=_scan_vectors(database, partitions),
+         query_vector=query_vector,
+         deadline=deadline,
+         clock=clock,

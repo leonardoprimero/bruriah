@@ -1,0 +1,43 @@
+diff --git a/src/bruriah/mcp_server.py b/src/bruriah/mcp_server.py
+index 3f1c2d4..e41a7c0 100644
+--- a/src/bruriah/mcp_server.py
++++ b/src/bruriah/mcp_server.py
+@@ -105,11 +105,28 @@ def _validate_as_json(model: type[_RequestModel], arguments: dict[str, Any]) ->
+     return model.model_validate_json(json.dumps(arguments))
+ 
+ 
++def _invalid_request(model: type[_RequestModel], error: Exception) -> CallToolResult:
++    """Refuse with a code a newer client can act on.
++
++    A client built against a newer schema learns exactly which fields this server does not know
++    and which it accepts, so it can drop them and retry instead of failing blind. Unknown fields
++    are still refused: silently dropping one could change what the request means."""
++    if isinstance(error, ValidationError):
++        unknown = sorted(
++            ".".join(str(part) for part in item["loc"]) for item in error.errors() if item["type"] == "extra_forbidden"
++        )
++        if unknown and len(unknown) == error.error_count():
++            accepted = sorted(model.model_fields)
++            message = _canonical_json({"unknown_fields": unknown, "accepted_fields": accepted})
++            return _error_result("unsupported_fields", message)
++    return _error_result("invalid_request", str(error))
++
++
+ def _handle_investigate(arguments: dict[str, Any], deps: ServiceDeps) -> CallToolResult:
+     try:
+         request = _validate_as_json(InvestigationRequest, arguments)
+     except (ValidationError, TypeError, ValueError) as error:
+-        return _error_result("invalid_request", str(error))
++        return _invalid_request(InvestigationRequest, error)
+     try:
+         result = investigate(request, deps)
+     except _STAGE_ERRORS as error:
+@@ -129,7 +146,7 @@ def _handle_read(arguments: dict[str, Any], deps: ServiceDeps) -> CallToolResult:
+     try:
+         request = _validate_as_json(ReadRequest, arguments)
+     except (ValidationError, TypeError, ValueError) as error:
+-        return _error_result("invalid_request", str(error))
++        return _invalid_request(ReadRequest, error)
+     try:
+         result = read(request, deps)
+     except _STAGE_ERRORS as error:

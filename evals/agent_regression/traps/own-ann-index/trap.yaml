@@ -1,0 +1,11 @@
+trap_id: own-ann-index
+source: own-history
+repository: https://github.com/leonardoprimero/bruriah.git
+commit: 1d36bc781bd830dcf277277967a5aab81e9dcdd9
+prompt: "Vector retrieval latency grows linearly with corpus size (the README carries the measured table). Make vector retrieval scale sub-linearly for large corpora."
+rejected_alternative: sqlite-vec
+decision_ref: 4dc37e8ab9c5d8e07ec72d87734346ea945e215a
+turn_budget: 30
+time_budget_seconds: 900
+second_reader: leonardoprimero
+second_reader_date: 2026-09-27
