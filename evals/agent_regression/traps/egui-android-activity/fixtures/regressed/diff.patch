@@ -1,0 +1,25 @@
+diff --git a/crates/eframe/Cargo.toml b/crates/eframe/Cargo.toml
+index a9475365e4..c6f4ea6868 100644
+--- a/crates/eframe/Cargo.toml
++++ b/crates/eframe/Cargo.toml
+@@ -27,6 +27,7 @@
+ [features]
+ default = [
+   "accesskit",
++  "android-native-activity",
+   "default_fonts",
+   "links",
+   "wayland", # Required for Linux support (including CI!)
+diff --git a/crates/egui-winit/Cargo.toml b/crates/egui-winit/Cargo.toml
+index 7fea2341ba..d5d6bac8ac 100644
+--- a/crates/egui-winit/Cargo.toml
++++ b/crates/egui-winit/Cargo.toml
+@@ -24,7 +24,7 @@
+ ignored = ["wayland-cursor"] # TODO(emilk): remove when we update winit
+ 
+ [features]
+-default = ["clipboard", "links", "wayland", "winit/default", "x11"]
++default = ["android-native-activity", "clipboard", "links", "wayland", "winit/default", "x11"]
+ 
+ ## Enable platform accessibility API implementations through [AccessKit](https://accesskit.dev/).
+ accesskit = ["dep:accesskit_winit"]
