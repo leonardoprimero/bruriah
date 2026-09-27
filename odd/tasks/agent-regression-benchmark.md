@@ -225,6 +225,10 @@ Also out of scope: a Codex or Cursor adapter, an LLM-judge column, a private-cor
   Fix commit 3c8c74e; the review then closed approved with nine advisory, non-blocking findings
   (incremental run-record writes, index cache keyed without the Bruriah version, orphaned client
   on interrupt, lenient record validators) to take up in T5, not as a reason to re-review.
+  The T0 and T1 ranges were then reviewed as separate candidates (the whole branch exceeds the
+  reviewer context budget) and both closed approved without correction; their advisory findings
+  (Wilson interval at zero denominator, provenance taken from the first run only, `run_from_json`
+  skipping the detection contract) join the T5 list.
 - 2026-09-27: T2 by one bounded writer, strict TDD (RED at collection, GREEN, six reverted
   mutations each caught by exactly one test). `evals/agent_regression/claude_code.py` (617 lines)
   and `tests/test_agent_regression_claude_code.py` (81 tests). Two facts measured on Claude Code
