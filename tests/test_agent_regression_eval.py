@@ -139,17 +139,26 @@ def _trap_fields(trap_id: str) -> dict[str, object]:
 
 
 def _make_trap(
-    root: Path, trap_id: str = "trap-a", *, directory: str | None = None, detect_source: str | None = None, **overrides
+    root: Path,
+    trap_id: object = "trap-a",
+    *,
+    directory: str | None = None,
+    detect_source: str | None = None,
+    **overrides,
 ) -> Path:
     """Writes a valid trap directory under `root` and returns it. An override replaces one
     `trap.yaml` key; the `_OMIT` sentinel drops it. `detect_source=""` writes no `detect.py`."""
-    fields = _trap_fields(trap_id)
+    fields = _trap_fields("trap-a" if trap_id is _OMIT else trap_id)
+    if trap_id is _OMIT:
+        # `trap_id` is both a helper parameter and a `trap.yaml` key, so `**{"trap_id": _OMIT}` binds
+        # to the parameter; honour the sentinel here the same way the loop below does for other keys.
+        fields.pop("trap_id")
     for key, value in overrides.items():
         if value is _OMIT:
             fields.pop(key, None)
         else:
             fields[key] = value
-    trap_dir = root / (directory or trap_id)
+    trap_dir = root / (directory or fields.get("trap_id", "trap-a"))
     trap_dir.mkdir(parents=True, exist_ok=True)
     (trap_dir / "trap.yaml").write_text(yaml.safe_dump(fields, sort_keys=False), encoding="utf-8")
     source = _DETECT_SOURCE if detect_source is None else detect_source
