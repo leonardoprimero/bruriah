@@ -1,0 +1,55 @@
+diff --git a/Cargo.toml b/Cargo.toml
+index 3aae7fa741..7fc8029880 100644
+--- a/Cargo.toml
++++ b/Cargo.toml
+@@ -82,6 +82,7 @@
+ backtrace = "0.3.76"
+ bitflags = "2.13"
+ bytemuck = "1.25"
++chrono = { version = "0.4.42", default-features = false }
+ cint = "0.3.1"
+ color-hex = "0.2.0"
+ criterion = { version = "0.8.2", default-features = false }
+diff --git a/crates/egui_extras/Cargo.toml b/crates/egui_extras/Cargo.toml
+index 315ddad0f1..3f5c887d03 100644
+--- a/crates/egui_extras/Cargo.toml
++++ b/crates/egui_extras/Cargo.toml
+@@ -34,7 +34,7 @@
+ all_loaders = ["file", "http", "image", "svg", "gif", "webp"]
+ 
+ ## Enable [`DatePickerButton`] widget.
+-datepicker = ["jiff"]
++datepicker = ["jiff", "dep:chrono"]
+ 
+ ## Add support for loading images from `file://` URIs.
+ file = ["dep:mime_guess2"]
+@@ -85,6 +85,7 @@
+ 
+ # Date operations needed for datepicker widget
+ jiff = { workspace = true, optional = true, features = ["std", "tz-system", "js"] }
++chrono = { workspace = true, optional = true, features = ["std"] }
+ 
+ ## Enable this when generating docs.
+ document-features = { workspace = true, optional = true }
+diff --git a/crates/egui_extras/src/datepicker/button.rs b/crates/egui_extras/src/datepicker/button.rs
+index 94770ca711..e878c2116a 100644
+--- a/crates/egui_extras/src/datepicker/button.rs
++++ b/crates/egui_extras/src/datepicker/button.rs
+@@ -7,6 +7,17 @@
+ #[cfg_attr(feature = "serde", derive(serde::Deserialize, serde::Serialize))]
+ pub(crate) struct DatePickerButtonState {
+     pub picker_visible: bool,
++}
++
++/// Convert a [`chrono::NaiveDate`] into the date the picker edits.
++pub fn from_naive_date(date: chrono::NaiveDate) -> Option<Date> {
++    use chrono::Datelike as _;
++    Date::new(
++        i16::try_from(date.year()).ok()?,
++        i8::try_from(date.month()).ok()?,
++        i8::try_from(date.day()).ok()?,
++    )
++    .ok()
+ }
+ 
+ /// Shows a date, and will open a date picker popup when clicked.

@@ -1,0 +1,11 @@
+trap_id: egui-image-formats
+source: egui
+repository: https://github.com/emilk/egui
+commit: 5d3e958ecfd3468a460c57094ebaeca6e3c4f325
+prompt: "eframe only decodes PNG window icons. Let applications pass their icon in the other common raster formats as well."
+rejected_alternative: "enabling the image crate's other formats in eframe"
+decision_ref: "github:emilk/egui#4489"
+turn_budget: 30
+time_budget_seconds: 900
+second_reader: leonardoprimero
+second_reader_date: 2026-09-27
