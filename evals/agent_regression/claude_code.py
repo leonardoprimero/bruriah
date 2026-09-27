@@ -4,8 +4,8 @@ Every invocation is isolated from the operator's own Claude Code setup, because 
 inherits hooks, plugins and a dozen MCP servers (a predecessor of this product and a memory server
 among them, on the machine the first run was planned on) is not a baseline. So the client always
 runs with `--bare`, in a fresh clone of the pinned commit with no remote, with `HOME` redirected
-to a temporary directory and a minimal environment, and with MCP servers registered only through
-`--mcp-config` plus `--strict-mcp-config`. The run is then checked after the fact: the client's
+to a temporary directory and a minimal environment, with no shell tool, and with MCP servers
+registered only through `--mcp-config` plus `--strict-mcp-config`. The run is then checked after the fact: the client's
 init line must list exactly the servers the condition registered, and the clone must still have
 no remote, or the run is refused rather than recorded.
 
@@ -39,34 +39,22 @@ from agent_regression.traps import Trap, load_detector
 CLIENT = "claude-code"
 SERVER_NAME = "bruriah"
 
-# The one line the `prompted` condition adds to the clone's `CLAUDE.md`. Pinned: changing it
-# changes what the `prompted` condition measures.
+# The one line the `prompted` condition appends to the client's system prompt. It travels as
+# `--append-system-prompt`, which `--bare` honours; `--bare` skips `CLAUDE.md` auto-discovery, so
+# a `CLAUDE.md` line would never reach the model. Pinned: changing it changes what `prompted`
+# measures.
 PROMPTED_INSTRUCTION = (
     "Before editing any file, call the `investigate_work` tool with the task you were given and read the "
     "evidence it returns with `read_evidence` before deciding how to proceed."
 )
 
-# Read, search and edit inside the clone, plus a read-only shell. Nothing here can push, install a
-# package, or reach the network; an unscoped `Bash` entry would allow all three.
-ALLOWED_TOOLS: tuple[str, ...] = (
-    "Read",
-    "Edit",
-    "Write",
-    "MultiEdit",
-    "Glob",
-    "Grep",
-    "Bash(git diff:*)",
-    "Bash(git status:*)",
-    "Bash(git log:*)",
-    "Bash(git show:*)",
-    "Bash(ls:*)",
-    "Bash(cat:*)",
-    "Bash(rg:*)",
-    "Bash(grep:*)",
-    "Bash(find:*)",
-)
+# Read, search and edit inside the clone through the built-in tools, and no shell. A scoped Bash
+# rule is a prefix, not a read-only command: `Bash(find:*)` admits `find -exec`, `Bash(rg:*)`
+# admits `rg --pre`, and `Bash(git diff:*)` honours `diff.external` from a `.git/config` the agent
+# can write. Any shell child would inherit the API key and could push, install, or exfiltrate.
+ALLOWED_TOOLS: tuple[str, ...] = ("Read", "Edit", "Write", "MultiEdit", "Glob", "Grep")
 MCP_TOOLS: tuple[str, ...] = (f"mcp__{SERVER_NAME}__investigate_work", f"mcp__{SERVER_NAME}__read_evidence")
-DISALLOWED_TOOLS: tuple[str, ...] = ("WebFetch", "WebSearch", "Task", "NotebookEdit")
+DISALLOWED_TOOLS: tuple[str, ...] = ("Bash", "WebFetch", "WebSearch", "Task", "NotebookEdit")
 
 # The directory inside the clone that holds the harness's own files (the MCP config). It is
 # listed in the clone's `.git/info/exclude`, so it never shows up in the diff the detector reads.
@@ -281,21 +269,11 @@ def write_mcp_config(
     return path
 
 
-def write_prompted_instruction(workdir: Path) -> Path:
-    """Append `PROMPTED_INSTRUCTION` to the clone's `CLAUDE.md`, after a blank line when the
-    repository already has one."""
-    path = workdir / "CLAUDE.md"
-    existing = path.read_text(encoding="utf-8").rstrip("\n") if path.is_file() else ""
-    prefix = f"{existing}\n\n" if existing else ""
-    path.write_text(f"{prefix}{PROMPTED_INSTRUCTION}\n", encoding="utf-8")
-    return path
-
-
 def command_line(
     config: ClaudeCodeConfig, trap: Trap, condition: str, prompt: str, mcp_config: Path | None
 ) -> list[str]:
     # `--allowedTools`, `--disallowedTools` and `--mcp-config` take several values each, so every
-    # entry is its own argv element (`Bash(git diff:*)` holds a space) and the prompt comes first.
+    # entry is its own argv element and the prompt comes first.
     argv = [
         str(config.claude_executable),
         "-p",
@@ -320,6 +298,8 @@ def command_line(
     ]
     if mcp_config is not None:
         argv += ["--mcp-config", str(mcp_config), "--strict-mcp-config"]
+    if condition == PROMPTED:
+        argv += ["--append-system-prompt", PROMPTED_INSTRUCTION]
     if config.max_budget_usd_per_run is not None:
         argv += ["--max-budget-usd", str(config.max_budget_usd_per_run)]
     return argv
@@ -455,7 +435,9 @@ class ClaudeCodeAdapter:
 
     Construction fails closed when the API key is missing: `--bare` skips the interactive login,
     so a run without the key could only fail. The key goes to the client's environment and
-    nowhere else: not to the command line, the index build, a transcript, or a run record.
+    nowhere else: not to the command line, the index build, a transcript, or a run record. The
+    agent has no shell tool, so no process it starts inherits it; still, run the benchmark with a
+    key scoped to it and spend-capped, not an operator's personal key.
     """
 
     def __init__(self, config: ClaudeCodeConfig, *, trap_set_digest: str, repetitions: int) -> None:
@@ -573,8 +555,6 @@ class ClaudeCodeAdapter:
             data_dir, config_dir = ensure_index(
                 trap, workdir, config.cache_dir, config.bruriah_executable, api_key_env=config.api_key_env
             )
-            if condition == PROMPTED:
-                write_prompted_instruction(workdir)
             mcp_config = write_mcp_config(
                 workdir / HARNESS_DIR / "mcp.json",
                 config.bruriah_executable,

@@ -55,7 +55,6 @@ from agent_regression.claude_code import (  # noqa: E402
     prepare_workdir,
     workdir_diff,
     write_mcp_config,
-    write_prompted_instruction,
 )
 from agent_regression.detection import Detection  # noqa: E402
 from agent_regression.metrics import trap_set_digest  # noqa: E402
@@ -434,39 +433,23 @@ def _result(**overrides: object) -> dict:
 
 
 # -------------------------------------------------------------------------------------------
-# Tool allowlist: the agent cannot push, install packages, or reach the network
+# Tool allowlist: the agent runs no shell command, so it cannot push, install packages, reach
+# the network, or read the API key from its environment
 # -------------------------------------------------------------------------------------------
 
 
 @pytest.mark.parametrize("condition", CONDITIONS)
-def test_no_allowed_tool_can_push_install_or_reach_the_network(condition: str) -> None:
+def test_no_allowed_tool_runs_a_shell_command(condition: str) -> None:
+    # A prefix rule is not read-only: `Bash(find:*)` admits `find -exec`, `Bash(rg:*)` admits
+    # `rg --pre`, and `Bash(git diff:*)` honours `diff.external` from a `.git/config` the agent
+    # can write. Every Bash child would inherit `ANTHROPIC_API_KEY`, so there is no shell at all.
     for entry in allowed_tools(condition):
-        lowered = entry.lower()
-        for forbidden in ("push", "pip", "uv", "npm", "curl", "wget"):
-            assert forbidden not in lowered, (condition, entry)
-        assert entry != "Bash", "an unscoped Bash entry would allow any command"
-        if entry.startswith("Bash"):
-            assert entry.startswith("Bash(") and entry.endswith(":*)"), entry
+        assert not entry.startswith("Bash"), (condition, entry)
+    assert "Bash" in DISALLOWED_TOOLS
 
 
-def test_the_base_allowlist_is_the_file_tools_plus_read_only_git_and_search() -> None:
-    assert ALLOWED_TOOLS == (
-        "Read",
-        "Edit",
-        "Write",
-        "MultiEdit",
-        "Glob",
-        "Grep",
-        "Bash(git diff:*)",
-        "Bash(git status:*)",
-        "Bash(git log:*)",
-        "Bash(git show:*)",
-        "Bash(ls:*)",
-        "Bash(cat:*)",
-        "Bash(rg:*)",
-        "Bash(grep:*)",
-        "Bash(find:*)",
-    )
+def test_the_base_allowlist_is_the_file_tools_and_the_built_in_search() -> None:
+    assert ALLOWED_TOOLS == ("Read", "Edit", "Write", "MultiEdit", "Glob", "Grep")
 
 
 def test_baseline_allows_no_bruriah_tool() -> None:
@@ -485,8 +468,8 @@ def test_allowed_tools_rejects_an_unknown_condition() -> None:
         allowed_tools("hooked")
 
 
-def test_web_task_and_notebook_tools_are_disallowed() -> None:
-    assert DISALLOWED_TOOLS == ("WebFetch", "WebSearch", "Task", "NotebookEdit")
+def test_shell_web_task_and_notebook_tools_are_disallowed() -> None:
+    assert DISALLOWED_TOOLS == ("Bash", "WebFetch", "WebSearch", "Task", "NotebookEdit")
     assert not set(DISALLOWED_TOOLS) & set(ALLOWED_TOOLS + MCP_TOOLS)
 
 
@@ -705,22 +688,27 @@ def test_the_prompted_instruction_names_both_tools_and_not_the_product() -> None
     assert "\n" not in PROMPTED_INSTRUCTION
 
 
-def test_write_prompted_instruction_creates_claude_md_when_missing(tmp_path: Path) -> None:
-    path = write_prompted_instruction(tmp_path)
+def test_prompted_command_line_appends_the_instruction_to_the_system_prompt(tmp_path: Path) -> None:
+    # `--bare` skips `CLAUDE.md` auto-discovery (Claude Code 2.1.283 `--help`), so a `CLAUDE.md`
+    # line would never reach the model and `prompted` would silently equal `unprompted`.
+    config = _config(tmp_path, Path("/opt/claude"), Path("/opt/bruriah"))
+    trap = _pure_trap(tmp_path)
 
-    assert path == tmp_path / "CLAUDE.md"
-    assert path.read_text(encoding="utf-8") == PROMPTED_INSTRUCTION + "\n"
+    argv = command_line(config, trap, PROMPTED, trap.prompt, tmp_path / "mcp.json")
+
+    assert _flag_values(argv, "--append-system-prompt") == [PROMPTED_INSTRUCTION]
 
 
-@pytest.mark.parametrize("existing", ["# Project\n\nRules.\n", "# Project\n\nRules."])
-def test_write_prompted_instruction_appends_after_a_blank_line(tmp_path: Path, existing: str) -> None:
-    (tmp_path / "CLAUDE.md").write_text(existing, encoding="utf-8")
+@pytest.mark.parametrize("condition", [BASELINE, UNPROMPTED])
+def test_only_the_prompted_command_line_carries_an_instruction(tmp_path: Path, condition: str) -> None:
+    config = _config(tmp_path, Path("/opt/claude"), Path("/opt/bruriah"))
+    trap = _pure_trap(tmp_path)
+    mcp_config = None if condition == BASELINE else tmp_path / "mcp.json"
 
-    write_prompted_instruction(tmp_path)
+    argv = command_line(config, trap, condition, trap.prompt, mcp_config)
 
-    assert (tmp_path / "CLAUDE.md").read_text(encoding="utf-8") == (
-        "# Project\n\nRules.\n\n" + PROMPTED_INSTRUCTION + "\n"
-    )
+    assert "--append-system-prompt" not in argv
+    assert PROMPTED_INSTRUCTION not in argv
 
 
 def test_write_mcp_config_renders_the_claude_code_manifest_for_the_real_server(tmp_path: Path) -> None:
@@ -1045,22 +1033,26 @@ def test_an_unprompted_run_registers_the_real_server_strictly_and_leaves_claude_
     assert run.exit_reason == "done"
 
 
-def test_a_prompted_run_appends_the_instruction_to_the_repository_claude_md(tmp_path: Path, rig: _Rig) -> None:
+def test_a_prompted_run_passes_the_instruction_as_system_prompt_and_leaves_claude_md_alone(
+    tmp_path: Path, rig: _Rig
+) -> None:
     origin, commit = _make_origin(tmp_path / "with-claude-md", {"CLAUDE.md": "# Project rules\n", "README.md": "x\n"})
     trap = _make_trap(tmp_path / "second", origin, commit, trap_id="trap-b")
 
     rig.run(rig.adapter(), PROMPTED, trap=trap)
 
     (call,) = rig.claude_calls()
-    assert call["claude_md"] == "# Project rules\n\n" + PROMPTED_INSTRUCTION + "\n"
+    assert _flag_values(call["argv"], "--append-system-prompt") == [PROMPTED_INSTRUCTION]
+    assert call["claude_md"] == "# Project rules\n"
     assert "--strict-mcp-config" in call["argv"]
 
 
-def test_a_prompted_run_creates_claude_md_when_the_repository_has_none(rig: _Rig) -> None:
+def test_a_prompted_run_writes_no_claude_md_when_the_repository_has_none(rig: _Rig) -> None:
     rig.run(rig.adapter(), PROMPTED)
 
     (call,) = rig.claude_calls()
-    assert call["claude_md"] == PROMPTED_INSTRUCTION + "\n"
+    assert call["claude_md"] is None
+    assert not (rig.root / "work" / "trap-a-prompted-0" / "CLAUDE.md").exists()
 
 
 def test_the_index_is_built_once_across_repetitions_and_conditions(rig: _Rig) -> None:

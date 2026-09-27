@@ -80,7 +80,7 @@ traps beat more traps with a detector that guesses.
 |---|---|---|---|
 | `baseline` | no | no | how often the agent regresses on its own |
 | `unprompted` | yes | no | whether the tool is used and heeded without being told to |
-| `prompted` | yes | one `CLAUDE.md` line: investigate the task before editing | the ceiling: what the tool is worth when used |
+| `prompted` | yes | one system-prompt line (`--append-system-prompt`): investigate the task before editing | the ceiling: what the tool is worth when used |
 
 `unprompted` vs `prompted` is the question that decides where the next product work goes, so both
 run from the first publication. A fourth condition with `bruriah brief` output pasted into the
@@ -94,8 +94,8 @@ where the repetition number travels explicitly so a replay adapter is a pure loo
 when the client reports it, and the exit reason (done, turn budget, time budget, error).
 
 First adapter: **Claude Code headless** (`claude -p`, JSON output, tool allowlist restricted to
-read/edit/write/grep/glob and a `bash` allowlist that excludes `git push`, package installs
-and network). Model id, `claude --version`, and the Bruriah version go into every run record.
+read/edit/write/grep/glob with no shell tool at all: a scoped `Bash(find:*)` still runs
+`find -exec`). Model id, `claude --version`, and the Bruriah version go into every run record.
 Codex is installed locally and gets the second adapter in a later branch; the interface is
 designed so a second adapter changes no harness code.
 
@@ -158,10 +158,10 @@ Also out of scope: a Codex or Cursor adapter, an LLM-judge column, a private-cor
 - The headline number is decided by code, never by a model. An LLM-judge column, if ever added,
   is secondary and labeled as such.
 - No trap prompt names the rejected alternative, the decision, or Bruriah.
-- The agent runs in a fresh temporary clone at the pinned sha, with a tool allowlist that cannot
-  push, install packages, or reach the network beyond the model API. Verified by a test that
-  inspects the allowlist the adapter passes, and by a post-run check that the clone's remotes
-  and lockfiles are untouched.
+- The agent runs in a fresh temporary clone at the pinned sha, with no shell tool, so it cannot
+  push, install packages, reach the network beyond the model API, or start a process that
+  inherits the API key. Verified by a test that inspects the allowlist the adapter passes, and
+  by a post-run check that the clone's remotes are untouched.
 - The MCP surface stays two read-only tools. The benchmark drives them through the real
   `bruriah serve` process, not through the service in-process, because the client's behavior
   with the real transport is the thing being measured.
@@ -215,6 +215,13 @@ Also out of scope: a Codex or Cursor adapter, an LLM-judge column, a private-cor
 
 ## Progress / evidence
 
+- 2026-09-27: native review of the T2 range (lineage `review-ab5b9bc91c52b75c`) found two
+  criticals, both confirmed against Claude Code 2.1.283 `--help`: (1) `--bare` skips `CLAUDE.md`
+  auto-discovery, so the `prompted` instruction never reached the model and `prompted` equalled
+  `unprompted`; it now travels as `--append-system-prompt` (the `CLAUDE.md`-in-diff follow-up
+  below is void). (2) The scoped Bash allowlist was not read-only (`find -exec`, `rg --pre`,
+  `diff.external` from an agent-writable `.git/config`) and every shell child inherited the API
+  key; the shell is gone and `Bash` is disallowed. Strict TDD: 7 RED, 81 GREEN, test count unchanged.
 - 2026-09-27: T2 by one bounded writer, strict TDD (RED at collection, GREEN, six reverted
   mutations each caught by exactly one test). `evals/agent_regression/claude_code.py` (617 lines)
   and `tests/test_agent_regression_claude_code.py` (81 tests). Two facts measured on Claude Code
