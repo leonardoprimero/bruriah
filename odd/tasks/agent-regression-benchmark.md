@@ -15,7 +15,7 @@ result. A benchmark that only publishes when it flatters the product is marketin
 
 Turn the central claim of this project -- *a coding agent with Bruriah reintroduces rejected
 architectures less often than the same agent without it* -- from a case study into a measured,
-reproducible number: `evals/agent-regression/`, a benchmark whose headline metric is
+reproducible number: `evals/agent_regression/`, a benchmark whose headline metric is
 **Regression Rate (RR)**, defined as "the agent's resulting change reintroduces the rejected
 alternative", decided by a deterministic detector over the resulting tree, never by a model.
 
@@ -44,7 +44,7 @@ asks, and today the honest answer is "not measured".
 
 ### The unit: a regression trap
 
-A trap is one directory under `evals/agent-regression/traps/<id>/` holding:
+A trap is one directory under `evals/agent_regression/traps/<id>/` holding:
 
 - `trap.yaml`: the pinned repository and commit, the task prompt, the rejected alternative's
   name, the reference decision document (path or commit) that rejected it, and a turn/time
@@ -88,7 +88,8 @@ prompt (no MCP round trip) is the obvious follow-up and is out of scope here.
 
 ### Agent adapters
 
-One adapter interface, `AgentAdapter.run(workdir, prompt, condition) -> AgentRun`, where
+One adapter interface, `AgentAdapter.run(workdir, prompt, condition, trap, repetition) -> AgentRun`,
+where the repetition number travels explicitly so a replay adapter is a pure lookup, and where
 `AgentRun` records the transcript, the tool calls in order, turn count, wall-clock, token usage
 when the client reports it, and the exit reason (done, turn budget, time budget, error).
 
@@ -142,7 +143,7 @@ first (T4), never an unattended kick-off.
 
 ## Scope
 
-- `evals/agent-regression/`: trap schema and loader, detector contract, adapter interface, Claude
+- `evals/agent_regression/`: trap schema and loader, detector contract, adapter interface, Claude
   Code adapter, runner, metric computation, JSON and Markdown report writers, README.
 - `tests/test_agent_regression_eval.py`: hermetic tests via a fake adapter.
 - 12 to 15 committed traps with detectors and fixture tests.
@@ -175,7 +176,7 @@ Also out of scope: a Codex or Cursor adapter, an LLM-judge column, a private-cor
   silent on clean fixture, completion check independent of detection), the `AgentRun` record and
   its provenance fields, the metric arithmetic (RR, consult rate, heed rate, Wilson interval,
   paired sign test) on hand-computed cases, and byte-identical report rendering.
-- [ ] **T1 -- Harness.** `evals/agent-regression/`: trap loader, detector protocol, adapter
+- [ ] **T1 -- Harness.** `evals/agent_regression/`: trap loader, detector protocol, adapter
   interface, fake replay adapter, runner, metrics, report writers. GREEN for T0.
 - [ ] **T2 -- Claude Code adapter.** Headless invocation, tool allowlist, MCP registration per
   condition (writes the client config into the temporary clone, never into the user's), run
@@ -190,7 +191,7 @@ Also out of scope: a Codex or Cursor adapter, an LLM-judge column, a private-cor
   decision before any paid run. Record the approved budget here.
 - [ ] **T5 -- Published run.** Execute, spot-check every fired detection by hand, commit the
   report with provenance. Publish the number as measured.
-- [ ] **T6 -- Docs.** `evals/agent-regression/README.md` (method, conditions, threats to
+- [ ] **T6 -- Docs.** `evals/agent_regression/README.md` (method, conditions, threats to
   validity, reproduce block), a row in the top-level README's measured-evidence table, and a
   CHANGELOG entry. The README row states the one-client one-model scope in the same cell as the
   number.
@@ -199,7 +200,7 @@ Also out of scope: a Codex or Cursor adapter, an LLM-judge column, a private-cor
 
 - `uv run pytest -q -p no:cacheprovider tests/test_agent_regression_eval.py` passes offline with
   no model, no network, and no `claude` binary present.
-- `uv run python evals/agent-regression/run.py --dry-run` lists every planned invocation and
+- `uv run python -m agent_regression.run --dry-run` (with `evals/` on the path) or `uv run python evals/agent_regression/run.py --dry-run` lists every planned invocation and
   exits without calling an agent.
 - Every committed trap's detector has both fixtures and both pass; every trap has a second-reader
   sign-off.
@@ -214,6 +215,15 @@ Also out of scope: a Codex or Cursor adapter, an LLM-judge column, a private-cor
 
 ## Progress / evidence
 
+- 2026-09-27: T0 RED written by one bounded writer (80 tests, `tests/test_agent_regression_eval.py`).
+  The writer found a flat-module-name collision with `evals/retrieval/metrics.py`,
+  `evals/retrieval/adapters.py` and `evals/injection/run.py` (all imported through `sys.path` by
+  their test modules in the same pytest session; commit bea29eb hit the same collision before).
+  Decision: the harness is a real package, `evals/agent_regression/` with `__init__.py`, imported
+  through `ROOT / "evals"`; no flat names. The parent also moved the repetition number into the
+  adapter signature (the writer's draft had the replay adapter counting calls to infer it, which
+  is hidden state). Settled by the tests: repetitions number from 0; `ConditionSummary.runs`
+  counts error runs and every rate uses non-error runs as its denominator.
 - 2026-09-27: task document written. Repository audit that motivated it: every existing eval is
   structural or retrieval-side; the agent-in-the-loop claim is unmeasured. Claude Code 2.1.283
   and Codex are installed locally; Claude Code is the first adapter.
