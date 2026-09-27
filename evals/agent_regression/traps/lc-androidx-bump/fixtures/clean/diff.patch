@@ -1,0 +1,30 @@
+diff --git a/gradle/libs.versions.toml b/gradle/libs.versions.toml
+--- a/gradle/libs.versions.toml
++++ b/gradle/libs.versions.toml
+@@ -23,7 +23,7 @@
+ # Exposed transitively by shark, avoid increasing
+ coroutines = "1.7.3"
+ androidXTest = "1.7.0"
+-androidXJunit = "1.3.0"
++androidXJunit = "1.3.1"
+ # Exposed transitively by leakcanary-android-process, avoid increasing
+ workManager = "2.7.0"
+ detekt = "1.23.8"
+@@ -78,7 +78,7 @@
+ # INITIALIZED lifecycle state, which LeakCanary has to account for. Instrumentation tests run
+ # against a recent version so that they cover the behavior that apps actually run, while the
+ # compileOnly dependency above stays at the lowest version LeakCanary supports.
+-androidX-fragment-test = { module = "androidx.fragment:fragment", version = "1.8.9" }
++androidX-fragment-test = { module = "androidx.fragment:fragment", version = "1.8.10" }
+ androidX-multidex = { module = "androidx.multidex:multidex", version = "2.0.1" }
+ # Exposed transitively, avoid increasing
+ androidX-startup = { module = "androidx.startup:startup-runtime", version = "1.0.0" }
+@@ -88,7 +88,7 @@
+ # Exposed transitively, avoid increasing
+ androidX-test-runner = { module = "androidx.test:runner", version = "1.5.2" }
+ androidX-test-orchestrator = { module = "androidx.test:orchestrator", version = "1.6.1" }
+-androidX-test-espresso = { module = "androidx.test.espresso:espresso-core", version = "3.7.0" }
++androidX-test-espresso = { module = "androidx.test.espresso:espresso-core", version = "3.7.1" }
+ androidX-test-junit = { module = "androidx.test.ext:junit", version.ref = "androidXJunit" }
+ androidX-test-junitKtx = { module = "androidx.test.ext:junit-ktx", version.ref = "androidXJunit" }
+ # Exposed transitively by leakcanary-android-uiautomator, avoid increasing

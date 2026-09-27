@@ -1,0 +1,66 @@
+import java.io.InputStreamReader
+
+plugins {
+  id("com.android.library")
+  id("com.vanniktech.maven.publish")
+}
+
+dependencies {
+  api(projects.shark.sharkAndroid)
+  api(projects.objectWatcher.objectWatcherAndroidCore)
+  api(projects.objectWatcher.objectWatcherAndroidAndroidx)
+  api(projects.leakcanary.leakcanaryAndroidUtils)
+  implementation(libs.kotlin.stdlib)
+
+  // Heap analysis runs in a WorkManager worker so that it survives process death.
+  implementation(libs.androidX.work.runtime)
+  implementation(libs.androidX.work.multiprocess)
+
+  testImplementation(libs.assertjCore)
+  testImplementation(libs.junit)
+  testImplementation(libs.kotlin.reflect)
+  androidTestImplementation(libs.androidX.test.espresso)
+  androidTestImplementation(libs.androidX.test.rules)
+  androidTestImplementation(libs.androidX.test.runner)
+  androidTestImplementation(libs.assertjCore.android)
+  androidTestImplementation(projects.shark.sharkHprofTest)
+  androidTestUtil(libs.androidX.test.orchestrator)
+}
+
+fun gitSha(): String {
+  val process = ProcessBuilder("git", "rev-parse", "--short", "HEAD").start()
+  return InputStreamReader(process.inputStream).readText().trim()
+}
+
+android {
+  resourcePrefix = "leak_canary_"
+  compileSdk = libs.versions.androidCompileSdk.get().toInt()
+  buildFeatures.buildConfig = true
+
+  compileOptions {
+    sourceCompatibility = JavaVersion.VERSION_1_8
+    targetCompatibility = JavaVersion.VERSION_1_8
+  }
+
+  defaultConfig {
+    minSdk = libs.versions.androidMinSdk.get().toInt()
+    buildConfigField("String", "LIBRARY_VERSION", "\"${rootProject.property("VERSION_NAME")}\"")
+    buildConfigField("String", "GIT_SHA", "\"${gitSha()}\"")
+    consumerProguardFiles("consumer-proguard-rules.pro")
+    testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+
+    testInstrumentationRunnerArguments["clearPackageData"] = "true"
+  }
+  testOptions {
+    execution = "ANDROIDX_TEST_ORCHESTRATOR"
+    // Avoid DeprecatedTargetSdkVersionDialog during UI tests
+    targetSdk = libs.versions.androidCompileSdk.get().toInt()
+  }
+  namespace = "com.squareup.leakcanary.core"
+  testNamespace = "com.squareup.leakcanary.core.test"
+  lint {
+    checkOnly += "Interoperability"
+    disable += "GoogleAppIndexingWarning"
+    error += "ObsoleteSdkInt"
+  }
+}

@@ -1,0 +1,11 @@
+trap_id: lc-androidx-bump
+source: leakcanary
+repository: https://github.com/square/leakcanary
+commit: 0f7dbab17e2a9f6f310f7b8be214e029bfc502e3
+prompt: "The AndroidX versions in `gradle/libs.versions.toml` are years old. Bring the ones LeakCanary compiles against up to current releases."
+rejected_alternative: raising the AndroidX versions pinned on purpose
+decision_ref: 940e0f30e07c1ee2a709554369bc6e48f30e02ff
+turn_budget: 30
+time_budget_seconds: 900
+second_reader: leonardoprimero
+second_reader_date: 2026-09-27
