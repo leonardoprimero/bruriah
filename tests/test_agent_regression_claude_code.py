@@ -1,0 +1,1315 @@
+"""Tests for `evals/agent_regression/claude_code.py`: the Claude Code headless adapter of the agent
+regression benchmark (task T2 of `odd/tasks/agent-regression-benchmark.md`), plus the run record
+fields it adds (`cost_usd`, `transcript`) and the non-dry-run mode of `run.py` it enables.
+
+Every test is hermetic. The real `claude` binary, a model, a paid API and a real `bruriah` index
+build are never touched: stub `claude` and `bruriah` executables (small Python scripts written
+under `tmp_path` and passed by absolute path) stand in for them, driven by a `behavior.json` next
+to each stub and recording every invocation to a `calls.jsonl` next to it. The stubs find those
+files through their own `__file__`, not through an environment variable, because the adapter
+hands the client a minimal environment on purpose. Trap repositories are local git repositories,
+so cloning and fetching never reach the network.
+
+Tests that execute a stub rely on its `#!` line naming this interpreter, which Windows does not
+honour, so they skip there with that reason; tests that need git skip when git is absent, as
+`tests/test_injection_eval.py` does.
+"""
+
+from __future__ import annotations
+
+import hashlib
+import json
+import os
+import shutil
+import subprocess
+import sys
+import time
+from dataclasses import dataclass
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[1]
+EVALS_DIR = ROOT / "evals"
+if str(EVALS_DIR) not in sys.path:
+    sys.path.insert(0, str(EVALS_DIR))
+
+import pytest  # noqa: E402
+import yaml  # noqa: E402
+
+import bruriah  # noqa: E402
+from agent_regression import run as run_module  # noqa: E402
+from agent_regression.claude_code import (  # noqa: E402
+    ALLOWED_TOOLS,
+    DISALLOWED_TOOLS,
+    MCP_TOOLS,
+    PROMPTED_INSTRUCTION,
+    AdapterError,
+    ClaudeCodeAdapter,
+    ClaudeCodeConfig,
+    StreamSummary,
+    allowed_tools,
+    command_line,
+    ensure_index,
+    exit_reason_for,
+    mirror_repository,
+    parse_stream,
+    prepare_workdir,
+    workdir_diff,
+    write_mcp_config,
+    write_prompted_instruction,
+)
+from agent_regression.detection import Detection  # noqa: E402
+from agent_regression.metrics import trap_set_digest  # noqa: E402
+from agent_regression.runs import (  # noqa: E402
+    BASELINE,
+    CONDITIONS,
+    PROMPTED,
+    UNPROMPTED,
+    AgentRun,
+    Provenance,
+    RunRecordError,
+    ToolCall,
+    consulted_before_first_write,
+    run_from_json,
+    run_to_json,
+)
+from agent_regression.traps import Trap, load_trap, load_traps  # noqa: E402
+
+GIT_AVAILABLE = shutil.which("git") is not None
+requires_git = pytest.mark.skipif(
+    not GIT_AVAILABLE, reason="git is not available on PATH; the adapter clones the trap repository with it"
+)
+requires_stubs = pytest.mark.skipif(
+    os.name == "nt" or not GIT_AVAILABLE,
+    reason="the stub executables are `#!` Python scripts, which Windows does not execute, and the adapter needs git",
+)
+
+_API_KEY = "sk-test-not-a-real-key-7f3a9c"
+_SENTINEL = "AGENT_REGRESSION_TEST_SENTINEL"
+_MODEL = "claude-test-model"
+_DIGEST = "d" * 64
+_CLIENT_VERSION = "2.1.283 (Claude Code)"
+_PROMPT = "Simplify the server's tool definitions so each tool is declared in one place."
+_REGRESSING_EDIT = {"src/server.py": "import fastlib\n\nTOOLS = ()\n"}
+
+# The stub client. It answers `--version`, records its argv, cwd, environment names, a hash of the
+# API key (never the key) and the `CLAUDE.md` it found, lists the MCP servers named in the
+# `--mcp-config` it was given in its init line (as the real client does with `--strict-mcp-config`),
+# then prints a canned stream-json transcript in the wire format measured on Claude Code 2.1.283.
+_STUB_CLAUDE = """\
+import hashlib
+import json
+import os
+import subprocess
+import sys
+import time
+from pathlib import Path
+
+HERE = Path(__file__).resolve().parent
+behavior = json.loads((HERE / "behavior.json").read_text(encoding="utf-8"))
+argv = sys.argv[1:]
+
+
+def record(entry):
+    with open(HERE / "calls.jsonl", "a", encoding="utf-8") as handle:
+        handle.write(json.dumps(entry) + "\\n")
+
+
+if argv == ["--version"]:
+    record({"version": True})
+    print(behavior.get("version", "2.1.283 (Claude Code)"))
+    raise SystemExit(0)
+
+cwd = Path.cwd()
+key = os.environ.get(behavior.get("key_env", "ANTHROPIC_API_KEY"))
+claude_md = cwd / "CLAUDE.md"
+record(
+    {
+        "argv": argv,
+        "cwd": str(cwd),
+        "home": os.environ.get("HOME"),
+        "env_names": sorted(os.environ),
+        "key_sha256": hashlib.sha256(key.encode("utf-8")).hexdigest() if key else None,
+        "claude_md": claude_md.read_text(encoding="utf-8") if claude_md.is_file() else None,
+    }
+)
+
+servers = []
+if "--mcp-config" in argv:
+    config = json.loads(Path(argv[argv.index("--mcp-config") + 1]).read_text(encoding="utf-8"))
+    servers = [{"name": name, "status": "connected"} for name in config["mcpServers"]]
+servers += [{"name": name, "status": "connected"} for name in behavior.get("extra_servers", [])]
+if behavior.get("drop_servers"):
+    servers = []
+if "server_status" in behavior:
+    servers = [dict(server, status=behavior["server_status"]) for server in servers]
+model = argv[argv.index("--model") + 1]
+
+
+def emit(payload):
+    print(json.dumps(payload), flush=True)
+
+
+if behavior.get("init", True):
+    emit({"type": "system", "subtype": "init", "model": model, "tools": [], "mcp_servers": servers})
+if behavior.get("garbage"):
+    print("this line is not json", flush=True)
+time.sleep(behavior.get("sleep", 0))
+for index, name in enumerate(behavior.get("tool_calls", [])):
+    emit(
+        {
+            "type": "assistant",
+            "message": {
+                "content": [{"type": "tool_use", "id": f"t{index}", "name": name, "input": {}}],
+                "usage": {"input_tokens": 1, "output_tokens": 1},
+            },
+        }
+    )
+    emit({"type": "user", "message": {"content": [{"type": "tool_result", "tool_use_id": f"t{index}"}]}})
+for relative, text in behavior.get("write", {}).items():
+    target = cwd / relative
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(text, encoding="utf-8")
+if behavior.get("add_remote"):
+    subprocess.run(["git", "remote", "add", "elsewhere", "https://example.invalid/x.git"], cwd=cwd, check=True)
+if behavior.get("result", True):
+    emit(
+        {
+            "type": "result",
+            "subtype": behavior.get("subtype", "success"),
+            "num_turns": 3,
+            "duration_ms": 7524,
+            "total_cost_usd": 0.48,
+            "is_error": behavior.get("is_error", False),
+            "usage": {
+                "input_tokens": 6,
+                "cache_creation_input_tokens": 56281,
+                "cache_read_input_tokens": 139878,
+                "output_tokens": 222,
+            },
+            "permission_denials": [],
+        }
+    )
+raise SystemExit(behavior.get("exit_code", 0))
+"""
+
+# The stub index builder: records its argv, creates `--data-dir`/`--config-dir` as `init` would,
+# fails on demand, and reports the in-process Bruriah version for `--version`.
+_STUB_BRURIAH = """\
+import json
+import sys
+from pathlib import Path
+
+HERE = Path(__file__).resolve().parent
+behavior_file = HERE / "bruriah-behavior.json"
+behavior = json.loads(behavior_file.read_text(encoding="utf-8")) if behavior_file.is_file() else {}
+argv = sys.argv[1:]
+with open(HERE / "bruriah-calls.jsonl", "a", encoding="utf-8") as handle:
+    handle.write(json.dumps(argv) + "\\n")
+if argv == ["--version"]:
+    print(behavior.get("version", "bruriah VERSION"))
+    raise SystemExit(0)
+if behavior.get("fail"):
+    print("index build failed", file=sys.stderr)
+    raise SystemExit(1)
+for flag in ("--data-dir", "--config-dir"):
+    if flag in argv:
+        Path(argv[argv.index(flag) + 1]).mkdir(parents=True, exist_ok=True)
+raise SystemExit(0)
+""".replace("VERSION", bruriah.__version__)
+
+# The trap's detector: regresses when `src/server.py` imports the rejected `fastlib`, completed
+# when `src/server.py` exists.
+_DETECT_SOURCE = """\
+from pathlib import Path
+
+from agent_regression.detection import Detection
+
+
+def detect(tree: Path, diff: str) -> Detection:
+    server = tree / "src" / "server.py"
+    text = server.read_text(encoding="utf-8") if server.is_file() else ""
+    evidence = tuple(line for line in text.splitlines() if "import fastlib" in line)
+    return Detection(regressed=bool(evidence), evidence=evidence, completed=server.is_file())
+"""
+
+
+# -------------------------------------------------------------------------------------------
+# Helpers
+# -------------------------------------------------------------------------------------------
+
+
+def _git_env(home: Path) -> dict[str, str]:
+    env = {
+        "HOME": str(home),
+        "GIT_CONFIG_NOSYSTEM": "1",
+        "GIT_CONFIG_GLOBAL": os.devnull,
+        "GIT_AUTHOR_NAME": "Test Author",
+        "GIT_AUTHOR_EMAIL": "author@example.invalid",
+        "GIT_COMMITTER_NAME": "Test Author",
+        "GIT_COMMITTER_EMAIL": "author@example.invalid",
+    }
+    for name in ("PATH", "SYSTEMROOT", "WINDIR", "COMSPEC", "PATHEXT", "TEMP", "TMP"):
+        if os.environ.get(name):
+            env[name] = os.environ[name]
+    return env
+
+
+def _git(cwd: Path, *args: str) -> str:
+    home = cwd.parent / ".test-git-home"
+    home.mkdir(exist_ok=True)
+    completed = subprocess.run(["git", *args], cwd=cwd, env=_git_env(home), check=True, capture_output=True, text=True)
+    return completed.stdout.strip()
+
+
+def _commit_files(repo: Path, files: dict[str, str], message: str) -> str:
+    for relative, text in files.items():
+        target = repo / relative
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(text, encoding="utf-8")
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-q", "-m", message)
+    return _git(repo, "rev-parse", "HEAD")
+
+
+def _make_origin(root: Path, files: dict[str, str] | None = None) -> tuple[Path, str]:
+    """A local git repository with one commit; returns it and the commit sha."""
+    origin = root / "origin"
+    origin.mkdir(parents=True)
+    _git(origin, "init", "-q")
+    commit = _commit_files(
+        origin, files or {"pyproject.toml": '[project]\nname = "demo"\n', "README.md": "# demo\n"}, "Initial commit"
+    )
+    return origin, commit
+
+
+def _make_trap(
+    root: Path, repository: Path, commit: str, *, trap_id: str = "trap-a", time_budget: int = 60, turn_budget: int = 7
+) -> Trap:
+    trap_dir = root / "traps" / trap_id
+    trap_dir.mkdir(parents=True)
+    fields = {
+        "trap_id": trap_id,
+        "source": "own-history",
+        "repository": str(repository),
+        "commit": commit,
+        "prompt": _PROMPT,
+        "rejected_alternative": "fastlib",
+        "decision_ref": "docs/decisions/0001-tool-declarations.md",
+        "turn_budget": turn_budget,
+        "time_budget_seconds": time_budget,
+        "second_reader": "reviewer-one",
+        "second_reader_date": "2026-09-26",
+    }
+    (trap_dir / "trap.yaml").write_text(yaml.safe_dump(fields, sort_keys=False), encoding="utf-8")
+    (trap_dir / "detect.py").write_text(_DETECT_SOURCE, encoding="utf-8")
+    return load_trap(trap_dir)
+
+
+def _write_stub(path: Path, source: str) -> Path:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(f"#!{sys.executable}\n{source}", encoding="utf-8")
+    path.chmod(0o755)
+    return path
+
+
+def _config(tmp_path: Path, claude: Path, bruriah_executable: Path, **overrides: object) -> ClaudeCodeConfig:
+    fields: dict[str, object] = {
+        "claude_executable": claude,
+        "bruriah_executable": bruriah_executable,
+        "model": _MODEL,
+        "cache_dir": tmp_path / "cache",
+        "transcripts_dir": tmp_path / "report" / "transcripts",
+        "provenance_date": "2026-09-27",
+    }
+    fields.update(overrides)
+    return ClaudeCodeConfig(**fields)  # type: ignore[arg-type]
+
+
+def _read_jsonl(path: Path) -> list:
+    if not path.is_file():
+        return []
+    return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
+
+
+@dataclass
+class _Rig:
+    root: Path
+    bin_dir: Path
+    claude: Path
+    bruriah: Path
+    origin: Path
+    commit: str
+    trap: Trap
+
+    def behave(self, **behavior: object) -> None:
+        (self.bin_dir / "behavior.json").write_text(json.dumps(behavior), encoding="utf-8")
+
+    def behave_bruriah(self, **behavior: object) -> None:
+        (self.bin_dir / "bruriah-behavior.json").write_text(json.dumps(behavior), encoding="utf-8")
+
+    def claude_calls(self) -> list[dict]:
+        return [call for call in _read_jsonl(self.bin_dir / "calls.jsonl") if "argv" in call]
+
+    def version_calls(self) -> int:
+        return len([call for call in _read_jsonl(self.bin_dir / "calls.jsonl") if "version" in call])
+
+    def bruriah_calls(self) -> list[list[str]]:
+        return _read_jsonl(self.bin_dir / "bruriah-calls.jsonl")
+
+    def config(self, **overrides: object) -> ClaudeCodeConfig:
+        return _config(self.root, self.claude, self.bruriah, **overrides)
+
+    def adapter(self, **overrides: object) -> ClaudeCodeAdapter:
+        return ClaudeCodeAdapter(self.config(**overrides), trap_set_digest=_DIGEST, repetitions=2)
+
+    def workdir(self, name: str) -> Path:
+        workdir = self.root / "work" / name
+        workdir.mkdir(parents=True)
+        return workdir
+
+    def run(
+        self, adapter: ClaudeCodeAdapter, condition: str, repetition: int = 0, trap: Trap | None = None
+    ) -> AgentRun:
+        trap = trap or self.trap
+        workdir = self.workdir(f"{trap.trap_id}-{condition}-{repetition}")
+        return adapter.run(workdir, trap.prompt, condition, trap, repetition)
+
+
+@pytest.fixture
+def rig(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> _Rig:
+    if os.name == "nt" or not GIT_AVAILABLE:
+        pytest.skip("the stub executables are `#!` Python scripts, which Windows does not execute, and git is needed")
+    monkeypatch.setenv("ANTHROPIC_API_KEY", _API_KEY)
+    monkeypatch.setenv(_SENTINEL, "must-not-reach-the-client")
+    bin_dir = tmp_path / "bin"
+    claude = _write_stub(bin_dir / "claude", _STUB_CLAUDE)
+    bruriah_executable = _write_stub(bin_dir / "bruriah", _STUB_BRURIAH)
+    origin, commit = _make_origin(tmp_path / "upstream")
+    trap = _make_trap(tmp_path, origin, commit)
+    rig = _Rig(tmp_path, bin_dir, claude, bruriah_executable, origin, commit, trap)
+    rig.behave(write=_REGRESSING_EDIT, tool_calls=["Read", "Edit"])
+    return rig
+
+
+def _stream(*payloads: object) -> list[str]:
+    return [json.dumps(payload) for payload in payloads]
+
+
+def _init(model: str = _MODEL, servers: tuple[tuple[str, str], ...] = ()) -> dict:
+    return {
+        "type": "system",
+        "subtype": "init",
+        "model": model,
+        "tools": ["Read"],
+        "mcp_servers": [{"name": name, "status": status} for name, status in servers],
+    }
+
+
+def _assistant(*items: dict) -> dict:
+    return {"type": "assistant", "message": {"content": list(items), "usage": {"input_tokens": 1, "output_tokens": 1}}}
+
+
+def _tool_use(name: str) -> dict:
+    return {"type": "tool_use", "id": "t", "name": name, "input": {}}
+
+
+def _result(**overrides: object) -> dict:
+    payload: dict[str, object] = {
+        "type": "result",
+        "subtype": "success",
+        "num_turns": 3,
+        "duration_ms": 7524,
+        "total_cost_usd": 0.48,
+        "is_error": False,
+        "usage": {
+            "input_tokens": 6,
+            "cache_creation_input_tokens": 56281,
+            "cache_read_input_tokens": 139878,
+            "output_tokens": 222,
+        },
+        "permission_denials": [],
+    }
+    payload.update(overrides)
+    return payload
+
+
+# -------------------------------------------------------------------------------------------
+# Tool allowlist: the agent cannot push, install packages, or reach the network
+# -------------------------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("condition", CONDITIONS)
+def test_no_allowed_tool_can_push_install_or_reach_the_network(condition: str) -> None:
+    for entry in allowed_tools(condition):
+        lowered = entry.lower()
+        for forbidden in ("push", "pip", "uv", "npm", "curl", "wget"):
+            assert forbidden not in lowered, (condition, entry)
+        assert entry != "Bash", "an unscoped Bash entry would allow any command"
+        if entry.startswith("Bash"):
+            assert entry.startswith("Bash(") and entry.endswith(":*)"), entry
+
+
+def test_the_base_allowlist_is_the_file_tools_plus_read_only_git_and_search() -> None:
+    assert ALLOWED_TOOLS == (
+        "Read",
+        "Edit",
+        "Write",
+        "MultiEdit",
+        "Glob",
+        "Grep",
+        "Bash(git diff:*)",
+        "Bash(git status:*)",
+        "Bash(git log:*)",
+        "Bash(git show:*)",
+        "Bash(ls:*)",
+        "Bash(cat:*)",
+        "Bash(rg:*)",
+        "Bash(grep:*)",
+        "Bash(find:*)",
+    )
+
+
+def test_baseline_allows_no_bruriah_tool() -> None:
+    assert allowed_tools(BASELINE) == ALLOWED_TOOLS
+    assert not any("bruriah" in entry for entry in allowed_tools(BASELINE))
+
+
+@pytest.mark.parametrize("condition", [UNPROMPTED, PROMPTED])
+def test_mcp_conditions_allow_exactly_the_two_read_only_bruriah_tools(condition: str) -> None:
+    assert MCP_TOOLS == ("mcp__bruriah__investigate_work", "mcp__bruriah__read_evidence")
+    assert allowed_tools(condition) == ALLOWED_TOOLS + MCP_TOOLS
+
+
+def test_allowed_tools_rejects_an_unknown_condition() -> None:
+    with pytest.raises(ValueError, match="hooked"):
+        allowed_tools("hooked")
+
+
+def test_web_task_and_notebook_tools_are_disallowed() -> None:
+    assert DISALLOWED_TOOLS == ("WebFetch", "WebSearch", "Task", "NotebookEdit")
+    assert not set(DISALLOWED_TOOLS) & set(ALLOWED_TOOLS + MCP_TOOLS)
+
+
+# -------------------------------------------------------------------------------------------
+# Command line
+# -------------------------------------------------------------------------------------------
+
+
+def _flag_values(argv: list[str], flag: str) -> list[str]:
+    """The values following a variadic flag, up to the next flag."""
+    start = argv.index(flag) + 1
+    values = []
+    for item in argv[start:]:
+        if item.startswith("--"):
+            break
+        values.append(item)
+    return values
+
+
+def _pure_trap(tmp_path: Path, **overrides: object) -> Trap:
+    fields: dict[str, object] = {
+        "path": tmp_path,
+        "trap_id": "trap-a",
+        "source": "own-history",
+        "repository": "https://example.invalid/project.git",
+        "commit": "0" * 40,
+        "prompt": _PROMPT,
+        "rejected_alternative": "fastlib",
+        "decision_ref": "docs/decisions/0001.md",
+        "turn_budget": 7,
+        "time_budget_seconds": 60,
+        "second_reader": "reviewer-one",
+        "second_reader_date": "2026-09-26",
+    }
+    fields.update(overrides)
+    return Trap(**fields)  # type: ignore[arg-type]
+
+
+def test_command_line_isolates_the_client_and_bounds_the_run(tmp_path: Path) -> None:
+    config = _config(tmp_path, Path("/opt/claude/bin/claude"), Path("/opt/bruriah/bin/bruriah"))
+    trap = _pure_trap(tmp_path)
+
+    argv = command_line(config, trap, BASELINE, trap.prompt, None)
+
+    assert argv[:3] == ["/opt/claude/bin/claude", "-p", _PROMPT]
+    for flag in ("--bare", "--verbose", "--no-session-persistence"):
+        assert flag in argv, flag
+    assert argv[argv.index("--output-format") + 1] == "stream-json"
+    assert argv[argv.index("--max-turns") + 1] == "7"
+    assert argv[argv.index("--model") + 1] == _MODEL
+    assert argv[argv.index("--permission-mode") + 1] == "acceptEdits"
+    assert argv[argv.index("--permission-prompts") + 1] == "none"
+    assert _flag_values(argv, "--allowedTools") == list(ALLOWED_TOOLS)
+    assert _flag_values(argv, "--disallowedTools") == list(DISALLOWED_TOOLS)
+
+
+def test_baseline_command_line_registers_no_mcp_server(tmp_path: Path) -> None:
+    config = _config(tmp_path, Path("/opt/claude"), Path("/opt/bruriah"))
+    trap = _pure_trap(tmp_path)
+
+    argv = command_line(config, trap, BASELINE, trap.prompt, None)
+
+    assert "--mcp-config" not in argv
+    assert "--strict-mcp-config" not in argv
+    assert not any(tool in argv for tool in MCP_TOOLS)
+
+
+@pytest.mark.parametrize("condition", [UNPROMPTED, PROMPTED])
+def test_mcp_command_line_registers_only_the_given_config_strictly(tmp_path: Path, condition: str) -> None:
+    config = _config(tmp_path, Path("/opt/claude"), Path("/opt/bruriah"))
+    trap = _pure_trap(tmp_path)
+    mcp_config = tmp_path / "mcp.json"
+
+    argv = command_line(config, trap, condition, trap.prompt, mcp_config)
+
+    assert _flag_values(argv, "--mcp-config") == [str(mcp_config)]
+    assert "--strict-mcp-config" in argv
+    assert _flag_values(argv, "--allowedTools") == list(ALLOWED_TOOLS + MCP_TOOLS)
+
+
+def test_command_line_caps_spend_only_when_a_budget_is_configured(tmp_path: Path) -> None:
+    trap = _pure_trap(tmp_path)
+    unbudgeted = _config(tmp_path, Path("/opt/claude"), Path("/opt/bruriah"))
+    budgeted = _config(tmp_path, Path("/opt/claude"), Path("/opt/bruriah"), max_budget_usd_per_run=1.5)
+
+    assert "--max-budget-usd" not in command_line(unbudgeted, trap, BASELINE, trap.prompt, None)
+    argv = command_line(budgeted, trap, BASELINE, trap.prompt, None)
+    assert argv[argv.index("--max-budget-usd") + 1] == "1.5"
+
+
+# -------------------------------------------------------------------------------------------
+# Stream parsing and exit reasons
+# -------------------------------------------------------------------------------------------
+
+
+def test_parse_stream_numbers_tool_calls_across_assistant_messages_in_encounter_order() -> None:
+    lines = _stream(
+        _init(servers=(("bruriah", "connected"),)),
+        _assistant({"type": "text", "text": "Looking."}, _tool_use("mcp__bruriah__investigate_work")),
+        {"type": "user", "message": {"content": [{"type": "tool_result", "tool_use_id": "t"}]}},
+        _assistant(_tool_use("Read"), _tool_use("Grep")),
+        _assistant(_tool_use("Edit")),
+        _result(),
+    )
+
+    summary = parse_stream(lines)
+
+    assert summary.tool_calls == (
+        ToolCall("mcp__bruriah__investigate_work", 0),
+        ToolCall("Read", 1),
+        ToolCall("Grep", 2),
+        ToolCall("Edit", 3),
+    )
+
+
+def test_parse_stream_reads_the_result_and_init_lines() -> None:
+    summary = parse_stream(_stream(_init(servers=(("bruriah", "connected"),)), _result()))
+
+    assert summary == StreamSummary(
+        tool_calls=(),
+        result_subtype="success",
+        num_turns=3,
+        duration_ms=7524,
+        input_tokens=6 + 56281 + 139878,
+        output_tokens=222,
+        cost_usd=0.48,
+        is_error=False,
+        model=_MODEL,
+        mcp_servers=(("bruriah", "connected"),),
+        init_seen=True,
+    )
+
+
+def test_parse_stream_counts_only_the_input_token_fields_present() -> None:
+    summary = parse_stream(_stream(_init(), _result(usage={"input_tokens": 9, "output_tokens": 4})))
+
+    assert summary.input_tokens == 9
+    assert summary.output_tokens == 4
+
+
+def test_parse_stream_skips_lines_that_are_not_json() -> None:
+    lines = ["", "not json at all", *_stream(_init(), _assistant(_tool_use("Read"))), "{truncated", "[1, 2]"]
+
+    summary = parse_stream(lines)
+
+    assert summary.tool_calls == (ToolCall("Read", 0),)
+
+
+def test_parse_stream_without_a_result_line_leaves_the_result_fields_unset() -> None:
+    summary = parse_stream(_stream(_init(), _assistant(_tool_use("Read"))))
+
+    assert summary.result_subtype is None
+    assert summary.num_turns is None
+    assert summary.duration_ms is None
+    assert summary.input_tokens is None
+    assert summary.output_tokens is None
+    assert summary.cost_usd is None
+    assert summary.is_error is False
+    assert summary.model == _MODEL
+
+
+def test_parse_stream_of_nothing_saw_no_init_line() -> None:
+    summary = parse_stream([])
+
+    assert summary.init_seen is False
+    assert summary.model is None
+    assert summary.mcp_servers == ()
+
+
+def _summary(**overrides: object) -> StreamSummary:
+    fields: dict[str, object] = {
+        "tool_calls": (),
+        "result_subtype": "success",
+        "num_turns": 3,
+        "duration_ms": 10,
+        "input_tokens": 1,
+        "output_tokens": 1,
+        "cost_usd": 0.1,
+        "is_error": False,
+        "model": _MODEL,
+        "mcp_servers": (),
+        "init_seen": True,
+    }
+    fields.update(overrides)
+    return StreamSummary(**fields)  # type: ignore[arg-type]
+
+
+@pytest.mark.parametrize(
+    ("summary", "timed_out", "returncode", "expected"),
+    [
+        (_summary(), False, 0, "done"),
+        (_summary(), True, 0, "time_budget"),
+        (_summary(result_subtype=None), True, -9, "time_budget"),
+        (_summary(result_subtype="error_max_turns", is_error=True), False, 1, "turn_budget"),
+        (_summary(result_subtype="error_max_turns"), False, 0, "turn_budget"),
+        (_summary(), False, 1, "error"),
+        (_summary(result_subtype=None), False, 0, "error"),
+        (_summary(result_subtype="error_during_execution"), False, 0, "error"),
+        (_summary(is_error=True), False, 0, "error"),
+    ],
+)
+def test_exit_reason_for(summary: StreamSummary, timed_out: bool, returncode: int, expected: str) -> None:
+    assert exit_reason_for(summary, timed_out, returncode) == expected
+
+
+# -------------------------------------------------------------------------------------------
+# Prompted instruction and MCP config
+# -------------------------------------------------------------------------------------------
+
+
+def test_the_prompted_instruction_names_both_tools_and_not_the_product() -> None:
+    assert "`investigate_work`" in PROMPTED_INSTRUCTION
+    assert "`read_evidence`" in PROMPTED_INSTRUCTION
+    assert "before editing any file" in PROMPTED_INSTRUCTION.lower()
+    assert "bruriah" not in PROMPTED_INSTRUCTION.lower()
+    assert "\n" not in PROMPTED_INSTRUCTION
+
+
+def test_write_prompted_instruction_creates_claude_md_when_missing(tmp_path: Path) -> None:
+    path = write_prompted_instruction(tmp_path)
+
+    assert path == tmp_path / "CLAUDE.md"
+    assert path.read_text(encoding="utf-8") == PROMPTED_INSTRUCTION + "\n"
+
+
+@pytest.mark.parametrize("existing", ["# Project\n\nRules.\n", "# Project\n\nRules."])
+def test_write_prompted_instruction_appends_after_a_blank_line(tmp_path: Path, existing: str) -> None:
+    (tmp_path / "CLAUDE.md").write_text(existing, encoding="utf-8")
+
+    write_prompted_instruction(tmp_path)
+
+    assert (tmp_path / "CLAUDE.md").read_text(encoding="utf-8") == (
+        "# Project\n\nRules.\n\n" + PROMPTED_INSTRUCTION + "\n"
+    )
+
+
+def test_write_mcp_config_renders_the_claude_code_manifest_for_the_real_server(tmp_path: Path) -> None:
+    executable = tmp_path / "bin" / "bruriah"
+    data_dir, config_dir, model_cache = tmp_path / "data", tmp_path / "config", tmp_path / "models"
+    target = tmp_path / "work" / ".agent-regression" / "mcp.json"
+
+    written = write_mcp_config(target, executable, data_dir, config_dir, model_cache_dir=model_cache)
+
+    assert written == target
+    assert json.loads(target.read_text(encoding="utf-8")) == {
+        "mcpServers": {
+            "bruriah": {
+                "command": str(executable),
+                "args": [
+                    "serve",
+                    "--data-dir",
+                    str(data_dir),
+                    "--config-dir",
+                    str(config_dir),
+                    "--cache-dir",
+                    str(model_cache),
+                ],
+                "env": {},
+            }
+        }
+    }
+
+
+def test_write_mcp_config_without_a_model_cache_passes_only_the_two_directories(tmp_path: Path) -> None:
+    target = tmp_path / "mcp.json"
+
+    write_mcp_config(target, tmp_path / "bruriah", tmp_path / "data", tmp_path / "config")
+
+    args = json.loads(target.read_text(encoding="utf-8"))["mcpServers"]["bruriah"]["args"]
+    assert args == ["serve", "--data-dir", str(tmp_path / "data"), "--config-dir", str(tmp_path / "config")]
+
+
+def test_write_mcp_config_rejects_a_relative_command(tmp_path: Path) -> None:
+    with pytest.raises(AdapterError, match="absolute"):
+        write_mcp_config(tmp_path / "mcp.json", Path("bruriah"), tmp_path / "data", tmp_path / "config")
+    assert not (tmp_path / "mcp.json").exists()
+
+
+# -------------------------------------------------------------------------------------------
+# Construction fails closed without an API key
+# -------------------------------------------------------------------------------------------
+
+
+def test_the_adapter_refuses_to_construct_without_the_api_key(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+
+    with pytest.raises(AdapterError, match="ANTHROPIC_API_KEY"):
+        ClaudeCodeAdapter(
+            _config(tmp_path, Path("/opt/claude"), Path("/opt/bruriah")), trap_set_digest=_DIGEST, repetitions=1
+        )
+
+
+def test_the_adapter_reads_the_configured_api_key_variable(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("ANTHROPIC_API_KEY", _API_KEY)
+    monkeypatch.delenv("BENCH_KEY", raising=False)
+    config = _config(tmp_path, Path("/opt/claude"), Path("/opt/bruriah"), api_key_env="BENCH_KEY")
+
+    with pytest.raises(AdapterError, match="BENCH_KEY"):
+        ClaudeCodeAdapter(config, trap_set_digest=_DIGEST, repetitions=1)
+
+    monkeypatch.setenv("BENCH_KEY", _API_KEY)
+    ClaudeCodeAdapter(config, trap_set_digest=_DIGEST, repetitions=1)
+
+
+def test_an_empty_api_key_counts_as_absent(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "")
+
+    with pytest.raises(AdapterError, match="ANTHROPIC_API_KEY"):
+        ClaudeCodeAdapter(
+            _config(tmp_path, Path("/opt/claude"), Path("/opt/bruriah")), trap_set_digest=_DIGEST, repetitions=1
+        )
+
+
+# -------------------------------------------------------------------------------------------
+# Mirror, working clone, diff (git only)
+# -------------------------------------------------------------------------------------------
+
+
+@requires_git
+def test_mirror_repository_clones_once_and_reuses_the_mirror_offline(tmp_path: Path) -> None:
+    origin, commit = _make_origin(tmp_path / "upstream")
+    trap = _make_trap(tmp_path, origin, commit)
+    cache = tmp_path / "cache"
+
+    mirror = mirror_repository(trap, cache)
+
+    digest = hashlib.sha256(str(origin).encode("utf-8")).hexdigest()[:16]
+    assert mirror == cache / "mirrors" / f"{digest}.git"
+    assert _git(mirror, "cat-file", "-t", commit) == "commit"
+
+    # The source is gone: a second call can succeed only by not cloning or fetching again.
+    origin.rename(tmp_path / "upstream" / "moved-away")
+    assert mirror_repository(trap, cache) == mirror
+
+
+@requires_git
+def test_mirror_repository_fetches_when_the_pinned_commit_is_missing(tmp_path: Path) -> None:
+    origin, first = _make_origin(tmp_path / "upstream")
+    cache = tmp_path / "cache"
+    mirror = mirror_repository(_make_trap(tmp_path, origin, first), cache)
+    second = _commit_files(origin, {"NEW.md": "new\n"}, "Second commit")
+
+    assert mirror_repository(_make_trap(tmp_path, origin, second, trap_id="trap-b"), cache) == mirror
+    assert _git(mirror, "cat-file", "-t", second) == "commit"
+
+
+@requires_git
+def test_mirror_repository_fails_when_the_pinned_commit_does_not_exist(tmp_path: Path) -> None:
+    origin, _ = _make_origin(tmp_path / "upstream")
+    trap = _make_trap(tmp_path, origin, "f" * 40)
+
+    with pytest.raises(AdapterError, match="f" * 40):
+        mirror_repository(trap, tmp_path / "cache")
+
+
+@requires_git
+def test_prepare_workdir_checks_out_the_pinned_commit_detached_with_no_remote(tmp_path: Path) -> None:
+    origin, first = _make_origin(tmp_path / "upstream")
+    _commit_files(origin, {"LATER.md": "later\n"}, "Later commit")
+    trap = _make_trap(tmp_path, origin, first)
+    mirror = mirror_repository(trap, tmp_path / "cache")
+    workdir = tmp_path / "work"
+    workdir.mkdir()
+
+    prepare_workdir(trap, mirror, workdir)
+
+    assert _git(workdir, "rev-parse", "HEAD") == first
+    assert _git(workdir, "rev-parse", "--abbrev-ref", "HEAD") == "HEAD"
+    assert _git(workdir, "remote") == ""
+    assert (workdir / "README.md").is_file()
+    assert not (workdir / "LATER.md").exists()
+
+
+@requires_git
+def test_workdir_diff_carries_tracked_changes_and_untracked_files_but_not_harness_files(tmp_path: Path) -> None:
+    origin, commit = _make_origin(tmp_path / "upstream")
+    trap = _make_trap(tmp_path, origin, commit)
+    workdir = tmp_path / "work"
+    workdir.mkdir()
+    prepare_workdir(trap, mirror_repository(trap, tmp_path / "cache"), workdir)
+    (workdir / "README.md").write_text("# demo\nchanged\n", encoding="utf-8")
+    (workdir / "src").mkdir()
+    (workdir / "src" / "server.py").write_text("import fastlib\n", encoding="utf-8")
+    (workdir / ".agent-regression").mkdir()
+    (workdir / ".agent-regression" / "mcp.json").write_text("{}\n", encoding="utf-8")
+
+    diff = workdir_diff(workdir)
+
+    assert "+changed" in diff
+    assert "?? src/server.py" in diff.splitlines()
+    assert ".agent-regression" not in diff
+
+
+# -------------------------------------------------------------------------------------------
+# Index build (stub bruriah)
+# -------------------------------------------------------------------------------------------
+
+
+def _prepared_clone(rig: _Rig, name: str = "clone") -> Path:
+    workdir = rig.workdir(name)
+    prepare_workdir(rig.trap, mirror_repository(rig.trap, rig.root / "cache"), workdir)
+    return workdir
+
+
+def _init_calls(rig: _Rig) -> list[list[str]]:
+    return [call for call in rig.bruriah_calls() if call[:1] == ["init"]]
+
+
+def test_ensure_index_builds_once_per_trap_commit_and_then_reuses_it(rig: _Rig) -> None:
+    clone = _prepared_clone(rig)
+    cache = rig.root / "cache"
+
+    first = ensure_index(rig.trap, clone, cache, rig.bruriah)
+    second = ensure_index(rig.trap, clone, cache, rig.bruriah)
+
+    key = f"{rig.trap.trap_id}-{rig.trap.commit[:12]}"
+    assert first == second == (cache / "indexes" / key / "data", cache / "indexes" / key / "config")
+    assert (cache / "indexes" / key / ".built").is_file()
+    calls = _init_calls(rig)
+    assert len(calls) == 1
+    argv = calls[0]
+    assert argv[argv.index("--repo") + 1] == str(clone)
+    assert argv[argv.index("--data-dir") + 1] == str(first[0])
+    assert argv[argv.index("--config-dir") + 1] == str(first[1])
+    assert "--cache-dir" in argv
+
+
+def test_a_failed_index_build_raises_and_is_retried_next_time(rig: _Rig) -> None:
+    clone = _prepared_clone(rig)
+    cache = rig.root / "cache"
+    rig.behave_bruriah(fail=True)
+
+    with pytest.raises(AdapterError, match="index build failed"):
+        ensure_index(rig.trap, clone, cache, rig.bruriah)
+    assert not list((cache / "indexes").glob("*/.built"))
+
+    rig.behave_bruriah()
+    ensure_index(rig.trap, clone, cache, rig.bruriah)
+    assert len(_init_calls(rig)) == 2
+
+
+def test_the_index_build_never_receives_the_api_key(rig: _Rig, monkeypatch: pytest.MonkeyPatch) -> None:
+    clone = _prepared_clone(rig)
+    seen: dict[str, object] = {}
+    real_run = subprocess.run
+
+    def spy(*args: object, **kwargs: object):
+        env = kwargs.get("env")
+        if isinstance(env, dict) and args and "init" in list(args[0]):  # type: ignore[call-overload]
+            seen["env"] = env
+        return real_run(*args, **kwargs)  # type: ignore[call-overload]
+
+    monkeypatch.setattr(subprocess, "run", spy)
+    ensure_index(rig.trap, clone, rig.root / "cache", rig.bruriah)
+
+    assert "env" in seen
+    assert "ANTHROPIC_API_KEY" not in seen["env"]  # type: ignore[operator]
+
+
+# -------------------------------------------------------------------------------------------
+# End-to-end adapter runs against the stub client
+# -------------------------------------------------------------------------------------------
+
+
+def test_a_baseline_run_records_the_client_transcript_and_the_detector_verdict(rig: _Rig) -> None:
+    run = rig.run(rig.adapter(), BASELINE)
+
+    assert (run.trap_id, run.condition, run.repetition) == ("trap-a", BASELINE, 0)
+    assert run.tool_calls == (ToolCall("Read", 0), ToolCall("Edit", 1))
+    assert run.turns == 3
+    assert run.input_tokens == 6 + 56281 + 139878
+    assert run.output_tokens == 222
+    assert run.cost_usd == pytest.approx(0.48)
+    assert run.exit_reason == "done"
+    assert run.wall_clock_seconds >= 0
+    assert run.detection == Detection(regressed=True, evidence=("import fastlib",), completed=True)
+    assert run.provenance == Provenance(
+        date="2026-09-27",
+        model_id=_MODEL,
+        client="claude-code",
+        client_version=_CLIENT_VERSION,
+        bruriah_version=bruriah.__version__,
+        trap_set_digest=_DIGEST,
+        repetitions=2,
+    )
+    assert run.transcript == "transcripts/trap-a/baseline-0.jsonl"
+    transcript = rig.root / "report" / run.transcript
+    lines = transcript.read_text(encoding="utf-8").splitlines()
+    assert json.loads(lines[0])["subtype"] == "init"
+    assert json.loads(lines[-1])["type"] == "result"
+
+
+def test_a_baseline_run_invokes_the_client_isolated_in_the_clone(rig: _Rig) -> None:
+    run = rig.run(rig.adapter(), BASELINE)
+
+    (call,) = rig.claude_calls()
+    workdir = rig.root / "work" / "trap-a-baseline-0"
+    assert Path(call["cwd"]).resolve() == workdir.resolve()
+    argv = call["argv"]
+    assert argv[:2] == ["-p", _PROMPT]
+    assert "--bare" in argv
+    assert "--mcp-config" not in argv
+    assert "--strict-mcp-config" not in argv
+    assert _flag_values(argv, "--allowedTools") == list(ALLOWED_TOOLS)
+    assert argv[argv.index("--max-turns") + 1] == "7"
+    assert call["claude_md"] is None
+    assert not (workdir / "CLAUDE.md").exists()
+    assert not (workdir / ".agent-regression").exists()
+    assert not _init_calls(rig), "baseline must not build an index"
+    assert run.exit_reason == "done"
+
+
+def test_the_client_gets_the_api_key_and_a_minimal_environment_with_a_redirected_home(rig: _Rig) -> None:
+    rig.run(rig.adapter(), BASELINE)
+
+    (call,) = rig.claude_calls()
+    assert call["key_sha256"] == hashlib.sha256(_API_KEY.encode("utf-8")).hexdigest()
+    assert _SENTINEL not in call["env_names"]
+    assert call["home"] != os.environ.get("HOME")
+    assert Path(call["home"]).parent.resolve() == (rig.root / "work").resolve()
+    # The redirected home is temporary: nothing of it survives the run.
+    assert not Path(call["home"]).exists()
+
+
+def test_the_api_key_is_never_written_to_any_file(rig: _Rig) -> None:
+    adapter = rig.adapter()
+    for condition in CONDITIONS:
+        run = rig.run(adapter, condition)
+        payload = json.dumps(run_to_json(run))
+        assert _API_KEY not in payload
+
+    for path in rig.root.rglob("*"):
+        if path.is_file():
+            assert _API_KEY.encode("utf-8") not in path.read_bytes(), path
+
+
+def test_an_unprompted_run_registers_the_real_server_strictly_and_leaves_claude_md_alone(rig: _Rig) -> None:
+    rig.behave(write=_REGRESSING_EDIT, tool_calls=["mcp__bruriah__investigate_work", "Read", "Edit"])
+
+    run = rig.run(rig.adapter(), UNPROMPTED)
+
+    (call,) = rig.claude_calls()
+    workdir = rig.root / "work" / "trap-a-unprompted-0"
+    argv = call["argv"]
+    mcp_config = workdir / ".agent-regression" / "mcp.json"
+    assert _flag_values(argv, "--mcp-config") == [str(mcp_config)]
+    assert "--strict-mcp-config" in argv
+    assert _flag_values(argv, "--allowedTools") == list(ALLOWED_TOOLS + MCP_TOOLS)
+    server = json.loads(mcp_config.read_text(encoding="utf-8"))["mcpServers"]["bruriah"]
+    assert server["command"] == str(rig.bruriah)
+    assert server["args"][0] == "serve"
+    key = f"trap-a-{rig.commit[:12]}"
+    assert server["args"][server["args"].index("--data-dir") + 1] == str(rig.root / "cache" / "indexes" / key / "data")
+    assert call["claude_md"] is None
+    assert consulted_before_first_write(run)
+    assert run.exit_reason == "done"
+
+
+def test_a_prompted_run_appends_the_instruction_to_the_repository_claude_md(tmp_path: Path, rig: _Rig) -> None:
+    origin, commit = _make_origin(tmp_path / "with-claude-md", {"CLAUDE.md": "# Project rules\n", "README.md": "x\n"})
+    trap = _make_trap(tmp_path / "second", origin, commit, trap_id="trap-b")
+
+    rig.run(rig.adapter(), PROMPTED, trap=trap)
+
+    (call,) = rig.claude_calls()
+    assert call["claude_md"] == "# Project rules\n\n" + PROMPTED_INSTRUCTION + "\n"
+    assert "--strict-mcp-config" in call["argv"]
+
+
+def test_a_prompted_run_creates_claude_md_when_the_repository_has_none(rig: _Rig) -> None:
+    rig.run(rig.adapter(), PROMPTED)
+
+    (call,) = rig.claude_calls()
+    assert call["claude_md"] == PROMPTED_INSTRUCTION + "\n"
+
+
+def test_the_index_is_built_once_across_repetitions_and_conditions(rig: _Rig) -> None:
+    adapter = rig.adapter()
+    for condition in (UNPROMPTED, PROMPTED):
+        for repetition in (0, 1):
+            rig.run(adapter, condition, repetition)
+
+    assert len(_init_calls(rig)) == 1
+    assert len(rig.claude_calls()) == 4
+
+
+def test_the_client_version_is_asked_once_per_adapter(rig: _Rig) -> None:
+    adapter = rig.adapter()
+    rig.run(adapter, BASELINE, 0)
+    rig.run(adapter, BASELINE, 1)
+
+    assert rig.version_calls() == 1
+
+
+def test_a_bruriah_executable_of_another_version_is_refused(rig: _Rig) -> None:
+    rig.behave_bruriah(version="bruriah 0.0.1")
+
+    with pytest.raises(AdapterError, match="0.0.1"):
+        rig.run(rig.adapter(), BASELINE)
+
+
+def test_a_run_that_exhausts_its_turns_is_a_turn_budget_exit(rig: _Rig) -> None:
+    rig.behave(subtype="error_max_turns", is_error=True, exit_code=1)
+
+    assert rig.run(rig.adapter(), BASELINE).exit_reason == "turn_budget"
+
+
+def test_a_client_that_exits_nonzero_is_an_error_run(rig: _Rig) -> None:
+    rig.behave(exit_code=2, result=False, init=False)
+
+    run = rig.run(rig.adapter(), UNPROMPTED)
+
+    assert run.exit_reason == "error"
+    assert run.turns == 0
+    assert run.input_tokens is None
+    assert run.cost_usd is None
+
+
+def test_a_run_past_its_time_budget_is_stopped_and_keeps_its_partial_transcript(tmp_path: Path, rig: _Rig) -> None:
+    trap = _make_trap(tmp_path / "slow", rig.origin, rig.commit, trap_id="trap-slow", time_budget=1)
+    rig.behave(sleep=10, tool_calls=["Read"])
+
+    started = time.monotonic()
+    run = rig.run(rig.adapter(), BASELINE, trap=trap)
+    elapsed = time.monotonic() - started
+
+    assert run.exit_reason == "time_budget"
+    assert elapsed < 8
+    assert run.turns == 0
+    assert run.transcript is not None
+    lines = (rig.root / "report" / run.transcript).read_text(encoding="utf-8").splitlines()
+    assert json.loads(lines[0])["subtype"] == "init"
+
+
+def test_non_json_output_lines_do_not_break_a_run(rig: _Rig) -> None:
+    rig.behave(garbage=True, tool_calls=["Read"])
+
+    run = rig.run(rig.adapter(), BASELINE)
+
+    assert run.exit_reason == "done"
+    assert run.tool_calls == (ToolCall("Read", 0),)
+
+
+@pytest.mark.parametrize(
+    ("condition", "behavior"),
+    [
+        (UNPROMPTED, {"extra_servers": ["cerebro"]}),
+        (PROMPTED, {"drop_servers": True}),
+        (BASELINE, {"extra_servers": ["engram"]}),
+        (UNPROMPTED, {"server_status": "failed"}),
+    ],
+    ids=["stray-server", "missing-server", "baseline-server", "failed-server"],
+)
+def test_a_run_whose_client_loaded_the_wrong_mcp_servers_is_invalid(rig: _Rig, condition: str, behavior: dict) -> None:
+    rig.behave(**behavior)
+
+    with pytest.raises(AdapterError, match="MCP"):
+        rig.run(rig.adapter(), condition)
+
+
+def test_a_run_that_leaves_a_remote_in_the_clone_is_invalid(rig: _Rig) -> None:
+    rig.behave(add_remote=True)
+
+    with pytest.raises(AdapterError, match="remote"):
+        rig.run(rig.adapter(), BASELINE)
+
+
+# -------------------------------------------------------------------------------------------
+# Run record additions: cost and transcript
+# -------------------------------------------------------------------------------------------
+
+
+def _record(**overrides: object) -> AgentRun:
+    fields: dict[str, object] = {
+        "trap_id": "trap-a",
+        "condition": BASELINE,
+        "repetition": 0,
+        "tool_calls": (ToolCall("Read", 0),),
+        "turns": 3,
+        "wall_clock_seconds": 7.5,
+        "input_tokens": 10,
+        "output_tokens": 2,
+        "exit_reason": "done",
+        "detection": Detection(regressed=False, evidence=(), completed=True),
+        "provenance": Provenance(
+            date="2026-09-27",
+            model_id=_MODEL,
+            client="claude-code",
+            client_version=_CLIENT_VERSION,
+            bruriah_version=bruriah.__version__,
+            trap_set_digest=_DIGEST,
+            repetitions=1,
+        ),
+    }
+    fields.update(overrides)
+    return AgentRun(**fields)  # type: ignore[arg-type]
+
+
+def test_cost_and_transcript_default_to_none() -> None:
+    run = _record()
+
+    assert run.cost_usd is None
+    assert run.transcript is None
+    payload = run_to_json(run)
+    assert payload["cost_usd"] is None
+    assert payload["transcript"] is None
+
+
+def test_cost_and_transcript_round_trip() -> None:
+    run = _record(cost_usd=0.48, transcript="transcripts/trap-a/baseline-0.jsonl")
+
+    assert run_from_json(json.loads(json.dumps(run_to_json(run)))) == run
+
+
+def test_a_record_without_cost_or_transcript_still_loads() -> None:
+    payload = run_to_json(_record())
+    del payload["cost_usd"]
+    del payload["transcript"]
+
+    assert run_from_json(payload) == _record()
+
+
+@pytest.mark.parametrize("cost", ["0.48", True, -1.0, [0.48]])
+def test_run_from_json_rejects_a_cost_that_is_not_a_non_negative_number(cost: object) -> None:
+    payload = run_to_json(_record())
+    payload["cost_usd"] = cost
+
+    with pytest.raises(RunRecordError, match="cost_usd"):
+        run_from_json(payload)
+
+
+@pytest.mark.parametrize("transcript", [3, "/abs/transcripts/a.jsonl", "C:\\transcripts\\a.jsonl"])
+def test_run_from_json_rejects_a_transcript_that_is_not_a_relative_path(transcript: object) -> None:
+    payload = run_to_json(_record())
+    payload["transcript"] = transcript
+
+    with pytest.raises(RunRecordError, match="transcript"):
+        run_from_json(payload)
+
+
+# -------------------------------------------------------------------------------------------
+# run.py: the real (non-dry) run
+# -------------------------------------------------------------------------------------------
+
+
+def _main_args(rig: _Rig, out: Path, *extra: str) -> list[str]:
+    return [
+        "--traps",
+        str(rig.root / "traps"),
+        "--repetitions",
+        "1",
+        "--claude",
+        str(rig.claude),
+        "--bruriah",
+        str(rig.bruriah),
+        "--cache-dir",
+        str(rig.root / "cache"),
+        "--out",
+        str(out),
+        "--date",
+        "2026-09-27",
+        *extra,
+    ]
+
+
+def test_main_runs_the_benchmark_end_to_end_and_writes_both_reports(rig: _Rig) -> None:
+    out = rig.root / "out"
+
+    exit_code = run_module.main(_main_args(rig, out, "--model", _MODEL))
+
+    assert exit_code == 0
+    payload = json.loads((out / "runs.json").read_text(encoding="utf-8"))
+    assert [(run["trap_id"], run["condition"], run["repetition"]) for run in payload["runs"]] == [
+        ("trap-a", condition, 0) for condition in CONDITIONS
+    ]
+    report = (out / "report.md").read_text(encoding="utf-8")
+    assert report.startswith("# Agent regression benchmark")
+    for run in payload["runs"]:
+        assert not Path(run["transcript"]).is_absolute()
+        assert (out / run["transcript"]).is_file()
+        assert run["provenance"]["model_id"] == _MODEL
+        assert run["provenance"]["client"] == "claude-code"
+        assert run["provenance"]["repetitions"] == 1
+        assert run["provenance"]["trap_set_digest"] == trap_set_digest(load_traps(rig.root / "traps"))
+        assert run["provenance"]["date"] == "2026-09-27"
+    assert len(rig.claude_calls()) == 3
+    assert _API_KEY not in (out / "runs.json").read_text(encoding="utf-8")
+
+
+def test_main_requires_an_explicit_model_for_a_real_run(rig: _Rig, capsys: pytest.CaptureFixture[str]) -> None:
+    exit_code = run_module.main(_main_args(rig, rig.root / "out"))
+
+    assert exit_code == 2
+    assert "--model" in capsys.readouterr().err
+    assert not rig.claude_calls()
+
+
+def test_main_refuses_a_real_run_without_the_api_key(
+    rig: _Rig, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    monkeypatch.delenv("ANTHROPIC_API_KEY")
+
+    exit_code = run_module.main(_main_args(rig, rig.root / "out", "--model", _MODEL))
+
+    assert exit_code == 2
+    assert "ANTHROPIC_API_KEY" in capsys.readouterr().err
+    assert not rig.claude_calls()
+
+
+@pytest.mark.parametrize("missing", ["claude", "bruriah"])
+def test_main_fails_clearly_when_an_executable_cannot_be_resolved(
+    rig: _Rig, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], missing: str
+) -> None:
+    empty = rig.root / "empty-path"
+    empty.mkdir()
+    monkeypatch.setenv("PATH", str(empty))
+    args = _main_args(rig, rig.root / "out", "--model", _MODEL)
+    flag = f"--{missing}"
+    index = args.index(flag)
+    del args[index : index + 2]
+
+    exit_code = run_module.main(args)
+
+    assert exit_code == 2
+    assert missing in capsys.readouterr().err
+    assert not rig.claude_calls()

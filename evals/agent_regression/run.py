@@ -6,17 +6,26 @@ so it never runs in CI and never starts unattended. `--dry-run` lists every plan
 (traps x conditions x repetitions) without constructing an adapter, which is how the cost
 estimate is made before anyone approves a paid run.
 
+A real run drives the Claude Code headless adapter (`claude_code.py`) and writes `runs.json` (every
+run record), `report.md`, and the raw client transcripts under `transcripts/` into `--out`.
+
 Usage:
     uv run python evals/agent_regression/run.py --dry-run
     uv run python evals/agent_regression/run.py --dry-run --traps <dir> --repetitions 5
+    uv run python evals/agent_regression/run.py --model <id> [--claude <path>] [--bruriah <path>]
 """
 
 from __future__ import annotations
 
 import argparse
+import os
+import shutil
 import sys
 from collections.abc import Iterable, Sequence
+from datetime import date
 from pathlib import Path
+
+import platformdirs
 
 # Executed as a script, only this file's own directory is on `sys.path`; the package is imported
 # through its parent, `evals/`, like the test suite does.
@@ -29,6 +38,7 @@ from agent_regression.traps import Trap, TrapError, load_traps  # noqa: E402
 
 DEFAULT_REPETITIONS = 5
 DEFAULT_TRAPS_DIR = _HERE / "traps"
+DEFAULT_CACHE_DIR = Path(platformdirs.user_cache_dir("bruriah")) / "agent-regression"
 
 
 def plan_invocations(traps: Iterable[Trap], conditions: Sequence[str], repetitions: int) -> list[tuple[str, str, int]]:
@@ -57,6 +67,23 @@ def _positive_int(text: str) -> int:
     return value
 
 
+def _positive_float(text: str) -> float:
+    try:
+        value = float(text)
+    except ValueError:
+        raise argparse.ArgumentTypeError(f"not a number: {text!r}") from None
+    if not value > 0:
+        raise argparse.ArgumentTypeError(f"must be positive, got {text}")
+    return value
+
+
+def _iso_date(text: str) -> str:
+    try:
+        return date.fromisoformat(text).isoformat()
+    except ValueError:
+        raise argparse.ArgumentTypeError(f"not an ISO date (YYYY-MM-DD): {text!r}") from None
+
+
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Agent regression benchmark runner.")
     parser.add_argument("--dry-run", action="store_true", help="list the planned invocations and exit")
@@ -66,7 +93,74 @@ def _parser() -> argparse.ArgumentParser:
         "--conditions", nargs="+", choices=CONDITIONS, default=list(CONDITIONS), help="conditions to run"
     )
     parser.add_argument("--out", type=Path, default=_HERE, help="directory the reports are written to")
+    parser.add_argument("--claude", type=Path, default=None, help="the claude executable (default: found on PATH)")
+    parser.add_argument("--bruriah", type=Path, default=None, help="the bruriah executable (default: found on PATH)")
+    parser.add_argument("--model", default=None, help="model id; required for a real run, never defaulted")
+    parser.add_argument(
+        "--cache-dir", type=Path, default=DEFAULT_CACHE_DIR, help="repository mirrors, indexes and the model cache"
+    )
+    parser.add_argument(
+        "--max-budget-usd-per-run", type=_positive_float, default=None, help="spend cap passed to every client run"
+    )
+    parser.add_argument(
+        "--date", type=_iso_date, default=date.today().isoformat(), help="provenance date (default: today)"
+    )
     return parser
+
+
+def _executable(given: Path | None, name: str) -> Path | None:
+    """The executable at `given`, or `name` on PATH, as an absolute path; `None` when neither
+    resolves to an executable file. A module invocation (`python -m bruriah`) is not accepted: the
+    MCP config needs one absolute command."""
+    if given is None:
+        found = shutil.which(name)
+        return Path(found).absolute() if found else None
+    return given.absolute() if given.is_file() and os.access(given, os.X_OK) else None
+
+
+def _run(args: argparse.Namespace, traps: Sequence[Trap], conditions: Sequence[str]) -> int:
+    # Imported here, not at module level: `adapters` imports `plan_invocations` from this module,
+    # and a dry run never needs the adapter.
+    from agent_regression.adapters import run_benchmark
+    from agent_regression.claude_code import AdapterError, ClaudeCodeAdapter, ClaudeCodeConfig
+    from agent_regression.metrics import summarize, trap_set_digest
+    from agent_regression.report import render_json, render_markdown, write_report
+
+    if not args.model:
+        print("error: --model is required for a real run; the provenance must name the model", file=sys.stderr)
+        return 2
+    executables = {}
+    for name, given in (("claude", args.claude), ("bruriah", args.bruriah)):
+        resolved = _executable(given, name)
+        if resolved is None:
+            where = f"{given} is not an executable file" if given else f"no `{name}` executable on PATH"
+            print(f"error: {where}; pass --{name} <path>", file=sys.stderr)
+            return 2
+        executables[name] = resolved
+
+    out: Path = args.out
+    config = ClaudeCodeConfig(
+        claude_executable=executables["claude"],
+        bruriah_executable=executables["bruriah"],
+        model=args.model,
+        cache_dir=args.cache_dir.absolute(),
+        transcripts_dir=out.absolute() / "transcripts",
+        provenance_date=args.date,
+        max_budget_usd_per_run=args.max_budget_usd_per_run,
+    )
+    try:
+        adapter = ClaudeCodeAdapter(config, trap_set_digest=trap_set_digest(traps), repetitions=args.repetitions)
+        out.mkdir(parents=True, exist_ok=True)
+        runs = run_benchmark(traps, adapter, conditions, args.repetitions)
+    except AdapterError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
+
+    summaries = summarize(runs)
+    write_report(out / "runs.json", render_json(runs, summaries))
+    write_report(out / "report.md", render_markdown(runs, summaries))
+    print(f"{len(runs)} runs recorded in {out / 'runs.json'}; report in {out / 'report.md'}")
+    return 0
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -81,12 +175,7 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     plan = plan_invocations(traps, conditions, args.repetitions)
     if not args.dry_run:
-        print(
-            "error: no agent adapter is available yet; the Claude Code adapter arrives in T2 "
-            "(odd/tasks/agent-regression-benchmark.md). Use --dry-run to list the planned invocations.",
-            file=sys.stderr,
-        )
-        return 2
+        return _run(args, traps, conditions)
 
     print(
         f"{len(plan)} planned invocations: {len(traps)} traps x {len(conditions)} conditions x "

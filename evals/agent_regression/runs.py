@@ -10,6 +10,7 @@ rather than trusting the file.
 from __future__ import annotations
 
 from dataclasses import dataclass, fields
+from pathlib import PurePosixPath, PureWindowsPath
 from typing import Any
 
 from agent_regression.detection import Detection
@@ -61,6 +62,11 @@ class AgentRun:
     exit_reason: str
     detection: Detection
     provenance: Provenance
+    # What the client reported the run cost, when it reports it.
+    cost_usd: float | None = None
+    # The raw client transcript, as a path relative to the report directory: a committed report
+    # carries no absolute paths.
+    transcript: str | None = None
 
 
 def _is_investigate(name: str) -> bool:
@@ -96,6 +102,8 @@ def run_to_json(run: AgentRun) -> dict[str, Any]:
             "completed": run.detection.completed,
         },
         "provenance": {field.name: getattr(run.provenance, field.name) for field in fields(Provenance)},
+        "cost_usd": run.cost_usd,
+        "transcript": run.transcript,
     }
 
 
@@ -135,6 +143,27 @@ def _list(payload: object, key: str, where: str) -> list[Any]:
     value = _require(payload, key, where)
     if not isinstance(value, list):
         raise RunRecordError(f"{where}.{key} must be a list, got {value!r}")
+    return value
+
+
+def _cost(payload: dict[str, Any]) -> float | None:
+    # Optional: records written before the Claude Code adapter carry no cost.
+    value = payload.get("cost_usd")
+    if value is None:
+        return None
+    if isinstance(value, bool) or not isinstance(value, (int, float)) or value < 0:
+        raise RunRecordError(f"run.cost_usd must be a non-negative number, got {value!r}")
+    return float(value)
+
+
+def _transcript(payload: dict[str, Any]) -> str | None:
+    # Optional, like the cost. A path that is absolute on either platform would tie the report to
+    # the machine that ran it.
+    value = payload.get("transcript")
+    if value is None:
+        return None
+    if not isinstance(value, str) or PurePosixPath(value).is_absolute() or PureWindowsPath(value).is_absolute():
+        raise RunRecordError(f"run.transcript must be a path relative to the report directory, got {value!r}")
     return value
 
 
@@ -189,4 +218,6 @@ def run_from_json(payload: dict[str, Any]) -> AgentRun:
         exit_reason=exit_reason,
         detection=detection,
         provenance=provenance,
+        cost_usd=_cost(payload),
+        transcript=_transcript(payload),
     )
