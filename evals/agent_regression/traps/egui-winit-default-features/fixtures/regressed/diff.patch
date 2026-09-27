@@ -1,0 +1,22 @@
+diff --git a/crates/egui_glow/Cargo.toml b/crates/egui_glow/Cargo.toml
+index 2bd8c31093..96b76ff2ce 100644
+--- a/crates/egui_glow/Cargo.toml
++++ b/crates/egui_glow/Cargo.toml
+@@ -39,7 +39,7 @@
+ ## enable opening links in a browser when an egui hyperlink is clicked.
+ links = ["egui-winit?/links"]
+ 
+-## Enable [`winit`](https://docs.rs/winit) integration. On Linux, requires either `wayland` or `x11`
++## Enable [`winit`](https://docs.rs/winit) integration, with both the Wayland and X11 backends on Linux.
+ winit = ["egui-winit", "dep:winit"]
+ 
+ ## Enables Wayland support for winit.
+@@ -63,7 +63,7 @@
+ document-features = { workspace = true, optional = true }
+ 
+ # Native:
+-winit = { workspace = true, optional = true, default-features = false, features = ["rwh_06"] }
++winit = { workspace = true, optional = true, features = ["rwh_06", "wayland", "x11"] }
+ 
+ 
+ [dev-dependencies]
