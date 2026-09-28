@@ -4,15 +4,20 @@ Every invocation is isolated from the operator's own Claude Code setup, because 
 inherits hooks, plugins and a dozen MCP servers (a predecessor of this product and a memory server
 among them, on the machine the first run was planned on) is not a baseline. The client runs with
 the operator's login (`--bare` would skip it, and a benchmark run has no API key), so isolation
-comes from flags and the environment instead: `--setting-sources project` keeps the operator's
-settings, hooks, plugins and user-level `CLAUDE.md` out (measured on 2.1.283: the model's context
-holds none of them), `--strict-mcp-config` in every condition admits only the servers this run
-registers, `--disable-slash-commands` drops the operator's skills, the clone of the pinned commit
-is fresh and has no remote, the agent has no shell tool, and the child environment is the five
-variables the login needs and nothing else. The run is then checked after the fact: the client's
-init line must list exactly the servers the condition registered, and the clone must still have
-no remote, or the run is refused rather than recorded. One side effect remains: the client
-creates an empty `~/.claude/projects/<workdir>/memory` directory per run.
+comes from flags and the environment instead: `--setting-sources ""` loads no settings file at
+all, neither the operator's (`user`: hooks, plugins, user-level `CLAUDE.md`) nor the trap
+repository's (`project`, `local`: a committed `.claude/settings.json` can define hooks, session
+environment such as the API base URL, and extra write directories) -- measured on 2.1.283 with a
+`SessionStart` hook committed in a probe repository: it ran under `project` and not under `""`;
+`--strict-mcp-config` in every condition admits only the servers this run registers;
+`--disable-slash-commands` drops the operator's skills; the clone of the pinned commit is fresh,
+has no remote, and is refused outright when it carries client configuration (`.claude/`,
+`.mcp.json`); the agent has no shell tool; and the child environment is the five variables the
+login needs and nothing else. A repository `CLAUDE.md` or `AGENTS.md` at the pinned commit is
+tree content the agent may read, like any other file. The run is then checked after the fact:
+the client's init line must list exactly the servers the condition registered, and the clone
+must still have no remote, or the run is refused rather than recorded. One side effect remains:
+the client creates an empty `~/.claude/projects/<workdir>/memory` directory per run.
 
 The wire format is Claude Code's `--output-format stream-json --verbose`, measured on 2.1.283: one
 JSON object per line, a `system`/`init` line first, `assistant` lines carrying `tool_use` items,
@@ -288,7 +293,7 @@ def command_line(
         "-p",
         prompt,
         "--setting-sources",
-        "project",
+        "",
         "--strict-mcp-config",
         "--disable-slash-commands",
         "--output-format",
@@ -431,6 +436,21 @@ def _check_no_remote(workdir: Path, trap: Trap) -> None:
         raise AdapterError(f"trap {trap.trap_id}: the run left a remote in the clone ({', '.join(remotes)})")
 
 
+# Client configuration a repository can commit. No setting source is selected, so the client
+# should ignore it; the clone is refused anyway, because a trap whose author can steer the client
+# is not a trap, and a flag is a weaker guarantee than an absent file.
+_CLIENT_CONFIGURATION = (".claude", ".mcp.json")
+
+
+def _check_no_client_configuration(workdir: Path, trap: Trap) -> None:
+    present = [name for name in _CLIENT_CONFIGURATION if (workdir / name).exists()]
+    if present:
+        raise AdapterError(
+            f"trap {trap.trap_id}: the pinned commit carries Claude Code configuration ({', '.join(present)}); "
+            "a repository that configures the client cannot be a trap"
+        )
+
+
 def _kill(process: subprocess.Popen[str]) -> None:
     # The client runs in its own session, so the MCP server it spawned dies with it.
     if os.name == "posix":
@@ -544,6 +564,7 @@ class ClaudeCodeAdapter:
 
         mirror = mirror_repository(trap, config.cache_dir)
         prepare_workdir(trap, mirror, workdir)
+        _check_no_client_configuration(workdir, trap)
         mcp_config = None
         if condition != BASELINE:
             data_dir, config_dir = ensure_index(trap, workdir, config.cache_dir, config.bruriah_executable)

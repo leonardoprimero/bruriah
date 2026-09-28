@@ -228,7 +228,14 @@ Also out of scope: a Codex or Cursor adapter, an LLM-judge column, a private-cor
   bills the same way. Fable (`claude-fable-5-1`) answers on the Max plan; `total_cost_usd` in the
   result line is the API-equivalent estimate, and T4 states it as such. Side effect measured: one
   empty `~/.claude/projects/<workdir>/memory` directory per run, even with
-  `--no-session-persistence`. Strict TDD: 6 RED, 79 GREEN.
+  `--no-session-persistence`. Strict TDD: 6 RED, 79 GREEN. Review of that commit found one
+  critical: `--setting-sources project` loads a `.claude/settings.json` committed in the trap
+  repository, repository-controlled content that can define hooks, the API base URL and extra
+  write directories. Measured with a `SessionStart` hook committed in a probe repository: it ran
+  under `project` and not under `--setting-sources ""`, which the client accepts and which still
+  authenticates. Fixed: no setting source at all, plus a refusal of any clone carrying `.claude/`
+  or `.mcp.json` at the pinned commit (none of the three pins does; leakcanary ships a repository
+  `CLAUDE.md` and `AGENTS.md`, which are tree content like any other file). 3 RED, 81 GREEN.
 
 - 2026-09-27: T3 trap set designed and signed off by the second reader (leonardoprimero,
   2026-09-27) before any file was written: twelve traps, four own-history (395962e FastMCP and

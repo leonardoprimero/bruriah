@@ -517,10 +517,12 @@ def test_command_line_isolates_the_client_and_bounds_the_run(tmp_path: Path) -> 
     assert argv[:3] == ["/opt/claude/bin/claude", "-p", _PROMPT]
     for flag in ("--verbose", "--no-session-persistence", "--strict-mcp-config", "--disable-slash-commands"):
         assert flag in argv, flag
-    # The client runs logged in, so `--bare` (which never reads the login) is out; the operator's
-    # own settings, hooks and plugins stay out through the setting sources instead.
+    # The client runs logged in, so `--bare` (which never reads the login) is out. No setting
+    # source at all: `user` would load the operator's hooks and plugins, and `project` or `local`
+    # would load a `.claude/settings.json` committed in the trap repository, which is
+    # repository-controlled content that can define hooks, environment and extra write directories.
     assert "--bare" not in argv
-    assert argv[argv.index("--setting-sources") + 1] == "project"
+    assert argv[argv.index("--setting-sources") + 1] == ""
     assert argv[argv.index("--output-format") + 1] == "stream-json"
     assert argv[argv.index("--max-turns") + 1] == "7"
     assert argv[argv.index("--model") + 1] == _MODEL
@@ -1138,6 +1140,21 @@ def test_a_run_that_leaves_a_remote_in_the_clone_is_invalid(rig: _Rig) -> None:
 
     with pytest.raises(AdapterError, match="remote"):
         rig.run(rig.adapter(), BASELINE)
+
+
+@pytest.mark.parametrize("path", [".claude/settings.json", ".mcp.json"])
+def test_a_trap_whose_commit_carries_client_configuration_is_refused_before_the_client_runs(
+    tmp_path: Path, rig: _Rig, path: str
+) -> None:
+    # Even with no setting source selected, a clone that ships Claude Code configuration is a
+    # clone whose author could steer the client; the harness refuses it rather than trusting a flag.
+    origin, commit = _make_origin(tmp_path / "configured", {path: "{}\n", "README.md": "x\n"})
+    trap = _make_trap(tmp_path / "configured-trap", origin, commit, trap_id="trap-c")
+
+    with pytest.raises(AdapterError, match="configuration"):
+        rig.run(rig.adapter(), BASELINE, trap=trap)
+
+    assert not rig.claude_calls()
 
 
 # -------------------------------------------------------------------------------------------
