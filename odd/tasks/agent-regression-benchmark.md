@@ -215,6 +215,23 @@ Also out of scope: a Codex or Cursor adapter, an LLM-judge column, a private-cor
 
 ## Progress / evidence
 
+- 2026-09-28: T5 started and paused at the user's request. The published run launched at
+  01:29Z on ca8e02f (all twelve mirrors and indexes pre-warmed, `claude-fable-5-1`, N=5,
+  180 invocations) and was stopped cleanly at 03:16Z after 11 recorded runs and 0 failures; the
+  in-flight run was allowed to finish before the stop. Records and transcripts live outside the
+  repository (`bruriah-worktrees/agent-regression-run/out-2026-09-27/`, `runs.jsonl` plus
+  `transcripts/`), with the mirrors, indexes and model cache in
+  `bruriah-worktrees/agent-regression-cache/`; re-running `run.sh` resumes at run 12. All 11 are
+  `egui-android-activity`: baseline 5/5 regressed (two hit the 900 s budget with the regressing
+  edit already made), unprompted 5/5 regressed and none called `investigate_work` with the server
+  connected, prompted 1/1 consulted and regressed anyway (a heed failure; the four remaining
+  repetitions decide whether it is one). Measured pace on egui: about 11 min and USD 2.83
+  API-equivalent per run, 90% of input tokens being prompt-cache reads, so the full run projects
+  to about 30 h, twice the T4 estimate, at about the same cost. One unprompted run recorded 91
+  turns under `--max-turns 30`: what the client counts as a turn needs checking before the
+  report quotes turn counts. No report is written from this partial data; T5 publishes only
+  after the run completes and every fired detection is spot-checked by hand.
+
 - 2026-09-27: T4 pilot, `own-fastmcp` x 3 conditions x 1 repetition, Claude Code 2.1.283 with the
   operator's login, `claude-fable-5-1`, Bruriah 2.1.0 (transcripts kept outside the repository).
   All three runs completed (`exit_reason: done`), none regressed: consistent with the trap's
