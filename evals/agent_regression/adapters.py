@@ -9,7 +9,7 @@ changes no harness code.
 from __future__ import annotations
 
 import tempfile
-from collections.abc import Iterable, Mapping, Sequence
+from collections.abc import Callable, Collection, Iterable, Mapping, Sequence
 from pathlib import Path
 from typing import Protocol
 
@@ -18,6 +18,11 @@ from agent_regression.runs import AgentRun, RunRecordError
 from agent_regression.traps import Trap
 
 InvocationKey = tuple[str, str, int]
+
+
+class AdapterError(RuntimeError):
+    """Raised when an adapter could not set a run up, or the run finished in a state that makes it
+    invalid to record."""
 
 
 class ReplayError(RuntimeError):
@@ -52,21 +57,44 @@ class ReplayAdapter:
 
 
 def run_benchmark(
-    traps: Iterable[Trap], adapter: AgentAdapter, conditions: Sequence[str], repetitions: int
+    traps: Iterable[Trap],
+    adapter: AgentAdapter,
+    conditions: Sequence[str],
+    repetitions: int,
+    *,
+    skip: Collection[InvocationKey] = frozenset(),
+    on_run: Callable[[AgentRun], None] | None = None,
+    on_failure: Callable[[InvocationKey, AdapterError], None] | None = None,
 ) -> list[AgentRun]:
-    """Drive `adapter` through every planned invocation, in plan order, each in its own empty
-    working directory, and return the runs in that order."""
+    """Drive `adapter` through every planned invocation not in `skip`, in plan order, each in its
+    own empty working directory, and return the successful runs in that order.
+
+    `on_run` receives each run before the next invocation starts, so a caller can record it at
+    once. With `on_failure`, an `AdapterError` for one invocation is handed to it and the loop
+    moves on; without it, the error propagates. Any other exception always propagates."""
     traps = tuple(traps)
     by_id = {trap.trap_id: trap for trap in traps}
+    skip = frozenset(skip)
     runs = []
-    for trap_id, condition, repetition in plan_invocations(traps, conditions, repetitions):
+    for key in plan_invocations(traps, conditions, repetitions):
+        if key in skip:
+            continue
+        trap_id, condition, repetition = key
         trap = by_id[trap_id]
-        with tempfile.TemporaryDirectory(prefix="agent-regression-") as workdir:
-            run = adapter.run(Path(workdir), trap.prompt, condition, trap, repetition)
+        try:
+            with tempfile.TemporaryDirectory(prefix="agent-regression-") as workdir:
+                run = adapter.run(Path(workdir), trap.prompt, condition, trap, repetition)
+        except AdapterError as error:
+            if on_failure is None:
+                raise
+            on_failure(key, error)
+            continue
         if (run.trap_id, run.condition, run.repetition) != (trap_id, condition, repetition):
             raise RunRecordError(
                 f"adapter returned a run for trap {run.trap_id}, condition {run.condition}, repetition "
                 f"{run.repetition} when asked for trap {trap_id}, condition {condition}, repetition {repetition}"
             )
         runs.append(run)
+        if on_run is not None:
+            on_run(run)
     return runs

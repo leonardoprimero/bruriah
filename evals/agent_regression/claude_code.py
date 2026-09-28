@@ -42,6 +42,7 @@ from typing import Any
 import bruriah
 from bruriah.clients import ClientError, LaunchManifest, render_claude_code
 
+from agent_regression.adapters import AdapterError
 from agent_regression.detection import validate_detection
 from agent_regression.runs import BASELINE, CONDITIONS, PROMPTED, AgentRun, Provenance, ToolCall
 from agent_regression.traps import Trap, load_detector
@@ -88,10 +89,6 @@ _GIT_IDENTITY = {
 }
 _VERSION_TIMEOUT_SECONDS = 60
 _ERROR_TAIL = 2000
-
-
-class AdapterError(RuntimeError):
-    """Raised when a run cannot be set up, or finished in a state that makes it invalid to record."""
 
 
 @dataclass(frozen=True)

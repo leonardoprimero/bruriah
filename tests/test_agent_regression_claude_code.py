@@ -36,6 +36,7 @@ import pytest  # noqa: E402
 import yaml  # noqa: E402
 
 import bruriah  # noqa: E402
+from agent_regression import adapters as adapters_module  # noqa: E402
 from agent_regression import run as run_module  # noqa: E402
 from agent_regression.claude_code import (  # noqa: E402
     ALLOWED_TOOLS,
@@ -1135,6 +1136,11 @@ def test_a_run_whose_client_loaded_the_wrong_mcp_servers_is_invalid(rig: _Rig, c
         rig.run(rig.adapter(), condition)
 
 
+def test_adapter_error_is_the_failure_type_the_benchmark_driver_defines() -> None:
+    """The driver recovers from exactly this type, so every adapter raises the one it defines."""
+    assert AdapterError is adapters_module.AdapterError
+
+
 def test_a_run_that_leaves_a_remote_in_the_clone_is_invalid(rig: _Rig) -> None:
     rig.behave(add_remote=True)
 
@@ -1313,3 +1319,98 @@ def test_main_fails_clearly_when_an_executable_cannot_be_resolved(
     assert exit_code == 2
     assert missing in capsys.readouterr().err
     assert not rig.claude_calls()
+
+
+def test_main_appends_every_run_record_to_runs_jsonl_as_it_finishes(rig: _Rig) -> None:
+    out = rig.root / "out"
+
+    exit_code = run_module.main(_main_args(rig, out, "--model", _MODEL))
+
+    assert exit_code == 0
+    lines = (out / "runs.jsonl").read_text(encoding="utf-8").splitlines()
+    assert len(lines) == len(rig.claude_calls()) == 3
+    payload = json.loads((out / "runs.json").read_text(encoding="utf-8"))
+    assert [run_from_json(json.loads(line)) for line in lines] == [run_from_json(run) for run in payload["runs"]]
+
+
+def test_main_resumes_from_runs_jsonl_without_invoking_the_client_again(
+    rig: _Rig, capsys: pytest.CaptureFixture[str]
+) -> None:
+    out = rig.root / "out"
+    assert run_module.main(_main_args(rig, out, "--model", _MODEL)) == 0
+    calls = len(rig.claude_calls())
+    first = (out / "runs.json").read_text(encoding="utf-8")
+    capsys.readouterr()
+
+    exit_code = run_module.main(_main_args(rig, out, "--model", _MODEL))
+
+    assert exit_code == 0
+    assert len(rig.claude_calls()) == calls
+    assert "resuming: 3 recorded run(s) skipped" in capsys.readouterr().out
+    assert (out / "runs.json").read_text(encoding="utf-8") == first
+    assert len((out / "runs.jsonl").read_text(encoding="utf-8").splitlines()) == 3
+
+
+def test_main_ignores_a_recorded_run_of_another_trap_set_with_a_warning(
+    rig: _Rig, capsys: pytest.CaptureFixture[str]
+) -> None:
+    out = rig.root / "out"
+    out.mkdir()
+    # `_record` carries `_DIGEST`, not the digest of the rig's trap set.
+    foreign = json.dumps(run_to_json(_record()))
+    (out / "runs.jsonl").write_text(foreign + "\n", encoding="utf-8")
+
+    exit_code = run_module.main(_main_args(rig, out, "--model", _MODEL))
+
+    assert exit_code == 0
+    assert len(rig.claude_calls()) == 3
+    err = capsys.readouterr().err
+    assert "warning" in err
+    assert "1 recorded run(s)" in err
+    lines = (out / "runs.jsonl").read_text(encoding="utf-8").splitlines()
+    assert lines[0] == foreign
+    assert len(lines) == 4
+    assert len(json.loads((out / "runs.json").read_text(encoding="utf-8"))["runs"]) == 3
+
+
+def test_main_records_an_invalid_run_as_a_failure_exits_3_and_retries_it_on_the_next_run(
+    rig: _Rig, capsys: pytest.CaptureFixture[str]
+) -> None:
+    out = rig.root / "out"
+    rig.behave(drop_servers=True)
+    args = _main_args(rig, out, "--model", _MODEL, "--conditions", UNPROMPTED)
+
+    exit_code = run_module.main(args)
+
+    assert exit_code == 3
+    failures = _read_jsonl(out / "failures.jsonl")
+    assert [(f["trap_id"], f["condition"], f["repetition"]) for f in failures] == [("trap-a", UNPROMPTED, 0)]
+    assert "MCP" in failures[0]["error"]
+    assert "error: trap-a unprompted 0: " in capsys.readouterr().err
+    assert not (out / "runs.json").exists()
+    assert not (out / "report.md").exists()
+    calls = len(rig.claude_calls())
+
+    rig.behave(write=_REGRESSING_EDIT, tool_calls=["Read", "Edit"])
+    exit_code = run_module.main(args)
+
+    assert exit_code == 0
+    assert len(rig.claude_calls()) == calls + 1
+    payload = json.loads((out / "runs.json").read_text(encoding="utf-8"))
+    assert [(run["trap_id"], run["condition"], run["repetition"]) for run in payload["runs"]] == [
+        ("trap-a", UNPROMPTED, 0)
+    ]
+
+
+def test_main_still_writes_the_report_of_the_runs_that_succeeded_when_one_failed(rig: _Rig) -> None:
+    out = rig.root / "out"
+    # Baseline registers no server, so dropping servers invalidates only the unprompted run.
+    rig.behave(drop_servers=True)
+
+    exit_code = run_module.main(_main_args(rig, out, "--model", _MODEL, "--conditions", BASELINE, UNPROMPTED))
+
+    assert exit_code == 3
+    payload = json.loads((out / "runs.json").read_text(encoding="utf-8"))
+    assert [(run["trap_id"], run["condition"]) for run in payload["runs"]] == [("trap-a", BASELINE)]
+    assert (out / "report.md").is_file()
+    assert len(_read_jsonl(out / "failures.jsonl")) == 1

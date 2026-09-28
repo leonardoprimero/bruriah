@@ -7,7 +7,11 @@ so it never runs in CI and never starts unattended. `--dry-run` lists every plan
 estimate is made before anyone approves a paid run.
 
 A real run drives the Claude Code headless adapter (`claude_code.py`) and writes `runs.json` (every
-run record), `report.md`, and the raw client transcripts under `transcripts/` into `--out`.
+run record), `report.md`, and the raw client transcripts under `transcripts/` into `--out`. Each run
+record is appended to `runs.jsonl` as soon as the run finishes, and a run the adapter could not
+record is appended to `failures.jsonl` and the benchmark moves on (exit code 3). Running the same
+command again skips every invocation `runs.jsonl` already holds for this trap set, so it retries
+exactly the failed and unfinished ones.
 
 Usage:
     uv run python evals/agent_regression/run.py --dry-run
@@ -18,12 +22,14 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import shutil
 import sys
-from collections.abc import Iterable, Sequence
+from collections.abc import Collection, Iterable, Sequence
 from datetime import date
 from pathlib import Path
+from typing import Any
 
 import platformdirs
 
@@ -33,7 +39,7 @@ _HERE = Path(__file__).resolve().parent
 if str(_HERE.parent) not in sys.path:
     sys.path.insert(0, str(_HERE.parent))
 
-from agent_regression.runs import CONDITIONS  # noqa: E402
+from agent_regression.runs import CONDITIONS, AgentRun, run_from_json, run_to_json  # noqa: E402
 from agent_regression.traps import Trap, TrapError, load_traps  # noqa: E402
 
 DEFAULT_REPETITIONS = 5
@@ -118,11 +124,45 @@ def _executable(given: Path | None, name: str) -> Path | None:
     return given.absolute() if given.is_file() and os.access(given, os.X_OK) else None
 
 
+def _append_jsonl(path: Path, payload: dict[str, Any]) -> None:
+    """Append `payload` as one line and flush it to disk, so a crash leaves every earlier line whole."""
+    with path.open("a", encoding="utf-8") as handle:
+        handle.write(json.dumps(payload, ensure_ascii=False) + "\n")
+        handle.flush()
+        os.fsync(handle.fileno())
+
+
+def _recorded_runs(
+    path: Path, digest: str, plan: Collection[tuple[str, str, int]]
+) -> dict[tuple[str, str, int], AgentRun]:
+    """The runs `path` already holds for this trap set and plan, by invocation key. Records of
+    another trap set stay in the file, are left out, and are counted in a warning."""
+    if not path.is_file():
+        return {}
+    recorded = {}
+    foreign = 0
+    for number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1):
+        if not line.strip():
+            continue
+        try:
+            run = run_from_json(json.loads(line))
+        except ValueError as exc:
+            raise ValueError(f"{path}, line {number}: {exc}") from None
+        key = (run.trap_id, run.condition, run.repetition)
+        if run.provenance.trap_set_digest != digest:
+            foreign += 1
+        elif key in plan:
+            recorded[key] = run
+    if foreign:
+        print(f"warning: {foreign} recorded run(s) in {path} are for another trap set; ignored", file=sys.stderr)
+    return recorded
+
+
 def _run(args: argparse.Namespace, traps: Sequence[Trap], conditions: Sequence[str]) -> int:
     # Imported here, not at module level: `adapters` imports `plan_invocations` from this module,
     # and a dry run never needs the adapter.
-    from agent_regression.adapters import run_benchmark
-    from agent_regression.claude_code import AdapterError, ClaudeCodeAdapter, ClaudeCodeConfig
+    from agent_regression.adapters import AdapterError, run_benchmark
+    from agent_regression.claude_code import ClaudeCodeAdapter, ClaudeCodeConfig
     from agent_regression.metrics import summarize, trap_set_digest
     from agent_regression.report import render_json, render_markdown, write_report
 
@@ -148,19 +188,61 @@ def _run(args: argparse.Namespace, traps: Sequence[Trap], conditions: Sequence[s
         provenance_date=args.date,
         max_budget_usd_per_run=args.max_budget_usd_per_run,
     )
+    plan = plan_invocations(traps, conditions, args.repetitions)
+    digest = trap_set_digest(traps)
+    runs_log = out / "runs.jsonl"
+    failures_log = out / "failures.jsonl"
     try:
-        adapter = ClaudeCodeAdapter(config, trap_set_digest=trap_set_digest(traps), repetitions=args.repetitions)
+        recorded = _recorded_runs(runs_log, digest, set(plan))
+    except ValueError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
+    if recorded:
+        print(f"resuming: {len(recorded)} recorded run(s) skipped")
+
+    failed: list[tuple[str, str, int]] = []
+
+    def record_failure(key: tuple[str, str, int], error: AdapterError) -> None:
+        trap_id, condition, repetition = key
+        failed.append(key)
+        _append_jsonl(
+            failures_log,
+            {"trap_id": trap_id, "condition": condition, "repetition": repetition, "error": str(error)},
+        )
+        print(f"error: {trap_id} {condition} {repetition}: {error}", file=sys.stderr)
+
+    try:
+        adapter = ClaudeCodeAdapter(config, trap_set_digest=digest, repetitions=args.repetitions)
         out.mkdir(parents=True, exist_ok=True)
-        runs = run_benchmark(traps, adapter, conditions, args.repetitions)
+        new_runs = run_benchmark(
+            traps,
+            adapter,
+            conditions,
+            args.repetitions,
+            skip=recorded.keys(),
+            on_run=lambda run: _append_jsonl(runs_log, run_to_json(run)),
+            on_failure=record_failure,
+        )
     except AdapterError as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 2
+
+    by_key = recorded | {(run.trap_id, run.condition, run.repetition): run for run in new_runs}
+    runs = [by_key[key] for key in plan if key in by_key]
+    if failed:
+        print(
+            f"{len(failed)} run(s) failed, listed in {failures_log}; run the same command again to retry them",
+            file=sys.stderr,
+        )
+    if not runs:
+        print(f"no run recorded; nothing written to {out}")
+        return 3 if failed else 0
 
     summaries = summarize(runs)
     write_report(out / "runs.json", render_json(runs, summaries))
     write_report(out / "report.md", render_markdown(runs, summaries))
     print(f"{len(runs)} runs recorded in {out / 'runs.json'}; report in {out / 'report.md'}")
-    return 0
+    return 3 if failed else 0
 
 
 def main(argv: Sequence[str] | None = None) -> int:

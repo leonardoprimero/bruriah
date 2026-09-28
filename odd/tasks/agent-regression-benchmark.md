@@ -227,8 +227,10 @@ Also out of scope: a Codex or Cursor adapter, an LLM-judge column, a private-cor
   sequential wall-clock and about USD 495 API-equivalent, plus one mirror and one index per
   external repository. Also observed: the client exposes `ToolSearch` and `Monitor` beyond the
   allowlist (auto-denied paths, harmless), and the agent left two helper files it could not
-  delete without a shell, which the detector counts as tree content. Approval of the budget:
-  pending the user's decision, recorded here when given.
+  delete without a shell, which the detector counts as tree content. Budget approved by the user
+  on 2026-09-27 for the full N=5 run (180 invocations, about 15 h, about USD 495 API-equivalent
+  on the Max plan), on two conditions: the runner writes run records incrementally and resumes
+  before the run starts, and every fired detection is spot-checked by hand before publication.
 
 - 2026-09-27: T2 revised: the client runs with the operator's Claude Code login, never with an
   API key (the user's decision: there will be no key). Measured on Claude Code 2.1.283 before

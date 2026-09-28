@@ -58,7 +58,7 @@ from agent_regression.metrics import (  # noqa: E402
 )
 from agent_regression.report import render_json, render_markdown, write_report  # noqa: E402
 from agent_regression.run import main, plan_invocations  # noqa: E402
-from agent_regression.adapters import AgentAdapter, ReplayAdapter, ReplayError, run_benchmark  # noqa: E402
+from agent_regression.adapters import AdapterError, AgentAdapter, ReplayAdapter, ReplayError, run_benchmark  # noqa: E402
 
 import pytest  # noqa: E402
 import yaml  # noqa: E402
@@ -1162,6 +1162,94 @@ def test_run_benchmark_drives_the_adapter_in_plan_order(tmp_path: Path) -> None:
     assert [(run.trap_id, run.condition, run.repetition) for run in runs] == plan
     prompts = {trap.trap_id: trap.prompt for trap in traps}
     assert calls == [(trap_id, condition, repetition, prompts[trap_id]) for trap_id, condition, repetition in plan]
+
+
+def _two_trap_set(tmp_path: Path) -> tuple[Trap, ...]:
+    traps_dir = tmp_path / "traps"
+    _make_trap(traps_dir, "trap-a")
+    _make_trap(traps_dir, "trap-b", prompt="Move the tool declarations next to their handlers.")
+    return load_traps(traps_dir)
+
+
+class _KeyedAdapter:
+    """Records every invocation in `events` and raises `AdapterError` for the keys in `failing`."""
+
+    def __init__(self, events: list[tuple[str, tuple[str, str, int]]], failing: frozenset = frozenset()) -> None:
+        self.events = events
+        self.failing = failing
+
+    def run(self, workdir: Path, prompt: str, condition: str, trap: Trap, repetition: int) -> AgentRun:
+        key = (trap.trap_id, condition, repetition)
+        self.events.append(("invoked", key))
+        if key in self.failing:
+            raise AdapterError(f"client loaded the wrong MCP servers for {key}")
+        return _make_run(trap_id=trap.trap_id, condition=condition, repetition=repetition)
+
+
+def _key(run: AgentRun) -> tuple[str, str, int]:
+    return (run.trap_id, run.condition, run.repetition)
+
+
+def test_run_benchmark_does_not_invoke_the_skipped_keys(tmp_path: Path) -> None:
+    traps = _two_trap_set(tmp_path)
+    plan = plan_invocations(traps, CONDITIONS, 2)
+    skip = {plan[0], plan[5], plan[-1]}
+    events: list[tuple[str, tuple[str, str, int]]] = []
+
+    runs = run_benchmark(traps, _KeyedAdapter(events), CONDITIONS, 2, skip=skip)
+
+    remaining = [key for key in plan if key not in skip]
+    assert [key for _, key in events] == remaining
+    assert [_key(run) for run in runs] == remaining
+
+
+def test_run_benchmark_hands_each_run_to_on_run_before_the_next_invocation(tmp_path: Path) -> None:
+    traps = _two_trap_set(tmp_path)
+    plan = plan_invocations(traps, CONDITIONS, 2)
+    events: list[tuple[str, tuple[str, str, int]]] = []
+
+    runs = run_benchmark(
+        traps, _KeyedAdapter(events), CONDITIONS, 2, on_run=lambda run: events.append(("recorded", _key(run)))
+    )
+
+    assert events == [event for key in plan for event in (("invoked", key), ("recorded", key))]
+    assert [_key(run) for run in runs] == plan
+
+
+def test_run_benchmark_reports_a_failing_key_to_on_failure_and_runs_the_others(tmp_path: Path) -> None:
+    traps = _two_trap_set(tmp_path)
+    plan = plan_invocations(traps, CONDITIONS, 2)
+    events: list[tuple[str, tuple[str, str, int]]] = []
+    failures: list[tuple[tuple[str, str, int], AdapterError]] = []
+    recorded: list[tuple[str, str, int]] = []
+
+    runs = run_benchmark(
+        traps,
+        _KeyedAdapter(events, failing=frozenset({plan[2]})),
+        CONDITIONS,
+        2,
+        on_run=lambda run: recorded.append(_key(run)),
+        on_failure=lambda key, error: failures.append((key, error)),
+    )
+
+    assert [key for _, key in events] == plan
+    assert [(key, str(error)) for key, error in failures] == [
+        (plan[2], f"client loaded the wrong MCP servers for {plan[2]}")
+    ]
+    succeeded = [key for key in plan if key != plan[2]]
+    assert [_key(run) for run in runs] == succeeded
+    assert recorded == succeeded
+
+
+def test_run_benchmark_without_on_failure_propagates_the_adapter_error(tmp_path: Path) -> None:
+    traps = _two_trap_set(tmp_path)
+    plan = plan_invocations(traps, CONDITIONS, 2)
+    events: list[tuple[str, tuple[str, str, int]]] = []
+
+    with pytest.raises(AdapterError, match="wrong MCP servers"):
+        run_benchmark(traps, _KeyedAdapter(events, failing=frozenset({plan[2]})), CONDITIONS, 2)
+
+    assert [key for _, key in events] == plan[:3]
 
 
 def test_replayed_benchmark_reproduces_its_report_byte_identically(tmp_path: Path) -> None:
