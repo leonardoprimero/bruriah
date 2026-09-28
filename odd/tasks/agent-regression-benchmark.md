@@ -215,6 +215,21 @@ Also out of scope: a Codex or Cursor adapter, an LLM-judge column, a private-cor
 
 ## Progress / evidence
 
+- 2026-09-27: T2 revised: the client runs with the operator's Claude Code login, never with an
+  API key (the user's decision: there will be no key). Measured on Claude Code 2.1.283 before
+  changing it: the OAuth token lives in the macOS keychain, not in `~/.claude/.credentials.json`
+  (a copy of that file in a throwaway `HOME` answered 401), so `HOME` stays the operator's and
+  `--bare` goes; `--setting-sources project` keeps the operator's settings, hooks, plugins and
+  user-level `CLAUDE.md` out of the context (a one-turn probe with `--strict-mcp-config` loaded
+  zero MCP servers, zero slash commands, and the model reported no Gentle AI instructions in its
+  context; ~20.5k prompt tokens is the default system prompt plus 21 tool schemas); the child
+  environment is exactly `HOME`, `PATH`, `USER`, `LOGNAME`, `TMPDIR` (the minimum that reaches
+  the keychain) and a key in the operator's shell is deliberately not forwarded, so every run
+  bills the same way. Fable (`claude-fable-5-1`) answers on the Max plan; `total_cost_usd` in the
+  result line is the API-equivalent estimate, and T4 states it as such. Side effect measured: one
+  empty `~/.claude/projects/<workdir>/memory` directory per run, even with
+  `--no-session-persistence`. Strict TDD: 6 RED, 79 GREEN.
+
 - 2026-09-27: T3 trap set designed and signed off by the second reader (leonardoprimero,
   2026-09-27) before any file was written: twelve traps, four own-history (395962e FastMCP and
   the same commit's strict argument models, 7335546 RRF_K, 4dc37e8 no ANN index), three

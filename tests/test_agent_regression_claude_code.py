@@ -515,8 +515,12 @@ def test_command_line_isolates_the_client_and_bounds_the_run(tmp_path: Path) -> 
     argv = command_line(config, trap, BASELINE, trap.prompt, None)
 
     assert argv[:3] == ["/opt/claude/bin/claude", "-p", _PROMPT]
-    for flag in ("--bare", "--verbose", "--no-session-persistence"):
+    for flag in ("--verbose", "--no-session-persistence", "--strict-mcp-config", "--disable-slash-commands"):
         assert flag in argv, flag
+    # The client runs logged in, so `--bare` (which never reads the login) is out; the operator's
+    # own settings, hooks and plugins stay out through the setting sources instead.
+    assert "--bare" not in argv
+    assert argv[argv.index("--setting-sources") + 1] == "project"
     assert argv[argv.index("--output-format") + 1] == "stream-json"
     assert argv[argv.index("--max-turns") + 1] == "7"
     assert argv[argv.index("--model") + 1] == _MODEL
@@ -533,7 +537,8 @@ def test_baseline_command_line_registers_no_mcp_server(tmp_path: Path) -> None:
     argv = command_line(config, trap, BASELINE, trap.prompt, None)
 
     assert "--mcp-config" not in argv
-    assert "--strict-mcp-config" not in argv
+    # Strict even with nothing registered: the operator's own MCP servers must not load either.
+    assert "--strict-mcp-config" in argv
     assert not any(tool in argv for tool in MCP_TOOLS)
 
 
@@ -689,8 +694,8 @@ def test_the_prompted_instruction_names_both_tools_and_not_the_product() -> None
 
 
 def test_prompted_command_line_appends_the_instruction_to_the_system_prompt(tmp_path: Path) -> None:
-    # `--bare` skips `CLAUDE.md` auto-discovery (Claude Code 2.1.283 `--help`), so a `CLAUDE.md`
-    # line would never reach the model and `prompted` would silently equal `unprompted`.
+    # The instruction travels as a system-prompt flag, never as a `CLAUDE.md` file: the client
+    # does not read a repository `CLAUDE.md` in every mode, and the benchmark must not depend on it.
     config = _config(tmp_path, Path("/opt/claude"), Path("/opt/bruriah"))
     trap = _pure_trap(tmp_path)
 
@@ -754,38 +759,16 @@ def test_write_mcp_config_rejects_a_relative_command(tmp_path: Path) -> None:
 
 
 # -------------------------------------------------------------------------------------------
-# Construction fails closed without an API key
+# Construction needs no API key: the client runs with the operator's login
 # -------------------------------------------------------------------------------------------
 
 
-def test_the_adapter_refuses_to_construct_without_the_api_key(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_the_adapter_constructs_without_any_api_key(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
 
-    with pytest.raises(AdapterError, match="ANTHROPIC_API_KEY"):
-        ClaudeCodeAdapter(
-            _config(tmp_path, Path("/opt/claude"), Path("/opt/bruriah")), trap_set_digest=_DIGEST, repetitions=1
-        )
-
-
-def test_the_adapter_reads_the_configured_api_key_variable(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("ANTHROPIC_API_KEY", _API_KEY)
-    monkeypatch.delenv("BENCH_KEY", raising=False)
-    config = _config(tmp_path, Path("/opt/claude"), Path("/opt/bruriah"), api_key_env="BENCH_KEY")
-
-    with pytest.raises(AdapterError, match="BENCH_KEY"):
-        ClaudeCodeAdapter(config, trap_set_digest=_DIGEST, repetitions=1)
-
-    monkeypatch.setenv("BENCH_KEY", _API_KEY)
-    ClaudeCodeAdapter(config, trap_set_digest=_DIGEST, repetitions=1)
-
-
-def test_an_empty_api_key_counts_as_absent(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("ANTHROPIC_API_KEY", "")
-
-    with pytest.raises(AdapterError, match="ANTHROPIC_API_KEY"):
-        ClaudeCodeAdapter(
-            _config(tmp_path, Path("/opt/claude"), Path("/opt/bruriah")), trap_set_digest=_DIGEST, repetitions=1
-        )
+    ClaudeCodeAdapter(
+        _config(tmp_path, Path("/opt/claude"), Path("/opt/bruriah")), trap_set_digest=_DIGEST, repetitions=1
+    )
 
 
 # -------------------------------------------------------------------------------------------
@@ -975,9 +958,9 @@ def test_a_baseline_run_invokes_the_client_isolated_in_the_clone(rig: _Rig) -> N
     assert Path(call["cwd"]).resolve() == workdir.resolve()
     argv = call["argv"]
     assert argv[:2] == ["-p", _PROMPT]
-    assert "--bare" in argv
+    assert "--bare" not in argv
     assert "--mcp-config" not in argv
-    assert "--strict-mcp-config" not in argv
+    assert "--strict-mcp-config" in argv
     assert _flag_values(argv, "--allowedTools") == list(ALLOWED_TOOLS)
     assert argv[argv.index("--max-turns") + 1] == "7"
     assert call["claude_md"] is None
@@ -987,16 +970,27 @@ def test_a_baseline_run_invokes_the_client_isolated_in_the_clone(rig: _Rig) -> N
     assert run.exit_reason == "done"
 
 
-def test_the_client_gets_the_api_key_and_a_minimal_environment_with_a_redirected_home(rig: _Rig) -> None:
+def test_the_client_runs_logged_in_with_the_real_home_and_a_minimal_environment(rig: _Rig) -> None:
     rig.run(rig.adapter(), BASELINE)
 
     (call,) = rig.claude_calls()
-    assert call["key_sha256"] == hashlib.sha256(_API_KEY.encode("utf-8")).hexdigest()
+    # The operator's login lives in the OS keychain, so `HOME` is the real one. Nothing else of
+    # the operator's environment goes along: not the sentinel, and not an API key even when one is
+    # set (the rig sets one), because a key would silently switch the client from the login to
+    # per-token billing and the run's provenance would no longer say which path it took.
+    assert call["home"] == os.environ["HOME"]
+    assert call["key_sha256"] is None
     assert _SENTINEL not in call["env_names"]
-    assert call["home"] != os.environ.get("HOME")
-    assert Path(call["home"]).parent.resolve() == (rig.root / "work").resolve()
-    # The redirected home is temporary: nothing of it survives the run.
-    assert not Path(call["home"]).exists()
+    assert not any(name.startswith(("CLAUDE_", "ANTHROPIC_")) for name in call["env_names"])
+    # `LC_CTYPE` is the stub interpreter's own doing (PEP 538 locale coercion exports it) and
+    # `__CF_USER_TEXT_ENCODING` is macOS's, injected into every process; neither came from the adapter.
+    assert {name for name in call["env_names"] if not name.startswith(("LC_", "__CF_"))} <= {
+        "HOME",
+        "PATH",
+        "USER",
+        "LOGNAME",
+        "TMPDIR",
+    }
 
 
 def test_the_api_key_is_never_written_to_any_file(rig: _Rig) -> None:
@@ -1276,16 +1270,13 @@ def test_main_requires_an_explicit_model_for_a_real_run(rig: _Rig, capsys: pytes
     assert not rig.claude_calls()
 
 
-def test_main_refuses_a_real_run_without_the_api_key(
-    rig: _Rig, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
-) -> None:
+def test_main_runs_a_real_run_without_any_api_key(rig: _Rig, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("ANTHROPIC_API_KEY")
 
     exit_code = run_module.main(_main_args(rig, rig.root / "out", "--model", _MODEL))
 
-    assert exit_code == 2
-    assert "ANTHROPIC_API_KEY" in capsys.readouterr().err
-    assert not rig.claude_calls()
+    assert exit_code == 0
+    assert len(rig.claude_calls()) == 3
 
 
 @pytest.mark.parametrize("missing", ["claude", "bruriah"])

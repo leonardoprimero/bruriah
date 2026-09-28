@@ -2,12 +2,17 @@
 
 Every invocation is isolated from the operator's own Claude Code setup, because a baseline that
 inherits hooks, plugins and a dozen MCP servers (a predecessor of this product and a memory server
-among them, on the machine the first run was planned on) is not a baseline. So the client always
-runs with `--bare`, in a fresh clone of the pinned commit with no remote, with `HOME` redirected
-to a temporary directory and a minimal environment, with no shell tool, and with MCP servers
-registered only through `--mcp-config` plus `--strict-mcp-config`. The run is then checked after the fact: the client's
+among them, on the machine the first run was planned on) is not a baseline. The client runs with
+the operator's login (`--bare` would skip it, and a benchmark run has no API key), so isolation
+comes from flags and the environment instead: `--setting-sources project` keeps the operator's
+settings, hooks, plugins and user-level `CLAUDE.md` out (measured on 2.1.283: the model's context
+holds none of them), `--strict-mcp-config` in every condition admits only the servers this run
+registers, `--disable-slash-commands` drops the operator's skills, the clone of the pinned commit
+is fresh and has no remote, the agent has no shell tool, and the child environment is the five
+variables the login needs and nothing else. The run is then checked after the fact: the client's
 init line must list exactly the servers the condition registered, and the clone must still have
-no remote, or the run is refused rather than recorded.
+no remote, or the run is refused rather than recorded. One side effect remains: the client
+creates an empty `~/.claude/projects/<workdir>/memory` directory per run.
 
 The wire format is Claude Code's `--output-format stream-json --verbose`, measured on 2.1.283: one
 JSON object per line, a `system`/`init` line first, `assistant` lines carrying `tool_use` items,
@@ -40,9 +45,9 @@ CLIENT = "claude-code"
 SERVER_NAME = "bruriah"
 
 # The one line the `prompted` condition appends to the client's system prompt. It travels as
-# `--append-system-prompt`, which `--bare` honours; `--bare` skips `CLAUDE.md` auto-discovery, so
-# a `CLAUDE.md` line would never reach the model. Pinned: changing it changes what `prompted`
-# measures.
+# `--append-system-prompt`, never as a `CLAUDE.md` file: whether the client reads a repository
+# `CLAUDE.md` depends on its mode (`--bare` skips it), and the benchmark must not depend on that.
+# Pinned: changing it changes what `prompted` measures.
 PROMPTED_INSTRUCTION = (
     "Before editing any file, call the `investigate_work` tool with the task you were given and read the "
     "evidence it returns with `read_evidence` before deciding how to proceed."
@@ -51,7 +56,7 @@ PROMPTED_INSTRUCTION = (
 # Read, search and edit inside the clone through the built-in tools, and no shell. A scoped Bash
 # rule is a prefix, not a read-only command: `Bash(find:*)` admits `find -exec`, `Bash(rg:*)`
 # admits `rg --pre`, and `Bash(git diff:*)` honours `diff.external` from a `.git/config` the agent
-# can write. Any shell child would inherit the API key and could push, install, or exfiltrate.
+# can write. Any shell child would inherit the operator's login and could push, install, or exfiltrate.
 ALLOWED_TOOLS: tuple[str, ...] = ("Read", "Edit", "Write", "MultiEdit", "Glob", "Grep")
 MCP_TOOLS: tuple[str, ...] = (f"mcp__{SERVER_NAME}__investigate_work", f"mcp__{SERVER_NAME}__read_evidence")
 DISALLOWED_TOOLS: tuple[str, ...] = ("Bash", "WebFetch", "WebSearch", "Task", "NotebookEdit")
@@ -60,10 +65,14 @@ DISALLOWED_TOOLS: tuple[str, ...] = ("Bash", "WebFetch", "WebSearch", "Task", "N
 # listed in the clone's `.git/info/exclude`, so it never shows up in the diff the detector reads.
 HARNESS_DIR = ".agent-regression"
 
-# The variable the client reads its key from, whatever variable the operator keeps it in.
+# Never forwarded to the client: a key in the environment would silently switch it from the
+# operator's login to per-token billing, and the provenance would not say which path a run took.
 _CLIENT_API_KEY_ENV = "ANTHROPIC_API_KEY"
+# What the logged-in client needs and nothing more (measured on macOS with Claude Code 2.1.283:
+# the OAuth token lives in the OS keychain, which `HOME` and `PATH` alone cannot reach).
+_CLIENT_ENV_VARS = ("HOME", "PATH", "USER", "LOGNAME", "TMPDIR")
 # Kept out of the index build: it needs no key, and it must use the same model cache the server
-# later reads with a redirected `HOME`, not one an operator variable points elsewhere.
+# later reads, not one an operator variable points elsewhere.
 _INDEX_ENV_DROPPED = frozenset({_CLIENT_API_KEY_ENV, "FASTEMBED_CACHE_PATH"})
 _WINDOWS_ESSENTIAL_ENV_VARS = ("SYSTEMROOT", "WINDIR", "COMSPEC", "PATHEXT", "TEMP", "TMP")
 _GIT_IDENTITY = {
@@ -90,7 +99,6 @@ class ClaudeCodeConfig:
     cache_dir: Path
     transcripts_dir: Path
     provenance_date: str
-    api_key_env: str = _CLIENT_API_KEY_ENV
     max_budget_usd_per_run: float | None = None
 
 
@@ -116,26 +124,30 @@ def allowed_tools(condition: str) -> tuple[str, ...]:
     return ALLOWED_TOOLS if condition == BASELINE else ALLOWED_TOOLS + MCP_TOOLS
 
 
-def _base_env(home: Path) -> dict[str, str]:
-    """`PATH`, a redirected `HOME`, and the Windows essentials: nothing of the operator's own
-    configuration reaches the child."""
-    env = {"HOME": str(home)}
-    path = os.environ.get("PATH")
-    if path:
-        env["PATH"] = path
-    for name in _WINDOWS_ESSENTIAL_ENV_VARS:
-        value = os.environ.get(name)
-        if value:
-            env[name] = value
-    if os.name == "nt":
-        env["USERPROFILE"] = str(home)
+def _windows_essentials() -> dict[str, str]:
+    return {name: os.environ[name] for name in _WINDOWS_ESSENTIAL_ENV_VARS if os.environ.get(name)}
+
+
+def _client_env() -> dict[str, str]:
+    """The operator's real `HOME` (the login is read from the OS keychain under it), the four
+    variables that reach the keychain and the temp directory, and the Windows essentials. Nothing
+    else: no `CLAUDE_*`, no `ANTHROPIC_*`, no proxy or locale of the operator's shell."""
+    env = {name: os.environ[name] for name in _CLIENT_ENV_VARS if os.environ.get(name)}
+    env.update(_windows_essentials())
+    if os.name == "nt" and os.environ.get("USERPROFILE"):
+        env["USERPROFILE"] = os.environ["USERPROFILE"]
     return env
 
 
 def _git_env(home: Path) -> dict[str, str]:
-    # The same hermetic git environment as `evals/injection/cases.py::_hermetic_git_env`: no
-    # system or global config, an explicit identity, and no credential prompt that could hang.
-    env = _base_env(home)
+    # The same hermetic git environment as `evals/injection/cases.py::_hermetic_git_env`: a
+    # throwaway `HOME`, no system or global config, an explicit identity, and no credential prompt
+    # that could hang.
+    env = {"HOME": str(home), **_windows_essentials()}
+    if os.environ.get("PATH"):
+        env["PATH"] = os.environ["PATH"]
+    if os.name == "nt":
+        env["USERPROFILE"] = str(home)
     env.update({"GIT_CONFIG_NOSYSTEM": "1", "GIT_CONFIG_GLOBAL": os.devnull, "GIT_TERMINAL_PROMPT": "0"})
     env.update(_GIT_IDENTITY)
     return env
@@ -212,9 +224,7 @@ def model_cache_dir(cache_dir: Path) -> Path:
     return cache_dir / "bruriah-cache"
 
 
-def ensure_index(
-    trap: Trap, clone: Path, cache_dir: Path, bruriah_executable: Path, *, api_key_env: str = _CLIENT_API_KEY_ENV
-) -> tuple[Path, Path]:
+def ensure_index(trap: Trap, clone: Path, cache_dir: Path, bruriah_executable: Path) -> tuple[Path, Path]:
     """Build the trap's Bruriah index once per `(trap_id, commit)` with `bruriah init --repo` on a
     clone of the pinned commit, and return its `(data_dir, config_dir)`."""
     root = cache_dir / "indexes" / f"{trap.trap_id}-{trap.commit[:12]}"
@@ -222,7 +232,6 @@ def ensure_index(
     if marker.is_file():
         return data_dir, config_dir
     root.mkdir(parents=True, exist_ok=True)
-    dropped = _INDEX_ENV_DROPPED | {api_key_env}
     completed = subprocess.run(
         [
             str(bruriah_executable),
@@ -236,7 +245,7 @@ def ensure_index(
             "--cache-dir",
             str(model_cache_dir(cache_dir)),
         ],
-        env={name: value for name, value in os.environ.items() if name not in dropped},
+        env={name: value for name, value in os.environ.items() if name not in _INDEX_ENV_DROPPED},
         stdin=subprocess.DEVNULL,
         capture_output=True,
         text=True,
@@ -278,7 +287,10 @@ def command_line(
         str(config.claude_executable),
         "-p",
         prompt,
-        "--bare",
+        "--setting-sources",
+        "project",
+        "--strict-mcp-config",
+        "--disable-slash-commands",
         "--output-format",
         "stream-json",
         "--verbose",
@@ -297,7 +309,7 @@ def command_line(
         *DISALLOWED_TOOLS,
     ]
     if mcp_config is not None:
-        argv += ["--mcp-config", str(mcp_config), "--strict-mcp-config"]
+        argv += ["--mcp-config", str(mcp_config)]
     if condition == PROMPTED:
         argv += ["--append-system-prompt", PROMPTED_INSTRUCTION]
     if config.max_budget_usd_per_run is not None:
@@ -433,44 +445,30 @@ def _kill(process: subprocess.Popen[str]) -> None:
 class ClaudeCodeAdapter:
     """`AgentAdapter` for Claude Code in headless mode.
 
-    Construction fails closed when the API key is missing: `--bare` skips the interactive login,
-    so a run without the key could only fail. The key goes to the client's environment and
-    nowhere else: not to the command line, the index build, a transcript, or a run record. The
-    agent has no shell tool, so no process it starts inherits it; still, run the benchmark with a
-    key scoped to it and spend-capped, not an operator's personal key.
+    The client runs with the operator's login, never with an API key: a key is not forwarded even
+    when the operator's shell carries one, so every run bills the same way and the model line in
+    the init event names what actually answered. A run that cannot authenticate ends as an error
+    run with the client's own message in its stderr transcript.
     """
 
     def __init__(self, config: ClaudeCodeConfig, *, trap_set_digest: str, repetitions: int) -> None:
-        api_key = os.environ.get(config.api_key_env)
-        if not api_key:
-            raise AdapterError(
-                f"{config.api_key_env} is not set: `claude --bare` does not use the interactive login, so a "
-                "benchmark run needs an API key in the environment"
-            )
         self._config = config
-        self._api_key = api_key
         self._trap_set_digest = trap_set_digest
         self._repetitions = repetitions
         self._client_version: str | None = None
         self._bruriah_checked = False
 
-    def _client_env(self, home: Path) -> dict[str, str]:
-        env = _base_env(home)
-        env[_CLIENT_API_KEY_ENV] = self._api_key
-        return env
-
     def client_version(self) -> str:
         """`claude --version`, asked once per adapter."""
         if self._client_version is None:
-            with tempfile.TemporaryDirectory(prefix="agent-regression-home-", ignore_cleanup_errors=True) as home:
-                completed = subprocess.run(
-                    [str(self._config.claude_executable), "--version"],
-                    env=_base_env(Path(home)),
-                    stdin=subprocess.DEVNULL,
-                    capture_output=True,
-                    text=True,
-                    timeout=_VERSION_TIMEOUT_SECONDS,
-                )
+            completed = subprocess.run(
+                [str(self._config.claude_executable), "--version"],
+                env=_client_env(),
+                stdin=subprocess.DEVNULL,
+                capture_output=True,
+                text=True,
+                timeout=_VERSION_TIMEOUT_SECONDS,
+            )
             version = completed.stdout.strip()
             if completed.returncode != 0 or not version:
                 raise AdapterError(
@@ -501,33 +499,29 @@ class ClaudeCodeAdapter:
         self._bruriah_checked = True
 
     def _invoke(self, argv: list[str], workdir: Path, budget: int) -> tuple[str, str, int, bool, float]:
-        """Run the client in `workdir` with a temporary `HOME` next to it, so the operator's
-        `~/.claude` is never read. Past the time budget the client is killed and whatever it had
-        printed is kept."""
-        with tempfile.TemporaryDirectory(
-            prefix="agent-regression-home-", dir=workdir.parent, ignore_cleanup_errors=True
-        ) as home:
-            started = time.monotonic()
-            process = subprocess.Popen(
-                argv,
-                cwd=workdir,
-                env=self._client_env(Path(home)),
-                stdin=subprocess.DEVNULL,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                text=True,
-                encoding="utf-8",
-                errors="replace",
-                start_new_session=os.name == "posix",
-            )
-            try:
-                stdout, stderr = process.communicate(timeout=budget)
-                timed_out = False
-            except subprocess.TimeoutExpired:
-                _kill(process)
-                stdout, stderr = process.communicate()
-                timed_out = True
-            elapsed = time.monotonic() - started
+        """Run the client in `workdir` with the minimal logged-in environment. Past the time budget
+        the client is killed and whatever it had printed is kept."""
+        started = time.monotonic()
+        process = subprocess.Popen(
+            argv,
+            cwd=workdir,
+            env=_client_env(),
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            start_new_session=os.name == "posix",
+        )
+        try:
+            stdout, stderr = process.communicate(timeout=budget)
+            timed_out = False
+        except subprocess.TimeoutExpired:
+            _kill(process)
+            stdout, stderr = process.communicate()
+            timed_out = True
+        elapsed = time.monotonic() - started
         return stdout or "", stderr or "", process.returncode, timed_out, elapsed
 
     def _write_transcript(self, trap: Trap, condition: str, repetition: int, stdout: str, stderr: str) -> str:
@@ -552,9 +546,7 @@ class ClaudeCodeAdapter:
         prepare_workdir(trap, mirror, workdir)
         mcp_config = None
         if condition != BASELINE:
-            data_dir, config_dir = ensure_index(
-                trap, workdir, config.cache_dir, config.bruriah_executable, api_key_env=config.api_key_env
-            )
+            data_dir, config_dir = ensure_index(trap, workdir, config.cache_dir, config.bruriah_executable)
             mcp_config = write_mcp_config(
                 workdir / HARNESS_DIR / "mcp.json",
                 config.bruriah_executable,
