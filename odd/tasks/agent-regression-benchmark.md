@@ -215,6 +215,21 @@ Also out of scope: a Codex or Cursor adapter, an LLM-judge column, a private-cor
 
 ## Progress / evidence
 
+- 2026-09-27: T4 pilot, `own-fastmcp` x 3 conditions x 1 repetition, Claude Code 2.1.283 with the
+  operator's login, `claude-fable-5-1`, Bruriah 2.1.0 (transcripts kept outside the repository).
+  All three runs completed (`exit_reason: done`), none regressed: consistent with the trap's
+  rationale being visible in `mcp_server.py`'s header. `unprompted` connected the `bruriah`
+  server and never called `investigate_work` (39 turns, 394 s); `prompted` called it as its
+  second tool call, before its first write at call 13 (18 turns, 265 s); `baseline` took 24 turns
+  and 267 s. API-equivalent cost per run USD 2.61 to 2.85 (the login bills the Max plan's quota,
+  not dollars; `total_cost_usd` is the client's own estimate). Dry run: 12 traps x 3 conditions
+  x 5 repetitions = 180 invocations. Estimate for the published run at N=5: about 15 h of
+  sequential wall-clock and about USD 495 API-equivalent, plus one mirror and one index per
+  external repository. Also observed: the client exposes `ToolSearch` and `Monitor` beyond the
+  allowlist (auto-denied paths, harmless), and the agent left two helper files it could not
+  delete without a shell, which the detector counts as tree content. Approval of the budget:
+  pending the user's decision, recorded here when given.
+
 - 2026-09-27: T2 revised: the client runs with the operator's Claude Code login, never with an
   API key (the user's decision: there will be no key). Measured on Claude Code 2.1.283 before
   changing it: the OAuth token lives in the macOS keychain, not in `~/.claude/.credentials.json`
