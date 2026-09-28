@@ -215,6 +215,25 @@ Also out of scope: a Codex or Cursor adapter, an LLM-judge column, a private-cor
 
 ## Progress / evidence
 
+- 2026-09-28: T5 resumed and paused again at the user's request. `run.sh` relaunched at 13:37Z
+  on cbc6dc4, skipped the 11 recorded runs and started at run 12; stopped cleanly at 15:24Z
+  after 30 recorded runs and 0 failures (the in-flight run finished first; the run-31 client
+  process that had just started was killed and left no record, so a re-run resumes at run 31,
+  `egui-image-formats`). Pace since the resume: about 5.5 min per run (datepicker-chrono is
+  about half the wall-clock of android-activity), so the remaining 150 project to about 14 h.
+  Two traps are complete and every one of their 30 runs regressed: `egui-android-activity`
+  5/5 in all three conditions, `egui-datepicker-chrono` 5/5 in all three conditions. Transcript
+  inspection of android-activity `prompted` (0, 2, 4): `investigate_work` was called once per
+  run, and its evidence included the trap's decision (`89e42884`, "Remove android-activity
+  dependency + add activity features (#2863)", summary plus files-touched) at ranks 4-5,
+  behind the older #1952 and the newer #5318; the agent's text never mentions #2863 in any of
+  the five prompted runs, and its final summaries describe the opt-in design as the defect and
+  make `android-native-activity` a default eframe feature. For that trap the failure is heed,
+  not retrieval. Two consequences for the report: keep "decision present in the evidence" and
+  "agent cited or deferred to it" as separate measures, and check whether the newer #5318
+  ranking above the decision made it read as superseded. datepicker-chrono transcripts are not
+  yet inspected. Nothing in the harness or the traps was changed during the run.
+
 - 2026-09-28: T5 started and paused at the user's request. The published run launched at
   01:29Z on ca8e02f (all twelve mirrors and indexes pre-warmed, `claude-fable-5-1`, N=5,
   180 invocations) and was stopped cleanly at 03:16Z after 11 recorded runs and 0 failures; the
