@@ -52,9 +52,12 @@ from agent_regression.runs import (  # noqa: E402
 )
 from agent_regression.metrics import (  # noqa: E402
     ConditionSummary,
+    PooledComparison,
+    fisher_exact_two_sided,
     pair_by_trap,
     pair_silent_by_trap,
     paired_sign_test,
+    pooled_comparison,
     summarize,
     trap_set_digest,
     wilson_interval,
@@ -952,6 +955,47 @@ def test_paired_sign_test_counts_discordant_pairs_and_computes_the_exact_two_sid
     assert p == pytest.approx(expected[2], abs=1e-12)
 
 
+@pytest.mark.parametrize(
+    ("table", "expected"),
+    [
+        ((1, 9, 11, 3), 0.002759456185220088),
+        ((8, 2, 1, 5), 0.03496503496503497),
+        ((3, 1, 1, 3), 0.4857142857142857),
+        ((0, 5, 5, 0), 0.007936507936507936),
+        ((0, 0, 0, 0), 1.0),
+        ((3, 3, 0, 6), 40 / 220),
+        ((5, 0, 5, 0), 1.0),
+    ],
+)
+def test_fisher_exact_two_sided_matches_known_values(table: tuple[int, int, int, int], expected: float) -> None:
+    """Rows are conditions, columns event / no event; p sums every table with the same margins
+    whose hypergeometric probability is at most the observed one's."""
+    assert fisher_exact_two_sided(*table) == pytest.approx(expected, rel=1e-9, abs=1e-12)
+
+
+@pytest.mark.parametrize("table", [(1, 9, 11, 3), (8, 2, 1, 5), (2, 7, 4, 1), (0, 3, 6, 2)])
+def test_fisher_exact_two_sided_is_symmetric_under_row_and_column_swaps(table: tuple[int, int, int, int]) -> None:
+    a, b, c, d = table
+    p = fisher_exact_two_sided(a, b, c, d)
+
+    assert fisher_exact_two_sided(c, d, a, b) == pytest.approx(p, rel=1e-12)
+    assert fisher_exact_two_sided(b, a, d, c) == pytest.approx(p, rel=1e-12)
+    assert fisher_exact_two_sided(a, c, b, d) == pytest.approx(p, rel=1e-12)
+    assert 0.0 < p <= 1.0
+
+
+@pytest.mark.parametrize("table", [(-1, 0, 0, 0), (0, 0, 0, -3)])
+def test_fisher_exact_two_sided_rejects_a_negative_count(table: tuple[int, int, int, int]) -> None:
+    with pytest.raises(ValueError, match="non-negative"):
+        fisher_exact_two_sided(*table)
+
+
+@pytest.mark.parametrize("table", [(1.0, 0, 0, 0), (0, True, 0, 0), (0, 0, "2", 0), (0, 0, 0, None)])
+def test_fisher_exact_two_sided_rejects_a_count_that_is_not_an_int(table: tuple[object, ...]) -> None:
+    with pytest.raises(TypeError, match="int"):
+        fisher_exact_two_sided(*table)  # type: ignore[arg-type]
+
+
 def test_summarize_computes_every_field_on_a_hand_computed_condition() -> None:
     """Four unprompted runs, computed by hand:
 
@@ -1363,6 +1407,96 @@ def test_pair_silent_by_trap_ignores_unknown_citations_of_error_indeterminate_an
     assert pair_silent_by_trap(runs, BASELINE, PROMPTED) == [(True, False)]
 
 
+def _pooled_runs() -> list[AgentRun]:
+    """Baseline: trap-a silent, silent, informed, clean; trap-b silent, clean; plus a regressed
+    error run and an indeterminate run, both of unknown citation and excluded. Decided 6, SRR 3/6,
+    RR 4/6. Prompted: trap-a clean, clean, informed, clean; trap-b clean, clean. Decided 6, SRR
+    0/6, RR 1/6."""
+    return [
+        *_outcomes("trap-a", BASELINE, ["silent", "silent", "informed", "clean"]),
+        *_outcomes("trap-b", BASELINE, ["silent", "clean"]),
+        _outcome_run("unknown", trap_id="trap-b", condition=BASELINE, repetition=2, exit_reason="error"),
+        _make_run(trap_id="trap-b", condition=BASELINE, repetition=3, indeterminate=True, cited_decision=None),
+        *_outcomes("trap-a", PROMPTED, ["clean", "clean", "informed", "clean"]),
+        *_outcomes("trap-b", PROMPTED, ["clean", "clean"]),
+    ]
+
+
+def test_pooled_comparison_counts_srr_events_over_decided_runs_across_traps() -> None:
+    comparison = pooled_comparison(_pooled_runs(), BASELINE, PROMPTED, "SRR")
+
+    assert comparison == PooledComparison(
+        metric="SRR",
+        first=BASELINE,
+        second=PROMPTED,
+        first_events=3,
+        first_decided=6,
+        second_events=0,
+        second_decided=6,
+        first_rate=pytest.approx(0.5),
+        second_rate=0.0,
+        p_value=pytest.approx(fisher_exact_two_sided(3, 3, 0, 6)),
+        unavailable_reason=None,
+    )
+    assert comparison.p_value == pytest.approx(40 / 220)
+
+
+def test_pooled_comparison_counts_rr_events_over_decided_runs_across_traps() -> None:
+    comparison = pooled_comparison(_pooled_runs(), BASELINE, PROMPTED, "RR")
+
+    assert (comparison.first_events, comparison.first_decided) == (4, 6)
+    assert (comparison.second_events, comparison.second_decided) == (1, 6)
+    assert comparison.first_rate == pytest.approx(4 / 6)
+    assert comparison.second_rate == pytest.approx(1 / 6)
+    assert comparison.p_value == pytest.approx(192 / 792)
+    assert comparison.unavailable_reason is None
+
+
+def test_pooled_comparison_of_srr_is_unavailable_on_a_regressed_decided_run_of_unknown_citation() -> None:
+    """The same fail-closed rule as SRR: an unknown citation is never assumed either way. RR,
+    which does not read the citation, stays available."""
+    runs = [*_pooled_runs(), _outcome_run("unknown", trap_id="trap-b", condition=PROMPTED, repetition=2)]
+
+    srr = pooled_comparison(runs, BASELINE, PROMPTED, "SRR")
+    rr = pooled_comparison(runs, BASELINE, PROMPTED, "RR")
+
+    assert srr.p_value is None
+    assert srr.first_events is None and srr.second_events is None
+    assert srr.first_rate is None and srr.second_rate is None
+    assert (srr.first_decided, srr.second_decided) == (6, 7)
+    assert srr.unavailable_reason == "1 regressed run with unknown citation"
+    assert (rr.second_events, rr.second_decided) == (2, 7)
+    assert rr.p_value == pytest.approx(fisher_exact_two_sided(4, 2, 2, 5))
+
+
+def test_pooled_comparison_restricted_to_traps_pools_only_their_runs() -> None:
+    """Restricting to trap-a leaves out trap-b, and with it trap-b's unknown citation."""
+    runs = [*_pooled_runs(), _outcome_run("unknown", trap_id="trap-b", condition=PROMPTED, repetition=2)]
+
+    srr = pooled_comparison(runs, BASELINE, PROMPTED, "SRR", trap_ids={"trap-a"})
+    rr = pooled_comparison(runs, BASELINE, PROMPTED, "RR", trap_ids=["trap-a"])
+
+    assert (srr.first_events, srr.first_decided, srr.second_events, srr.second_decided) == (2, 4, 0, 4)
+    assert srr.p_value == pytest.approx(12 / 28)
+    assert (rr.first_events, rr.first_decided, rr.second_events, rr.second_decided) == (3, 4, 1, 4)
+    assert pooled_comparison(runs, BASELINE, PROMPTED, "RR", trap_ids=set()).first_decided == 0
+
+
+def test_pooled_comparison_without_decided_runs_has_no_rate_and_p_one() -> None:
+    runs = [_make_run(condition=BASELINE, exit_reason="error"), _make_run(condition=PROMPTED, indeterminate=True)]
+
+    comparison = pooled_comparison(runs, BASELINE, PROMPTED, "RR")
+
+    assert (comparison.first_decided, comparison.second_decided) == (0, 0)
+    assert comparison.first_rate is None and comparison.second_rate is None
+    assert comparison.p_value == 1.0
+
+
+def test_pooled_comparison_rejects_an_unknown_metric() -> None:
+    with pytest.raises(ValueError, match="metric"):
+        pooled_comparison(_pooled_runs(), BASELINE, PROMPTED, "heed")
+
+
 def test_trap_set_digest_is_a_sha256_hex_digest_stable_across_load_order(tmp_path: Path) -> None:
     _make_trap(tmp_path, "trap-a")
     _make_trap(tmp_path, "trap-b", prompt="Move the tool declarations next to their handlers.")
@@ -1573,6 +1707,68 @@ def test_render_markdown_reports_the_srr_sign_test_unavailable_on_unknown_citati
     assert "| baseline vs prompted | RR | 2 | 2 | 0 | 0.5000 |" in lines
 
 
+def _pooled_section(lines: list[str]) -> list[str]:
+    start = lines.index("## Pooled run-level comparison")
+    end = next(index for index in range(start + 1, len(lines)) if lines[index].startswith("## "))
+    return lines[start:end]
+
+
+def test_render_markdown_has_a_pooled_fisher_row_per_compared_pair_and_metric() -> None:
+    """SRR baseline 3/4, unprompted 2/4, prompted 0/4; RR 4/4, 2/4, 0/4. Baseline vs prompted:
+    SRR p = 8/56, RR p = 2/70."""
+    runs = _cited_report_runs()
+    section = _pooled_section(render_markdown(runs, summarize(runs)).splitlines())
+
+    header = next(line for line in section if line.startswith("| comparison |"))
+    assert [cell.strip() for cell in header.strip("|").split("|")] == [
+        "comparison",
+        "metric",
+        "first events/decided",
+        "second events/decided",
+        "first rate",
+        "second rate",
+        "p",
+    ]
+    rows = [line for line in section if line.startswith("| ") and not line.startswith("| comparison |")]
+    assert rows == [
+        "| baseline vs unprompted | SRR | 3/4 | 2/4 | 0.75 | 0.50 | 1.0000 |",
+        "| baseline vs unprompted | RR | 4/4 | 2/4 | 1.00 | 0.50 | 0.4286 |",
+        "| baseline vs prompted | SRR | 3/4 | 0/4 | 0.75 | 0.00 | 0.1429 |",
+        "| baseline vs prompted | RR | 4/4 | 0/4 | 1.00 | 0.00 | 0.0286 |",
+        "| unprompted vs prompted | SRR | 2/4 | 0/4 | 0.50 | 0.00 | 0.4286 |",
+        "| unprompted vs prompted | RR | 2/4 | 0/4 | 0.50 | 0.00 | 0.4286 |",
+    ]
+    prose = " ".join(line for line in section if line and not line.startswith("|"))
+    assert "Fisher exact" in prose
+    assert "pre-registered primary test for run set B" in prose
+    assert "sign test" in prose and "cannot reach significance" in prose
+
+
+def test_render_markdown_reports_the_pooled_srr_unavailable_on_unknown_citations() -> None:
+    runs = _report_runs()
+    section = _pooled_section(render_markdown(runs, summarize(runs)).splitlines())
+
+    assert (
+        "| baseline vs prompted | SRR | n/a | n/a | n/a | n/a | unavailable (4 regressed runs with unknown citation) |"
+        in section
+    )
+    assert "| baseline vs prompted | RR | 4/4 | 0/4 | 1.00 | 0.00 | 0.0286 |" in section
+
+
+def test_render_markdown_keeps_the_sign_test_and_per_trap_tables_around_the_pooled_one() -> None:
+    runs = _cited_report_runs()
+    lines = render_markdown(runs, summarize(runs)).splitlines()
+
+    headings = [line for line in lines if line.startswith("## ")]
+    assert headings == [
+        "## Provenance",
+        "## Conditions",
+        "## Paired sign tests",
+        "## Pooled run-level comparison",
+        "## Per trap",
+    ]
+
+
 def test_render_markdown_defines_the_outcomes_and_how_citation_is_decided() -> None:
     runs = _cited_report_runs()
     text = render_markdown(runs, summarize(runs))
@@ -1742,6 +1938,92 @@ def test_render_markdown_warns_once_on_a_mixed_client_version_alone() -> None:
 
     assert _provenance_rows(text)["client_version"] == "1 (1), 2 (1)"
     assert len([line for line in text.splitlines() if line.lower().startswith("warning")]) == 1
+
+
+def _warnings(runs: list[AgentRun]) -> list[str]:
+    text = render_markdown(runs, summarize(runs))
+    return [line for line in text.splitlines() if line.lower().startswith("warning")]
+
+
+def test_render_markdown_warns_on_a_mixed_bruriah_version_alone() -> None:
+    runs = [
+        _make_run(repetition=0, provenance=_make_provenance(bruriah_version="2.1.0")),
+        _make_run(repetition=1, provenance=_make_provenance(bruriah_version="2.2.0")),
+    ]
+
+    assert _warnings(runs) == [
+        "Warning: this run set mixes 2 Bruriah versions; its rates and comparisons pool runs that did not "
+        "share one Bruriah version."
+    ]
+
+
+def test_render_markdown_names_every_mixed_provenance_field_in_one_warning() -> None:
+    runs = [
+        _make_run(repetition=0),
+        _make_run(
+            repetition=1,
+            provenance=_make_provenance(client_version="9.9.9", model_id="other-model", bruriah_version="2.2.0"),
+        ),
+    ]
+
+    assert _warnings(runs) == [
+        "Warning: this run set mixes 2 client versions, 2 models and 2 Bruriah versions; its rates and "
+        "comparisons pool runs that did not share one client, model and Bruriah version."
+    ]
+
+
+def test_render_markdown_keeps_the_client_and_model_warning_wording() -> None:
+    runs = [
+        _make_run(repetition=0),
+        _make_run(repetition=1, provenance=_make_provenance(client_version="9.9.9", model_id="other-model")),
+    ]
+
+    assert _warnings(runs) == [
+        "Warning: this run set mixes 2 client versions and 2 models; its rates and comparisons pool runs that "
+        "did not share one client and model."
+    ]
+
+
+def test_render_json_provenance_lists_every_value_of_a_homogeneous_run_with_its_count() -> None:
+    """The JSON shape: one key per `Provenance` field, each a list of {"value", "runs"} objects,
+    most runs first and ties by value -- the same counting as the Markdown header."""
+    runs = [_make_run(repetition=repetition) for repetition in range(3)]
+
+    provenance = json.loads(render_json(runs, summarize(runs)))["provenance"]
+
+    assert provenance == {
+        "date": [{"value": _PROVENANCE_DATE, "runs": 3}],
+        "model_id": [{"value": "model-under-test", "runs": 3}],
+        "client": [{"value": "replay", "runs": 3}],
+        "client_version": [{"value": "0.0.0", "runs": 3}],
+        "bruriah_version": [{"value": "2.1.0", "runs": 3}],
+        "trap_set_digest": [{"value": "a" * 64, "runs": 3}],
+        "repetitions": [{"value": 2, "runs": 3}],
+    }
+    assert set(provenance) == {field.name for field in dataclasses.fields(Provenance)}
+
+
+def test_render_json_provenance_lists_every_value_of_a_mixed_run_not_the_first_run_s() -> None:
+    versions = ["2.1.283"] * 3 + ["2.1.286"] * 8 + ["2.1.287"]
+    runs = [
+        _make_run(repetition=repetition, provenance=_make_provenance(client_version=version))
+        for repetition, version in enumerate(versions)
+    ]
+    runs[0] = _make_run(repetition=0, provenance=_make_provenance(client_version="2.1.283", model_id="other-model"))
+
+    provenance = json.loads(render_json(runs, summarize(runs)))["provenance"]
+
+    assert provenance["client_version"] == [
+        {"value": "2.1.286", "runs": 8},
+        {"value": "2.1.283", "runs": 3},
+        {"value": "2.1.287", "runs": 1},
+    ]
+    assert provenance["model_id"] == [{"value": "model-under-test", "runs": 11}, {"value": "other-model", "runs": 1}]
+    assert provenance["bruriah_version"] == [{"value": "2.1.0", "runs": 12}]
+
+
+def test_render_json_has_no_provenance_without_runs() -> None:
+    assert json.loads(render_json([], {}))["provenance"] is None
 
 
 def test_main_dry_run_ignores_a_runs_log_of_another_provenance(tmp_path: Path) -> None:

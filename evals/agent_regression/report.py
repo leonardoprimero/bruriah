@@ -37,9 +37,11 @@ if str(_HERE.parent) not in sys.path:
 from agent_regression.citation import rescore_citations  # noqa: E402
 from agent_regression.metrics import (  # noqa: E402
     ConditionSummary,
+    PooledComparison,
     pair_by_trap,
     pair_silent_by_trap,
     paired_sign_test,
+    pooled_comparison,
     summarize,
 )
 from agent_regression.runs import CONDITIONS, AgentRun, Provenance, run_from_json, run_to_json  # noqa: E402
@@ -49,6 +51,13 @@ DEFAULT_TRAPS_DIR = _HERE / "traps"
 # Provenance fields that can differ between the runs of one run set, so the header lists every
 # value present with its run count instead of the first run's.
 _COUNTED_PROVENANCE = ("client_version", "model_id", "bruriah_version")
+# The counted fields a provenance warning names when a run set mixes their values: (field, plural
+# for the count, what the runs did not share).
+_MIXED_PROVENANCE = (
+    ("client_version", "client versions", "client"),
+    ("model_id", "models", "model"),
+    ("bruriah_version", "Bruriah versions", "Bruriah version"),
+)
 
 
 def write_report(path: Path, text: str) -> None:
@@ -83,13 +92,18 @@ def _summary_to_json(summary: ConditionSummary) -> dict[str, Any]:
     return payload
 
 
-def _provenance_to_json(provenance: Provenance) -> dict[str, Any]:
-    return {field.name: getattr(provenance, field.name) for field in fields(Provenance)}
+def _provenance_to_json(runs: Sequence[AgentRun]) -> dict[str, Any]:
+    """Every provenance field as the list of its values among `runs`, each with its run count,
+    counted like the Markdown header, so a mixed run set is never reported as its first run's."""
+    return {
+        field.name: [{"value": value, "runs": count} for value, count in _counted_values(runs, field.name)]
+        for field in fields(Provenance)
+    }
 
 
 def render_json(runs: Sequence[AgentRun], summaries: Mapping[str, ConditionSummary]) -> str:
     payload = {
-        "provenance": _provenance_to_json(runs[0].provenance) if runs else None,
+        "provenance": _provenance_to_json(runs) if runs else None,
         "conditions": {condition: _summary_to_json(summary) for condition, summary in summaries.items()},
         "runs": [run_to_json(run) for run in runs],
     }
@@ -120,6 +134,20 @@ def _srr_cells(summary: ConditionSummary) -> str:
     return f"{_rate(summary.silent_regression_rate)} | [{low:.2f}, {high:.2f}]"
 
 
+def _events(events: int | None, decided: int) -> str:
+    return "n/a" if events is None else f"{events}/{decided}"
+
+
+def _pooled_row(comparison: PooledComparison) -> str:
+    p = f"unavailable ({comparison.unavailable_reason})" if comparison.p_value is None else f"{comparison.p_value:.4f}"
+    return (
+        f"| {comparison.first} vs {comparison.second} | {comparison.metric} "
+        f"| {_events(comparison.first_events, comparison.first_decided)} "
+        f"| {_events(comparison.second_events, comparison.second_decided)} "
+        f"| {_rate(comparison.first_rate)} | {_rate(comparison.second_rate)} | {p} |"
+    )
+
+
 def _ordered_conditions(summaries: Mapping[str, ConditionSummary]) -> list[str]:
     return [condition for condition in CONDITIONS if condition in summaries]
 
@@ -129,6 +157,11 @@ def _counted_values(runs: Sequence[AgentRun], field: str) -> list[tuple[str, int
     ties by value, so the rendering is deterministic."""
     counts = Counter(getattr(run.provenance, field) for run in runs)
     return sorted(counts.items(), key=lambda item: (-item[1], item[0]))
+
+
+def _and_list(items: Sequence[str]) -> str:
+    """`a`, `a and b`, `a, b and c`."""
+    return items[0] if len(items) == 1 else f"{', '.join(items[:-1])} and {items[-1]}"
 
 
 def _provenance_lines(runs: Sequence[AgentRun]) -> list[str]:
@@ -141,18 +174,17 @@ def _provenance_lines(runs: Sequence[AgentRun]) -> list[str]:
             value = getattr(provenance, field.name)
         lines.append(f"| {field.name} | {value} |")
     mixed = [
-        f"{len(values)} {label}"
-        for label, values in (
-            ("client versions", _counted_values(runs, "client_version")),
-            ("models", _counted_values(runs, "model_id")),
-        )
-        if len(values) > 1
+        (f"{len(values)} {plural}", singular)
+        for field, plural, singular in _MIXED_PROVENANCE
+        if len(values := _counted_values(runs, field)) > 1
     ]
     if mixed:
+        counts = _and_list([count for count, _ in mixed])
+        shared = _and_list([singular for _, singular in mixed])
         lines += [
             "",
-            f"Warning: this run set mixes {' and '.join(mixed)}; its rates and comparisons pool runs that "
-            "did not share one client and model.",
+            f"Warning: this run set mixes {counts}; its rates and comparisons pool runs that "
+            f"did not share one {shared}.",
         ]
     return lines
 
@@ -249,6 +281,23 @@ def render_markdown(runs: Sequence[AgentRun], summaries: Mapping[str, ConditionS
         pairs = pair_by_trap(runs, first, second)
         first_only, second_only, p = paired_sign_test(pairs)
         lines.append(f"| {first} vs {second} | RR | {len(pairs)} | {first_only} | {second_only} | {p:.4f} |")
+
+    lines += [
+        "",
+        "## Pooled run-level comparison",
+        "",
+        "Events (silent regressions for SRR, regressions for RR) over the non-error, non-indeterminate runs "
+        "of each condition, pooled across traps rather than reduced to per-trap majorities; p is the two-sided "
+        "Fisher exact test. This is the pre-registered primary test for run set B; the per-trap sign test above "
+        "is reported but cannot reach significance with few traps. The SRR comparison is unavailable while "
+        "either condition has a regressed run with an unknown citation.",
+        "",
+        "| comparison | metric | first events/decided | second events/decided | first rate | second rate | p |",
+        "|---|---|---:|---:|---:|---:|---:|",
+    ]
+    for first, second in combinations(conditions, 2):
+        for metric in ("SRR", "RR"):
+            lines.append(_pooled_row(pooled_comparison(runs, first, second, metric)))
 
     lines += [
         "",

@@ -4,7 +4,9 @@ Per condition: Regression Rate (RR) with a Wilson 95% interval, consult rate (`i
 before the first write), heed rate (consulted runs that did not regress, separating "did not ask"
 from "asked and ignored it"), RR among completed runs (avoiding the regression by doing nothing
 is not a win), and cost. Between conditions: an exact paired sign test on per-trap majorities,
-the same statistical treatment the fusion sweep used.
+the same statistical treatment the fusion sweep used, and a two-sided Fisher exact test on the
+decided runs pooled across traps, the pre-registered primary test for run set B: a sign test over
+three traps can never reach p < 0.25.
 
 The headline is Silent Regression Rate (SRR): regressed runs whose final message does not cite
 the trap's decision, over the same decided runs as RR, with the same interval and sign test. A
@@ -27,7 +29,7 @@ from __future__ import annotations
 import hashlib
 import json
 import math
-from collections.abc import Callable, Iterable, Sequence
+from collections.abc import Callable, Collection, Iterable, Sequence
 from dataclasses import dataclass
 
 from agent_regression.runs import CONDITIONS, AgentRun, consulted_before_first_write
@@ -35,6 +37,8 @@ from agent_regression.traps import Trap
 
 # Two-sided 95% normal quantile.
 _Z95 = 1.959963984540054
+# Relative tolerance under which two tables of the Fisher test count as equally probable.
+_FISHER_TIE = 10**7
 
 
 @dataclass(frozen=True)
@@ -110,6 +114,29 @@ def paired_sign_test(pairs: Iterable[tuple[bool, bool]]) -> tuple[int, int, floa
         elif b and not a:
             b_only += 1
     return a_only, b_only, _two_sided_binomial(a_only, a_only + b_only)
+
+
+def fisher_exact_two_sided(a: int, b: int, c: int, d: int) -> float:
+    """Two-sided Fisher exact p for the 2x2 table [[a, b], [c, d]] (rows conditions, columns
+    event / no event): the hypergeometric probability of every table with the same margins that is
+    at most the observed one's, within a relative tolerance of 1e-7 for ties.
+
+    The probabilities share the denominator C(n, a + c), so they are compared as exact integer
+    numerators; the tolerance is the one float implementations use, applied exactly.
+    """
+    for count in (a, b, c, d):
+        if not isinstance(count, int) or isinstance(count, bool):
+            raise TypeError(f"table counts must be int, got {count!r}")
+        if count < 0:
+            raise ValueError(f"table counts must be non-negative, got {count}")
+    first, second, events = a + b, c + d, a + c
+    weights = [
+        math.comb(first, x) * math.comb(second, events - x)
+        for x in range(max(0, events - second), min(first, events) + 1)
+    ]
+    observed = math.comb(first, a) * math.comb(second, c)
+    tail = sum(weight for weight in weights if weight * _FISHER_TIE <= observed * (_FISHER_TIE + 1))
+    return min(1.0, tail / math.comb(first + second, events))
 
 
 def _rate(numerator: float, denominator: int) -> float | None:
@@ -248,6 +275,90 @@ def pair_silent_by_trap(runs: Sequence[AgentRun], condition_a: str, condition_b:
     """`pair_by_trap` on silent-regression majorities, or `None` when a regressed decided run of
     either condition has an unknown citation: the pairing is unavailable, no trap is dropped."""
     return _pair(runs, condition_a, condition_b, _silently_regressed)
+
+
+@dataclass(frozen=True)
+class PooledComparison:
+    """One metric compared between two conditions over their decided runs pooled across traps.
+
+    Events and rates are `None`, and `unavailable_reason` says why, when the comparison is
+    unavailable; the decided counts are stated either way."""
+
+    metric: str
+    first: str
+    second: str
+    first_events: int | None
+    first_decided: int
+    second_events: int | None
+    second_decided: int
+    first_rate: float | None
+    second_rate: float | None
+    p_value: float | None
+    unavailable_reason: str | None
+
+
+_POOLED_OUTCOMES: dict[str, Outcome] = {"SRR": _silently_regressed, "RR": _regressed}
+
+
+def pooled_comparison(
+    runs: Iterable[AgentRun],
+    first: str,
+    second: str,
+    metric: str,
+    *,
+    trap_ids: Collection[str] | None = None,
+) -> PooledComparison:
+    """`metric` ("SRR": silent regressions, "RR": regressions) of `first` against `second` over
+    their non-error, decided runs pooled across traps, with the two-sided Fisher exact p.
+
+    `trap_ids` restricts the pool to those traps (all by default). SRR is unavailable when a
+    regressed decided run of either condition in the pool has an unknown citation, the same
+    fail-closed rule as SRR itself."""
+    outcome = _POOLED_OUTCOMES.get(metric)
+    if outcome is None:
+        raise ValueError(f"unknown metric {metric!r}, expected one of {', '.join(_POOLED_OUTCOMES)}")
+    tallies = {first: [0, 0], second: [0, 0]}
+    unknown = 0
+    for run in runs:
+        if run.condition not in tallies or run.exit_reason == "error" or run.detection.indeterminate:
+            continue
+        if trap_ids is not None and run.trap_id not in trap_ids:
+            continue
+        value = outcome(run)
+        tallies[run.condition][0] += int(bool(value))
+        tallies[run.condition][1] += 1
+        unknown += value is None
+    (first_events, first_decided), (second_events, second_decided) = tallies[first], tallies[second]
+    if unknown:
+        noun = "run" if unknown == 1 else "runs"
+        return PooledComparison(
+            metric=metric,
+            first=first,
+            second=second,
+            first_events=None,
+            first_decided=first_decided,
+            second_events=None,
+            second_decided=second_decided,
+            first_rate=None,
+            second_rate=None,
+            p_value=None,
+            unavailable_reason=f"{unknown} regressed {noun} with unknown citation",
+        )
+    return PooledComparison(
+        metric=metric,
+        first=first,
+        second=second,
+        first_events=first_events,
+        first_decided=first_decided,
+        second_events=second_events,
+        second_decided=second_decided,
+        first_rate=_rate(first_events, first_decided),
+        second_rate=_rate(second_events, second_decided),
+        p_value=fisher_exact_two_sided(
+            first_events, first_decided - first_events, second_events, second_decided - second_events
+        ),
+        unavailable_reason=None,
+    )
 
 
 def trap_set_digest(traps: Iterable[Trap]) -> str:
