@@ -42,7 +42,7 @@ rescore the published run's 122 records from their stored transcripts, at no mod
 - [x] Citation cues per trap (loader + twelve manifests).
 - [x] Citation extraction/matching and `cited_decision` in records and adapter.
 - [x] SRR in metrics and report.
-- [ ] Rescore the published run and spot-check informed overrides.
+- [x] Rescore the published run and spot-check informed overrides.
 
 ## Verification Evidence
 - Unit 1 (cues): RED 30 of 31 new loader/committed-set tests (rejection tests first passed for
@@ -68,6 +68,34 @@ rescore the published run's 122 records from their stored transcripts, at no mod
   `python evals/agent_regression/report.py <run-dir> [--rescore-citations] [--traps DIR]
   [--out DIR]`; it refuses an `--out` inside the run directory, and tests prove the run directory
   is byte-identical after rendering.
+- Unit 4 (rescore + audit): rendered `out-2026-09-27` with `--rescore-citations` into a scratch
+  directory under /tmp; a stat hash of every published file was identical before and after. A
+  read-only explorer classified all 43 regressed runs' final messages (A = names the decision by
+  identifier, B = acknowledges a deliberate earlier choice in prose only, C = neither); the parent
+  re-read the two decisive transcripts. Result: A 3, B 1, C 39. Every code-cited run is a true A.
+  One A was missed: `egui-datepicker-chrono` prompted-4 wrote "PR 8008" without `#`; fixed in
+  `a2a8fc8` (`#N` cues also match `PR N`, `pull request N`, `issue N`; bare numbers still never
+  match; RED 12, GREEN; 540 tests pass). The one B (`egui-android-activity` baseline-2: "eframe
+  deliberately left that choice to applications") stays a silent regression under the strict
+  rule and is the known under-count: 1 of 40. The explorer's per-condition summary counts did not
+  match its own table; the table was used.
+- Published run, rescored (decided runs; SRR then RR):
+
+  | condition | SRR | RR | informed overrides |
+  |---|---|---|---|
+  | baseline | 0.32 [0.20, 0.47] | 0.32 | 0 |
+  | unprompted | 0.35 [0.22, 0.50] | 0.38 | 1 |
+  | prompted | 0.33 [0.20, 0.48] | 0.38 | 2 |
+
+  Paired sign tests: p = 1.0 for SRR and RR in every pair. Reading: Bruriah 2.1.0 did not reduce
+  silent regressions on this run; it predates `fa26c59`, whose decision signal made all six later
+  smoke runs cite #2863. One informed override (`egui-datepicker-chrono` prompted-4) claims to act
+  "in line with" the decision while the detector says it reintroduced chrono: worth a detector
+  spot-check before the next published run.
 
 ## Commit Evidence
-_Pending._
+- `fa71956` citation cues; review `review-74bae41d167a2d9a` approved.
+- `1415c43` citation extraction and `cited_decision`; review `review-5e92e4635c1d0cfc` approved.
+- `6c58cde` SRR in metrics and report; review `review-b64c0415be2701a5` approved.
+- `a2a8fc8` spelled-out PR/issue citations; review `review-d158c7ce462d7b11` approved.
+- All reviews ran committed-only from a clean detached worktree at the commit.
