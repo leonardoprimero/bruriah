@@ -21,6 +21,7 @@ import json
 import os
 import sys
 import tempfile
+from collections import Counter
 from collections.abc import Mapping, Sequence
 from dataclasses import fields
 from itertools import combinations
@@ -45,6 +46,9 @@ from agent_regression.runs import CONDITIONS, AgentRun, Provenance, run_from_jso
 from agent_regression.traps import TrapError, load_traps  # noqa: E402
 
 DEFAULT_TRAPS_DIR = _HERE / "traps"
+# Provenance fields that can differ between the runs of one run set, so the header lists every
+# value present with its run count instead of the first run's.
+_COUNTED_PROVENANCE = ("client_version", "model_id", "bruriah_version")
 
 
 def write_report(path: Path, text: str) -> None:
@@ -120,6 +124,39 @@ def _ordered_conditions(summaries: Mapping[str, ConditionSummary]) -> list[str]:
     return [condition for condition in CONDITIONS if condition in summaries]
 
 
+def _counted_values(runs: Sequence[AgentRun], field: str) -> list[tuple[str, int]]:
+    """Every value of the provenance `field` among `runs` with its run count, most runs first and
+    ties by value, so the rendering is deterministic."""
+    counts = Counter(getattr(run.provenance, field) for run in runs)
+    return sorted(counts.items(), key=lambda item: (-item[1], item[0]))
+
+
+def _provenance_lines(runs: Sequence[AgentRun]) -> list[str]:
+    provenance = runs[0].provenance
+    lines = ["| field | value |", "|---|---|"]
+    for field in fields(Provenance):
+        if field.name in _COUNTED_PROVENANCE:
+            value = ", ".join(f"{value} ({count})" for value, count in _counted_values(runs, field.name))
+        else:
+            value = getattr(provenance, field.name)
+        lines.append(f"| {field.name} | {value} |")
+    mixed = [
+        f"{len(values)} {label}"
+        for label, values in (
+            ("client versions", _counted_values(runs, "client_version")),
+            ("models", _counted_values(runs, "model_id")),
+        )
+        if len(values) > 1
+    ]
+    if mixed:
+        lines += [
+            "",
+            f"Warning: this run set mixes {' and '.join(mixed)}; its rates and comparisons pool runs that "
+            "did not share one client and model.",
+        ]
+    return lines
+
+
 def render_markdown(runs: Sequence[AgentRun], summaries: Mapping[str, ConditionSummary]) -> str:
     conditions = _ordered_conditions(summaries)
     lines = [
@@ -140,9 +177,7 @@ def render_markdown(runs: Sequence[AgentRun], summaries: Mapping[str, ConditionS
         "",
     ]
     if runs:
-        provenance = runs[0].provenance
-        lines += ["| field | value |", "|---|---|"]
-        lines += [f"| {field.name} | {getattr(provenance, field.name)} |" for field in fields(Provenance)]
+        lines += _provenance_lines(runs)
     else:
         lines.append("No runs.")
 

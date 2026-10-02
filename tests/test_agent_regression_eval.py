@@ -1694,6 +1694,71 @@ def test_render_markdown_states_the_provenance() -> None:
     assert re.search(rf"\b{provenance.repetitions}\b", text)
 
 
+def _provenance_rows(text: str) -> dict[str, str]:
+    lines = text.splitlines()
+    start = lines.index("## Provenance")
+    end = lines.index("## Conditions")
+    rows = [line.split(" | ") for line in lines[start:end] if line.startswith("| ") and line != "| field | value |"]
+    return {cells[0].removeprefix("| "): cells[1].removesuffix(" |") for cells in rows}
+
+
+def test_render_markdown_counts_the_single_provenance_value_of_a_homogeneous_run() -> None:
+    runs = [_make_run(repetition=repetition) for repetition in range(3)]
+    text = render_markdown(runs, summarize(runs))
+
+    rows = _provenance_rows(text)
+    assert rows["client_version"] == "0.0.0 (3)"
+    assert rows["model_id"] == "model-under-test (3)"
+    assert rows["bruriah_version"] == "2.1.0 (3)"
+    assert rows["date"] == _PROVENANCE_DATE
+    assert rows["client"] == "replay"
+    assert "warning" not in text.lower()
+
+
+def test_render_markdown_lists_every_client_and_model_version_of_a_mixed_run_with_a_warning() -> None:
+    versions = ["2.1.283"] * 3 + ["2.1.286"] * 8 + ["2.1.287"]
+    runs = [
+        _make_run(repetition=repetition, provenance=_make_provenance(client_version=version))
+        for repetition, version in enumerate(versions)
+    ]
+    runs[0] = _make_run(repetition=0, provenance=_make_provenance(client_version="2.1.283", model_id="other-model"))
+    text = render_markdown(runs, summarize(runs))
+
+    rows = _provenance_rows(text)
+    assert rows["client_version"] == "2.1.286 (8), 2.1.283 (3), 2.1.287 (1)"
+    assert rows["model_id"] == "model-under-test (11), other-model (1)"
+    assert rows["bruriah_version"] == "2.1.0 (12)"
+    warnings = [line for line in text.splitlines() if line.lower().startswith("warning")]
+    assert len(warnings) == 1
+    assert "client" in warnings[0] and "model" in warnings[0]
+
+
+def test_render_markdown_warns_once_on_a_mixed_client_version_alone() -> None:
+    runs = [
+        _make_run(repetition=0, provenance=_make_provenance(client_version="1")),
+        _make_run(repetition=1, provenance=_make_provenance(client_version="2")),
+    ]
+    text = render_markdown(runs, summarize(runs))
+
+    assert _provenance_rows(text)["client_version"] == "1 (1), 2 (1)"
+    assert len([line for line in text.splitlines() if line.lower().startswith("warning")]) == 1
+
+
+def test_main_dry_run_ignores_a_runs_log_of_another_provenance(tmp_path: Path) -> None:
+    traps = tmp_path / "traps"
+    _make_trap(traps, "trap-a")
+    out = tmp_path / "out"
+    out.mkdir()
+    log = out / "runs.jsonl"
+    log.write_text(
+        json.dumps(run_to_json(_make_run(provenance=_make_provenance(client_version="9.9.9")))) + "\n", encoding="utf-8"
+    )
+    before = log.read_bytes()
+
+    assert main(["--dry-run", "--traps", str(traps), "--out", str(out)]) == 0
+    assert log.read_bytes() == before
+
+
 @pytest.mark.parametrize("render", [render_json, render_markdown])
 def test_reports_carry_no_absolute_path_and_no_timestamp_but_the_provenance_date(tmp_path: Path, render) -> None:
     runs = _report_runs()

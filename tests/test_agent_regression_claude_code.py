@@ -42,6 +42,7 @@ from agent_regression import adapters as adapters_module  # noqa: E402
 from agent_regression import gated_hook  # noqa: E402
 from agent_regression import run as run_module  # noqa: E402
 from agent_regression.claude_code import (  # noqa: E402
+    _client_env,
     ALLOWED_TOOLS,
     DISALLOWED_TOOLS,
     GATE_DENIAL_MARKER,
@@ -1384,7 +1385,18 @@ def test_the_client_runs_logged_in_with_the_real_home_and_a_minimal_environment(
         "USER",
         "LOGNAME",
         "TMPDIR",
+        "DISABLE_AUTOUPDATER",
     }
+
+
+def test_the_client_environment_disables_the_autoupdater(rig: _Rig) -> None:
+    # A client that updates itself between a run set's pauses and resumes records several client
+    # versions in one run set.
+    assert _client_env()["DISABLE_AUTOUPDATER"] == "1"
+    rig.run(rig.adapter(), BASELINE)
+
+    (call,) = rig.claude_calls()
+    assert "DISABLE_AUTOUPDATER" in call["env_names"]
 
 
 def test_the_api_key_is_never_written_to_any_file(rig: _Rig) -> None:
@@ -1894,6 +1906,100 @@ def test_main_resumes_from_runs_jsonl_without_invoking_the_client_again(
     assert len(rig.claude_calls()) == calls
     assert "resuming: 3 recorded run(s) skipped" in capsys.readouterr().out
     assert (out / "runs.json").read_text(encoding="utf-8") == first
+    assert len((out / "runs.jsonl").read_text(encoding="utf-8").splitlines()) == 3
+
+
+def _rewrite_provenance(log: Path, field: str, value: str) -> None:
+    lines = []
+    for line in log.read_text(encoding="utf-8").splitlines():
+        payload = json.loads(line)
+        payload["provenance"][field] = value
+        lines.append(json.dumps(payload) + "\n")
+    log.write_text("".join(lines), encoding="utf-8")
+
+
+_CURRENT_PROVENANCE = {"client_version": _CLIENT_VERSION, "bruriah_version": bruriah.__version__, "model_id": _MODEL}
+
+
+@pytest.mark.parametrize("field", ["client_version", "bruriah_version"])
+def test_main_refuses_to_resume_before_any_run_when_the_client_or_bruriah_version_changed(
+    rig: _Rig, capsys: pytest.CaptureFixture[str], field: str
+) -> None:
+    out = rig.root / "out"
+    assert run_module.main(_main_args(rig, out, "--model", _MODEL, "--conditions", BASELINE)) == 0
+    log = out / "runs.jsonl"
+    _rewrite_provenance(log, field, "0.0.1-recorded")
+    before = log.read_bytes()
+    calls = len(rig.claude_calls())
+    capsys.readouterr()
+
+    exit_code = run_module.main(_main_args(rig, out, "--model", _MODEL))
+
+    assert exit_code == 2
+    err = capsys.readouterr().err
+    assert field in err
+    assert "0.0.1-recorded" in err
+    assert _CURRENT_PROVENANCE[field] in err
+    # Only `claude --version` was asked; no run started and nothing was appended.
+    assert not [call for call in rig.claude_calls()[calls:] if "argv" in call]
+    assert log.read_bytes() == before
+
+
+def test_main_refuses_to_append_a_run_whose_model_differs_from_the_recorded_runs(
+    rig: _Rig, capsys: pytest.CaptureFixture[str]
+) -> None:
+    out = rig.root / "out"
+    assert run_module.main(_main_args(rig, out, "--model", _MODEL, "--conditions", BASELINE)) == 0
+    log = out / "runs.jsonl"
+    _rewrite_provenance(log, "model_id", "claude-recorded-model")
+    before = log.read_bytes()
+    report = (out / "runs.json").read_bytes()
+    capsys.readouterr()
+
+    exit_code = run_module.main(_main_args(rig, out, "--model", _MODEL))
+
+    assert exit_code == 2
+    err = capsys.readouterr().err
+    assert "model_id" in err
+    assert "claude-recorded-model" in err
+    assert _MODEL in err
+    # The model is only known from the first new run's init line: that run is not appended, and
+    # no further run starts.
+    assert log.read_bytes() == before
+    assert (out / "runs.json").read_bytes() == report
+    assert len([call for call in rig.claude_calls() if "argv" in call]) == 2
+
+
+def test_main_refuses_to_resume_a_runs_log_that_already_mixes_client_versions(
+    rig: _Rig, capsys: pytest.CaptureFixture[str]
+) -> None:
+    out = rig.root / "out"
+    assert run_module.main(_main_args(rig, out, "--model", _MODEL, "--conditions", BASELINE, UNPROMPTED)) == 0
+    log = out / "runs.jsonl"
+    first, second = log.read_text(encoding="utf-8").splitlines()
+    mixed = json.loads(second)
+    mixed["provenance"]["client_version"] = "2.1.286 (Claude Code)"
+    log.write_text(first + "\n" + json.dumps(mixed) + "\n", encoding="utf-8")
+    capsys.readouterr()
+
+    exit_code = run_module.main(_main_args(rig, out, "--model", _MODEL))
+
+    assert exit_code == 2
+    assert "2.1.286 (Claude Code)" in capsys.readouterr().err
+    assert len(log.read_text(encoding="utf-8").splitlines()) == 2
+
+
+def test_main_resumes_and_appends_when_the_provenance_is_unchanged(
+    rig: _Rig, capsys: pytest.CaptureFixture[str]
+) -> None:
+    out = rig.root / "out"
+    assert run_module.main(_main_args(rig, out, "--model", _MODEL, "--conditions", BASELINE)) == 0
+    capsys.readouterr()
+
+    exit_code = run_module.main(_main_args(rig, out, "--model", _MODEL))
+
+    assert exit_code == 0
+    assert "resuming: 1 recorded run(s) skipped" in capsys.readouterr().out
     assert len((out / "runs.jsonl").read_text(encoding="utf-8").splitlines()) == 3
 
 

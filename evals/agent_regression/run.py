@@ -11,7 +11,8 @@ run record), `report.md`, and the raw client transcripts under `transcripts/` in
 record is appended to `runs.jsonl` as soon as the run finishes, and a run the adapter could not
 record is appended to `failures.jsonl` and the benchmark moves on (exit code 3). Running the same
 command again skips every invocation `runs.jsonl` already holds for this trap set, so it retries
-exactly the failed and unfinished ones.
+exactly the failed and unfinished ones. A resume whose client, model or Bruriah version differs from
+the runs already recorded for the trap set is refused (exit code 2) rather than mixed into them.
 
 Usage:
     uv run python evals/agent_regression/run.py --dry-run
@@ -26,7 +27,7 @@ import json
 import os
 import shutil
 import sys
-from collections.abc import Collection, Iterable, Sequence
+from collections.abc import Collection, Iterable, Mapping, Sequence
 from datetime import date
 from pathlib import Path
 from typing import Any
@@ -45,6 +46,13 @@ from agent_regression.traps import Trap, TrapError, load_traps  # noqa: E402
 DEFAULT_REPETITIONS = 5
 DEFAULT_TRAPS_DIR = _HERE / "traps"
 DEFAULT_CACHE_DIR = Path(platformdirs.user_cache_dir("bruriah")) / "agent-regression"
+# What every run of one trap set in one runs log must share: a report over runs of different
+# clients, models or servers would compare them as if they were one run set.
+PINNED_PROVENANCE = ("client_version", "model_id", "bruriah_version")
+
+
+class ProvenanceMismatch(RuntimeError):
+    """Raised when a new run would record a pinned provenance value the runs log does not hold."""
 
 
 def plan_invocations(traps: Iterable[Trap], conditions: Sequence[str], repetitions: int) -> list[tuple[str, str, int]]:
@@ -186,6 +194,34 @@ def _recorded_runs(
     return recorded
 
 
+def _recorded_provenance(path: Path, digest: str) -> dict[str, set[str]]:
+    """Every value of each pinned provenance field among the runs `path` holds for this trap set,
+    whether or not they are in this plan. Read after `_recorded_runs`, which has already rejected
+    or repaired every malformed line."""
+    values: dict[str, set[str]] = {field: set() for field in PINNED_PROVENANCE}
+    if not path.is_file():
+        return values
+    for raw in path.read_bytes().split(b"\n"):
+        if not raw.strip():
+            continue
+        provenance = run_from_json(json.loads(raw.decode("utf-8"))).provenance
+        if provenance.trap_set_digest == digest:
+            for field in PINNED_PROVENANCE:
+                values[field].add(getattr(provenance, field))
+    return values
+
+
+def _provenance_mismatch(recorded: Mapping[str, set[str]], current: Mapping[str, str]) -> str | None:
+    """Each field of `current` whose value is not the one value every recorded run shares, with
+    the recorded and current values; `None` when all match or nothing is recorded."""
+    differing = [
+        f"{field} recorded {', '.join(sorted(recorded[field]))}, current {value}"
+        for field, value in current.items()
+        if recorded[field] and recorded[field] != {value}
+    ]
+    return "; ".join(differing) or None
+
+
 def _run(args: argparse.Namespace, traps: Sequence[Trap], conditions: Sequence[str]) -> int:
     # Imported here, not at module level: `adapters` imports `plan_invocations` from this module,
     # and a dry run never needs the adapter.
@@ -193,6 +229,8 @@ def _run(args: argparse.Namespace, traps: Sequence[Trap], conditions: Sequence[s
     from agent_regression.claude_code import ClaudeCodeAdapter, ClaudeCodeConfig
     from agent_regression.metrics import summarize, trap_set_digest
     from agent_regression.report import render_json, render_markdown, write_report
+
+    import bruriah
 
     if not args.model:
         print("error: --model is required for a real run; the provenance must name the model", file=sys.stderr)
@@ -239,8 +277,31 @@ def _run(args: argparse.Namespace, traps: Sequence[Trap], conditions: Sequence[s
         )
         print(f"error: {trap_id} {condition} {repetition}: {error}", file=sys.stderr)
 
+    pinned = _recorded_provenance(runs_log, digest)
+
+    def check_provenance(current: Mapping[str, str]) -> None:
+        mismatch = _provenance_mismatch(pinned, current)
+        if mismatch:
+            raise ProvenanceMismatch(
+                f"{runs_log} already holds runs of this trap set with another provenance ({mismatch}); "
+                "refusing to mix them into one run set. Resume with the recorded client, model and Bruriah, "
+                "or write to a new --out"
+            )
+
+    def record_run(run: AgentRun) -> None:
+        current = {field: getattr(run.provenance, field) for field in PINNED_PROVENANCE}
+        check_provenance(current)
+        _append_jsonl(runs_log, run_to_json(run))
+        for field, value in current.items():
+            pinned[field].add(value)
+
     try:
         adapter = ClaudeCodeAdapter(config, trap_set_digest=digest, repetitions=args.repetitions)
+        # The client and Bruriah versions are known before any run, so a resume that changed them
+        # stops here and spends nothing. The model is only known from a run's init line, so
+        # `record_run` checks it before that run's record is appended.
+        if any(pinned.values()):
+            check_provenance({"client_version": adapter.client_version(), "bruriah_version": bruriah.__version__})
         out.mkdir(parents=True, exist_ok=True)
         new_runs = run_benchmark(
             traps,
@@ -248,10 +309,10 @@ def _run(args: argparse.Namespace, traps: Sequence[Trap], conditions: Sequence[s
             conditions,
             args.repetitions,
             skip=recorded.keys(),
-            on_run=lambda run: _append_jsonl(runs_log, run_to_json(run)),
+            on_run=record_run,
             on_failure=record_failure,
         )
-    except AdapterError as exc:
+    except (AdapterError, ProvenanceMismatch) as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 2
 

@@ -88,6 +88,9 @@ _CLIENT_API_KEY_ENV = "ANTHROPIC_API_KEY"
 # What the logged-in client needs and nothing more (measured on macOS with Claude Code 2.1.283:
 # the OAuth token lives in the OS keychain, which `HOME` and `PATH` alone cannot reach).
 _CLIENT_ENV_VARS = ("HOME", "PATH", "USER", "LOGNAME", "TMPDIR")
+# A client that updates itself between a run set's pauses and resumes records several client
+# versions in one run set, which the report then compares as if they were one.
+_CLIENT_PINNED_ENV = {"DISABLE_AUTOUPDATER": "1"}
 # Kept out of the index build: it needs no key, and it must use the same model cache the server
 # later reads, not one an operator variable points elsewhere.
 _INDEX_ENV_DROPPED = frozenset({_CLIENT_API_KEY_ENV, "FASTEMBED_CACHE_PATH"})
@@ -143,10 +146,12 @@ def _windows_essentials() -> dict[str, str]:
 
 def _client_env() -> dict[str, str]:
     """The operator's real `HOME` (the login is read from the OS keychain under it), the four
-    variables that reach the keychain and the temp directory, and the Windows essentials. Nothing
-    else: no `CLAUDE_*`, no `ANTHROPIC_*`, no proxy or locale of the operator's shell."""
+    variables that reach the keychain and the temp directory, the Windows essentials, and the
+    autoupdater switched off. Nothing else: no `CLAUDE_*`, no `ANTHROPIC_*`, no proxy or locale of
+    the operator's shell."""
     env = {name: os.environ[name] for name in _CLIENT_ENV_VARS if os.environ.get(name)}
     env.update(_windows_essentials())
+    env.update(_CLIENT_PINNED_ENV)
     if os.name == "nt" and os.environ.get("USERPROFILE"):
         env["USERPROFILE"] = os.environ["USERPROFILE"]
     return env
