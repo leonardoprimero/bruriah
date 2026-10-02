@@ -160,6 +160,8 @@ if behavior.get("init", True):
     emit({"type": "system", "subtype": "init", "model": model, "tools": [], "mcp_servers": servers})
 if behavior.get("garbage"):
     print("this line is not json", flush=True)
+for text in behavior.get("assistant_text", []):
+    emit({"type": "assistant", "message": {"content": [{"type": "text", "text": text}]}})
 time.sleep(behavior.get("sleep", 0))
 for index, name in enumerate(behavior.get("tool_calls", [])):
     emit(
@@ -171,7 +173,8 @@ for index, name in enumerate(behavior.get("tool_calls", [])):
             },
         }
     )
-    emit({"type": "user", "message": {"content": [{"type": "tool_result", "tool_use_id": f"t{index}"}]}})
+    tool_result = {"type": "tool_result", "tool_use_id": f"t{index}", "content": behavior.get("tool_output", "")}
+    emit({"type": "user", "message": {"content": [tool_result]}})
 for relative, text in behavior.get("write", {}).items():
     target = cwd / relative
     target.parent.mkdir(parents=True, exist_ok=True)
@@ -194,6 +197,7 @@ if behavior.get("result", True):
                 "output_tokens": 222,
             },
             "permission_denials": [],
+            **({"result": behavior["final_text"]} if "final_text" in behavior else {}),
         }
     )
 raise SystemExit(behavior.get("exit_code", 0))
@@ -1485,6 +1489,49 @@ def test_a_run_past_its_time_budget_is_stopped_and_keeps_its_partial_transcript(
     assert run.transcript is not None
     lines = (rig.root / "report" / run.transcript).read_text(encoding="utf-8").splitlines()
     assert json.loads(lines[0])["subtype"] == "init"
+
+
+# The rig's trap is decided by a document, so its one cue is the document path.
+_DECISION_DOC = "docs/decisions/0001-tool-declarations.md"
+
+
+def test_a_run_whose_final_message_cites_the_decision_records_it(rig: _Rig) -> None:
+    rig.behave(write=_REGRESSING_EDIT, tool_calls=["Read", "Edit"], final_text=f"Overrode {_DECISION_DOC} on purpose.")
+
+    run = rig.run(rig.adapter(), BASELINE)
+
+    assert rig.trap.citation_cues == (_DECISION_DOC,)
+    assert run.cited_decision is True
+
+
+def test_a_decision_read_only_in_tool_output_is_not_cited(rig: _Rig) -> None:
+    rig.behave(
+        write=_REGRESSING_EDIT,
+        tool_calls=["Read", "Edit"],
+        tool_output=f"{_DECISION_DOC}: declare each tool once",
+        final_text="Switched the server to fastlib.",
+    )
+
+    run = rig.run(rig.adapter(), BASELINE)
+
+    assert run.cited_decision is False
+
+
+def test_a_run_without_a_final_message_cites_nothing(rig: _Rig) -> None:
+    run = rig.run(rig.adapter(), BASELINE)
+
+    assert run.transcript is not None
+    assert run.cited_decision is False
+
+
+def test_a_run_stopped_by_its_time_budget_is_scored_on_its_last_assistant_text(tmp_path: Path, rig: _Rig) -> None:
+    trap = _make_trap(tmp_path / "slow", rig.origin, rig.commit, trap_id="trap-slow", time_budget=1)
+    rig.behave(sleep=10, assistant_text=[f"Keeping {_DECISION_DOC} in mind."])
+
+    run = rig.run(rig.adapter(), BASELINE, trap=trap)
+
+    assert run.exit_reason == "time_budget"
+    assert run.cited_decision is True
 
 
 def test_non_json_output_lines_do_not_break_a_run(rig: _Rig) -> None:

@@ -40,7 +40,7 @@ rescore the published run's 122 records from their stored transcripts, at no mod
 
 ## Work Units
 - [x] Citation cues per trap (loader + twelve manifests).
-- [ ] Citation extraction/matching and `cited_decision` in records and adapter.
+- [x] Citation extraction/matching and `cited_decision` in records and adapter.
 - [ ] SRR in metrics and report.
 - [ ] Rescore the published run and spot-check informed overrides.
 
@@ -53,6 +53,14 @@ rescore the published run's 122 records from their stored transcripts, at no mod
   `lc-workmanager-required` #2875 (earliest merge of 940e0f30 into main; a broad dependency PR,
   kept because every informed override is checked by hand). The four own-history decisions were
   pushed directly, so they carry only their sha cue. Unit 2 also matches pull/issue URLs.
+- Unit 2 (citation): RED 12 records/adapter tests for the intended reasons; the 50 new citation
+  tests failed at collection only (module missing), not one by one. GREEN: the four benchmark
+  test files pass 487; Ruff check and format clean. `#N` matches a URL only as
+  `github.com/<owner>/<repo>/(pull|issues)/N`. Transcript shapes checked on all 122 published
+  transcripts: 118 end in a `result` event; 4 baseline runs have none and fall back to assistant
+  text. Read-only rescoring (no file changed, mtimes and sizes identical): 36 of 122 runs cite
+  their decision; among the 43 regressions only 2 cite it (baseline 0/13, unprompted 1/15,
+  prompted 1/15, both `egui-datepicker-chrono`). The published run predates `fa26c59`.
 
 ## Commit Evidence
 _Pending._

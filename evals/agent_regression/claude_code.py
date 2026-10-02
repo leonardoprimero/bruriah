@@ -53,6 +53,7 @@ from bruriah.clients import ClientError, LaunchManifest, render_claude_code
 
 from agent_regression import gated_hook
 from agent_regression.adapters import AdapterError
+from agent_regression.citation import cites_decision, final_message
 from agent_regression.detection import validate_detection
 from agent_regression.runs import BASELINE, CONDITIONS, GATED, PROMPTED, AgentRun, Provenance, ToolCall
 from agent_regression.traps import Trap, load_detector
@@ -640,6 +641,7 @@ class ClaudeCodeAdapter:
         argv = command_line(config, trap, condition, prompt, mcp_config, settings=settings)
         stdout, stderr, returncode, timed_out, elapsed = self._invoke(argv, workdir, trap.time_budget_seconds)
         transcript = self._write_transcript(trap, condition, repetition, stdout, stderr)
+        cited = cites_decision(final_message(config.transcripts_dir.parent / transcript), trap.citation_cues)
         summary = parse_stream(stdout.splitlines())
 
         _check_mcp_servers(summary, condition, trap)
@@ -668,4 +670,5 @@ class ClaudeCodeAdapter:
             ),
             cost_usd=summary.cost_usd,
             transcript=transcript,
+            cited_decision=cited,
         )

@@ -775,6 +775,37 @@ def test_run_from_json_rejects_a_non_boolean_indeterminate(value: object) -> Non
         run_from_json(payload)
 
 
+@pytest.mark.parametrize("cited", [True, False, None])
+def test_run_record_round_trips_cited_decision(cited: bool | None) -> None:
+    run = _make_run(regressed=True, cited_decision=cited)
+
+    payload = json.loads(json.dumps(run_to_json(run)))
+
+    assert payload["cited_decision"] is cited
+    assert run_from_json(payload) == run
+
+
+def test_run_from_json_loads_a_record_without_cited_decision_as_unknown() -> None:
+    """Records written before citation scoring (the published run) carry no such field."""
+    run = _make_run(regressed=True)
+    payload = run_to_json(run)
+    del payload["cited_decision"]
+
+    loaded = run_from_json(payload)
+
+    assert loaded.cited_decision is None
+    assert loaded == run
+
+
+@pytest.mark.parametrize("value", [1, 0, "true", [True]])
+def test_run_from_json_rejects_a_non_boolean_cited_decision(value: object) -> None:
+    payload = run_to_json(_make_run())
+    payload["cited_decision"] = value
+
+    with pytest.raises(RunRecordError, match="cited_decision"):
+        run_from_json(payload)
+
+
 def test_run_record_round_trips_without_token_counts() -> None:
     run = _make_run(input_tokens=None, output_tokens=None, exit_reason="error")
 

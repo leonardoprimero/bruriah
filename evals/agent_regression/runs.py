@@ -72,6 +72,9 @@ class AgentRun:
     # The raw client transcript, as a path relative to the report directory: a committed report
     # carries no absolute paths.
     transcript: str | None = None
+    # Whether the agent's final message cites the trap's decision (`citation.py`). `None` is
+    # unknown: a record written before citation scoring, or a run without a transcript.
+    cited_decision: bool | None = None
 
 
 def _is_investigate(name: str) -> bool:
@@ -110,6 +113,7 @@ def run_to_json(run: AgentRun) -> dict[str, Any]:
         "provenance": {field.name: getattr(run.provenance, field.name) for field in fields(Provenance)},
         "cost_usd": run.cost_usd,
         "transcript": run.transcript,
+        "cited_decision": run.cited_decision,
     }
 
 
@@ -180,6 +184,14 @@ def _transcript(payload: dict[str, Any]) -> str | None:
     return value
 
 
+def _cited_decision(payload: dict[str, Any]) -> bool | None:
+    # Optional: records written before citation scoring (the published run) carry no such field.
+    value = payload.get("cited_decision")
+    if value is not None and not isinstance(value, bool):
+        raise RunRecordError(f"run.cited_decision must be a boolean or null, got {value!r}")
+    return value
+
+
 def run_from_json(payload: dict[str, Any]) -> AgentRun:
     where = "run"
     condition = _string(payload, "condition", where)
@@ -234,4 +246,5 @@ def run_from_json(payload: dict[str, Any]) -> AgentRun:
         provenance=provenance,
         cost_usd=_cost(payload),
         transcript=_transcript(payload),
+        cited_decision=_cited_decision(payload),
     )
