@@ -215,6 +215,21 @@ Also out of scope: a Codex or Cursor adapter, an LLM-judge column, a private-cor
 
 ## Progress / evidence
 
+- 2026-10-02: the two benchmark ranges never reviewed before are now reviewed as committed-only
+  slices, each in a detached worktree at the slice tip; all closed approved and acknowledged:
+  - Adapter (`b14b2aa..ca8e02f`, 672 lines, high tier, 4 lenses): `review-a17764baac1075f3`.
+  - Own-history traps (`29a855d..5a7e329`, 1,978 lines): `review-906ee8382bc7097c`.
+  - LeakCanary and egui image/datepicker traps (`5a7e329..f8b9f5a`, 3,336 lines):
+    `review-9beb3db6e75a555d`.
+  - egui winit/android/wgpu traps (`f8b9f5a..b14b2aa`, 3,748 lines): `review-ba2b79d55e2574e4`.
+  A first own-history slice based at `b8cf4cd` was abandoned (`review-055f4477882495df`,
+  operator disposition): it included the RED trap-set spec (29a855d), which pins all twelve traps
+  by design, so the slice tip with four traps looked broken. The spec itself passes at HEAD
+  (99/99) and was not weakened. With these, every benchmark commit has native review.
+  Advisory, non-blocking follow-ups worth taking before trusting new verdicts: the resume
+  checkpoint can be torn by a partial last line (`run.py:144-150`); detectors that fail open or
+  call an unparseable file regressed (`egui-android-activity/detect.py:30-37`,
+  `own-lenient-schemas/detect.py:52-57`).
 - 2026-09-28: T5 resumed and paused again at the user's request. `run.sh` relaunched at 13:37Z
   on cbc6dc4, skipped the 11 recorded runs and started at run 12; stopped cleanly at 15:24Z
   after 30 recorded runs and 0 failures (the in-flight run finished first; the run-31 client
