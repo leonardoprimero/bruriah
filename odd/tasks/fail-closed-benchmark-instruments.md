@@ -38,7 +38,7 @@ Advisory findings from the 2026-10-02 native reviews (`review-361755826198b896`,
 
 ## Work Units
 - [x] Gate fails closed on state or payload errors.
-- [ ] Checkpoint tolerates only a torn final line.
+- [x] Checkpoint tolerates only a torn final line.
 - [ ] Indeterminate detection state through contract, records, metrics, report and two detectors.
 
 ## Verification Evidence
@@ -49,6 +49,14 @@ Advisory findings from the 2026-10-02 native reviews (`review-361755826198b896`,
   partial state file and never spends the first denial. The hook is registered only for
   `Edit|Write|MultiEdit` (`claude_code.py:323`), so denying an unparseable payload cannot block
   read tools.
+- Unit 2 (checkpoint): RED 4 of 6 new `_recorded_runs` cases (torn final line cut mid-record,
+  before the closing brace, and mid-UTF-8 character raised; a whole final line missing its newline
+  was not repaired); the two corruption cases passed before and after by design. GREEN
+  `tests/test_agent_regression_eval.py` 154 passed; Ruff check clean. The log is now split on
+  `\n` only, which also stops U+2028 in unescaped records from splitting a line. Formatted one
+  pre-existing line from `eee486f` (`test_main_dry_run_plans_only_gated_when_asked_for_it`).
 
 ## Commit Evidence
-_Pending._
+- `9b45fc8` fix(evals): fail the gated hook closed. Native review `review-52cb0e6fd58e86cd`
+  (medium, reliability) approved and acknowledged; advisories at `gated_hook.py:67-71,87,90-94`
+  and `tests/test_agent_regression_claude_code.py:977-986`.

@@ -140,23 +140,47 @@ def _recorded_runs(
     path: Path, digest: str, plan: Collection[tuple[str, str, int]]
 ) -> dict[tuple[str, str, int], AgentRun]:
     """The runs `path` already holds for this trap set and plan, by invocation key. Records of
-    another trap set stay in the file, are left out, and are counted in a warning."""
+    another trap set stay in the file, are left out, and are counted in a warning.
+
+    A final line with no newline is what a crash mid-append leaves. When it does not parse it is
+    dropped with a warning and the file is cut back to its last whole line; when it does, it is
+    kept and its newline is added. Either way the next append starts on a line of its own. Any
+    other malformed line is corruption and raises `ValueError`, leaving the file untouched."""
     if not path.is_file():
         return {}
+    data = path.read_bytes()
+    lines = data.split(b"\n")
+    # Without a trailing newline the last element is the unterminated final line.
+    unterminated = len(lines) if lines[-1].strip() else None
     recorded = {}
     foreign = 0
-    for number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1):
-        if not line.strip():
+    for number, raw in enumerate(lines, start=1):
+        if not raw.strip():
             continue
         try:
-            run = run_from_json(json.loads(line))
+            run = run_from_json(json.loads(raw.decode("utf-8")))
         except ValueError as exc:
-            raise ValueError(f"{path}, line {number}: {exc}") from None
+            if number != unterminated:
+                raise ValueError(f"{path}, line {number}: {exc}") from None
+            print(
+                f"warning: {path}, line {number}: dropped a torn final line ({len(raw)} bytes) left by an "
+                "interrupted append; that run is not recorded",
+                file=sys.stderr,
+            )
+            with path.open("r+b") as handle:
+                handle.truncate(len(data) - len(raw))
+                os.fsync(handle.fileno())
+            break
         key = (run.trap_id, run.condition, run.repetition)
         if run.provenance.trap_set_digest != digest:
             foreign += 1
         elif key in plan:
             recorded[key] = run
+        if number == unterminated:
+            with path.open("ab") as handle:
+                handle.write(b"\n")
+                handle.flush()
+                os.fsync(handle.fileno())
     if foreign:
         print(f"warning: {foreign} recorded run(s) in {path} are for another trap set; ignored", file=sys.stderr)
     return recorded

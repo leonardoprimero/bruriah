@@ -1149,9 +1149,7 @@ def test_main_dry_run_lists_every_invocation_without_running_an_agent(
     assert not [line for line in lines if re.search(rf"\b{GATED}\b", line)], "gated is opt-in"
 
 
-def test_main_dry_run_plans_only_gated_when_asked_for_it(
-    tmp_path: Path, capsys: pytest.CaptureFixture[str]
-) -> None:
+def test_main_dry_run_plans_only_gated_when_asked_for_it(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     traps_dir = tmp_path / "traps"
     _make_trap(traps_dir, "trap-a")
 
@@ -1319,3 +1317,76 @@ def test_replayed_benchmark_reproduces_its_report_byte_identically(tmp_path: Pat
         return render_json(runs, summaries), render_markdown(runs, summaries)
 
     assert replay() == replay()
+
+
+# -------------------------------------------------------------------------------------------
+# Resume checkpoint
+# -------------------------------------------------------------------------------------------
+
+
+def _record_line(repetition: int) -> bytes:
+    return (json.dumps(run_to_json(_make_run(repetition=repetition)), ensure_ascii=False) + "\n").encode("utf-8")
+
+
+_RESUME_DIGEST = "a" * 64
+_RESUME_PLAN = {("trap-a", BASELINE, repetition) for repetition in range(3)}
+
+
+@pytest.mark.parametrize(
+    "torn",
+    [
+        pytest.param(_record_line(2)[:40], id="cut-mid-record"),
+        pytest.param(_record_line(2)[:-2], id="cut-before-closing-brace"),
+        pytest.param(b'{"exit_reason": "\xc3', id="cut-mid-utf8-character"),
+    ],
+)
+def test_recorded_runs_drops_a_torn_final_line_and_truncates_the_log_to_its_last_whole_line(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], torn: bytes
+) -> None:
+    """A crash mid-append leaves a final line with no newline that does not parse: that run is
+    not recorded, a warning names it, and the log is cut back so the next append starts clean."""
+    log = tmp_path / "runs.jsonl"
+    whole = _record_line(0) + _record_line(1)
+    log.write_bytes(whole + torn)
+
+    recorded = run_module._recorded_runs(log, _RESUME_DIGEST, _RESUME_PLAN)
+
+    assert set(recorded) == {("trap-a", BASELINE, 0), ("trap-a", BASELINE, 1)}
+    err = capsys.readouterr().err
+    assert str(log) in err
+    assert "line 3" in err
+    assert f"{len(torn)} bytes" in err
+    assert log.read_bytes() == whole
+    run_module._append_jsonl(log, run_to_json(_make_run(repetition=2)))
+    assert set(run_module._recorded_runs(log, _RESUME_DIGEST, _RESUME_PLAN)) == _RESUME_PLAN
+
+
+def test_recorded_runs_keeps_a_whole_final_line_missing_its_newline_and_adds_the_newline(tmp_path: Path) -> None:
+    log = tmp_path / "runs.jsonl"
+    log.write_bytes(_record_line(0) + _record_line(1).rstrip(b"\n"))
+
+    recorded = run_module._recorded_runs(log, _RESUME_DIGEST, _RESUME_PLAN)
+
+    assert set(recorded) == {("trap-a", BASELINE, 0), ("trap-a", BASELINE, 1)}
+    assert log.read_bytes() == _record_line(0) + _record_line(1)
+    run_module._append_jsonl(log, run_to_json(_make_run(repetition=2)))
+    assert set(run_module._recorded_runs(log, _RESUME_DIGEST, _RESUME_PLAN)) == _RESUME_PLAN
+
+
+@pytest.mark.parametrize(
+    "content",
+    [
+        pytest.param(_record_line(0) + b'{"trap_id": "tr\n' + _record_line(1), id="middle-line"),
+        pytest.param(_record_line(0) + b'{"trap_id": "tr\n', id="final-line-ending-in-newline"),
+    ],
+)
+def test_recorded_runs_rejects_a_malformed_line_that_is_not_a_torn_final_line(tmp_path: Path, content: bytes) -> None:
+    """Only an unterminated final line can be a crash artifact; any other bad line is corruption,
+    and the log is left exactly as it was."""
+    log = tmp_path / "runs.jsonl"
+    log.write_bytes(content)
+
+    with pytest.raises(ValueError, match=rf"{re.escape(str(log))}, line 2: "):
+        run_module._recorded_runs(log, _RESUME_DIGEST, _RESUME_PLAN)
+
+    assert log.read_bytes() == content
