@@ -15,6 +15,11 @@ Error runs are counted (`runs`, `errors`) but excluded from every rate and mean:
 crashed says nothing about whether the agent regresses. Indeterminate runs (the detector could
 not parse a target file) are counted (`indeterminate`) and excluded the same way, from the
 summary rates and from the per-trap majorities; a run that is both counts as an error.
+
+Gate activity (the `gated` condition's hook) is counted over every run that carries gate data,
+error and indeterminate runs included: the hook ran whether or not the detector could decide. A run
+whose hook state file exists but whose transcript shows no denial is counted as inconsistent,
+never corrected.
 """
 
 from __future__ import annotations
@@ -58,6 +63,11 @@ class ConditionSummary:
     mean_wall_clock_seconds: float | None
     input_tokens: int | None
     output_tokens: int | None
+    # Gate activity: `None` when no run of the condition carries gate data.
+    gate_runs: int | None
+    gate_denied_runs: int | None
+    gate_error_runs: int | None
+    gate_inconsistent_runs: int | None
 
 
 def wilson_interval(successes: int, total: int, z: float = _Z95) -> tuple[float, float]:
@@ -113,6 +123,19 @@ def _token_total(values: list[int | None]) -> int | None:
     return sum(value for value in values if value is not None)
 
 
+def _gate_counts(runs: list[AgentRun]) -> tuple[int | None, int | None, int | None, int | None]:
+    """(runs with gate data, with at least one denial, with at least one gate error, inconsistent)."""
+    gated = [run for run in runs if run.gate_denials is not None]
+    if not gated:
+        return None, None, None, None
+    return (
+        len(gated),
+        sum(1 for run in gated if run.gate_denials),
+        sum(1 for run in gated if run.gate_errors),
+        sum(1 for run in gated if run.gate_state_written and run.gate_denials == 0),
+    )
+
+
 def _summarize_condition(condition: str, runs: list[AgentRun]) -> ConditionSummary:
     non_error = [run for run in runs if run.exit_reason != "error"]
     valid = [run for run in non_error if not run.detection.indeterminate]
@@ -124,6 +147,7 @@ def _summarize_condition(condition: str, runs: list[AgentRun]) -> ConditionSumma
     heeded = [run for run in consulted if not run.detection.regressed]
     completed = [run for run in valid if run.detection.completed]
     completed_regressed = [run for run in completed if run.detection.regressed]
+    gate_runs, gate_denied, gate_errored, gate_inconsistent = _gate_counts(runs)
     return ConditionSummary(
         condition=condition,
         runs=len(runs),
@@ -148,6 +172,10 @@ def _summarize_condition(condition: str, runs: list[AgentRun]) -> ConditionSumma
         mean_wall_clock_seconds=_rate(sum(run.wall_clock_seconds for run in valid), len(valid)),
         input_tokens=_token_total([run.input_tokens for run in valid]),
         output_tokens=_token_total([run.output_tokens for run in valid]),
+        gate_runs=gate_runs,
+        gate_denied_runs=gate_denied,
+        gate_error_runs=gate_errored,
+        gate_inconsistent_runs=gate_inconsistent,
     )
 
 

@@ -75,6 +75,12 @@ class AgentRun:
     # Whether the agent's final message cites the trap's decision (`citation.py`). `None` is
     # unknown: a record written before citation scoring, or a run without a transcript.
     cited_decision: bool | None = None
+    # What the `gated` condition's hook did, counted from the transcript (`claude_code.py`): calls
+    # it denied normally, calls it denied as a broken gate, and whether its state file exists after
+    # the run. `None` for every other condition and for a record written before gate counting.
+    gate_denials: int | None = None
+    gate_errors: int | None = None
+    gate_state_written: bool | None = None
 
 
 def _is_investigate(name: str) -> bool:
@@ -114,6 +120,9 @@ def run_to_json(run: AgentRun) -> dict[str, Any]:
         "cost_usd": run.cost_usd,
         "transcript": run.transcript,
         "cited_decision": run.cited_decision,
+        "gate_denials": run.gate_denials,
+        "gate_errors": run.gate_errors,
+        "gate_state_written": run.gate_state_written,
     }
 
 
@@ -192,6 +201,20 @@ def _cited_decision(payload: dict[str, Any]) -> bool | None:
     return value
 
 
+def _gate_count(payload: dict[str, Any], key: str) -> int | None:
+    # Optional: records written before gate counting, and every non-gated run, carry `None`.
+    if payload.get(key) is None:
+        return None
+    return _integer(payload, key, "run")
+
+
+def _gate_state_written(payload: dict[str, Any]) -> bool | None:
+    value = payload.get("gate_state_written")
+    if value is not None and not isinstance(value, bool):
+        raise RunRecordError(f"run.gate_state_written must be a boolean or null, got {value!r}")
+    return value
+
+
 def run_from_json(payload: dict[str, Any]) -> AgentRun:
     where = "run"
     condition = _string(payload, "condition", where)
@@ -247,4 +270,7 @@ def run_from_json(payload: dict[str, Any]) -> AgentRun:
         cost_usd=_cost(payload),
         transcript=_transcript(payload),
         cited_decision=_cited_decision(payload),
+        gate_denials=_gate_count(payload, "gate_denials"),
+        gate_errors=_gate_count(payload, "gate_errors"),
+        gate_state_written=_gate_state_written(payload),
     )

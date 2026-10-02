@@ -168,6 +168,27 @@ def render_markdown(runs: Sequence[AgentRun], summaries: Mapping[str, ConditionS
             f"| {_count(summary.output_tokens)} |"
         )
 
+    gated = [condition for condition in conditions if summaries[condition].gate_runs is not None]
+    if gated:
+        lines += [
+            "",
+            "## Gate activity",
+            "",
+            "Denials and gate errors are counted from each run's transcript as `user` events (tool results the "
+            "client returns, never the agent's own assistant text) containing the first sentence of the gate's "
+            "pinned denial or broken-gate reason. A run whose gate state file exists but whose transcript shows "
+            "no denial is inconsistent; every run with gate data counts, error and indeterminate runs included.",
+            "",
+            "| condition | runs with gate data | runs with a denial | runs with a gate error | inconsistent runs |",
+            "|---|---:|---:|---:|---:|",
+        ]
+        for condition in gated:
+            summary = summaries[condition]
+            lines.append(
+                f"| {condition} | {summary.gate_runs} | {summary.gate_denied_runs} | {summary.gate_error_runs} "
+                f"| {summary.gate_inconsistent_runs} |"
+            )
+
     lines += [
         "",
         "## Paired sign tests",

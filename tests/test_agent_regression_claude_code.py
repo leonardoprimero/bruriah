@@ -44,6 +44,8 @@ from agent_regression import run as run_module  # noqa: E402
 from agent_regression.claude_code import (  # noqa: E402
     ALLOWED_TOOLS,
     DISALLOWED_TOOLS,
+    GATE_DENIAL_MARKER,
+    GATE_ERROR_MARKER,
     MCP_TOOLS,
     PROMPTED_INSTRUCTION,
     AdapterError,
@@ -52,6 +54,7 @@ from agent_regression.claude_code import (  # noqa: E402
     StreamSummary,
     allowed_tools,
     command_line,
+    count_gate_events,
     ensure_index,
     exit_reason_for,
     gate_hook_command,
@@ -102,6 +105,8 @@ _REGRESSING_EDIT = {"src/server.py": "import fastlib\n\nTOOLS = ()\n"}
 # API key (never the key) and the `CLAUDE.md` it found, lists the MCP servers named in the
 # `--mcp-config` it was given in its init line (as the real client does with `--strict-mcp-config`),
 # then prints a canned stream-json transcript in the wire format measured on Claude Code 2.1.283.
+# With `run_gate`, it runs the `PreToolUse` command from its `--settings` before each tool call,
+# as the real client does, and hands an exit-2 stderr back as the tool result.
 _STUB_CLAUDE = """\
 import hashlib
 import json
@@ -163,7 +168,17 @@ if behavior.get("garbage"):
 for text in behavior.get("assistant_text", []):
     emit({"type": "assistant", "message": {"content": [{"type": "text", "text": text}]}})
 time.sleep(behavior.get("sleep", 0))
+gate_command = None
+if behavior.get("run_gate") and "--settings" in argv:
+    settings = json.loads(Path(argv[argv.index("--settings") + 1]).read_text(encoding="utf-8"))
+    gate_command = settings["hooks"]["PreToolUse"][0]["hooks"][0]["command"]
 for index, name in enumerate(behavior.get("tool_calls", [])):
+    content = behavior.get("tool_output", "")
+    if gate_command is not None:
+        stdin = behavior.get("gate_stdin", json.dumps({"tool_name": name, "tool_input": {}}))
+        hook = subprocess.run(gate_command, shell=True, input=stdin, capture_output=True, text=True)
+        if hook.returncode == 2 and not behavior.get("gate_silent"):
+            content = hook.stderr
     emit(
         {
             "type": "assistant",
@@ -173,7 +188,7 @@ for index, name in enumerate(behavior.get("tool_calls", [])):
             },
         }
     )
-    tool_result = {"type": "tool_result", "tool_use_id": f"t{index}", "content": behavior.get("tool_output", "")}
+    tool_result = {"type": "tool_result", "tool_use_id": f"t{index}", "content": content}
     emit({"type": "user", "message": {"content": [tool_result]}})
 for relative, text in behavior.get("write", {}).items():
     target = cwd / relative
@@ -648,6 +663,66 @@ def test_parse_stream_without_a_result_line_leaves_the_result_fields_unset() -> 
     assert summary.cost_usd is None
     assert summary.is_error is False
     assert summary.model == _MODEL
+
+
+def _user(content: object) -> dict:
+    return {"type": "user", "message": {"content": [{"type": "tool_result", "tool_use_id": "t", "content": content}]}}
+
+
+def test_count_gate_events_counts_user_events_carrying_the_gate_reason() -> None:
+    lines = _stream(
+        _init(),
+        _assistant(_tool_use("Edit")),
+        _user(f"PreToolUse:Edit hook error: {gated_hook.GATE_REASON}"),
+        _assistant(_tool_use("Edit")),
+        _user("ok"),
+        _result(),
+    )
+
+    assert count_gate_events(lines) == (1, 0)
+
+
+def test_count_gate_events_ignores_the_reason_quoted_in_assistant_text() -> None:
+    lines = _stream(
+        _assistant({"type": "text", "text": gated_hook.GATE_REASON}),
+        _assistant({"type": "text", "text": gated_hook.GATE_ERROR_REASON}),
+        _result(result=gated_hook.GATE_REASON),
+    )
+
+    assert count_gate_events(lines) == (0, 0)
+
+
+def test_count_gate_events_counts_gate_errors_separately_from_denials() -> None:
+    lines = _stream(
+        _user(f"{gated_hook.GATE_ERROR_REASON} (OSError: boom)"),
+        _user([{"type": "text", "text": f"{gated_hook.GATE_ERROR_REASON} (ValueError: x)"}]),
+        _user(gated_hook.GATE_REASON),
+    )
+
+    assert count_gate_events(lines) == (1, 2)
+
+
+def test_count_gate_events_matches_the_first_sentence_only_and_skips_non_json_lines() -> None:
+    first_sentence = gated_hook.GATE_REASON.split(". ")[0] + "."
+    lines = ["not json", "[1, 2]", "", *_stream(_user(f"Hook said: {first_sentence} (truncated)"))]
+
+    assert count_gate_events(lines) == (1, 0)
+
+
+def test_the_gate_markers_are_distinct_json_safe_first_sentences_of_the_pinned_reasons() -> None:
+    for marker, reason in (
+        (GATE_DENIAL_MARKER, gated_hook.GATE_REASON),
+        (GATE_ERROR_MARKER, gated_hook.GATE_ERROR_REASON),
+    ):
+        assert reason.startswith(marker)
+        assert marker.endswith(".") and ". " not in marker
+        assert json.dumps(marker) == f'"{marker}"'
+    assert GATE_DENIAL_MARKER not in GATE_ERROR_MARKER
+    assert GATE_ERROR_MARKER not in GATE_DENIAL_MARKER
+
+
+def test_count_gate_events_of_nothing_is_zero() -> None:
+    assert count_gate_events([]) == (0, 0)
 
 
 def test_parse_stream_of_nothing_saw_no_init_line() -> None:
@@ -1405,6 +1480,53 @@ def test_a_gated_run_registers_the_server_and_a_pre_tool_use_gate_outside_the_cl
     assert call["claude_md"] is None
     assert (run.condition, run.exit_reason) == (GATED, "done")
     assert run.transcript == "transcripts/trap-a/gated-0.jsonl"
+
+
+def test_a_gated_run_records_the_gate_denial_from_the_transcript_and_its_state_file(rig: _Rig) -> None:
+    rig.behave(
+        write=_REGRESSING_EDIT,
+        tool_calls=["Edit", "mcp__bruriah__investigate_work", "Edit"],
+        run_gate=True,
+        # The agent quoting the reason is its own text, not a denial.
+        assistant_text=[gated_hook.GATE_REASON],
+    )
+
+    run = rig.run(rig.adapter(), GATED)
+
+    assert (run.gate_denials, run.gate_errors, run.gate_state_written) == (1, 0, True)
+
+
+def test_a_gated_run_records_a_broken_gate_as_gate_errors(rig: _Rig) -> None:
+    rig.behave(tool_calls=["Edit", "Edit"], run_gate=True, gate_stdin="not json")
+
+    run = rig.run(rig.adapter(), GATED)
+
+    assert (run.gate_denials, run.gate_errors, run.gate_state_written) == (0, 2, False)
+
+
+def test_a_gated_run_reads_the_state_file_independently_of_the_transcript(rig: _Rig) -> None:
+    rig.behave(tool_calls=["Edit"], run_gate=True, gate_silent=True)
+
+    run = rig.run(rig.adapter(), GATED)
+
+    assert (run.gate_denials, run.gate_errors, run.gate_state_written) == (0, 0, True)
+
+
+def test_a_gated_run_whose_gate_never_fired_records_zero_and_no_state(rig: _Rig) -> None:
+    rig.behave(tool_calls=["Read"], run_gate=True)
+
+    run = rig.run(rig.adapter(), GATED)
+
+    assert (run.gate_denials, run.gate_errors, run.gate_state_written) == (0, 0, False)
+
+
+@pytest.mark.parametrize("condition", DEFAULT_CONDITIONS)
+def test_a_default_condition_run_records_no_gate_activity(rig: _Rig, condition: str) -> None:
+    rig.behave(tool_calls=["Read", "Edit"], tool_output=gated_hook.GATE_REASON)
+
+    run = rig.run(rig.adapter(), condition)
+
+    assert (run.gate_denials, run.gate_errors, run.gate_state_written) == (None, None, None)
 
 
 def test_the_default_conditions_install_no_gate(rig: _Rig) -> None:

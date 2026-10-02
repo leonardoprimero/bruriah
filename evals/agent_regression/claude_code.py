@@ -459,6 +459,37 @@ def parse_stream(lines: Iterable[str]) -> StreamSummary:
     )
 
 
+def _first_sentence(text: str) -> str:
+    return text[: text.index(". ") + 1]
+
+
+# What marks a gate denial and a broken gate in a transcript: the first sentence of each pinned
+# reason, which survives a prefix the client adds to the hook's stderr or a truncated tail. Neither
+# needs JSON escaping, so each matches the serialized event as it matches the text.
+GATE_DENIAL_MARKER = _first_sentence(gated_hook.GATE_REASON)
+GATE_ERROR_MARKER = _first_sentence(gated_hook.GATE_ERROR_REASON)
+
+
+def count_gate_events(lines: Iterable[str]) -> tuple[int, int]:
+    """`(denials, gate errors)`: the `user` events (tool results the client hands back; the agent
+    never writes one) whose serialized JSON contains `GATE_DENIAL_MARKER` or `GATE_ERROR_MARKER`.
+    Shape-agnostic, so it does not depend on where the client puts the hook's stderr. An agent
+    quoting a reason in its own text is an `assistant` event and never counts. A line that is not
+    a JSON object is skipped."""
+    denials = errors = 0
+    for line in lines:
+        try:
+            event = json.loads(line)
+        except ValueError:
+            continue
+        if not isinstance(event, dict) or event.get("type") != "user":
+            continue
+        serialized = json.dumps(event, ensure_ascii=False)
+        denials += GATE_DENIAL_MARKER in serialized
+        errors += GATE_ERROR_MARKER in serialized
+    return denials, errors
+
+
 def exit_reason_for(summary: StreamSummary, timed_out: bool, returncode: int) -> str:
     if timed_out:
         return "time_budget"
@@ -642,7 +673,13 @@ class ClaudeCodeAdapter:
         stdout, stderr, returncode, timed_out, elapsed = self._invoke(argv, workdir, trap.time_budget_seconds)
         transcript = self._write_transcript(trap, condition, repetition, stdout, stderr)
         cited = cites_decision(final_message(config.transcripts_dir.parent / transcript), trap.citation_cues)
-        summary = parse_stream(stdout.splitlines())
+        lines = stdout.splitlines()
+        summary = parse_stream(lines)
+        gate_denials = gate_errors = gate_state_written = None
+        if settings is not None:
+            gate_denials, gate_errors = count_gate_events(lines)
+            # The hook's state lives next to its settings, in the run's own gate directory.
+            gate_state_written = (settings.parent / gated_hook.STATE_FILE).exists()
 
         _check_mcp_servers(summary, condition, trap)
         _check_no_remote(workdir, trap)
@@ -671,4 +708,7 @@ class ClaudeCodeAdapter:
             cost_usd=summary.cost_usd,
             transcript=transcript,
             cited_decision=cited,
+            gate_denials=gate_denials,
+            gate_errors=gate_errors,
+            gate_state_written=gate_state_written,
         )

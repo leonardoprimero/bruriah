@@ -807,6 +807,58 @@ def test_run_from_json_rejects_a_non_boolean_cited_decision(value: object) -> No
         run_from_json(payload)
 
 
+_GATE_FIELDS = ("gate_denials", "gate_errors", "gate_state_written")
+
+
+@pytest.mark.parametrize(
+    "gate",
+    [
+        {"gate_denials": 1, "gate_errors": 0, "gate_state_written": True},
+        {"gate_denials": 0, "gate_errors": 2, "gate_state_written": False},
+        {"gate_denials": None, "gate_errors": None, "gate_state_written": None},
+    ],
+)
+def test_run_record_round_trips_gate_activity(gate: dict[str, object]) -> None:
+    run = _make_run(condition=GATED, **gate)
+
+    payload = json.loads(json.dumps(run_to_json(run)))
+
+    assert {name: payload[name] for name in _GATE_FIELDS} == gate
+    assert run_from_json(payload) == run
+
+
+def test_gate_activity_defaults_to_none_and_a_record_without_it_loads_as_none() -> None:
+    run = _make_run()
+    assert (run.gate_denials, run.gate_errors, run.gate_state_written) == (None, None, None)
+    payload = run_to_json(run)
+    for name in _GATE_FIELDS:
+        del payload[name]
+
+    assert run_from_json(payload) == run
+
+
+@pytest.mark.parametrize(
+    ("name", "value"),
+    [
+        ("gate_denials", -1),
+        ("gate_denials", True),
+        ("gate_denials", "1"),
+        ("gate_denials", 1.0),
+        ("gate_errors", -1),
+        ("gate_errors", False),
+        ("gate_errors", [0]),
+        ("gate_state_written", 1),
+        ("gate_state_written", "true"),
+    ],
+)
+def test_run_from_json_rejects_malformed_gate_activity(name: str, value: object) -> None:
+    payload = run_to_json(_make_run(condition=GATED, gate_denials=0, gate_errors=0, gate_state_written=False))
+    payload[name] = value
+
+    with pytest.raises(RunRecordError, match=name):
+        run_from_json(payload)
+
+
 def test_run_record_round_trips_without_token_counts() -> None:
     run = _make_run(input_tokens=None, output_tokens=None, exit_reason="error")
 
@@ -1543,6 +1595,86 @@ def test_render_json_carries_srr_and_its_interval_or_null() -> None:
     assert (baseline["silent_regressions"], baseline["informed_overrides"], baseline["unknown_citations"]) == (3, 1, 0)
     assert legacy["conditions"][BASELINE]["silent_regression_rate"] is None
     assert legacy["conditions"][BASELINE]["silent_regression_interval"] is None
+
+
+def _gated_run(repetition: int, denials: int, errors: int, state: bool, **overrides: object) -> AgentRun:
+    return _make_run(
+        condition=GATED,
+        repetition=repetition,
+        gate_denials=denials,
+        gate_errors=errors,
+        gate_state_written=state,
+        **overrides,
+    )
+
+
+def _gate_report_runs() -> list[AgentRun]:
+    """`_report_runs` plus five gated runs: two denied normally (one of them an error run), one
+    denied as a broken gate, one inconsistent (state file written, no denial counted), one quiet."""
+    return _report_runs() + [
+        _gated_run(0, 1, 0, True),
+        _gated_run(1, 1, 0, True, exit_reason="error"),
+        _gated_run(2, 0, 3, False),
+        _gated_run(3, 0, 0, True),
+        _gated_run(4, 0, 0, False),
+    ]
+
+
+def test_summarize_counts_gate_activity_per_condition() -> None:
+    summaries = summarize(_gate_report_runs())
+
+    gated = summaries[GATED]
+    assert (gated.gate_runs, gated.gate_denied_runs, gated.gate_error_runs, gated.gate_inconsistent_runs) == (
+        5,
+        2,
+        1,
+        1,
+    )
+    for condition in DEFAULT_CONDITIONS:
+        summary = summaries[condition]
+        assert summary.gate_runs is None, condition
+        assert summary.gate_denied_runs is None, condition
+        assert summary.gate_error_runs is None, condition
+        assert summary.gate_inconsistent_runs is None, condition
+
+
+def test_render_markdown_shows_gate_activity_only_for_conditions_with_gate_data() -> None:
+    runs = _gate_report_runs()
+    lines = render_markdown(runs, summarize(runs)).splitlines()
+
+    start = lines.index("## Gate activity")
+    end = next(index for index in range(start + 1, len(lines)) if lines[index].startswith("## "))
+    section = lines[start:end]
+    header = next(line for line in section if line.startswith("| condition |"))
+    assert [cell.strip() for cell in header.strip("|").split("|")] == [
+        "condition",
+        "runs with gate data",
+        "runs with a denial",
+        "runs with a gate error",
+        "inconsistent runs",
+    ]
+    rows = [line for line in section if line.startswith("| ") and not line.startswith("| condition |")]
+    assert rows == [f"| {GATED} | 5 | 2 | 1 | 1 |"]
+    assert any("`user` events" in line and "assistant" in line for line in section)
+    # The condition table is unchanged by gate data.
+    assert _condition_cells(lines, GATED)["runs"] == "5"
+
+
+def test_render_markdown_has_no_gate_activity_without_gate_data() -> None:
+    runs = _report_runs() + [_make_run(trap_id="trap-a", condition=GATED, repetition=0)]
+
+    markdown = render_markdown(runs, summarize(runs))
+
+    assert "Gate activity" not in markdown
+
+
+def test_render_json_carries_gate_activity_or_null() -> None:
+    runs = _gate_report_runs()
+
+    payload = json.loads(render_json(runs, summarize(runs)))
+
+    assert payload["conditions"][GATED]["gate_inconsistent_runs"] == 1
+    assert payload["conditions"][BASELINE]["gate_runs"] is None
 
 
 def test_render_markdown_states_the_provenance() -> None:
