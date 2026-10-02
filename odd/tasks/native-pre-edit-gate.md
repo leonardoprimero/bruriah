@@ -23,7 +23,7 @@ Add an opt-in `gated` benchmark condition using Claude Code's native `PreToolUse
 - [x] Add opt-in gated condition and isolated hook configuration.
 - [x] Add focused adapter/runner/hook tests.
 - [x] Verify and run bounded gated smoke.
-- [ ] Commit the gated condition as an opt-in benchmark instrument.
+- [x] Commit the gated condition as an opt-in benchmark instrument.
 
 ## Verification Evidence
 - TDD RED/GREEN: focused benchmark tests covered condition defaults, argv compatibility, hook state, shell-metacharacter safety, per-run isolation, and clone tampering; final focused suite passed with 358 tests.
@@ -39,4 +39,11 @@ Add an opt-in `gated` benchmark condition using Claude Code's native `PreToolUse
 Keep `gated` as an opt-in benchmark instrument, not a product fix. It measures that a one-time native denial does not change adherence (heed 0/3), and serves as the comparison point for a future persistent-acknowledgement or host-authorization gate.
 
 ## Commit Evidence
-_Pending._
+- `eee486f` feat(evals): add opt-in gated condition with an isolated native pre-edit hook (7 files, +554/-14).
+- Native review: lineage `review-361755826198b896`, committed-only range `bd46442..eee486f`, high tier, 4 lenses; approved and acknowledgement burned.
+
+## Follow-ups (non-blocking review findings)
+- `gated_hook.py:40-46` fails open silently when the state write fails; a broken gate is indistinguishable from an ignored one.
+- `claude_code.py:638` does not record gate activity as structured run evidence; denials are only visible in transcripts.
+- `claude_code.py:312-314` never cleans the per-run gate directories under the isolated cache.
+- `tests/test_agent_regression_eval.py:1008-1018` does not pin the default report shape.
