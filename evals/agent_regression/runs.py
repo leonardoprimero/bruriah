@@ -52,6 +52,10 @@ class Provenance:
     bruriah_version: str
     trap_set_digest: str
     repetitions: int
+    # The git commit of the source tree the `bruriah` executable imported, which is also the
+    # harness's own (`claude_code.py`). `None` is unknown: a record written before it was recorded,
+    # whose `bruriah_version` alone cannot tell two checkouts of one release apart.
+    bruriah_commit: str | None = None
 
 
 @dataclass(frozen=True)
@@ -201,6 +205,14 @@ def _cited_decision(payload: dict[str, Any]) -> bool | None:
     return value
 
 
+def _bruriah_commit(provenance: dict[str, Any]) -> str | None:
+    # Optional: records written before the commit was recorded (the published run) carry none.
+    value = provenance.get("bruriah_commit")
+    if value is not None and not isinstance(value, str):
+        raise RunRecordError(f"run.provenance.bruriah_commit must be a string or null, got {value!r}")
+    return value
+
+
 def _gate_count(payload: dict[str, Any], key: str) -> int | None:
     # Optional: records written before gate counting, and every non-gated run, carry `None`.
     if payload.get(key) is None:
@@ -253,6 +265,7 @@ def run_from_json(payload: dict[str, Any]) -> AgentRun:
         bruriah_version=_string(raw_provenance, "bruriah_version", "run.provenance"),
         trap_set_digest=_string(raw_provenance, "trap_set_digest", "run.provenance"),
         repetitions=_integer(raw_provenance, "repetitions", "run.provenance"),
+        bruriah_commit=_bruriah_commit(raw_provenance),
     )
 
     return AgentRun(

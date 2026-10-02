@@ -39,6 +39,7 @@ import yaml  # noqa: E402
 
 import bruriah  # noqa: E402
 from agent_regression import adapters as adapters_module  # noqa: E402
+from agent_regression import claude_code as claude_code_module  # noqa: E402
 from agent_regression import gated_hook  # noqa: E402
 from agent_regression import run as run_module  # noqa: E402
 from agent_regression.claude_code import (  # noqa: E402
@@ -57,6 +58,7 @@ from agent_regression.claude_code import (  # noqa: E402
     command_line,
     count_gate_events,
     ensure_index,
+    executable_interpreter,
     exit_reason_for,
     gate_hook_command,
     install_gate,
@@ -99,6 +101,9 @@ _SENTINEL = "AGENT_REGRESSION_TEST_SENTINEL"
 _MODEL = "claude-test-model"
 _DIGEST = "d" * 64
 _CLIENT_VERSION = "2.1.283 (Claude Code)"
+# The commit the fake command runner reports for both the harness and the server source.
+_SOURCE_COMMIT = "0123456789abcdef0123456789abcdef01234567"
+_PROBE = "import bruriah; print(bruriah.__file__)"
 _PROMPT = "Simplify the server's tool definitions so each tool is declared in one place."
 _REGRESSING_EDIT = {"src/server.py": "import fastlib\n\nTOOLS = ()\n"}
 
@@ -359,6 +364,48 @@ def _read_jsonl(path: Path) -> list:
 
 
 @dataclass
+class _Tree:
+    """What the fake git reports for one source directory. `commit=None` is no git worktree."""
+
+    commit: str | None = _SOURCE_COMMIT
+    status: str = ""
+    tracked: bool = True
+
+
+class _FakeRunner:
+    """Stands in for the adapter's command runner: answers the interpreter's import probe with
+    `server_file` and the git commands per source directory, and records every argv. The real
+    commands would read this checkout's own, possibly dirty, git state."""
+
+    def __init__(self, server_file: Path, server: _Tree | None = None, harness: _Tree | None = None) -> None:
+        self.server_file = server_file
+        self.trees = {
+            server_file.parent: server or _Tree(),
+            claude_code_module.HARNESS_SOURCE.parent: harness or _Tree(),
+        }
+        self.calls: list[list[str]] = []
+
+    def __call__(self, argv: list[str]) -> subprocess.CompletedProcess[str]:
+        argv = list(argv)
+        self.calls.append(argv)
+        if _PROBE in argv:
+            return subprocess.CompletedProcess(argv, 0, f"{self.server_file}\n", "")
+        tree = self.trees[Path(argv[argv.index("-C") + 1])]
+        if tree.commit is None:
+            return subprocess.CompletedProcess(argv, 128, "", "fatal: not a git repository\n")
+        if "rev-parse" in argv:
+            return subprocess.CompletedProcess(argv, 0, f"{tree.commit}\n", "")
+        if "ls-files" in argv:
+            return subprocess.CompletedProcess(argv, 0 if tree.tracked else 1, "", "")
+        if "status" in argv:
+            return subprocess.CompletedProcess(argv, 0, tree.status, "")
+        raise AssertionError(f"unexpected command: {argv}")
+
+    def probes(self) -> list[list[str]]:
+        return [call for call in self.calls if _PROBE in call]
+
+
+@dataclass
 class _Rig:
     root: Path
     bin_dir: Path
@@ -367,6 +414,7 @@ class _Rig:
     origin: Path
     commit: str
     trap: Trap
+    runner: _FakeRunner
 
     def behave(self, **behavior: object) -> None:
         (self.bin_dir / "behavior.json").write_text(json.dumps(behavior), encoding="utf-8")
@@ -413,7 +461,9 @@ def rig(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> _Rig:
     bruriah_executable = _write_stub(bin_dir / "bruriah", _STUB_BRURIAH)
     origin, commit = _make_origin(tmp_path / "upstream")
     trap = _make_trap(tmp_path, origin, commit)
-    rig = _Rig(tmp_path, bin_dir, claude, bruriah_executable, origin, commit, trap)
+    runner = _FakeRunner(tmp_path / "server-src" / "bruriah" / "__init__.py")
+    monkeypatch.setattr(claude_code_module, "run_command", runner)
+    rig = _Rig(tmp_path, bin_dir, claude, bruriah_executable, origin, commit, trap, runner)
     rig.behave(write=_REGRESSING_EDIT, tool_calls=["Read", "Edit"])
     return rig
 
@@ -1337,6 +1387,7 @@ def test_a_baseline_run_records_the_client_transcript_and_the_detector_verdict(r
         bruriah_version=bruriah.__version__,
         trap_set_digest=_DIGEST,
         repetitions=2,
+        bruriah_commit=_SOURCE_COMMIT,
     )
     assert run.transcript == "transcripts/trap-a/baseline-0.jsonl"
     transcript = rig.root / "report" / run.transcript
@@ -1590,6 +1641,120 @@ def test_a_bruriah_executable_of_another_version_is_refused(rig: _Rig) -> None:
 
     with pytest.raises(AdapterError, match="0.0.1"):
         rig.run(rig.adapter(), BASELINE)
+
+
+# -------------------------------------------------------------------------------------------
+# The Bruriah commit: the source the `--bruriah` executable imports, and the harness's own
+# -------------------------------------------------------------------------------------------
+
+
+def test_a_run_records_the_commit_of_the_source_the_bruriah_executable_imports(rig: _Rig) -> None:
+    run = rig.run(rig.adapter(), BASELINE)
+
+    assert run.provenance.bruriah_commit == _SOURCE_COMMIT
+    # The stub's `#!` line names this interpreter; it is asked where `bruriah` comes from.
+    assert rig.runner.probes() == [[sys.executable, "-P", "-c", _PROBE]]
+    server_dir = str(rig.runner.server_file.parent)
+    harness_dir = str(claude_code_module.HARNESS_SOURCE.parent)
+    for directory in (server_dir, harness_dir):
+        asked = [call[call.index("-C") + 1 :] for call in rig.runner.calls if directory in call]
+        assert ["rev-parse", "HEAD"] in [call[1:] for call in asked]
+        assert any("status" in call and "--porcelain" in call for call in asked)
+
+
+def test_the_bruriah_commit_is_resolved_once_per_adapter(rig: _Rig) -> None:
+    adapter = rig.adapter()
+    rig.run(adapter, BASELINE, 0)
+    rig.run(adapter, BASELINE, 1)
+
+    assert adapter.bruriah_commit() == _SOURCE_COMMIT
+    assert len(rig.runner.probes()) == 1
+
+
+@pytest.mark.parametrize(
+    ("server", "harness", "message"),
+    [
+        (_Tree(status=" M src/bruriah/server.py\n"), None, "uncommitted changes"),
+        (_Tree(commit=None), None, "not inside a git worktree"),
+        (_Tree(tracked=False), None, "not tracked"),
+        (_Tree(commit="not-a-sha"), None, "not-a-sha"),
+        (None, _Tree(status="M  evals/agent_regression/run.py\n"), "uncommitted changes"),
+        (None, _Tree(commit=None), "not inside a git worktree"),
+    ],
+    ids=["server-dirty", "server-no-git", "server-untracked", "server-bad-sha", "harness-dirty", "harness-no-git"],
+)
+def test_a_run_refuses_a_source_whose_commit_cannot_be_proven(
+    rig: _Rig, monkeypatch: pytest.MonkeyPatch, server: _Tree | None, harness: _Tree | None, message: str
+) -> None:
+    runner = _FakeRunner(rig.runner.server_file, server, harness)
+    monkeypatch.setattr(claude_code_module, "run_command", runner)
+
+    with pytest.raises(AdapterError, match=message):
+        rig.run(rig.adapter(), BASELINE)
+
+    assert not rig.claude_calls()
+
+
+def test_a_run_refuses_a_server_of_another_commit_than_the_harness(rig: _Rig, monkeypatch: pytest.MonkeyPatch) -> None:
+    old = "4d1f72e" + "0" * 33
+    monkeypatch.setattr(
+        claude_code_module, "run_command", _FakeRunner(rig.runner.server_file, server=_Tree(commit=old))
+    )
+
+    with pytest.raises(AdapterError) as raised:
+        rig.run(rig.adapter(), BASELINE)
+
+    assert old in str(raised.value)
+    assert _SOURCE_COMMIT in str(raised.value)
+    assert not rig.claude_calls()
+
+
+def test_the_runner_given_to_the_adapter_is_the_one_it_uses(rig: _Rig) -> None:
+    runner = _FakeRunner(rig.runner.server_file, server=_Tree(commit="f" * 40), harness=_Tree(commit="f" * 40))
+    adapter = ClaudeCodeAdapter(rig.config(), trap_set_digest=_DIGEST, repetitions=2, runner=runner)
+
+    assert adapter.bruriah_commit() == "f" * 40
+    assert runner.probes() and not rig.runner.calls
+
+
+def test_the_interpreter_is_the_console_script_s_shebang(tmp_path: Path) -> None:
+    script = tmp_path / "bin" / "bruriah"
+    _write_stub(script, "print('hi')\n")
+
+    assert executable_interpreter(script) == Path(sys.executable)
+
+
+def test_the_interpreter_of_an_env_shebang_is_found_on_path(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    bin_dir = tmp_path / "elsewhere"
+    python = _write_stub(bin_dir / "python3", "")
+    monkeypatch.setenv("PATH", str(bin_dir))
+    script = tmp_path / "bin" / "bruriah"
+    script.parent.mkdir()
+    script.write_text("#!/usr/bin/env python3\nprint('hi')\n", encoding="utf-8")
+
+    assert executable_interpreter(script) == python
+
+
+def test_the_interpreter_of_a_script_without_a_python_shebang_is_the_venv_next_to_it(tmp_path: Path) -> None:
+    bin_dir = tmp_path / "venv" / "bin"
+    python = _write_stub(bin_dir / "python", "")
+    # The form pip writes for a long interpreter path: a `/bin/sh` shebang that re-executes Python.
+    script = bin_dir / "bruriah"
+    script.write_text("#!/bin/sh\n'''exec' \"$0\" \"$@\"\n' '''\n", encoding="utf-8")
+    binary = bin_dir / "native-bruriah"
+    binary.write_bytes(b"\x7fELF\x00\x01")
+
+    assert executable_interpreter(script) == python
+    assert executable_interpreter(binary) == python
+
+
+def test_an_executable_with_no_findable_interpreter_is_refused(tmp_path: Path) -> None:
+    script = tmp_path / "bin" / "bruriah"
+    script.parent.mkdir()
+    script.write_text("#!/bin/sh\necho hi\n", encoding="utf-8")
+
+    with pytest.raises(AdapterError, match="interpreter"):
+        executable_interpreter(script)
 
 
 def test_a_run_that_exhausts_its_turns_is_a_turn_budget_exit(rig: _Rig) -> None:
@@ -1918,10 +2083,78 @@ def _rewrite_provenance(log: Path, field: str, value: str) -> None:
     log.write_text("".join(lines), encoding="utf-8")
 
 
-_CURRENT_PROVENANCE = {"client_version": _CLIENT_VERSION, "bruriah_version": bruriah.__version__, "model_id": _MODEL}
+_CURRENT_PROVENANCE = {
+    "client_version": _CLIENT_VERSION,
+    "bruriah_version": bruriah.__version__,
+    "bruriah_commit": _SOURCE_COMMIT,
+    "model_id": _MODEL,
+}
 
 
-@pytest.mark.parametrize("field", ["client_version", "bruriah_version"])
+def test_main_refuses_to_start_when_the_bruriah_source_is_dirty(
+    rig: _Rig, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    runner = _FakeRunner(rig.runner.server_file, server=_Tree(status=" M src/bruriah/server.py\n"))
+    monkeypatch.setattr(claude_code_module, "run_command", runner)
+    out = rig.root / "out"
+
+    exit_code = run_module.main(_main_args(rig, out, "--model", _MODEL))
+
+    assert exit_code == 2
+    err = capsys.readouterr().err
+    assert "uncommitted changes" in err
+    assert "src/bruriah/server.py" in err
+    assert not rig.claude_calls()
+    assert not out.exists()
+
+
+def test_main_records_the_bruriah_commit_in_every_run(rig: _Rig) -> None:
+    out = rig.root / "out"
+
+    assert run_module.main(_main_args(rig, out, "--model", _MODEL)) == 0
+
+    payload = json.loads((out / "runs.json").read_text(encoding="utf-8"))
+    assert {run["provenance"]["bruriah_commit"] for run in payload["runs"]} == {_SOURCE_COMMIT}
+    assert f"| bruriah_commit | {_SOURCE_COMMIT} (3) |" in (out / "report.md").read_text(encoding="utf-8")
+
+
+def test_main_refuses_to_resume_runs_recorded_without_a_bruriah_commit(
+    rig: _Rig, capsys: pytest.CaptureFixture[str]
+) -> None:
+    out = rig.root / "out"
+    assert run_module.main(_main_args(rig, out, "--model", _MODEL, "--conditions", BASELINE)) == 0
+    log = out / "runs.jsonl"
+    legacy = json.loads(log.read_text(encoding="utf-8"))
+    del legacy["provenance"]["bruriah_commit"]
+    log.write_text(json.dumps(legacy) + "\n", encoding="utf-8")
+    calls = len(rig.claude_calls())
+    capsys.readouterr()
+
+    exit_code = run_module.main(_main_args(rig, out, "--model", _MODEL))
+
+    assert exit_code == 2
+    err = capsys.readouterr().err
+    assert "bruriah_commit recorded unrecorded, current " + _SOURCE_COMMIT in err
+    assert len(rig.claude_calls()) == calls
+
+
+def test_main_runs_only_the_traps_named_by_trap_ids_and_digests_only_them(rig: _Rig) -> None:
+    other = _make_trap(rig.root, rig.origin, rig.commit, trap_id="trap-b")
+    out = rig.root / "out"
+
+    exit_code = run_module.main(
+        _main_args(rig, out, "--model", _MODEL, "--conditions", BASELINE, "--trap-ids", "trap-b")
+    )
+
+    assert exit_code == 0
+    payload = json.loads((out / "runs.json").read_text(encoding="utf-8"))
+    assert [run["trap_id"] for run in payload["runs"]] == ["trap-b"]
+    digest = payload["runs"][0]["provenance"]["trap_set_digest"]
+    assert digest == trap_set_digest([other])
+    assert digest != trap_set_digest(load_traps(rig.root / "traps"))
+
+
+@pytest.mark.parametrize("field", ["client_version", "bruriah_version", "bruriah_commit"])
 def test_main_refuses_to_resume_before_any_run_when_the_client_or_bruriah_version_changed(
     rig: _Rig, capsys: pytest.CaptureFixture[str], field: str
 ) -> None:

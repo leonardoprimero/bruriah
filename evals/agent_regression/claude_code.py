@@ -36,6 +36,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 import shlex
 import shutil
 import signal
@@ -43,7 +44,7 @@ import subprocess
 import sys
 import tempfile
 import time
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from typing import Any
@@ -103,6 +104,14 @@ _GIT_IDENTITY = {
 }
 _VERSION_TIMEOUT_SECONDS = 60
 _ERROR_TAIL = 2000
+
+# Runs one probe of the Bruriah source (its interpreter's import, then git) and returns it completed.
+CommandRunner = Callable[[Sequence[str]], subprocess.CompletedProcess[str]]
+# The file the harness runs from. Its commit must be the server's: a record states one commit for both.
+HARNESS_SOURCE = Path(__file__).resolve()
+_IMPORT_PROBE = "import bruriah; print(bruriah.__file__)"
+_COMMIT_ID = re.compile(r"[0-9a-f]{40}")
+_INTERPRETER_NAMES = ("python", "python3", "python.exe")
 
 
 @dataclass(frozen=True)
@@ -173,6 +182,96 @@ def _git_env(home: Path) -> dict[str, str]:
 
 def _tail(text: str) -> str:
     return text.strip()[-_ERROR_TAIL:]
+
+
+def run_command(argv: Sequence[str]) -> subprocess.CompletedProcess[str]:
+    """Run one probe without a shell, under a timeout, in the client's minimal environment: the
+    one the server the client spawns inherits, so the import probe sees what the server sees."""
+    try:
+        return subprocess.run(
+            list(argv),
+            env=_client_env(),
+            stdin=subprocess.DEVNULL,
+            capture_output=True,
+            text=True,
+            timeout=_VERSION_TIMEOUT_SECONDS,
+        )
+    except (OSError, subprocess.TimeoutExpired) as error:
+        raise AdapterError(f"{shlex.join(argv)} did not complete: {error}") from error
+
+
+def _is_interpreter(name: str) -> bool:
+    return name.startswith(("python", "pypy"))
+
+
+def executable_interpreter(executable: Path) -> Path:
+    """The Python that runs `executable`: the interpreter its `#!` line names, directly or through
+    `env`, else the venv's `python` next to the file it resolves to (a console script whose `#!`
+    line is a `/bin/sh` trampoline, or a native launcher)."""
+    with executable.open("rb") as handle:
+        first = handle.readline(4096)
+    if first.startswith(b"#!"):
+        words = first[2:].decode("utf-8", "replace").split()
+        if words and Path(words[0]).name == "env":
+            names = [word for word in words[1:] if not word.startswith("-")]
+            found = shutil.which(names[0]) if names else None
+            if found and _is_interpreter(Path(found).name):
+                return Path(found)
+        elif words and _is_interpreter(Path(words[0]).name):
+            return Path(words[0])
+    directory = executable.resolve().parent
+    for name in _INTERPRETER_NAMES:
+        candidate = directory / name
+        if candidate.is_file() and os.access(candidate, os.X_OK):
+            return candidate
+    raise AdapterError(
+        f"cannot find the Python interpreter that runs {executable}: its `#!` line names none and there is no "
+        f"python next to it in {directory}; the run cannot tell which Bruriah source it serves"
+    )
+
+
+def bruriah_source(interpreter: Path, runner: CommandRunner) -> Path:
+    """The `bruriah/__init__.py` that `interpreter` imports. `-P` keeps the current directory off
+    `sys.path`, as it is for the console script."""
+    completed = runner([str(interpreter), "-P", "-c", _IMPORT_PROBE])
+    lines = completed.stdout.strip().splitlines()
+    if completed.returncode != 0 or not lines:
+        raise AdapterError(f"{interpreter} cannot import bruriah: {_tail(completed.stderr) or 'no output'}")
+    return Path(lines[-1].strip())
+
+
+def source_commit(source: Path, runner: CommandRunner, what: str) -> str:
+    """The 40-character commit of the git worktree that holds `source`. Refused when `source` is
+    outside a git worktree or untracked in it (an installed copy inside a checkout), or when any
+    tracked file of the worktree differs from that commit: then no commit describes the code."""
+    directory = source.parent
+
+    def git(*args: str) -> subprocess.CompletedProcess[str]:
+        return runner(["git", "--no-optional-locks", "-C", str(directory), *args])
+
+    head = git("rev-parse", "HEAD")
+    if head.returncode != 0:
+        raise AdapterError(
+            f"{what} {source} is not inside a git worktree ({_tail(head.stderr) or 'git failed'}); a run must "
+            "name the commit it measures"
+        )
+    commit = head.stdout.strip()
+    if not _COMMIT_ID.fullmatch(commit):
+        raise AdapterError(f"{what}: git reports HEAD {commit!r} in {directory}, not a 40-character commit id")
+    if git("ls-files", "--error-unmatch", "--", source.name).returncode != 0:
+        raise AdapterError(
+            f"{what} {source} is not tracked by the git worktree around it, so commit {commit} does not "
+            "describe it; run Bruriah from its checkout"
+        )
+    status = git("status", "--porcelain", "--untracked-files=no")
+    if status.returncode != 0:
+        raise AdapterError(f"{what}: git status failed in {directory}: {_tail(status.stderr) or 'no output'}")
+    if status.stdout.strip():
+        raise AdapterError(
+            f"{what} in {directory} has uncommitted changes, so commit {commit} does not describe it "
+            f"({_tail(status.stdout)}); commit or stash them before a run"
+        )
+    return commit
 
 
 def _git(*args: str, cwd: Path | None = None, check: bool = True) -> subprocess.CompletedProcess[str]:
@@ -568,12 +667,21 @@ class ClaudeCodeAdapter:
     run with the client's own message in its stderr transcript.
     """
 
-    def __init__(self, config: ClaudeCodeConfig, *, trap_set_digest: str, repetitions: int) -> None:
+    def __init__(
+        self,
+        config: ClaudeCodeConfig,
+        *,
+        trap_set_digest: str,
+        repetitions: int,
+        runner: CommandRunner | None = None,
+    ) -> None:
         self._config = config
         self._trap_set_digest = trap_set_digest
         self._repetitions = repetitions
+        self._runner = runner if runner is not None else run_command
         self._client_version: str | None = None
         self._bruriah_checked = False
+        self._bruriah_commit: str | None = None
 
     def client_version(self) -> str:
         """`claude --version`, asked once per adapter."""
@@ -614,6 +722,25 @@ class ClaudeCodeAdapter:
                 f"records Bruriah {bruriah.__version__}; run it with the matching executable"
             )
         self._bruriah_checked = True
+
+    def bruriah_commit(self) -> str:
+        """The commit of the Bruriah source the `--bruriah` executable imports, asked once per
+        adapter. `bruriah.__version__` does not change with every commit, so a checkout of an older
+        commit would pass the version check; this is refused unless that source is a clean, tracked
+        checkout of the commit the harness itself runs from."""
+        if self._bruriah_commit is None:
+            executable = self._config.bruriah_executable
+            source = bruriah_source(executable_interpreter(executable), self._runner)
+            server = source_commit(source, self._runner, "the Bruriah source")
+            harness = source_commit(HARNESS_SOURCE, self._runner, "the harness source")
+            if server != harness:
+                raise AdapterError(
+                    f"{executable} serves Bruriah from commit {server} ({source}), but this harness runs from "
+                    f"commit {harness}; the MCP server and the harness must be the same code, so run with the "
+                    "bruriah executable of this checkout"
+                )
+            self._bruriah_commit = server
+        return self._bruriah_commit
 
     def _invoke(self, argv: list[str], workdir: Path, budget: int) -> tuple[str, str, int, bool, float]:
         """Run the client in `workdir` with the minimal logged-in environment. Past the time budget
@@ -658,6 +785,7 @@ class ClaudeCodeAdapter:
         config = self._config
         client_version = self.client_version()
         self._check_bruriah_version()
+        bruriah_commit = self.bruriah_commit()
 
         mirror = mirror_repository(trap, config.cache_dir)
         prepare_workdir(trap, mirror, workdir)
@@ -709,6 +837,7 @@ class ClaudeCodeAdapter:
                 bruriah_version=bruriah.__version__,
                 trap_set_digest=self._trap_set_digest,
                 repetitions=self._repetitions,
+                bruriah_commit=bruriah_commit,
             ),
             cost_usd=summary.cost_usd,
             transcript=transcript,

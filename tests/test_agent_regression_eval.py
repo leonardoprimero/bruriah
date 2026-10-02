@@ -892,13 +892,41 @@ def test_run_from_json_rejects_an_unknown_condition() -> None:
         run_from_json(payload)
 
 
-@pytest.mark.parametrize("field", [field.name for field in dataclasses.fields(Provenance)])
+@pytest.mark.parametrize(
+    "field", [field.name for field in dataclasses.fields(Provenance) if field.name != "bruriah_commit"]
+)
 def test_run_from_json_rejects_a_record_missing_a_provenance_field(field: str) -> None:
     """A run record without full provenance cannot be compared with a later run or dismissed."""
     payload = run_to_json(_make_run())
     del payload["provenance"][field]
 
     with pytest.raises(RunRecordError, match=field):
+        run_from_json(payload)
+
+
+def test_the_bruriah_commit_defaults_to_none_and_round_trips() -> None:
+    assert _make_provenance().bruriah_commit is None
+    run = _make_run(provenance=_make_provenance(bruriah_commit=_COMMIT))
+
+    payload = run_to_json(run)
+
+    assert payload["provenance"]["bruriah_commit"] == _COMMIT
+    assert run_from_json(json.loads(json.dumps(payload))) == run
+
+
+def test_a_record_written_before_the_bruriah_commit_loads_with_none() -> None:
+    payload = run_to_json(_make_run(provenance=_make_provenance(bruriah_commit=_COMMIT)))
+    del payload["provenance"]["bruriah_commit"]
+
+    assert run_from_json(payload).provenance.bruriah_commit is None
+
+
+@pytest.mark.parametrize("commit", [3, True, [_COMMIT]])
+def test_run_from_json_rejects_a_bruriah_commit_that_is_not_a_string(commit: object) -> None:
+    payload = run_to_json(_make_run())
+    payload["provenance"]["bruriah_commit"] = commit
+
+    with pytest.raises(RunRecordError, match="bruriah_commit"):
         run_from_json(payload)
 
 
@@ -1906,9 +1934,35 @@ def test_render_markdown_counts_the_single_provenance_value_of_a_homogeneous_run
     assert rows["client_version"] == "0.0.0 (3)"
     assert rows["model_id"] == "model-under-test (3)"
     assert rows["bruriah_version"] == "2.1.0 (3)"
+    assert rows["bruriah_commit"] == "unrecorded (3)"
     assert rows["date"] == _PROVENANCE_DATE
     assert rows["client"] == "replay"
     assert "warning" not in text.lower()
+
+
+def test_render_markdown_counts_every_bruriah_commit_with_a_warning_when_they_differ() -> None:
+    other = "f" * 40
+    runs = [
+        _make_run(repetition=repetition, provenance=_make_provenance(bruriah_commit=commit))
+        for repetition, commit in enumerate([_COMMIT, _COMMIT, other])
+    ]
+    runs.append(_make_run(repetition=3))
+    text = render_markdown(runs, summarize(runs))
+
+    assert _provenance_rows(text)["bruriah_commit"] == f"{_COMMIT} (2), {other} (1), unrecorded (1)"
+    assert _warnings(runs) == [
+        "Warning: this run set mixes 3 Bruriah commits; its rates and comparisons pool runs that did not "
+        "share one Bruriah commit."
+    ]
+
+
+def test_render_markdown_does_not_warn_on_one_bruriah_commit() -> None:
+    runs = [
+        _make_run(repetition=repetition, provenance=_make_provenance(bruriah_commit=_COMMIT)) for repetition in (0, 1)
+    ]
+
+    assert _provenance_rows(render_markdown(runs, summarize(runs)))["bruriah_commit"] == f"{_COMMIT} (2)"
+    assert _warnings(runs) == []
 
 
 def test_render_markdown_lists_every_client_and_model_version_of_a_mixed_run_with_a_warning() -> None:
@@ -1999,6 +2053,7 @@ def test_render_json_provenance_lists_every_value_of_a_homogeneous_run_with_its_
         "bruriah_version": [{"value": "2.1.0", "runs": 3}],
         "trap_set_digest": [{"value": "a" * 64, "runs": 3}],
         "repetitions": [{"value": 2, "runs": 3}],
+        "bruriah_commit": [{"value": None, "runs": 3}],
     }
     assert set(provenance) == {field.name for field in dataclasses.fields(Provenance)}
 
@@ -2160,6 +2215,57 @@ def test_main_dry_run_plans_only_gated_when_asked_for_it(tmp_path: Path, capsys:
         "trap-a gated repetition 0",
         "trap-a gated repetition 1",
     ]
+
+
+def test_main_dry_run_plans_only_the_traps_named_by_trap_ids(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    traps_dir = tmp_path / "traps"
+    for trap_id in ("trap-a", "trap-b", "trap-c"):
+        _make_trap(traps_dir, trap_id)
+
+    exit_code = main(
+        ["--dry-run", "--traps", str(traps_dir), "--repetitions", "1", "--conditions", BASELINE]
+        + ["--trap-ids", "trap-c", "trap-a"]
+    )
+
+    lines = capsys.readouterr().out.splitlines()
+    assert exit_code == 0
+    assert lines == [
+        "restricted by --trap-ids to 2 of 3 traps: trap-a, trap-c",
+        "2 planned invocations: 2 traps x 1 conditions x 1 repetitions",
+        "trap-a baseline repetition 0",
+        "trap-c baseline repetition 0",
+    ]
+
+
+def test_main_refuses_an_unknown_trap_id_and_lists_the_known_ones(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    traps_dir = tmp_path / "traps"
+    for trap_id in ("trap-a", "trap-b"):
+        _make_trap(traps_dir, trap_id)
+
+    exit_code = main(["--dry-run", "--traps", str(traps_dir), "--trap-ids", "trap-a", "trap-z"])
+
+    captured = capsys.readouterr()
+    assert exit_code == 2
+    assert "trap-z" in captured.err
+    assert "known: trap-a, trap-b" in captured.err
+    assert "planned invocations" not in captured.out
+
+
+def test_select_traps_keeps_the_named_traps_and_the_digest_covers_only_them(tmp_path: Path) -> None:
+    for trap_id in ("trap-a", "trap-b", "trap-c"):
+        _make_trap(tmp_path, trap_id)
+    traps = load_traps(tmp_path)
+
+    selected = run_module.select_traps(traps, ["trap-b", "trap-a", "trap-b"])
+
+    assert sorted(trap.trap_id for trap in selected) == ["trap-a", "trap-b"]
+    assert trap_set_digest(selected) == trap_set_digest([trap for trap in traps if trap.trap_id != "trap-c"])
+    assert trap_set_digest(selected) != trap_set_digest(traps)
+    assert run_module.select_traps(traps, None) == traps
 
 
 def test_replay_adapter_returns_the_stored_run_for_the_requested_repetition(tmp_path: Path) -> None:

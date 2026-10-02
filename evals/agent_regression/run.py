@@ -11,12 +11,16 @@ run record), `report.md`, and the raw client transcripts under `transcripts/` in
 record is appended to `runs.jsonl` as soon as the run finishes, and a run the adapter could not
 record is appended to `failures.jsonl` and the benchmark moves on (exit code 3). Running the same
 command again skips every invocation `runs.jsonl` already holds for this trap set, so it retries
-exactly the failed and unfinished ones. A resume whose client, model or Bruriah version differs from
-the runs already recorded for the trap set is refused (exit code 2) rather than mixed into them.
+exactly the failed and unfinished ones. A resume whose client, model, Bruriah version or Bruriah
+commit differs from the runs already recorded for the trap set is refused (exit code 2) rather than
+mixed into them. A real run whose Bruriah source is not one clean commit, the harness's own, does
+not start (exit code 2). `--trap-ids` restricts the run to some traps; the trap set digest is then
+the digest of those traps.
 
 Usage:
     uv run python evals/agent_regression/run.py --dry-run
     uv run python evals/agent_regression/run.py --dry-run --traps <dir> --repetitions 5
+    uv run python evals/agent_regression/run.py --dry-run --trap-ids <id> [<id> ...]
     uv run python evals/agent_regression/run.py --model <id> [--claude <path>] [--bruriah <path>]
 """
 
@@ -48,7 +52,9 @@ DEFAULT_TRAPS_DIR = _HERE / "traps"
 DEFAULT_CACHE_DIR = Path(platformdirs.user_cache_dir("bruriah")) / "agent-regression"
 # What every run of one trap set in one runs log must share: a report over runs of different
 # clients, models or servers would compare them as if they were one run set.
-PINNED_PROVENANCE = ("client_version", "model_id", "bruriah_version")
+PINNED_PROVENANCE = ("client_version", "model_id", "bruriah_version", "bruriah_commit")
+# How a refusal names a pinned value a recorded run does not carry (`None`).
+_UNRECORDED = "unrecorded"
 
 
 class ProvenanceMismatch(RuntimeError):
@@ -69,6 +75,19 @@ def plan_invocations(traps: Iterable[Trap], conditions: Sequence[str], repetitio
         for condition in conditions
         for repetition in range(repetitions)
     ]
+
+
+def select_traps(traps: Sequence[Trap], trap_ids: Iterable[str] | None) -> Sequence[Trap]:
+    """The traps whose id is in `trap_ids`, or all of them when it is `None`. An id no trap has
+    raises `ValueError` naming the known ids."""
+    if trap_ids is None:
+        return traps
+    wanted = set(trap_ids)
+    known = sorted(trap.trap_id for trap in traps)
+    unknown = sorted(wanted.difference(known))
+    if unknown:
+        raise ValueError(f"unknown trap id(s): {', '.join(unknown)}; known: {', '.join(known)}")
+    return [trap for trap in traps if trap.trap_id in wanted]
 
 
 def _positive_int(text: str) -> int:
@@ -102,6 +121,13 @@ def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Agent regression benchmark runner.")
     parser.add_argument("--dry-run", action="store_true", help="list the planned invocations and exit")
     parser.add_argument("--traps", type=Path, default=DEFAULT_TRAPS_DIR, help="directory of trap directories")
+    parser.add_argument(
+        "--trap-ids",
+        nargs="+",
+        metavar="ID",
+        default=None,
+        help="run only these traps of --traps; the trap set digest covers only them",
+    )
     parser.add_argument("--repetitions", type=_positive_int, default=DEFAULT_REPETITIONS, help="runs per trap")
     parser.add_argument(
         "--conditions",
@@ -194,11 +220,11 @@ def _recorded_runs(
     return recorded
 
 
-def _recorded_provenance(path: Path, digest: str) -> dict[str, set[str]]:
+def _recorded_provenance(path: Path, digest: str) -> dict[str, set[str | None]]:
     """Every value of each pinned provenance field among the runs `path` holds for this trap set,
     whether or not they are in this plan. Read after `_recorded_runs`, which has already rejected
     or repaired every malformed line."""
-    values: dict[str, set[str]] = {field: set() for field in PINNED_PROVENANCE}
+    values: dict[str, set[str | None]] = {field: set() for field in PINNED_PROVENANCE}
     if not path.is_file():
         return values
     for raw in path.read_bytes().split(b"\n"):
@@ -211,11 +237,13 @@ def _recorded_provenance(path: Path, digest: str) -> dict[str, set[str]]:
     return values
 
 
-def _provenance_mismatch(recorded: Mapping[str, set[str]], current: Mapping[str, str]) -> str | None:
+def _provenance_mismatch(recorded: Mapping[str, set[str | None]], current: Mapping[str, str]) -> str | None:
     """Each field of `current` whose value is not the one value every recorded run shares, with
-    the recorded and current values; `None` when all match or nothing is recorded."""
+    the recorded and current values; `None` when all match or nothing is recorded. A recorded run
+    that does not carry the field (`None`) never matches."""
     differing = [
-        f"{field} recorded {', '.join(sorted(recorded[field]))}, current {value}"
+        f"{field} recorded {', '.join(sorted(_UNRECORDED if each is None else each for each in recorded[field]))}, "
+        f"current {value}"
         for field, value in current.items()
         if recorded[field] and recorded[field] != {value}
     ]
@@ -284,8 +312,8 @@ def _run(args: argparse.Namespace, traps: Sequence[Trap], conditions: Sequence[s
         if mismatch:
             raise ProvenanceMismatch(
                 f"{runs_log} already holds runs of this trap set with another provenance ({mismatch}); "
-                "refusing to mix them into one run set. Resume with the recorded client, model and Bruriah, "
-                "or write to a new --out"
+                "refusing to mix them into one run set. Resume with the recorded client, model and Bruriah "
+                "version and commit, or write to a new --out"
             )
 
     def record_run(run: AgentRun) -> None:
@@ -297,11 +325,19 @@ def _run(args: argparse.Namespace, traps: Sequence[Trap], conditions: Sequence[s
 
     try:
         adapter = ClaudeCodeAdapter(config, trap_set_digest=digest, repetitions=args.repetitions)
-        # The client and Bruriah versions are known before any run, so a resume that changed them
-        # stops here and spends nothing. The model is only known from a run's init line, so
-        # `record_run` checks it before that run's record is appended.
+        # A Bruriah source that is not one clean commit, the harness's own, refuses here rather than
+        # failing every run. The client version and Bruriah version and commit are known before any
+        # run, so a resume that changed them stops here and spends nothing. The model is only known
+        # from a run's init line, so `record_run` checks it before that run's record is appended.
+        bruriah_commit = adapter.bruriah_commit()
         if any(pinned.values()):
-            check_provenance({"client_version": adapter.client_version(), "bruriah_version": bruriah.__version__})
+            check_provenance(
+                {
+                    "client_version": adapter.client_version(),
+                    "bruriah_version": bruriah.__version__,
+                    "bruriah_commit": bruriah_commit,
+                }
+            )
         out.mkdir(parents=True, exist_ok=True)
         new_runs = run_benchmark(
             traps,
@@ -339,12 +375,16 @@ def main(argv: Sequence[str] | None = None) -> int:
     # Canonical order, duplicates dropped, whatever order the flags came in.
     conditions = tuple(condition for condition in CONDITIONS if condition in args.conditions)
     try:
-        traps = load_traps(args.traps)
-    except TrapError as exc:
+        loaded = load_traps(args.traps)
+        traps = select_traps(loaded, args.trap_ids)
+    except (TrapError, ValueError) as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 2
 
     plan = plan_invocations(traps, conditions, args.repetitions)
+    if args.trap_ids is not None:
+        selected = ", ".join(sorted(trap.trap_id for trap in traps))
+        print(f"restricted by --trap-ids to {len(traps)} of {len(loaded)} traps: {selected}")
     if not args.dry_run:
         return _run(args, traps, conditions)
 

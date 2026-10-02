@@ -50,14 +50,17 @@ from agent_regression.traps import TrapError, load_traps  # noqa: E402
 DEFAULT_TRAPS_DIR = _HERE / "traps"
 # Provenance fields that can differ between the runs of one run set, so the header lists every
 # value present with its run count instead of the first run's.
-_COUNTED_PROVENANCE = ("client_version", "model_id", "bruriah_version")
+_COUNTED_PROVENANCE = ("client_version", "model_id", "bruriah_version", "bruriah_commit")
 # The counted fields a provenance warning names when a run set mixes their values: (field, plural
 # for the count, what the runs did not share).
 _MIXED_PROVENANCE = (
     ("client_version", "client versions", "client"),
     ("model_id", "models", "model"),
     ("bruriah_version", "Bruriah versions", "Bruriah version"),
+    ("bruriah_commit", "Bruriah commits", "Bruriah commit"),
 )
+# How the Markdown header shows a provenance value a record does not carry (`None`).
+_UNRECORDED = "unrecorded"
 
 
 def write_report(path: Path, text: str) -> None:
@@ -152,11 +155,11 @@ def _ordered_conditions(summaries: Mapping[str, ConditionSummary]) -> list[str]:
     return [condition for condition in CONDITIONS if condition in summaries]
 
 
-def _counted_values(runs: Sequence[AgentRun], field: str) -> list[tuple[str, int]]:
+def _counted_values(runs: Sequence[AgentRun], field: str) -> list[tuple[Any, int]]:
     """Every value of the provenance `field` among `runs` with its run count, most runs first and
-    ties by value, so the rendering is deterministic."""
+    ties by value with `None` last, so the rendering is deterministic."""
     counts = Counter(getattr(run.provenance, field) for run in runs)
-    return sorted(counts.items(), key=lambda item: (-item[1], item[0]))
+    return sorted(counts.items(), key=lambda item: (-item[1], item[0] is None, "" if item[0] is None else item[0]))
 
 
 def _and_list(items: Sequence[str]) -> str:
@@ -169,7 +172,10 @@ def _provenance_lines(runs: Sequence[AgentRun]) -> list[str]:
     lines = ["| field | value |", "|---|---|"]
     for field in fields(Provenance):
         if field.name in _COUNTED_PROVENANCE:
-            value = ", ".join(f"{value} ({count})" for value, count in _counted_values(runs, field.name))
+            value = ", ".join(
+                f"{_UNRECORDED if value is None else value} ({count})"
+                for value, count in _counted_values(runs, field.name)
+            )
         else:
             value = getattr(provenance, field.name)
         lines.append(f"| {field.name} | {value} |")
