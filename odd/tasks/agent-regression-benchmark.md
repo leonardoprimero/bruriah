@@ -309,6 +309,41 @@ Also out of scope: a Codex or Cursor adapter, an LLM-judge column, a private-cor
 
 ## Progress / evidence
 
+- 2026-10-02: **run set B, Part 1 (confirmatory) finished** -- 45 of 45 runs, no error or
+  indeterminate run, $97.03, homogeneous provenance (`claude-fable-5-1`, Claude Code 2.1.287,
+  Bruriah commit `2bfaeae`, fresh index cache). Launched 19:33Z from the dedicated worktree, ended
+  22:08Z. Instrument checked at runs 6 and 11 (MCP connected, `investigate_work` returned the
+  decision `89e4288`); outcomes were not inspected before the set closed.
+
+  | condition | SRR (code rule) | RR | informed overrides | consult rate |
+  |---|---|---|---|---|
+  | baseline | 11/15 = 0.73 [0.48, 0.89] | 14/15 | 3 | 0.00 |
+  | unprompted | 12/15 = 0.80 [0.55, 0.93] | 14/15 | 2 | 0.00 |
+  | prompted | 4/15 = 0.27 [0.11, 0.52] | 14/15 | 10 | 1.00 |
+
+  **Primary test (pre-registered): SRR prompted vs baseline, pooled Fisher exact, p = 0.0268.**
+  Unprompted vs prompted p = 0.0092; baseline vs unprompted p = 1.0; RR p = 1.0 in every pair.
+
+  **Hand audit of all 15 informed overrides** (read-only explorer, two decisive messages re-read by
+  the parent): 10 genuine, 5 spurious. The spurious ones name #8008 as context ("the picker moved
+  from chrono to jiff in #8008, so I assumed NaiveDate") without acknowledging a departure:
+  baseline 3 of 3, unprompted 1 of 2, prompted 1 of 10 (`egui-datepicker-chrono` prompted-0);
+  `prompted-4` is borderline ("opt-in feature, not a switch back"). Audited SRR: baseline 14/15,
+  unprompted 13/15, prompted 5/15 (6/15 counting the borderline one); Fisher prompted vs baseline
+  p = 0.0017 (0.0052 strict). All four prompted silent regressions are `egui-image-formats`, where
+  `investigate_work` returned no constraining decision: a retrieval limit, not disobedience.
+
+  **Reading.** With the instruction to consult it, Bruriah does not stop agents from undoing a
+  decision (RR 0.93 everywhere) but makes the undoing visible: silent regressions fall from about
+  0.9 to about 0.3. Without the instruction agents never consulted it (consult rate 0.00), so the
+  tool alone changes nothing; the client integration is what matters. Limits: three traps, one
+  model, N = 15 per condition, public repositories.
+
+  **Instrument correction.** The citation rule is not one-sided as `citation.py` claims: an
+  incidental mention of the decision's identifier counts as a citation, and that hides a silent
+  regression (5 of 15 here, concentrated in baseline). The code-rule SRR stays the pre-registered
+  primary; the audited figures are reported next to it.
+
 - 2026-10-02: the two benchmark ranges never reviewed before are now reviewed as committed-only
   slices, each in a detached worktree at the slice tip; all closed approved and acknowledged:
   - Adapter (`b14b2aa..ca8e02f`, 672 lines, high tier, 4 lenses): `review-a17764baac1075f3`.
