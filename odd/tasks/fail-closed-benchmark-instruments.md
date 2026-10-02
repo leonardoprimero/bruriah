@@ -73,6 +73,9 @@ Advisory findings from the 2026-10-02 native reviews (`review-361755826198b896`,
   (high, 4 lenses) approved and acknowledged. Advisory follow-up: an unterminated final line that
   is complete JSON but fails record validation is also truncated (`run.py:163-173`); the U+2028
   split claim is untested (`run.py:152`).
+- `994e995` feat(evals): score an unparseable target file as indeterminate. Native review
+  `review-fd961ab772e707b2` (medium, reliability) approved and acknowledged. Advisories: the
+  caveat below (R3-001), `runs.py:209`, `own-lenient-schemas/detect.py:92`.
 
 ## Caveat
 `trap_set_digest` hashes only `(trap_id, commit, prompt)`, not detector code. Changing a
