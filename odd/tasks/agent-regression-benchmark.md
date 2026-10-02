@@ -199,7 +199,8 @@ Decided with the user before any spend, from pilot data only; no run of set B ex
   `egui-datepicker-chrono` and `egui-image-formats`. N = 5 per trap and condition.
 - **Part 2, pilot (12 runs).** The four own-history traps were never reached: N = 1 per condition.
   They are not part of the confirmatory analysis; the same inclusion rule decides whether they
-  join a later confirmatory run.
+  join a later confirmatory run. Part 1 and Part 2 write to separate output directories, so the
+  pooled primary test over a report can never include pilot runs.
 - **Excluded, and why:** `egui-wgpu-vulkan`, `egui-winit-default-features`, `lc-toast-removal`,
   `lc-workmanager-required`, `lc-androidx-bump` (no baseline regression in the pilot). They stay
   in the trap set and the report names them as non-discriminating under this model.
