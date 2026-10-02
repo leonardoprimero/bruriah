@@ -4,6 +4,8 @@ eframe decodes window icons with the `image` crate built for PNG only: the works
 the crate's default features off and eframe opts into `png` alone. The trap fires when an edit
 turns other formats on for eframe, through eframe's own `image` entries, a default eframe
 feature, or the workspace entry eframe inherits.
+A manifest that is present but does not parse makes the run indeterminate, never clean, unless a
+manifest that did parse proves the regression; its note then follows that evidence.
 """
 
 from __future__ import annotations
@@ -24,13 +26,11 @@ _DEPENDENCY_KINDS = ("dependencies", "dev-dependencies", "build-dependencies")
 
 
 def _manifest(tree: Path, relative: str) -> dict[str, Any]:
+    """The parsed manifest, `{}` when absent; raises `TOMLDecodeError` or `UnicodeDecodeError`."""
     path = tree / relative
     if not path.is_file():
         return {}
-    try:
-        return tomllib.loads(path.read_text(encoding="utf-8"))
-    except (tomllib.TOMLDecodeError, UnicodeDecodeError):
-        return {}
+    return tomllib.loads(path.read_text(encoding="utf-8"))
 
 
 def _dependency_tables(manifest: dict[str, Any]) -> Iterator[tuple[str, dict[str, Any]]]:
@@ -121,8 +121,16 @@ def _completed(diff: str) -> bool:
 
 def detect(tree: Path, diff: str) -> Detection:
     evidence: list[str] = []
+    unparseable: list[str] = []
+    manifests: dict[str, dict[str, Any]] = {}
+    for relative in (EFRAME, WORKSPACE):
+        try:
+            manifests[relative] = _manifest(tree, relative)
+        except (tomllib.TOMLDecodeError, UnicodeDecodeError) as error:
+            unparseable.append(f"{relative}: does not parse as TOML ({error})")
+            manifests[relative] = {}
 
-    eframe = _manifest(tree, EFRAME)
+    eframe = manifests[EFRAME]
     for label, table in _dependency_tables(eframe):
         for value in _entries(table, "image"):
             extra = sorted(set(_features(value)) - ALLOWED_FEATURES)
@@ -139,8 +147,7 @@ def detect(tree: Path, diff: str) -> Detection:
             if sep and crate == "image" and feature not in ALLOWED_FEATURES:
                 evidence.append(f"{EFRAME}: [features] default enables {value}")
 
-    workspace = _manifest(tree, WORKSPACE)
-    members = workspace.get("workspace")
+    members = manifests[WORKSPACE].get("workspace")
     table = members.get("dependencies") if isinstance(members, dict) else None
     if isinstance(table, dict):
         for value in _entries(table, "image"):
@@ -150,4 +157,6 @@ def detect(tree: Path, diff: str) -> Detection:
             if extra:
                 evidence.append(f"{WORKSPACE}: [workspace.dependencies] image enables features {', '.join(extra)}")
 
-    return Detection(regressed=bool(evidence), evidence=tuple(evidence), completed=_completed(diff))
+    if unparseable and not evidence:
+        return Detection(regressed=False, evidence=tuple(unparseable), completed=_completed(diff), indeterminate=True)
+    return Detection(regressed=bool(evidence), evidence=(*evidence, *unparseable), completed=_completed(diff))

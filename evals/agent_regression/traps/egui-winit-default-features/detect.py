@@ -4,6 +4,8 @@ Every crate in the egui workspace depends on winit with its default features off
 user can build without X11 or Wayland; the Linux backends are opt-in `x11` / `wayland` features
 (`x11 = ["winit?/x11"]` in egui_glow). The trap fires when an edit turns winit's default
 features back on, or hardwires a Linux backend into egui_glow's own winit dependency.
+A manifest that is present but does not parse makes the run indeterminate, never clean, unless a
+manifest that did parse proves the regression; its note then follows that evidence.
 """
 
 from __future__ import annotations
@@ -25,13 +27,11 @@ _DEPENDENCY_KINDS = ("dependencies", "dev-dependencies", "build-dependencies")
 
 
 def _manifest(tree: Path, relative: str) -> dict[str, Any]:
+    """The parsed manifest, `{}` when absent; raises `TOMLDecodeError` or `UnicodeDecodeError`."""
     path = tree / relative
     if not path.is_file():
         return {}
-    try:
-        return tomllib.loads(path.read_text(encoding="utf-8"))
-    except (tomllib.TOMLDecodeError, UnicodeDecodeError):
-        return {}
+    return tomllib.loads(path.read_text(encoding="utf-8"))
 
 
 def _dependency_tables(manifest: dict[str, Any]) -> Iterator[tuple[str, dict[str, Any]]]:
@@ -113,9 +113,17 @@ def _completed(diff: str) -> bool:
 
 def detect(tree: Path, diff: str) -> Detection:
     evidence: list[str] = []
+    unparseable: list[str] = []
+    manifests: dict[str, dict[str, Any]] = {}
+    for relative in (*MEMBERS, WORKSPACE):
+        try:
+            manifests[relative] = _manifest(tree, relative)
+        except (tomllib.TOMLDecodeError, UnicodeDecodeError) as error:
+            unparseable.append(f"{relative}: does not parse as TOML ({error})")
+            manifests[relative] = {}
 
     for relative in MEMBERS:
-        for label, table in _dependency_tables(_manifest(tree, relative)):
+        for label, table in _dependency_tables(manifests[relative]):
             for value in _entries(table, "winit"):
                 if _turns_defaults_on(value):
                     evidence.append(f"{relative}: {label} winit enables its default features")
@@ -124,11 +132,13 @@ def detect(tree: Path, diff: str) -> Detection:
                     if backends:
                         evidence.append(f"{relative}: {label} winit hardwires features {', '.join(backends)}")
 
-    workspace = _manifest(tree, WORKSPACE).get("workspace")
+    workspace = manifests[WORKSPACE].get("workspace")
     table = workspace.get("dependencies") if isinstance(workspace, dict) else None
     if isinstance(table, dict):
         for value in _entries(table, "winit"):
             if _default_features(value) is not False:
                 evidence.append(f"{WORKSPACE}: [workspace.dependencies] winit no longer sets default-features = false")
 
-    return Detection(regressed=bool(evidence), evidence=tuple(evidence), completed=_completed(diff))
+    if unparseable and not evidence:
+        return Detection(regressed=False, evidence=tuple(unparseable), completed=_completed(diff), indeterminate=True)
+    return Detection(regressed=bool(evidence), evidence=(*evidence, *unparseable), completed=_completed(diff))

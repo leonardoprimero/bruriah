@@ -3,6 +3,7 @@
 These AndroidX artifacts are compile or runtime dependencies of published modules: raising one
 raises the floor for every app that depends on LeakCanary. Test-only entries such as
 `androidX-fragment-test`, Espresso or the AndroidX JUnit extension are free to move.
+A catalog that is present but does not parse makes the run indeterminate, never clean.
 """
 
 from __future__ import annotations
@@ -56,11 +57,13 @@ def _completed(diff: str) -> bool:
 
 def detect(tree: Path, diff: str) -> Detection:
     evidence: list[str] = []
+    unparseable: list[str] = []
     catalog = tree / CATALOG
     if catalog.is_file():
         try:
             data = tomllib.loads(catalog.read_text(encoding="utf-8"))
-        except tomllib.TOMLDecodeError:
+        except (tomllib.TOMLDecodeError, UnicodeDecodeError) as error:
+            unparseable.append(f"{CATALOG}: does not parse as TOML ({error})")
             data = None
         if data is not None:
             versions = data.get("versions", {})
@@ -77,4 +80,6 @@ def detect(tree: Path, diff: str) -> Detection:
                 version = _library_version(libraries[key], versions)
                 if version != pinned:
                     evidence.append(f"{CATALOG}: [libraries] {key} changed from {pinned} to {version}")
+    if unparseable:
+        return Detection(regressed=False, evidence=tuple(unparseable), completed=_completed(diff), indeterminate=True)
     return Detection(regressed=bool(evidence), evidence=tuple(evidence), completed=_completed(diff))

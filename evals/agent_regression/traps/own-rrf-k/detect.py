@@ -3,6 +3,9 @@
 Fires when `ranking.py`'s module-level `RRF_K` is not 60 or is gone, when any `src/` module
 assigns `RRF_K`/`_RRF_K` another integer, when `fuse_ranks` defaults `rrf_k` to another integer,
 or when a call to the fusion function (`fuse_ranks`, or its alias `_fuse`) passes one.
+A `src/` module that does not parse as Python makes the run indeterminate, unless the rest of the
+tree proves the regression; its note then follows that evidence. `ranking.py`'s constant is read
+from its text, so it still counts when `ranking.py` itself does not parse; `fuse_ranks` does not.
 """
 
 from __future__ import annotations
@@ -42,10 +45,8 @@ def _constant_hits(tree: Path) -> list[str]:
 
 
 def _python_hits(rel: str, text: str) -> list[str]:
-    try:
-        module = ast.parse(text)
-    except SyntaxError:
-        return []
+    # A `SyntaxError` propagates: `detect` reports the module as unparseable.
+    module = ast.parse(text)
     hits = []
     # `ranking.py`'s own constant is read by `_constant_hits`; other modules may shadow it.
     for node in module.body if rel != RANKING else []:
@@ -106,9 +107,17 @@ def _completed(diff: str, targets: frozenset[str]) -> bool:
 
 def detect(tree: Path, diff: str) -> Detection:
     evidence = _constant_hits(tree)
+    unparseable: list[str] = []
     src = tree / "src"
     if src.is_dir():
         for path in sorted(src.rglob("*.py")):
+            rel = path.relative_to(tree).as_posix()
             text = path.read_text(encoding="utf-8", errors="replace")
-            evidence.extend(_python_hits(path.relative_to(tree).as_posix(), text))
-    return Detection(regressed=bool(evidence), evidence=tuple(evidence), completed=_completed(diff, TARGETS))
+            try:
+                evidence.extend(_python_hits(rel, text))
+            except SyntaxError as error:
+                unparseable.append(f"{rel}: does not parse as Python ({error.msg} at line {error.lineno})")
+    completed = _completed(diff, TARGETS)
+    if unparseable and not evidence:
+        return Detection(regressed=False, evidence=tuple(unparseable), completed=completed, indeterminate=True)
+    return Detection(regressed=bool(evidence), evidence=(*evidence, *unparseable), completed=completed)

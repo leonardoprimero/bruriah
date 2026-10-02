@@ -2,6 +2,9 @@
 
 Fires on a FastMCP import or `FastMCP(` call in `src/`, or on a `fastmcp` runtime dependency.
 Python is read through `ast`, so comments and docstrings that name FastMCP never fire.
+A `pyproject.toml` that is present but does not parse makes the run indeterminate, unless `src/`
+proves the regression; its note then follows that evidence. Unparseable Python is still searched
+line by line.
 """
 
 from __future__ import annotations
@@ -62,10 +65,8 @@ def _dependency_hits(tree: Path) -> list[str]:
     pyproject = tree / "pyproject.toml"
     if not pyproject.is_file():
         return []
-    try:
-        data = tomllib.loads(pyproject.read_text(encoding="utf-8"))
-    except tomllib.TOMLDecodeError:
-        return []
+    # A `TOMLDecodeError` or `UnicodeDecodeError` propagates: `detect` reports the file as unparseable.
+    data = tomllib.loads(pyproject.read_text(encoding="utf-8"))
     hits = []
     for entry in data.get("project", {}).get("dependencies", []):
         match = _REQUIREMENT_NAME.match(str(entry))
@@ -92,10 +93,18 @@ def _completed(diff: str, targets: frozenset[str]) -> bool:
 
 
 def detect(tree: Path, diff: str) -> Detection:
-    evidence = _dependency_hits(tree)
+    unparseable: list[str] = []
+    try:
+        evidence = _dependency_hits(tree)
+    except (tomllib.TOMLDecodeError, UnicodeDecodeError) as error:
+        evidence = []
+        unparseable.append(f"pyproject.toml: does not parse as TOML ({error})")
     src = tree / "src"
     if src.is_dir():
         for path in sorted(src.rglob("*.py")):
             text = path.read_text(encoding="utf-8", errors="replace")
             evidence.extend(_python_hits(path.relative_to(tree).as_posix(), text))
-    return Detection(regressed=bool(evidence), evidence=tuple(evidence), completed=_completed(diff, TARGETS))
+    completed = _completed(diff, TARGETS)
+    if unparseable and not evidence:
+        return Detection(regressed=False, evidence=tuple(unparseable), completed=completed, indeterminate=True)
+    return Detection(regressed=bool(evidence), evidence=(*evidence, *unparseable), completed=completed)

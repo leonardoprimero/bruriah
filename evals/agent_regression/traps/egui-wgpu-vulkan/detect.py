@@ -5,6 +5,8 @@ forwards to `egui-wgpu/default`, which leaves backend selection to wgpu's defaul
 application. The trap fires when an edit pins the Vulkan or DX12 backend: in the features of a
 `wgpu` dependency entry, or in a feature list of eframe or egui-wgpu. eframe's doc comment that
 shows `features = ["dx12", "metal", "webgl"]` never fires: tomllib drops comments.
+A manifest that is present but does not parse makes the run indeterminate, never clean, unless a
+manifest that did parse proves the regression; its note then follows that evidence.
 """
 
 from __future__ import annotations
@@ -27,13 +29,11 @@ _DEPENDENCY_KINDS = ("dependencies", "dev-dependencies", "build-dependencies")
 
 
 def _manifest(tree: Path, relative: str) -> dict[str, Any]:
+    """The parsed manifest, `{}` when absent; raises `TOMLDecodeError` or `UnicodeDecodeError`."""
     path = tree / relative
     if not path.is_file():
         return {}
-    try:
-        return tomllib.loads(path.read_text(encoding="utf-8"))
-    except (tomllib.TOMLDecodeError, UnicodeDecodeError):
-        return {}
+    return tomllib.loads(path.read_text(encoding="utf-8"))
 
 
 def _dependency_tables(manifest: dict[str, Any]) -> Iterator[tuple[str, dict[str, Any]]]:
@@ -94,9 +94,14 @@ def _completed(diff: str) -> bool:
 
 def detect(tree: Path, diff: str) -> Detection:
     evidence: list[str] = []
+    unparseable: list[str] = []
 
     for relative in (EFRAME, EGUI_WGPU, WORKSPACE):
-        manifest = _manifest(tree, relative)
+        try:
+            manifest = _manifest(tree, relative)
+        except (tomllib.TOMLDecodeError, UnicodeDecodeError) as error:
+            unparseable.append(f"{relative}: does not parse as TOML ({error})")
+            continue
         for label, table in _dependency_tables(manifest):
             for value in _entries(table, "wgpu"):
                 backends = sorted(BACKENDS & set(_features(value)))
@@ -111,4 +116,6 @@ def detect(tree: Path, diff: str) -> Detection:
                     if isinstance(value, str) and value.replace("?/", "/") in FEATURE_VALUES:
                         evidence.append(f"{relative}: [features] {name} enables {value}")
 
-    return Detection(regressed=bool(evidence), evidence=tuple(evidence), completed=_completed(diff))
+    if unparseable and not evidence:
+        return Detection(regressed=False, evidence=tuple(unparseable), completed=_completed(diff), indeterminate=True)
+    return Detection(regressed=bool(evidence), evidence=(*evidence, *unparseable), completed=_completed(diff))

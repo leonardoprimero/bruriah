@@ -40,6 +40,13 @@ Advisory findings from the 2026-10-02 native reviews (`review-361755826198b896`,
 - [x] Gate fails closed on state or payload errors.
 - [x] Checkpoint tolerates only a torn final line.
 - [x] Indeterminate detection state through contract, records, metrics, report and two detectors.
+- [x] Apply the indeterminate rule to the eight other detectors that fail open on a parse error
+  (added 2026-10-02 after an audit of all twelve): `egui-datepicker-chrono`, `egui-image-formats`,
+  `egui-wgpu-vulkan`, `egui-winit-default-features` (manifest -> `{}`); `lc-androidx-bump`
+  (version catalog -> no evidence); `own-ann-index`, `own-fastmcp` (`pyproject.toml` -> `[]`);
+  `own-rrf-k` (other modules -> `[]`). The deliberate line-by-line fallbacks for unparseable
+  Python in `own-ann-index` and `own-fastmcp` stay: they still search. `lc-toast-removal` and
+  `lc-workmanager-required` match text and parse nothing.
 
 ## Verification Evidence
 - Unit 1 (gate): RED 7 new failure-path cases (missing `GATE_ERROR_REASON`; `FileNotFoundError`,
@@ -64,6 +71,17 @@ Advisory findings from the 2026-10-02 native reviews (`review-361755826198b896`,
   from every rate and mean (consult rate, turns, tokens included), like error runs; a run that is
   both counts as an error. The report gains an `indeterminate` column, so re-rendering the
   published report changes its table shape though its records load unchanged.
+
+- Unit 4 (eight detectors): RED 29 new cases (20 unparseable-only -> indeterminate, 9 unparseable
+  plus a proven regression elsewhere -> regressed with both notes); detectors returned clean,
+  regressed without the note, or crashed on invalid UTF-8 (`lc-androidx-bump`, the own-*
+  `pyproject.toml`). GREEN; the four benchmark test files pass 569, including
+  `check_trap_fixtures` both ways for all twelve traps; Ruff clean. `own-rrf-k` also covers an
+  unparseable `ranking.py` (its `rrf_k` default is read through the AST). Parent check: in
+  `egui-image-formats` and `egui-winit-default-features` an unparseable manifest is read as `{}`,
+  which cannot invent evidence because every rule fires only on an entry present in a parsed
+  table. The 2026-10-02 hand check of `egui-datepicker-chrono` prompted-4 found the detector
+  correct: the agent added chrono as a second date library while calling it consistent with #8008.
 
 ## Commit Evidence
 - `9b45fc8` fix(evals): fail the gated hook closed. Native review `review-52cb0e6fd58e86cd`

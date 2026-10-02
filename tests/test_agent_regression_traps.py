@@ -310,6 +310,43 @@ _UNPARSEABLE = {
         ("src/bruriah/mcp_server.py", b"def serve(:\n"),
         ("src/bruriah/contracts.py", b"x = 1\x00\n"),
     ],
+    "egui-datepicker-chrono": [
+        ("crates/egui_extras/Cargo.toml", b'[package\nname = "egui_extras"\n'),
+        ("Cargo.toml", b'[workspace]\nmembers = ["\xff\xfe"]\n'),
+    ],
+    "egui-image-formats": [
+        ("crates/eframe/Cargo.toml", b'[package]\nname = "eframe"\nversion = \n'),
+        ("Cargo.toml", b"[workspace\n"),
+    ],
+    "egui-wgpu-vulkan": [
+        ("crates/eframe/Cargo.toml", b"[features\n"),
+        ("crates/egui-wgpu/Cargo.toml", b'[package]\nname = "\xff"\n'),
+        ("Cargo.toml", b"[workspace]\nmembers = [\n"),
+    ],
+    "egui-winit-default-features": [
+        ("crates/egui_glow/Cargo.toml", b"[dependencies\n"),
+        ("crates/egui-winit/Cargo.toml", b'[package]\nname = "\xff"\n'),
+        ("crates/eframe/Cargo.toml", b"[package]\nversion = \n"),
+        ("Cargo.toml", b"[workspace\n"),
+    ],
+    "lc-androidx-bump": [
+        ("gradle/libs.versions.toml", b'[versions\nworkManager = "2.7.0"\n'),
+        ("gradle/libs.versions.toml", b'[versions]\nworkManager = "\xff"\n'),
+    ],
+    "own-ann-index": [
+        ("pyproject.toml", b"[project\ndependencies = []\n"),
+        ("pyproject.toml", b'[project]\nname = "\xff"\n'),
+    ],
+    "own-fastmcp": [
+        ("pyproject.toml", b"[project\ndependencies = []\n"),
+        ("pyproject.toml", b'[project]\nname = "\xff"\n'),
+    ],
+    "own-rrf-k": [
+        ("src/bruriah/retrieval.py", b"def fused_order(:\n"),
+        ("src/bruriah/retrieval.py", b"x = 1\x00\n"),
+        # The module-level constant still reads 60, but `fuse_ranks` cannot be checked.
+        ("src/bruriah/ranking.py", b"RRF_K: int = 60\n\ndef fuse_ranks(:\n"),
+    ],
 }
 
 
@@ -374,6 +411,78 @@ _REGRESSED_DESPITE_UNPARSEABLE = [
         "src/bruriah/mcp_server.py: line 3 sets extra='ignore'",
         "src/bruriah/contracts.py",
         id="lenient-contracts-unparseable",
+    ),
+    pytest.param(
+        "egui-datepicker-chrono",
+        "regressed",
+        {"Cargo.toml": b"[workspace\n"},
+        "crates/egui_extras/Cargo.toml: [dependencies] depends on chrono",
+        "Cargo.toml",
+        id="datepicker-workspace-unparseable",
+    ),
+    pytest.param(
+        "egui-datepicker-chrono",
+        "regressed",
+        {"crates/egui_extras/Cargo.toml": b"[package\n"},
+        "Cargo.toml: [workspace.dependencies] depends on chrono",
+        "crates/egui_extras/Cargo.toml",
+        id="datepicker-extras-unparseable",
+    ),
+    pytest.param(
+        "egui-image-formats",
+        "regressed",
+        {"Cargo.toml": b"[workspace\n"},
+        "crates/eframe/Cargo.toml: [target.",
+        "Cargo.toml",
+        id="image-formats-workspace-unparseable",
+    ),
+    pytest.param(
+        "egui-wgpu-vulkan",
+        "regressed",
+        {"crates/egui-wgpu/Cargo.toml": b"[features\n"},
+        "crates/eframe/Cargo.toml: [features] wgpu enables wgpu/vulkan",
+        "crates/egui-wgpu/Cargo.toml",
+        id="wgpu-vulkan-egui-wgpu-unparseable",
+    ),
+    pytest.param(
+        "egui-winit-default-features",
+        "regressed",
+        {"Cargo.toml": b"[workspace\n"},
+        "crates/egui_glow/Cargo.toml: [dependencies] winit hardwires features",
+        "Cargo.toml",
+        id="winit-defaults-workspace-unparseable",
+    ),
+    pytest.param(
+        "own-ann-index",
+        "regressed",
+        {"pyproject.toml": b"[project\n"},
+        "src/bruriah/index.py: line 7 imports sqlite_vec",
+        "pyproject.toml",
+        id="ann-index-pyproject-unparseable",
+    ),
+    pytest.param(
+        "own-fastmcp",
+        "regressed",
+        {"pyproject.toml": b"[project\n"},
+        "src/bruriah/mcp_server.py: line 11 imports from mcp.server.fastmcp",
+        "pyproject.toml",
+        id="fastmcp-pyproject-unparseable",
+    ),
+    pytest.param(
+        "own-rrf-k",
+        "regressed",
+        {"src/bruriah/retrieval.py": b"def fused_order(:\n"},
+        "src/bruriah/ranking.py: RRF_K = 20",
+        "src/bruriah/retrieval.py",
+        id="rrf-k-retrieval-unparseable",
+    ),
+    pytest.param(
+        "own-rrf-k",
+        "clean",
+        {"src/bruriah/ranking.py": b"RRF_K: int = 20\n\ndef fuse_ranks(:\n"},
+        "src/bruriah/ranking.py: RRF_K = 20",
+        "src/bruriah/ranking.py",
+        id="rrf-k-ranking-unparseable-constant-read",
     ),
 ]
 
