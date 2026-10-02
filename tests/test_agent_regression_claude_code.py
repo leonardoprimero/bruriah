@@ -1311,14 +1311,14 @@ def _init_calls(rig: _Rig) -> list[list[str]]:
     return [call for call in rig.bruriah_calls() if call[:1] == ["init"]]
 
 
-def test_ensure_index_builds_once_per_trap_commit_and_then_reuses_it(rig: _Rig) -> None:
+def test_ensure_index_builds_once_per_trap_and_bruriah_commit_and_then_reuses_it(rig: _Rig) -> None:
     clone = _prepared_clone(rig)
     cache = rig.root / "cache"
 
-    first = ensure_index(rig.trap, clone, cache, rig.bruriah)
-    second = ensure_index(rig.trap, clone, cache, rig.bruriah)
+    first = ensure_index(rig.trap, clone, cache, rig.bruriah, bruriah_commit=_SOURCE_COMMIT)
+    second = ensure_index(rig.trap, clone, cache, rig.bruriah, bruriah_commit=_SOURCE_COMMIT)
 
-    key = f"{rig.trap.trap_id}-{rig.trap.commit[:12]}"
+    key = f"{rig.trap.trap_id}-{rig.trap.commit[:12]}-b{_SOURCE_COMMIT[:12]}"
     assert first == second == (cache / "indexes" / key / "data", cache / "indexes" / key / "config")
     assert (cache / "indexes" / key / ".built").is_file()
     calls = _init_calls(rig)
@@ -1336,12 +1336,52 @@ def test_a_failed_index_build_raises_and_is_retried_next_time(rig: _Rig) -> None
     rig.behave_bruriah(fail=True)
 
     with pytest.raises(AdapterError, match="index build failed"):
-        ensure_index(rig.trap, clone, cache, rig.bruriah)
+        ensure_index(rig.trap, clone, cache, rig.bruriah, bruriah_commit=_SOURCE_COMMIT)
     assert not list((cache / "indexes").glob("*/.built"))
 
     rig.behave_bruriah()
-    ensure_index(rig.trap, clone, cache, rig.bruriah)
+    ensure_index(rig.trap, clone, cache, rig.bruriah, bruriah_commit=_SOURCE_COMMIT)
     assert len(_init_calls(rig)) == 2
+
+
+def test_an_index_built_by_another_bruriah_commit_is_never_reused(rig: _Rig) -> None:
+    clone = _prepared_clone(rig)
+    cache = rig.root / "cache"
+    other = "f" * 40
+
+    first = ensure_index(rig.trap, clone, cache, rig.bruriah, bruriah_commit=_SOURCE_COMMIT)
+    second = ensure_index(rig.trap, clone, cache, rig.bruriah, bruriah_commit=other)
+    again = ensure_index(rig.trap, clone, cache, rig.bruriah, bruriah_commit=other)
+
+    assert first != second == again
+    assert second[0].parent.name == f"{rig.trap.trap_id}-{rig.trap.commit[:12]}-b{other[:12]}"
+    calls = _init_calls(rig)
+    assert len(calls) == 2
+    assert [argv[argv.index("--data-dir") + 1] for argv in calls] == [str(first[0]), str(second[0])]
+    # The model cache does not depend on Bruriah code: every build shares it.
+    assert {argv[argv.index("--cache-dir") + 1] for argv in calls} == {str(cache / "bruriah-cache")}
+
+
+def test_an_index_in_the_key_format_without_the_bruriah_commit_is_not_reused(rig: _Rig) -> None:
+    clone = _prepared_clone(rig)
+    cache = rig.root / "cache"
+    legacy = cache / "indexes" / f"{rig.trap.trap_id}-{rig.trap.commit[:12]}"
+    (legacy / "data").mkdir(parents=True)
+    (legacy / ".built").write_text(f"{rig.trap.commit}\n", encoding="utf-8")
+
+    data_dir, _ = ensure_index(rig.trap, clone, cache, rig.bruriah, bruriah_commit=_SOURCE_COMMIT)
+
+    assert data_dir.parent != legacy
+    assert len(_init_calls(rig)) == 1
+    # The old directory is left alone, never deleted.
+    assert (legacy / ".built").is_file()
+
+
+@pytest.mark.parametrize("commit", ["", "0123456789ab", "G" * 40, _SOURCE_COMMIT.upper()])
+def test_ensure_index_refuses_a_bruriah_commit_that_is_not_a_commit_id(rig: _Rig, commit: str) -> None:
+    with pytest.raises(AdapterError, match="commit"):
+        ensure_index(rig.trap, rig.root, rig.root / "cache", rig.bruriah, bruriah_commit=commit)
+    assert _init_calls(rig) == []
 
 
 def test_the_index_build_never_receives_the_api_key(rig: _Rig, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -1356,7 +1396,7 @@ def test_the_index_build_never_receives_the_api_key(rig: _Rig, monkeypatch: pyte
         return real_run(*args, **kwargs)  # type: ignore[call-overload]
 
     monkeypatch.setattr(subprocess, "run", spy)
-    ensure_index(rig.trap, clone, rig.root / "cache", rig.bruriah)
+    ensure_index(rig.trap, clone, rig.root / "cache", rig.bruriah, bruriah_commit=_SOURCE_COMMIT)
 
     assert "env" in seen
     assert "ANTHROPIC_API_KEY" not in seen["env"]  # type: ignore[operator]
@@ -1477,11 +1517,31 @@ def test_an_unprompted_run_registers_the_real_server_strictly_and_leaves_claude_
     server = json.loads(mcp_config.read_text(encoding="utf-8"))["mcpServers"]["bruriah"]
     assert server["command"] == str(rig.bruriah)
     assert server["args"][0] == "serve"
-    key = f"trap-a-{rig.commit[:12]}"
+    key = f"trap-a-{rig.commit[:12]}-b{_SOURCE_COMMIT[:12]}"
     assert server["args"][server["args"].index("--data-dir") + 1] == str(rig.root / "cache" / "indexes" / key / "data")
     assert call["claude_md"] is None
     assert consulted_before_first_write(run)
     assert run.exit_reason == "done"
+
+
+def test_runs_of_another_bruriah_commit_build_their_own_index_and_share_mirror_and_model_cache(
+    rig: _Rig, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    rig.run(rig.adapter(), UNPROMPTED, 0)
+    other = "f" * 40
+    tree = _Tree(commit=other)
+    monkeypatch.setattr(claude_code_module, "run_command", _FakeRunner(rig.runner.server_file, tree, tree))
+    rig.run(rig.adapter(), UNPROMPTED, 1)
+    rig.run(rig.adapter(), UNPROMPTED, 2)
+
+    cache = rig.root / "cache"
+    calls = _init_calls(rig)
+    assert [Path(argv[argv.index("--data-dir") + 1]).parent.name for argv in calls] == [
+        f"trap-a-{rig.commit[:12]}-b{_SOURCE_COMMIT[:12]}",
+        f"trap-a-{rig.commit[:12]}-b{other[:12]}",
+    ]
+    assert {argv[argv.index("--cache-dir") + 1] for argv in calls} == {str(cache / "bruriah-cache")}
+    assert len(list((cache / "mirrors").glob("*.git"))) == 1
 
 
 def test_a_prompted_run_passes_the_instruction_as_system_prompt_and_leaves_claude_md_alone(

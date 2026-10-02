@@ -120,7 +120,8 @@ class ClaudeCodeConfig:
     bruriah_executable: Path
     model: str
     # Holds `mirrors/` (one bare mirror per trap repository), `indexes/` (one Bruriah index per
-    # trap and commit) and the model cache the index build and the server share.
+    # trap, trap commit and Bruriah commit) and the model cache the index build and the server
+    # share. Mirrors and the model cache do not depend on Bruriah code, so every run shares them.
     cache_dir: Path
     transcripts_dir: Path
     provenance_date: str
@@ -341,10 +342,20 @@ def model_cache_dir(cache_dir: Path) -> Path:
     return cache_dir / "bruriah-cache"
 
 
-def ensure_index(trap: Trap, clone: Path, cache_dir: Path, bruriah_executable: Path) -> tuple[Path, Path]:
-    """Build the trap's Bruriah index once per `(trap_id, commit)` with `bruriah init --repo` on a
-    clone of the pinned commit, and return its `(data_dir, config_dir)`."""
-    root = cache_dir / "indexes" / f"{trap.trap_id}-{trap.commit[:12]}"
+def ensure_index(
+    trap: Trap, clone: Path, cache_dir: Path, bruriah_executable: Path, *, bruriah_commit: str
+) -> tuple[Path, Path]:
+    """Build the trap's Bruriah index once per `(trap_id, commit, bruriah_commit)` with `bruriah
+    init --repo` on a clone of the pinned commit, and return its `(data_dir, config_dir)`. The
+    index lives in `indexes/{trap_id}-{commit[:12]}-b{bruriah_commit[:12]}`: other Bruriah code may
+    build another index, so an index built by one commit is never served by another. A directory
+    without the `-b` part is never found, and never deleted."""
+    if not _COMMIT_ID.fullmatch(bruriah_commit):
+        raise AdapterError(
+            f"trap {trap.trap_id}: the index cache is keyed by the Bruriah commit, and {bruriah_commit!r} is not "
+            "a 40-character commit id"
+        )
+    root = cache_dir / "indexes" / f"{trap.trap_id}-{trap.commit[:12]}-b{bruriah_commit[:12]}"
     data_dir, config_dir, marker = root / "data", root / "config", root / ".built"
     if marker.is_file():
         return data_dir, config_dir
@@ -371,7 +382,7 @@ def ensure_index(trap: Trap, clone: Path, cache_dir: Path, bruriah_executable: P
         raise AdapterError(
             f"trap {trap.trap_id}: the index build exited {completed.returncode}: {_tail(completed.stderr)}"
         )
-    marker.write_text(f"{trap.commit}\n", encoding="utf-8")
+    marker.write_text(f"{trap.commit}\n{bruriah_commit}\n", encoding="utf-8")
     return data_dir, config_dir
 
 
@@ -792,7 +803,9 @@ class ClaudeCodeAdapter:
         _check_no_client_configuration(workdir, trap)
         mcp_config = None
         if condition != BASELINE:
-            data_dir, config_dir = ensure_index(trap, workdir, config.cache_dir, config.bruriah_executable)
+            data_dir, config_dir = ensure_index(
+                trap, workdir, config.cache_dir, config.bruriah_executable, bruriah_commit=bruriah_commit
+            )
             mcp_config = write_mcp_config(
                 workdir / HARNESS_DIR / "mcp.json",
                 config.bruriah_executable,
