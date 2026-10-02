@@ -225,6 +225,16 @@ limit (80% used during the pilot): check it before launch, and stop rather than 
 **Before launch:** Fisher exact test in `metrics.py` and the report; pinned client version and
 provenance refusal; then the user's explicit go-ahead on the final estimate.
 
+**Launch readiness (2026-10-02).** Done and reviewed: client auto-update disabled and resume
+refused on any provenance change (`d92508c`); pooled Fisher exact comparison (`be3a1f4`); exact
+Bruriah commit recorded and enforced, `--trap-ids` (`857fe5e`, `review-81f63c9cf0b747d7`). Live
+check without the client: with uncommitted changes both the server source and the harness were
+refused, naming the files; on the clean tree both resolved to `857fe5e`. Dry run of Part 1:
+`--trap-ids egui-android-activity egui-datepicker-chrono egui-image-formats --repetitions 5`
+plans 45 invocations. Operating rule: launch from a dedicated worktree at the reviewed commit and
+leave it untouched until the set finishes, because the commit is resolved once per run set and
+each run's MCP server imports the code then on disk.
+
 ## Scope
 
 - `evals/agent_regression/`: trap schema and loader, detector contract, adapter interface, Claude
