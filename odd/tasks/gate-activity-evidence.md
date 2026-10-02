@@ -46,4 +46,9 @@ normally, how many it denied as a broken gate, and whether its state file agrees
   rather than hiding it. A `user` event carrying several denied results counts once.
 
 ## Commit Evidence
-_Pending._
+- `2a866c9` feat(evals): record what the gated hook did in every run. Native review
+  `review-14082c9b05c1b9e7` (medium, reliability) approved and acknowledged, from a clean
+  worktree. Advisory follow-ups: a tool output that itself contains a pinned reason (e.g. the
+  agent reading `gated_hook.py`) would count as a denial (`claude_code.py:485-489`; the hook lives
+  outside the agent's clone, so this needs the agent to read a copy elsewhere); counts are events,
+  not calls (`runs.py:78-83`); a partial gate triple is accepted on load (`runs.py:204-215`).
