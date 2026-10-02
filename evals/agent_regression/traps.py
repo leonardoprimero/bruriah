@@ -5,6 +5,11 @@ the rejected alternative, the decision that rejected it, the budgets, and the se
 confirmed the prompt does not leak the answer) and `detect.py` (a pure, deterministic
 `detect(tree, diff) -> Detection`). The loader refuses a trap whose prompt names the rejected
 alternative or Bruriah: such a prompt measures instruction following, not memory.
+
+Each trap also carries its citation cues: the identifiers that, in an agent's final message, mean
+the agent cited the decision. Some are derived from `decision_ref`; `trap.yaml` may add more under
+the optional `citation_cues` key, for identifiers the ref does not carry (the pull request that
+merged a decision commit, a decision document path).
 """
 
 from __future__ import annotations
@@ -39,11 +44,19 @@ _STRING_KEYS = (
 )
 _BUDGET_KEYS = ("turn_budget", "time_budget_seconds")
 _REQUIRED_KEYS = frozenset(_STRING_KEYS + _BUDGET_KEYS)
+_OPTIONAL_KEYS = frozenset({"citation_cues"})
 
 _COMMIT = re.compile(r"[0-9a-f]{40}")
 # Trap ids become Markdown table cells and plan lines, so they stay plain.
 _TRAP_ID = re.compile(r"[a-z0-9][a-z0-9._-]*")
 _ISO_DATE = re.compile(r"\d{4}-\d{2}-\d{2}")
+_GITHUB_REF = re.compile(r"github:([A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+)#([0-9]+)")
+# A commit decision is cited by its sha abbreviated to git's default 7 characters. Matching
+# accepts any prefix of the full sha at least this long, so the 7-character form is the only one
+# a trap needs to store.
+SHA_CUE_LENGTH = 7
+# Shorter cues, and bare numbers without `#`, would match text that does not cite anything.
+_MIN_CUE_LENGTH = 3
 
 
 class TrapError(ValueError):
@@ -64,6 +77,8 @@ class Trap:
     time_budget_seconds: int
     second_reader: str
     second_reader_date: str
+    # Derived cues first, then the manifest's, without duplicates. `load_trap` always fills it.
+    citation_cues: tuple[str, ...] = ()
 
 
 def _as_iso_date(manifest: Path, value: object) -> object:
@@ -80,6 +95,31 @@ def _as_iso_date(manifest: Path, value: object) -> object:
     raise TrapError(f"{manifest}: second_reader_date must be an ISO date (YYYY-MM-DD), got {value!r}")
 
 
+def derived_citation_cues(decision_ref: str) -> tuple[str, ...]:
+    """A full commit sha gives its abbreviation; `github:owner/repo#N` gives `#N` and
+    `owner/repo#N`. Any other ref, such as a decision document path, is cited as written."""
+    if _COMMIT.fullmatch(decision_ref):
+        return (decision_ref[:SHA_CUE_LENGTH],)
+    github = _GITHUB_REF.fullmatch(decision_ref)
+    if github:
+        repository, number = github.groups()
+        return (f"#{number}", f"{repository}#{number}")
+    return (decision_ref,)
+
+
+def _manifest_citation_cues(manifest: Path, value: object) -> tuple[str, ...]:
+    if not isinstance(value, list):
+        raise TrapError(f"{manifest}: citation_cues must be a list of strings, got {value!r}")
+    for cue in value:
+        if not isinstance(cue, str) or not cue.strip():
+            raise TrapError(f"{manifest}: citation_cues items must be non-empty strings, got {cue!r}")
+        if len(cue.strip()) < _MIN_CUE_LENGTH:
+            raise TrapError(f"{manifest}: citation_cues item {cue!r} is shorter than {_MIN_CUE_LENGTH} characters")
+        if cue.strip().isdigit():
+            raise TrapError(f"{manifest}: citation_cues item {cue!r} is a bare number; write it as '#{cue.strip()}'")
+    return tuple(cue.strip() for cue in value)
+
+
 def load_trap(path: Path) -> Trap:
     manifest = path / "trap.yaml"
     if not manifest.is_file():
@@ -94,11 +134,12 @@ def load_trap(path: Path) -> Trap:
     missing = sorted(_REQUIRED_KEYS - set(data))
     if missing:
         raise TrapError(f"{manifest}: missing required key(s): {', '.join(missing)}")
-    unknown = sorted(str(key) for key in data if key not in _REQUIRED_KEYS)
+    unknown = sorted(str(key) for key in data if key not in _REQUIRED_KEYS | _OPTIONAL_KEYS)
     if unknown:
         raise TrapError(f"{manifest}: unknown key(s): {', '.join(unknown)}")
 
     fields: dict[str, Any] = dict(data)
+    manifest_cues = _manifest_citation_cues(manifest, fields.pop("citation_cues")) if "citation_cues" in fields else ()
     fields["second_reader_date"] = _as_iso_date(manifest, fields["second_reader_date"])
     for key in _STRING_KEYS:
         value = fields[key]
@@ -124,7 +165,11 @@ def load_trap(path: Path) -> Trap:
                 f"{manifest}: prompt names {leaked!r}; a prompt that names it measures instruction following"
             )
 
-    return Trap(path=path, **fields)
+    citation_cues = tuple(dict.fromkeys(derived_citation_cues(fields["decision_ref"]) + manifest_cues))
+    if not citation_cues:
+        raise TrapError(f"{manifest}: the decision has no citation cue")
+
+    return Trap(path=path, **fields, citation_cues=citation_cues)
 
 
 def load_traps(root: Path) -> tuple[Trap, ...]:

@@ -272,7 +272,75 @@ def test_load_trap_reads_every_field_from_trap_yaml(tmp_path: Path) -> None:
 
     trap = load_trap(trap_dir)
 
-    assert trap == Trap(path=trap_dir, **_trap_fields("trap-a"))
+    # A decision ref that is neither a commit sha nor a GitHub ref is cited as written.
+    assert trap == Trap(
+        path=trap_dir, **_trap_fields("trap-a"), citation_cues=("docs/decisions/0001-tool-declarations.md",)
+    )
+
+
+def test_load_trap_derives_the_abbreviated_sha_from_a_commit_decision_ref(tmp_path: Path) -> None:
+    trap = load_trap(_make_trap(tmp_path, decision_ref="89e42884fcc38f304a96134ce47bb8441208a2e2"))
+
+    assert trap.citation_cues == ("89e4288",)
+
+
+def test_load_trap_derives_the_number_and_the_qualified_ref_from_a_github_decision_ref(tmp_path: Path) -> None:
+    trap = load_trap(_make_trap(tmp_path, decision_ref="github:emilk/egui#4489"))
+
+    assert trap.citation_cues == ("#4489", "emilk/egui#4489")
+
+
+def test_load_trap_appends_manifest_cues_after_the_derived_ones_without_duplicates(tmp_path: Path) -> None:
+    trap_dir = _make_trap(
+        tmp_path,
+        decision_ref="89e42884fcc38f304a96134ce47bb8441208a2e2",
+        citation_cues=["#2863", "89e4288", "docs/decisions/0001.md", "#2863"],
+    )
+
+    assert load_trap(trap_dir).citation_cues == ("89e4288", "#2863", "docs/decisions/0001.md")
+
+
+def test_load_trap_accepts_an_empty_citation_cues_list(tmp_path: Path) -> None:
+    trap = load_trap(_make_trap(tmp_path, decision_ref="github:emilk/egui#4489", citation_cues=[]))
+
+    assert trap.citation_cues == ("#4489", "emilk/egui#4489")
+
+
+@pytest.mark.parametrize("cues", ["#2863", {"pr": "#2863"}, None, 2863])
+def test_load_trap_rejects_citation_cues_that_are_not_a_list(tmp_path: Path, cues: object) -> None:
+    trap_dir = _make_trap(tmp_path, citation_cues=cues)
+
+    with pytest.raises(TrapError, match="citation_cues") as excinfo:
+        load_trap(trap_dir)
+    assert "unknown key" not in str(excinfo.value)
+
+
+@pytest.mark.parametrize(
+    "cue",
+    [
+        pytest.param(2863, id="integer"),
+        pytest.param(None, id="null"),
+        pytest.param(["#2863"], id="nested-list"),
+        pytest.param("", id="empty"),
+        pytest.param("   ", id="whitespace"),
+        pytest.param("#7", id="shorter-than-three"),
+        pytest.param("2863", id="bare-number"),
+        pytest.param(" 2863 ", id="bare-number-padded"),
+    ],
+)
+def test_load_trap_rejects_a_malformed_citation_cue(tmp_path: Path, cue: object) -> None:
+    trap_dir = _make_trap(tmp_path, citation_cues=["#2863", cue])
+
+    with pytest.raises(TrapError, match="citation_cues") as excinfo:
+        load_trap(trap_dir)
+    assert "unknown key" not in str(excinfo.value)
+
+
+def test_load_trap_still_rejects_an_unknown_key_next_to_citation_cues(tmp_path: Path) -> None:
+    trap_dir = _make_trap(tmp_path, citation_cues=["#2863"], citation_cue=["#2863"])
+
+    with pytest.raises(TrapError, match="unknown key.*citation_cue\\b"):
+        load_trap(trap_dir)
 
 
 def test_load_trap_reads_an_unquoted_yaml_date_as_an_iso_string(tmp_path: Path) -> None:

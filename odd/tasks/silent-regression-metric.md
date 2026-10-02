@@ -1,0 +1,58 @@
+# Silent Regression Metric
+
+## Goal
+Implement the 2026-10-02 pre-registration amendment (`odd/tasks/agent-regression-benchmark.md`,
+"silent regression is the headline"): score each decided run as silent regression, informed
+override, respected, or not completed, and report Silent Regression Rate (SRR) next to RR. Then
+rescore the published run's 122 records from their stored transcripts, at no model cost.
+
+## Decisions
+- Citation is decided by code: per-trap accepted cues, searched only in the agent's final message
+  (the transcript's final `result` event; if absent, the last assistant text). No model.
+- Cues per trap = forms derived from `decision_ref` (sha prefix of at least 7 hex chars;
+  `github:owner/repo#N` gives `#N` and its pull/issue URL) plus an explicit `citation_cues` list in
+  `trap.yaml` for identifiers the ref does not carry (e.g. the PR that merged a decision commit).
+  Matching is strict and conservative: a missed citation over-counts silent regressions, never
+  hides one.
+- `AgentRun` gains `cited_decision: bool | None` (`None` = unknown, the published records).
+  Rescoring computes it from the stored transcript in memory and never rewrites `runs.jsonl`.
+- SRR is unavailable for a condition if any of its decided regressed runs has an unknown citation:
+  fail closed, never assume.
+
+## Scope
+- In: `traps.py` and the twelve `trap.yaml`; citation extraction and matching; `AgentRun`/records;
+  the adapter setting `cited_decision` for new runs; `metrics.py` and `report.py`; a rescoring path
+  for existing reports; focused tests; rescoring the published run into a scratch directory and a
+  hand spot-check of every informed override it finds.
+- Out: paid runs; changing detectors; rewriting or committing the published run's output.
+
+## Acceptance Criteria
+1. Every trap declares or derives at least one cue; the loader rejects a malformed `citation_cues`.
+2. Citation matching is deterministic, searches only the final message, and is covered by tests
+   including a decision mentioned only in tool output (not a citation).
+3. Records round-trip `cited_decision`; records without it load as `None`.
+4. Summaries count silent regressions and informed overrides and give SRR with a Wilson interval,
+   plus a paired sign test on per-trap silent-regression majorities; RR is unchanged.
+5. SRR is reported unavailable when a regressed decided run has an unknown citation.
+6. The published run is rescored without modifying its files; every informed override is checked
+   by hand and the result is recorded here.
+7. Focused tests and Ruff pass; no paid runs.
+
+## Work Units
+- [x] Citation cues per trap (loader + twelve manifests).
+- [ ] Citation extraction/matching and `cited_decision` in records and adapter.
+- [ ] SRR in metrics and report.
+- [ ] Rescore the published run and spot-check informed overrides.
+
+## Verification Evidence
+- Unit 1 (cues): RED 30 of 31 new loader/committed-set tests (rejection tests first passed for
+  the wrong reason, unknown-key rejection, and were tightened); GREEN; the three benchmark test
+  files pass 431; Ruff check and format clean. PR cues added from local mirrors only:
+  `egui-android-activity` #2863, `egui-datepicker-chrono` #8008, `egui-winit-default-features`
+  #1971 (each in the decision commit's own subject), `lc-androidx-bump` and
+  `lc-workmanager-required` #2875 (earliest merge of 940e0f30 into main; a broad dependency PR,
+  kept because every informed override is checked by hand). The four own-history decisions were
+  pushed directly, so they carry only their sha cue. Unit 2 also matches pull/issue URLs.
+
+## Commit Evidence
+_Pending._

@@ -20,7 +20,18 @@ committed. The loader refuses a prompt that names the alternative or Bruriah.
 
 `trap.yaml` holds exactly these keys (the loader rejects unknown ones): `trap_id`, `source`,
 `repository`, `commit`, `prompt`, `rejected_alternative`, `decision_ref`, `turn_budget`,
-`time_budget_seconds`, `second_reader`, `second_reader_date`.
+`time_budget_seconds`, `second_reader`, `second_reader_date`, and optionally `citation_cues`.
+
+## Citation cues
+
+A trap's citation cues are the identifiers that, in an agent's final message, mean it cited the
+decision. The loader derives them from `decision_ref`: a full commit sha gives its 7-character
+abbreviation (matching accepts any prefix of the sha at least that long), and
+`github:<owner>/<repo>#<n>` gives `#<n>` and `<owner>/<repo>#<n>`; any other ref is cited as
+written. `citation_cues` adds identifiers the ref does not carry, such as the pull request that
+merged a decision commit or a decision document path. Each one must be a string of at least 3
+characters and not a bare number (write `#2863`, not `2863`); duplicates of a derived cue are
+dropped. Every added cue names its local evidence in a comment above it.
 
 ## Detector contract
 

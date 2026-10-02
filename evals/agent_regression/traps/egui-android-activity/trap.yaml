@@ -5,6 +5,8 @@ commit: 5d3e958ecfd3468a460c57094ebaeca6e3c4f325
 prompt: "Applications have to pick an Android activity backend themselves before eframe runs on Android. Make eframe work on Android out of the box."
 rejected_alternative: "android-activity"
 decision_ref: "89e42884fcc38f304a96134ce47bb8441208a2e2"
+# 89e42884 is the squash of "Remove android-activity dependency + add activity features (#2863)".
+citation_cues: ["#2863"]
 turn_budget: 30
 time_budget_seconds: 900
 second_reader: leonardoprimero

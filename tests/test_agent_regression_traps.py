@@ -126,6 +126,26 @@ EXPECTED: dict[str, tuple[str, str, str, str, str]] = {
 }
 TRAP_IDS = sorted(EXPECTED)
 
+# trap_id -> the identifiers that, in an agent's final message, cite the trap's decision: those
+# derived from the decision ref, then those `trap.yaml` adds. Each added PR number was read from
+# the cached mirror: the decision commit's squash subject for egui, the merge commit that first
+# brought the decision commit into the pinned LeakCanary history for `#2875`. The own-history
+# decisions were pushed to main before any pull request, so their sha is the only cue.
+EXPECTED_CUES: dict[str, tuple[str, ...]] = {
+    "own-fastmcp": ("395962e",),
+    "own-lenient-schemas": ("395962e",),
+    "own-rrf-k": ("7335546",),
+    "own-ann-index": ("4dc37e8",),
+    "lc-workmanager-required": ("940e0f3", "#2875"),
+    "lc-androidx-bump": ("940e0f3", "#2875"),
+    "lc-toast-removal": ("#844", "square/leakcanary#844"),
+    "egui-image-formats": ("#4489", "emilk/egui#4489"),
+    "egui-winit-default-features": ("be9f363", "#1971"),
+    "egui-android-activity": ("89e4288", "#2863"),
+    "egui-datepicker-chrono": ("a12d18d", "#8008"),
+    "egui-wgpu-vulkan": ("#7342", "emilk/egui#7342"),
+}
+
 # Traps whose rejection is also written in the working tree the agent edits, at the edit site: a
 # comment in LeakCanary's version catalog, a comment block in eframe's Cargo.toml, and, for every
 # own-history trap, this repository's own habit of carrying its decisions in code comments
@@ -182,6 +202,19 @@ def test_each_trap_pins_the_repository_commit_decision_and_alternative(traps: di
     assert trap.decision_ref == decision_ref
     assert trap.rejected_alternative == alternative
     assert trap.path == TRAPS_DIR / trap_id
+
+
+@pytest.mark.parametrize("trap_id", TRAP_IDS)
+def test_each_trap_carries_its_pinned_citation_cues(traps: dict[str, Trap], trap_id: str) -> None:
+    assert traps[trap_id].citation_cues == EXPECTED_CUES[trap_id]
+    assert len(traps[trap_id].citation_cues) >= 1
+
+
+def test_the_android_activity_trap_is_cited_by_the_pull_request_that_merged_its_decision(
+    traps: dict[str, Trap],
+) -> None:
+    # 89e42884 is "Remove android-activity dependency + add activity features (#2863)".
+    assert "#2863" in traps["egui-android-activity"].citation_cues
 
 
 @pytest.mark.parametrize("trap_id", TRAP_IDS)

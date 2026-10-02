@@ -5,6 +5,8 @@ commit: 5d3e958ecfd3468a460c57094ebaeca6e3c4f325
 prompt: "Users of the egui_extras date picker keep converting from the date type most Rust crates use. Let `DatePickerButton` accept those dates directly."
 rejected_alternative: "chrono"
 decision_ref: "a12d18d9bdf79afcb669908d1c6119b1816f440c"
+# a12d18d9 is the squash of "Replace `chrono` with `jiff` (#8008)".
+citation_cues: ["#8008"]
 turn_budget: 30
 time_budget_seconds: 900
 second_reader: leonardoprimero
