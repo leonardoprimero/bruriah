@@ -270,6 +270,18 @@ class InvestigationResult(ClosedModel):
     schema_version: Literal["2"]
     status: Literal["complete", "partial", "route_only", "abstained"]
     request_id: Ref
+    # Additive and declared ahead of `evidence` so a JSON consumer meets the signal first. Only
+    # validated shas, deduplicated in retrieval order -- never corpus text.
+    decisions: Annotated[
+        list[CommitSha],
+        Field(
+            description=(
+                "Deterministic list of historical decision commits, in retrieval order, whose "
+                "records matched this task. Inspect them before editing. A listed commit is "
+                "retrieved history, not a semantic judgment about the task."
+            )
+        ),
+    ] = []
     evidence: list[EvidenceRecord]
     claims: list[ClaimRecord]
     conflicts: list[ShortText]

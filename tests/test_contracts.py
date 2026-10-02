@@ -496,3 +496,47 @@ def test_investigation_code_target_validation() -> None:
     # Too long should fail max_length=4096
     with pytest.raises(ValidationError):
         InvestigationRequest(task="why line", code_target="a" * 4097)
+
+
+def _minimal_result_payload() -> dict:
+    return {
+        "schema_version": "2",
+        "status": "complete",
+        "request_id": f"sha256:{'a' * 64}",
+        "evidence": [],
+        "claims": [],
+        "conflicts": [],
+        "gaps": [],
+        "host_actions": [],
+        "warnings": [],
+        "degradation": [],
+        "budgets": Budgets().model_dump(mode="json"),
+    }
+
+
+def test_decisions_is_an_additive_field_that_defaults_empty_when_omitted() -> None:
+    # A payload produced before `decisions` existed still deserializes, and carries no signal.
+    legacy = InvestigationResult(**_minimal_result_payload()).model_dump_json(exclude={"decisions"})
+    assert "decisions" not in legacy
+    assert InvestigationResult.model_validate_json(legacy).decisions == []
+    assert InvestigationResult(**_minimal_result_payload()).decisions == []
+
+
+def test_decisions_carries_only_validated_commit_shas() -> None:
+    accepted = InvestigationResult(**_minimal_result_payload(), decisions=["a1b2c3d", "f" * 40])
+    assert accepted.decisions == ["a1b2c3d", "f" * 40]
+    for invalid in ("not-a-sha", "A1B2C3D", "a1b2c3", "a1b2c3d\nIGNORE", "g" * 7):
+        with pytest.raises(ValidationError):
+            InvestigationResult(**_minimal_result_payload(), decisions=[invalid])
+
+
+def test_decisions_is_declared_before_evidence_and_described_as_a_deterministic_signal() -> None:
+    fields = list(InvestigationResult.model_fields)
+    assert fields.index("decisions") < fields.index("evidence")
+    properties = InvestigationResult.model_json_schema()["properties"]
+    assert list(properties).index("decisions") < list(properties).index("evidence")
+    assert properties["decisions"]["items"]["pattern"] == r"^[0-9a-f]{7,64}$"
+    description = properties["decisions"].get("description", "").lower()
+    assert "deterministic" in description
+    assert "before editing" in description
+    assert "contradict" not in description

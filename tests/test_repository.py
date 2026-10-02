@@ -181,3 +181,32 @@ def test_repository_error_handling(memory_db: sqlite3.Connection):
     with pytest.raises(RepositoryError) as exc:
         repo.hydrate_passages(["p1"])
     assert exc.value.code == "snapshot_unreadable"
+
+
+def test_get_commits_by_refs_returns_only_string_commits(memory_db: sqlite3.Connection):
+    memory_db.execute("CREATE TABLE passages (ref TEXT, metadata TEXT)")
+    memory_db.executemany(
+        "INSERT INTO passages VALUES (?,?)",
+        [
+            ("p1", '{"commit": "a1b2c3d4e5f6", "status": "unknown"}'),
+            ("p2", '{"commit": null}'),
+            ("p3", '{"commit": 1234567}'),
+            ("p4", "not json"),
+            ("p5", '["commit"]'),
+            ("p6", '{"commit": "not a sha"}'),
+        ],
+    )
+    repo = SnapshotRepository(memory_db)
+    # The repository reports what is stored; validating it as a sha is the retrieval boundary's job.
+    assert repo.get_commits_by_refs(["p1", "p2", "p3", "p4", "p5", "p6", "missing"]) == {
+        "p1": "a1b2c3d4e5f6",
+        "p6": "not a sha",
+    }
+    assert repo.get_commits_by_refs([]) == {}
+
+
+def test_get_commits_by_refs_fails_typed_without_a_metadata_column(memory_db: sqlite3.Connection):
+    memory_db.execute("CREATE TABLE passages (ref TEXT)")
+    with pytest.raises(RepositoryError) as exc:
+        SnapshotRepository(memory_db).get_commits_by_refs(["p1"])
+    assert exc.value.code == "snapshot_unreadable"

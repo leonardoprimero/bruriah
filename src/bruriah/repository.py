@@ -222,6 +222,32 @@ class SnapshotRepository:
         except sqlite3.DatabaseError as error:
             raise RepositoryError("snapshot_unreadable") from error
 
+    def get_commits_by_refs(self, refs: Sequence[str]) -> dict[str, str]:
+        """Map each ref to the `commit` its document metadata declares, when it is a string.
+
+        Unparseable metadata or a non-string commit is omitted rather than raised: the commit is
+        an additive signal, and validating it as a sha is the caller's job."""
+        if not refs:
+            return {}
+        placeholders = ", ".join("?" for _ in refs)
+        try:
+            rows = self._db.execute(
+                f"SELECT ref, metadata FROM passages WHERE ref IN ({placeholders})",
+                list(refs),
+            ).fetchall()
+        except sqlite3.DatabaseError as error:
+            raise RepositoryError("snapshot_unreadable") from error
+        commits: dict[str, str] = {}
+        for ref, raw in rows:
+            try:
+                parsed = json.loads(raw)
+            except (TypeError, json.JSONDecodeError):
+                continue
+            commit = parsed.get("commit") if isinstance(parsed, dict) else None
+            if isinstance(commit, str):
+                commits[ref] = commit
+        return commits
+
     def get_corpus_stats(self) -> tuple[int, float]:
         """Fetch total_documents and average_length from corpus_stats."""
         try:
