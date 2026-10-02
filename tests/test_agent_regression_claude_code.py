@@ -18,6 +18,7 @@ honour, so they skip there with that reason; tests that need git skip when git i
 from __future__ import annotations
 
 import hashlib
+import io
 import json
 import os
 import shlex
@@ -914,6 +915,86 @@ def test_the_gate_lets_anything_else_through_without_spending_the_denial(tmp_pat
     assert gated_hook.gate(state, payload) == (0, "")
     assert not state.exists()
     assert gated_hook.gate(state, {"tool_name": "Write"})[0] == 2
+
+
+def test_the_gate_error_reason_says_the_gate_is_broken_and_is_not_the_gate_reason() -> None:
+    reason = gated_hook.GATE_ERROR_REASON
+    assert reason != gated_hook.GATE_REASON
+    assert "gate is broken" in reason
+    assert "blocked" in reason
+    assert "bruriah" not in reason.lower()
+    assert "\n" not in reason
+
+
+@pytest.mark.parametrize("parent", ["missing", "a-file"])
+def test_the_gate_denies_every_gated_call_when_its_state_cannot_be_created(tmp_path: Path, parent: str) -> None:
+    (tmp_path / "a-file").write_text("", encoding="utf-8")
+    state = tmp_path / parent / gated_hook.STATE_FILE
+
+    for tool in ("Edit", "Edit", "Write", "MultiEdit"):
+        code, message = gated_hook.gate(state, {"tool_name": tool})
+        assert code == 2
+        assert message.startswith(gated_hook.GATE_ERROR_REASON)
+        assert "Error" in message
+    assert gated_hook.gate(state, {"tool_name": "Read"}) == (0, "")
+
+
+def test_a_failed_state_write_denies_and_leaves_the_first_denial_unspent(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    state = tmp_path / gated_hook.STATE_FILE
+
+    class FailingHandle:
+        def __init__(self, descriptor: int, *args: object, **kwargs: object) -> None:
+            os.close(descriptor)
+
+        def __enter__(self) -> FailingHandle:
+            return self
+
+        def __exit__(self, *exc: object) -> None:
+            return None
+
+        def write(self, text: str) -> int:
+            raise OSError(28, "No space left on device")
+
+    with monkeypatch.context() as patched:
+        patched.setattr(os, "fdopen", FailingHandle)
+        for _ in range(2):
+            code, message = gated_hook.gate(state, {"tool_name": "Edit"})
+            assert code == 2
+            assert message.startswith(gated_hook.GATE_ERROR_REASON)
+            assert "No space left on device" in message
+            # No partial state is left behind for a later call to read as "already denied".
+            assert not state.exists()
+
+    # Once the gate can record state again, the real first denial is still there to give.
+    assert gated_hook.gate(state, {"tool_name": "Write"}) == (2, gated_hook.GATE_REASON)
+    assert gated_hook.gate(state, {"tool_name": "Write"}) == (0, "")
+    assert json.loads(state.read_text(encoding="utf-8")) == {"denied": "Write"}
+    assert sorted(path.name for path in tmp_path.iterdir()) == [gated_hook.STATE_FILE]
+
+
+@pytest.mark.parametrize("stdin", ["", "not json", '{"tool_name": "Edit"'])
+def test_the_hook_denies_an_unparseable_payload(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], stdin: str
+) -> None:
+    state = tmp_path / gated_hook.STATE_FILE
+    monkeypatch.setattr(sys, "stdin", io.StringIO(stdin))
+
+    assert gated_hook.main([str(state)]) == 2
+    assert capsys.readouterr().err.startswith(gated_hook.GATE_ERROR_REASON)
+    assert not state.exists()
+
+
+def test_the_hook_allows_a_valid_payload_for_a_tool_it_does_not_gate(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    state = tmp_path / gated_hook.STATE_FILE
+    monkeypatch.setattr(sys, "stdin", io.StringIO(json.dumps({"tool_name": "Read"})))
+
+    assert gated_hook.main([str(state)]) == 0
+    assert capsys.readouterr().err == ""
+    assert not state.exists()
 
 
 @pytest.mark.skipif(os.name == "nt", reason="the client runs hook commands through a POSIX shell here")
