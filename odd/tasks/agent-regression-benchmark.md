@@ -178,6 +178,52 @@ one they can catch.
 - **Consequence for product work:** a persistent pre-edit gate is no longer required for the
   headline claim; it stays an opt-in instrument (`gated`).
 
+### Pre-registration amendment (2026-10-02, second): targeted run set B
+
+**Why.** The published run (Bruriah 2.1.0, 122 of 180 runs) is treated as a pilot. Five of the nine
+traps it reached regressed in no decided run under any condition (a floor: there is nothing for
+Bruriah to prevent), and they took about $235 of its $344. It also mixed three Claude Code
+versions (2.1.283 x30, 2.1.286 x82, 2.1.287 x10) because the client updated itself between pauses.
+Decided with the user before any spend, from pilot data only; no run of set B exists yet.
+
+**Run set B** -- a fresh output directory, never a resume of `out-2026-09-27`:
+
+- **Bruriah:** the commit at launch (it includes the decision signal, `fa26c59`, and the
+  fail-closed instruments), recorded in every run.
+- **Client and model:** one Claude Code version with auto-update disabled, and
+  `claude-fable-5-1` as in the pilot; the runner refuses to append runs with a different client,
+  model or Bruriah version.
+- **Conditions:** baseline, unprompted, prompted. `gated` is not part of the headline claim.
+- **Part 1, confirmatory (45 runs).** Inclusion rule, fixed now: a trap is included when its pilot
+  baseline regressed in at least one decided run. That selects `egui-android-activity`,
+  `egui-datepicker-chrono` and `egui-image-formats`. N = 5 per trap and condition.
+- **Part 2, pilot (12 runs).** The four own-history traps were never reached: N = 1 per condition.
+  They are not part of the confirmatory analysis; the same inclusion rule decides whether they
+  join a later confirmatory run.
+- **Excluded, and why:** `egui-wgpu-vulkan`, `egui-winit-default-features`, `lc-toast-removal`,
+  `lc-workmanager-required`, `lc-androidx-bump` (no baseline regression in the pilot). They stay
+  in the trap set and the report names them as non-discriminating under this model.
+
+**Analysis plan.**
+
+- **Primary:** SRR, prompted vs baseline, pooled over the Part 1 runs (decided runs, not traps),
+  with Wilson intervals and a two-sided Fisher exact test. A per-trap paired sign test over three
+  traps can never reach p < 0.25, so it is reported but cannot carry the claim.
+- **Secondary:** the same for unprompted vs baseline; RR next to SRR throughout; heed, consult,
+  completion and cost as before.
+- **Instrument limits stated in the report:** a run stopped by the time budget records no cost;
+  citation is strict (the audited under-count was 1 of 40 regressions).
+- **No early stopping on results.** The set completes or is reported as incomplete. Pauses are
+  allowed only if the provenance stays identical.
+
+**Budget.** Pilot mean cost per run: $3.43, $2.54 and $1.85 for the three Part 1 traps (about
+$117 for 45 runs); about $34 for Part 2 at the pilot average ($2.8 per run). Estimate: about $155,
+with the existing per-run cap. The binding constraint is the operator account's seven-day usage
+limit (80% used during the pilot): check it before launch, and stop rather than mix if it is hit.
+
+**Before launch:** Fisher exact test in `metrics.py` and the report; pinned client version and
+provenance refusal; then the user's explicit go-ahead on the final estimate.
+
 ## Scope
 
 - `evals/agent_regression/`: trap schema and loader, detector contract, adapter interface, Claude
