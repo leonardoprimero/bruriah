@@ -74,6 +74,7 @@ from .research import NetworkLedger, ResearchDeps, ResearchOutcome, research
 from .retrieval import (
     EmbedQuery,
     Rerank,
+    RetrievalMatch,
     SearchService,
     build_local_evidence_record,
     is_shortfall,
@@ -566,6 +567,19 @@ def _apply_lineage(
 
     result_evidence.extend(additional_evidence)
     return result_evidence, claims, conflicts
+
+
+def _decision_commits(matches: tuple[RetrievalMatch, ...]) -> list[str]:
+    """The distinct commits the retrieved matches were recorded at, first-seen order.
+
+    Re-validated with `agent_surface.commit_sha` even though retrieval already validates: a value
+    that is not a sha is dropped here, so it can never fail the result's `CommitSha` check."""
+    decisions: dict[str, None] = {}
+    for match in matches:
+        sha = agent_surface.commit_sha(match.commit)
+        if sha != agent_surface.UNKNOWN:
+            decisions.setdefault(sha, None)
+    return list(decisions)
 
 
 def _resolve_code_target_causality(
@@ -1065,6 +1079,7 @@ class InvestigateService:
             request.budgets,
             offset=local_offset,
         )
+        decisions = _decision_commits(outcome.matches)
         raw_local_evidence = to_evidence_records(outcome)
         local_evidence, search_claims, search_conflicts = _apply_lineage(raw_local_evidence, self._snapshot_repo)
         lineage_claims = lineage_claims + search_claims
@@ -1119,6 +1134,7 @@ class InvestigateService:
             schema_version="2",
             status=status,
             request_id=request_id,
+            decisions=decisions,
             evidence=evidence,
             claims=lineage_claims,
             conflicts=lineage_conflicts,

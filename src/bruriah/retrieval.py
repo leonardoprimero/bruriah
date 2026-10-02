@@ -18,7 +18,7 @@ from dataclasses import dataclass
 
 from typing import Literal
 
-from . import language, ranking
+from . import agent_surface, language, ranking
 from .contracts import AuthorityRationale, Budgets, EvidenceRecord
 from .index import ActiveSnapshot
 from .repository import PassageRecord, RepositoryError, SnapshotRepository, parse_heading_path
@@ -81,6 +81,14 @@ class RetrievalMatch:
     rank: int
     lexical_rank: int | None
     vector_rank: int | None
+    # The commit the passage's document was recorded at: a validated, lower-cased sha or `None`,
+    # never the raw frontmatter value.
+    commit: str | None = None
+
+
+def _validated_commit(value: str | None) -> str | None:
+    rendered = agent_surface.commit_sha(value)
+    return None if rendered == agent_surface.UNKNOWN else rendered
 
 
 @dataclass(frozen=True)
@@ -629,6 +637,13 @@ class SearchService:
             except sqlite3.DatabaseError as error:
                 raise RetrievalError("snapshot_unreadable") from error
 
+        # Only the refs this page can return are looked up. A snapshot without passage metadata
+        # loses the commit signal, never the retrieval.
+        try:
+            commits = self._repo.get_commits_by_refs([ref for ref, _, _ in ordered_slice[: budgets.max_candidates]])
+        except RepositoryError:
+            commits = {}
+
         for rank, (ref, lexical_rank, vector_rank) in enumerate(ordered_slice, start=offset + 1):
             if len(matches) >= budgets.max_candidates:
                 truncated = True
@@ -654,6 +669,7 @@ class SearchService:
                     rank=rank,
                     lexical_rank=lexical_rank,
                     vector_rank=vector_rank,
+                    commit=_validated_commit(commits.get(ref)),
                 )
             )
 
