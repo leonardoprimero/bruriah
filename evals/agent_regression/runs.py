@@ -18,7 +18,12 @@ from agent_regression.detection import Detection
 BASELINE = "baseline"
 UNPROMPTED = "unprompted"
 PROMPTED = "prompted"
-CONDITIONS = (BASELINE, UNPROMPTED, PROMPTED)
+# Opt-in: `prompted` plus a run-local `PreToolUse` hook that denies the first native file mutation.
+GATED = "gated"
+# What a runner plans when no condition is named: the published conditions, never `gated`.
+DEFAULT_CONDITIONS = (BASELINE, UNPROMPTED, PROMPTED)
+# Every condition a run record, a plan or a report accepts, in canonical order.
+CONDITIONS = (*DEFAULT_CONDITIONS, GATED)
 
 EXIT_REASONS = ("done", "turn_budget", "time_budget", "error")
 

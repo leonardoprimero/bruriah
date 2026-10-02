@@ -20,6 +20,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import shlex
 import shutil
 import subprocess
 import sys
@@ -37,6 +38,7 @@ import yaml  # noqa: E402
 
 import bruriah  # noqa: E402
 from agent_regression import adapters as adapters_module  # noqa: E402
+from agent_regression import gated_hook  # noqa: E402
 from agent_regression import run as run_module  # noqa: E402
 from agent_regression.claude_code import (  # noqa: E402
     ALLOWED_TOOLS,
@@ -51,6 +53,8 @@ from agent_regression.claude_code import (  # noqa: E402
     command_line,
     ensure_index,
     exit_reason_for,
+    gate_hook_command,
+    install_gate,
     mirror_repository,
     parse_stream,
     prepare_workdir,
@@ -62,6 +66,8 @@ from agent_regression.metrics import trap_set_digest  # noqa: E402
 from agent_regression.runs import (  # noqa: E402
     BASELINE,
     CONDITIONS,
+    DEFAULT_CONDITIONS,
+    GATED,
     PROMPTED,
     UNPROMPTED,
     AgentRun,
@@ -719,6 +725,231 @@ def test_only_the_prompted_command_line_carries_an_instruction(tmp_path: Path, c
     assert PROMPTED_INSTRUCTION not in argv
 
 
+_BASE_ARGV = [
+    "/opt/claude",
+    "-p",
+    _PROMPT,
+    "--setting-sources",
+    "",
+    "--strict-mcp-config",
+    "--disable-slash-commands",
+    "--output-format",
+    "stream-json",
+    "--verbose",
+    "--no-session-persistence",
+    "--max-turns",
+    "7",
+    "--model",
+    _MODEL,
+    "--permission-mode",
+    "acceptEdits",
+    "--permission-prompts",
+    "none",
+    "--allowedTools",
+    "Read",
+    "Edit",
+    "Write",
+    "MultiEdit",
+    "Glob",
+    "Grep",
+]
+_DISALLOWED_ARGV = ["--disallowedTools", "Bash", "WebFetch", "WebSearch", "Task", "NotebookEdit"]
+_MCP_ARGV = ["mcp__bruriah__investigate_work", "mcp__bruriah__read_evidence"]
+
+
+@pytest.mark.parametrize(
+    ("condition", "tail"),
+    [
+        (BASELINE, []),
+        (UNPROMPTED, ["--mcp-config", "MCP"]),
+        (PROMPTED, ["--mcp-config", "MCP", "--append-system-prompt", PROMPTED_INSTRUCTION]),
+    ],
+)
+def test_the_default_conditions_keep_their_published_command_line(
+    tmp_path: Path, condition: str, tail: list[str]
+) -> None:
+    # Pinned argv: the published runs were measured with exactly these command lines, and the
+    # opt-in gated condition must not change a single element of them.
+    config = _config(tmp_path, Path("/opt/claude"), Path("/opt/bruriah"))
+    trap = _pure_trap(tmp_path)
+    mcp_config = None if condition == BASELINE else tmp_path / "mcp.json"
+    tools = [] if condition == BASELINE else _MCP_ARGV
+
+    argv = command_line(config, trap, condition, trap.prompt, mcp_config)
+
+    expected_tail = [str(mcp_config) if item == "MCP" else item for item in tail]
+    assert argv == _BASE_ARGV + tools + _DISALLOWED_ARGV + expected_tail
+    assert "--settings" not in argv
+
+
+# -------------------------------------------------------------------------------------------
+# Gated condition: a run-local `PreToolUse` hook denies the first native file mutation
+# -------------------------------------------------------------------------------------------
+
+
+def test_gated_allows_the_same_tools_as_the_mcp_conditions() -> None:
+    assert allowed_tools(GATED) == ALLOWED_TOOLS + MCP_TOOLS
+
+
+def test_gated_command_line_registers_the_server_the_gate_settings_and_the_prompted_instruction(
+    tmp_path: Path,
+) -> None:
+    config = _config(tmp_path, Path("/opt/claude"), Path("/opt/bruriah"))
+    trap = _pure_trap(tmp_path)
+    mcp_config, settings = tmp_path / "mcp.json", tmp_path / "settings.json"
+
+    argv = command_line(config, trap, GATED, trap.prompt, mcp_config, settings=settings)
+
+    assert argv == (
+        _BASE_ARGV
+        + _MCP_ARGV
+        + _DISALLOWED_ARGV
+        + ["--mcp-config", str(mcp_config), "--settings", str(settings), "--append-system-prompt", PROMPTED_INSTRUCTION]
+    )
+    # The gate travels as flag settings; no settings file of the operator or the trap repository loads.
+    assert argv[argv.index("--setting-sources") + 1] == ""
+
+
+def test_command_line_takes_gate_settings_for_the_gated_condition_only(tmp_path: Path) -> None:
+    config = _config(tmp_path, Path("/opt/claude"), Path("/opt/bruriah"))
+    trap = _pure_trap(tmp_path)
+    mcp_config, settings = tmp_path / "mcp.json", tmp_path / "settings.json"
+
+    with pytest.raises(ValueError, match="settings"):
+        command_line(config, trap, GATED, trap.prompt, mcp_config)
+    for condition in DEFAULT_CONDITIONS:
+        with pytest.raises(ValueError, match="settings"):
+            command_line(config, trap, condition, trap.prompt, mcp_config, settings=settings)
+
+
+def test_install_gate_writes_settings_hook_and_state_outside_the_clone(tmp_path: Path) -> None:
+    workdir = tmp_path / "work"
+    workdir.mkdir()
+    gates = tmp_path / "cache" / "gates"
+
+    settings_path = install_gate(gates, workdir)
+
+    gate_dir = settings_path.parent
+    hook, state = gate_dir / "gated_hook.py", gate_dir / gated_hook.STATE_FILE
+    assert settings_path.name == "settings.json"
+    assert gate_dir.parent == gates
+    # The agent edits inside the clone; nothing of the gate is there for it to replace or pre-empt.
+    assert not gate_dir.resolve().is_relative_to(workdir.resolve())
+    assert list(workdir.iterdir()) == []
+    assert hook.read_bytes() == Path(gated_hook.__file__).read_bytes()
+    assert not state.exists()
+    assert json.loads(settings_path.read_text(encoding="utf-8")) == {
+        "hooks": {
+            "PreToolUse": [
+                {
+                    "matcher": "Edit|Write|MultiEdit",
+                    "hooks": [{"type": "command", "command": gate_hook_command(hook, state)}],
+                }
+            ]
+        }
+    }
+    # Every word is quoted and nothing but the interpreter, the hook copy and its state is named: no
+    # repository or task text ever reaches the shell the client runs the hook command in.
+    assert gate_hook_command(hook, state) == (
+        f"{shlex.quote(sys.executable)} -I {shlex.quote(str(hook))} {shlex.quote(str(state))}"
+    )
+    if os.name == "posix":
+        assert gate_dir.stat().st_mode & 0o777 == 0o700
+        for path in (settings_path, hook):
+            assert path.stat().st_mode & 0o022 == 0, path
+
+
+def test_install_gate_gives_every_run_its_own_directory(tmp_path: Path) -> None:
+    workdir = tmp_path / "work"
+    workdir.mkdir()
+    gates = tmp_path / "cache" / "gates"
+
+    first, second = install_gate(gates, workdir), install_gate(gates, workdir)
+
+    assert first.parent != second.parent
+    assert {first.parent.parent, second.parent.parent} == {gates}
+
+
+@pytest.mark.parametrize("inside", [".agent-regression", ".", "nested/gates"])
+def test_install_gate_refuses_a_gate_root_inside_the_clone(tmp_path: Path, inside: str) -> None:
+    workdir = tmp_path / "work"
+    workdir.mkdir()
+
+    with pytest.raises(AdapterError, match="outside"):
+        install_gate(workdir / inside, workdir)
+
+    assert not (workdir / ".agent-regression").exists()
+    assert not any(workdir.rglob("settings.json"))
+    assert not any(workdir.rglob("gated_hook.py"))
+
+
+def test_the_gate_reason_tells_the_agent_to_review_the_decision_and_retry() -> None:
+    reason = gated_hook.GATE_REASON
+    assert "`investigate_work`" in reason
+    assert "`read_evidence`" in reason
+    assert "historical decision" in reason
+    assert "retry" in reason.lower()
+    assert "bruriah" not in reason.lower()
+    assert "\n" not in reason
+    assert gated_hook.GATED_TOOLS == ("Edit", "Write", "MultiEdit")
+
+
+def test_the_gate_denies_the_first_native_file_mutation_and_allows_every_later_one(tmp_path: Path) -> None:
+    state = tmp_path / gated_hook.STATE_FILE
+
+    assert gated_hook.gate(state, {"tool_name": "Edit", "tool_input": {"file_path": "src/a.py"}}) == (
+        2,
+        gated_hook.GATE_REASON,
+    )
+    assert gated_hook.gate(state, {"tool_name": "Edit", "tool_input": {"file_path": "src/a.py"}}) == (0, "")
+    assert gated_hook.gate(state, {"tool_name": "Write"}) == (0, "")
+    assert gated_hook.gate(state, {"tool_name": "MultiEdit"}) == (0, "")
+    assert json.loads(state.read_text(encoding="utf-8")) == {"denied": "Edit"}
+
+
+@pytest.mark.parametrize("payload", [{"tool_name": "Read"}, {"tool_name": "NotebookEdit"}, {}, [], "Edit"])
+def test_the_gate_lets_anything_else_through_without_spending_the_denial(tmp_path: Path, payload: object) -> None:
+    state = tmp_path / gated_hook.STATE_FILE
+
+    assert gated_hook.gate(state, payload) == (0, "")
+    assert not state.exists()
+    assert gated_hook.gate(state, {"tool_name": "Write"})[0] == 2
+
+
+@pytest.mark.skipif(os.name == "nt", reason="the client runs hook commands through a POSIX shell here")
+def test_the_rendered_hook_command_gates_once_per_run_through_the_shell(tmp_path: Path) -> None:
+    # A gate root full of shell metacharacters: the quoted command must still run the hook as-is.
+    workdir = tmp_path / "work"
+    workdir.mkdir()
+    gates = tmp_path / "it's a $(touch pwned) `dir`; ok" / "gates"
+
+    def hook(settings_path: Path, tool: str) -> subprocess.CompletedProcess[str]:
+        settings = json.loads(settings_path.read_text(encoding="utf-8"))
+        command = settings["hooks"]["PreToolUse"][0]["hooks"][0]["command"]
+        event = {"hook_event_name": "PreToolUse", "tool_name": tool, "tool_input": {"file_path": "README.md"}}
+        return subprocess.run(
+            command,
+            shell=True,
+            input=json.dumps(event),
+            capture_output=True,
+            text=True,
+            cwd=tmp_path,
+            env={"PATH": os.environ.get("PATH", "")},
+        )
+
+    settings, other_settings = install_gate(gates, workdir), install_gate(gates, workdir)
+    first = hook(settings, "Edit")
+    retry = hook(settings, "Edit")
+
+    assert (first.returncode, first.stderr.strip()) == (2, gated_hook.GATE_REASON)
+    assert (retry.returncode, retry.stderr) == (0, "")
+    assert (settings.parent / gated_hook.STATE_FILE).is_file()
+    assert not (tmp_path / "pwned").exists()
+    assert not any(workdir.iterdir())
+    # Each run's gate is its own: another run still gets its first denial.
+    assert hook(other_settings, "Write").returncode == 2
+
+
 def test_write_mcp_config_renders_the_claude_code_manifest_for_the_real_server(tmp_path: Path) -> None:
     executable = tmp_path / "bin" / "bruriah"
     data_dir, config_dir, model_cache = tmp_path / "data", tmp_path / "config", tmp_path / "models"
@@ -1052,6 +1283,71 @@ def test_a_prompted_run_writes_no_claude_md_when_the_repository_has_none(rig: _R
     assert not (rig.root / "work" / "trap-a-prompted-0" / "CLAUDE.md").exists()
 
 
+def test_a_gated_run_registers_the_server_and_a_pre_tool_use_gate_outside_the_clone(rig: _Rig) -> None:
+    # The agent writes where the gate used to live; the real gate is out of its reach.
+    rig.behave(
+        write={
+            **_REGRESSING_EDIT,
+            ".agent-regression/gated_hook.py": "raise SystemExit(0)\n",
+            ".agent-regression/gate-state.json": "{}\n",
+        },
+        tool_calls=["Edit", "mcp__bruriah__investigate_work", "Edit"],
+    )
+
+    run = rig.run(rig.adapter(), GATED)
+
+    (call,) = rig.claude_calls()
+    workdir = rig.root / "work" / "trap-a-gated-0"
+    harness = workdir / ".agent-regression"
+    argv = call["argv"]
+    assert _flag_values(argv, "--mcp-config") == [str(harness / "mcp.json")]
+    (settings_arg,) = _flag_values(argv, "--settings")
+    settings_path = Path(settings_arg)
+    gate_dir = settings_path.parent
+    assert gate_dir.parent == rig.root / "cache" / "gates"
+    assert not gate_dir.resolve().is_relative_to(workdir.resolve())
+    assert argv[argv.index("--setting-sources") + 1] == ""
+    assert _flag_values(argv, "--allowedTools") == list(ALLOWED_TOOLS + MCP_TOOLS)
+    assert _flag_values(argv, "--append-system-prompt") == [PROMPTED_INSTRUCTION]
+    settings = json.loads(settings_path.read_text(encoding="utf-8"))
+    command = settings["hooks"]["PreToolUse"][0]["hooks"][0]["command"]
+    assert command == gate_hook_command(gate_dir / "gated_hook.py", gate_dir / gated_hook.STATE_FILE)
+    assert str(workdir) not in command
+    assert (gate_dir / "gated_hook.py").read_bytes() == Path(gated_hook.__file__).read_bytes()
+    assert not (harness / "settings.json").exists()
+    assert sorted(path.name for path in harness.iterdir()) == ["gate-state.json", "gated_hook.py", "mcp.json"]
+    assert ".agent-regression" not in workdir_diff(workdir)
+    assert call["claude_md"] is None
+    assert (run.condition, run.exit_reason) == (GATED, "done")
+    assert run.transcript == "transcripts/trap-a/gated-0.jsonl"
+
+
+def test_the_default_conditions_install_no_gate(rig: _Rig) -> None:
+    adapter = rig.adapter()
+    for condition in DEFAULT_CONDITIONS:
+        rig.run(adapter, condition)
+
+    for call in rig.claude_calls():
+        assert "--settings" not in call["argv"]
+    for condition in DEFAULT_CONDITIONS:
+        harness = rig.root / "work" / f"trap-a-{condition}-0" / ".agent-regression"
+        assert not (harness / "settings.json").exists(), condition
+        assert not (harness / "gated_hook.py").exists(), condition
+    assert not (rig.root / "cache" / "gates").exists()
+
+
+def test_gated_runs_never_share_a_gate(rig: _Rig) -> None:
+    adapter = rig.adapter()
+    rig.run(adapter, GATED, 0)
+    rig.run(adapter, GATED, 1)
+
+    settings = [Path(_flag_values(call["argv"], "--settings")[0]) for call in rig.claude_calls()]
+    assert len({path.parent for path in settings}) == 2
+    for repetition in (0, 1):
+        harness = rig.root / "work" / f"trap-a-gated-{repetition}" / ".agent-regression"
+        assert sorted(path.name for path in harness.iterdir()) == ["mcp.json"]
+
+
 def test_the_index_is_built_once_across_repetitions_and_conditions(rig: _Rig) -> None:
     adapter = rig.adapter()
     for condition in (UNPROMPTED, PROMPTED):
@@ -1269,7 +1565,7 @@ def test_main_runs_the_benchmark_end_to_end_and_writes_both_reports(rig: _Rig) -
     assert exit_code == 0
     payload = json.loads((out / "runs.json").read_text(encoding="utf-8"))
     assert [(run["trap_id"], run["condition"], run["repetition"]) for run in payload["runs"]] == [
-        ("trap-a", condition, 0) for condition in CONDITIONS
+        ("trap-a", condition, 0) for condition in DEFAULT_CONDITIONS
     ]
     report = (out / "report.md").read_text(encoding="utf-8")
     assert report.startswith("# Agent regression benchmark")
@@ -1414,3 +1710,16 @@ def test_main_still_writes_the_report_of_the_runs_that_succeeded_when_one_failed
     assert [(run["trap_id"], run["condition"]) for run in payload["runs"]] == [("trap-a", BASELINE)]
     assert (out / "report.md").is_file()
     assert len(_read_jsonl(out / "failures.jsonl")) == 1
+
+
+def test_main_runs_only_the_gated_condition_when_asked_for_it(rig: _Rig) -> None:
+    out = rig.root / "out"
+
+    exit_code = run_module.main(_main_args(rig, out, "--model", _MODEL, "--conditions", GATED))
+
+    assert exit_code == 0
+    payload = json.loads((out / "runs.json").read_text(encoding="utf-8"))
+    assert [(run["trap_id"], run["condition"], run["repetition"]) for run in payload["runs"]] == [("trap-a", GATED, 0)]
+    assert list(payload["conditions"]) == [GATED]
+    (call,) = rig.claude_calls()
+    assert "--settings" in call["argv"]

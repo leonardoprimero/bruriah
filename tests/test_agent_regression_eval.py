@@ -37,6 +37,8 @@ from agent_regression.detection import (  # noqa: E402
 from agent_regression.runs import (  # noqa: E402
     BASELINE,
     CONDITIONS,
+    DEFAULT_CONDITIONS,
+    GATED,
     PROMPTED,
     UNPROMPTED,
     WRITE_TOOLS,
@@ -529,7 +531,20 @@ def test_check_trap_fixtures_rejects_a_trap_without_fixtures(tmp_path: Path) -> 
 
 def test_conditions_are_baseline_unprompted_prompted_in_that_order() -> None:
     assert (BASELINE, UNPROMPTED, PROMPTED) == ("baseline", "unprompted", "prompted")
-    assert CONDITIONS == (BASELINE, UNPROMPTED, PROMPTED)
+    assert DEFAULT_CONDITIONS == (BASELINE, UNPROMPTED, PROMPTED)
+
+
+def test_gated_is_an_opt_in_condition_after_the_default_ones() -> None:
+    # The published conditions stay the default; `gated` is accepted everywhere but only runs when asked for.
+    assert GATED == "gated"
+    assert CONDITIONS == (*DEFAULT_CONDITIONS, GATED)
+    assert GATED not in DEFAULT_CONDITIONS
+
+
+def test_run_from_json_accepts_a_gated_run() -> None:
+    run = _make_run(condition=GATED)
+
+    assert run_from_json(run_to_json(run)) == run
 
 
 def test_write_tools_are_exactly_the_file_mutating_tools() -> None:
@@ -935,7 +950,7 @@ def _report_runs() -> list[AgentRun]:
     (trap-a only), prompted 0/4."""
     runs = []
     for trap_id in ("trap-a", "trap-b"):
-        for condition in CONDITIONS:
+        for condition in DEFAULT_CONDITIONS:
             for repetition in range(2):
                 regressed = condition == BASELINE or (condition == UNPROMPTED and trap_id == "trap-a")
                 calls = _unconsulted_calls() if condition == BASELINE else _consulted_calls()
@@ -981,13 +996,26 @@ def test_render_markdown_has_one_row_per_condition_with_rate_and_interval() -> N
     summaries = summarize(runs)
     lines = render_markdown(runs, summaries).splitlines()
 
-    for condition in CONDITIONS:
+    for condition in DEFAULT_CONDITIONS:
         summary = summaries[condition]
         low, high = summary.regression_interval
         rows = [line for line in lines if line.startswith(f"| {condition} |")]
         assert len(rows) == 1, condition
         assert f"{summary.regression_rate:.2f}" in rows[0]
         assert f"[{low:.2f}, {high:.2f}]" in rows[0]
+
+
+def test_render_markdown_orders_the_gated_condition_after_the_default_ones() -> None:
+    runs = _report_runs()
+    runs += [_make_run(trap_id="trap-a", condition=GATED, repetition=0, tool_calls=_consulted_calls())]
+    summaries = summarize(runs)
+
+    assert list(summaries) == [BASELINE, UNPROMPTED, PROMPTED, GATED]
+    lines = render_markdown(runs, summaries).splitlines()
+    rows = [line.split(" | ")[0].lstrip("| ") for line in lines if line.startswith("| ") and " | " in line]
+    conditions = [row for row in rows if row in CONDITIONS]
+    assert conditions == [BASELINE, UNPROMPTED, PROMPTED, GATED]
+    assert "| trap | baseline | unprompted | prompted | gated |" in lines
 
 
 def test_render_markdown_has_a_per_trap_row_for_every_trap() -> None:
@@ -1083,10 +1111,16 @@ def test_plan_invocations_covers_traps_times_conditions_times_repetitions(tmp_pa
         _make_trap(tmp_path, trap_id)
     traps = load_traps(tmp_path)
 
-    plan = plan_invocations(traps, CONDITIONS, 5)
+    plan = plan_invocations(traps, DEFAULT_CONDITIONS, 5)
 
     assert len(plan) == 3 * 3 * 5
     assert len(set(plan)) == len(plan)
+
+
+def test_plan_invocations_accepts_the_gated_condition(tmp_path: Path) -> None:
+    _make_trap(tmp_path, "trap-a")
+
+    assert plan_invocations(load_traps(tmp_path), (GATED,), 2) == [("trap-a", GATED, 0), ("trap-a", GATED, 1)]
 
 
 def test_main_dry_run_lists_every_invocation_without_running_an_agent(
@@ -1109,9 +1143,27 @@ def test_main_dry_run_lists_every_invocation_without_running_an_agent(
     assert exit_code == 0
     assert any(re.search(r"\b12\b", line) for line in lines)
     for trap_id in ("trap-a", "trap-b"):
-        for condition in CONDITIONS:
+        for condition in DEFAULT_CONDITIONS:
             matching = [line for line in lines if trap_id in line and re.search(rf"\b{condition}\b", line)]
             assert len(matching) == 2, (trap_id, condition)
+    assert not [line for line in lines if re.search(rf"\b{GATED}\b", line)], "gated is opt-in"
+
+
+def test_main_dry_run_plans_only_gated_when_asked_for_it(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    traps_dir = tmp_path / "traps"
+    _make_trap(traps_dir, "trap-a")
+
+    exit_code = main(["--dry-run", "--traps", str(traps_dir), "--repetitions", "2", "--conditions", GATED])
+
+    lines = capsys.readouterr().out.splitlines()
+    assert exit_code == 0
+    assert lines == [
+        "2 planned invocations: 1 traps x 1 conditions x 2 repetitions",
+        "trap-a gated repetition 0",
+        "trap-a gated repetition 1",
+    ]
 
 
 def test_replay_adapter_returns_the_stored_run_for_the_requested_repetition(tmp_path: Path) -> None:
@@ -1262,7 +1314,7 @@ def test_replayed_benchmark_reproduces_its_report_byte_identically(tmp_path: Pat
     records = {(run.trap_id, run.condition, run.repetition): run for run in _report_runs()}
 
     def replay() -> tuple[str, str]:
-        runs = run_benchmark(traps, ReplayAdapter(records), CONDITIONS, 2)
+        runs = run_benchmark(traps, ReplayAdapter(records), DEFAULT_CONDITIONS, 2)
         summaries = summarize(runs)
         return render_json(runs, summaries), render_markdown(runs, summaries)
 

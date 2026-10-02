@@ -19,6 +19,13 @@ the client's init line must list exactly the servers the condition registered, a
 must still have no remote, or the run is refused rather than recorded. One side effect remains:
 the client creates an empty `~/.claude/projects/<workdir>/memory` directory per run.
 
+The opt-in `gated` condition is `prompted` plus one hook: per-run `--settings` (flag settings, not
+one of the sources `--setting-sources` selects) register a `PreToolUse` command on the native file tools
+that denies the first file mutation and allows the retry (`gated_hook.py`). The hook script, its
+settings and its state live in a fresh owner-only directory per run under the cache directory,
+outside the clone the agent writes with its file tools, so it can neither replace the hook nor
+pre-create or delete the state; no user or global settings file is read or written.
+
 The wire format is Claude Code's `--output-format stream-json --verbose`, measured on 2.1.283: one
 JSON object per line, a `system`/`init` line first, `assistant` lines carrying `tool_use` items,
 `user` lines carrying tool results, and a final `result` line with the turn count, cost and usage.
@@ -29,9 +36,11 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import shlex
 import shutil
 import signal
 import subprocess
+import sys
 import tempfile
 import time
 from collections.abc import Iterable
@@ -42,9 +51,10 @@ from typing import Any
 import bruriah
 from bruriah.clients import ClientError, LaunchManifest, render_claude_code
 
+from agent_regression import gated_hook
 from agent_regression.adapters import AdapterError
 from agent_regression.detection import validate_detection
-from agent_regression.runs import BASELINE, CONDITIONS, PROMPTED, AgentRun, Provenance, ToolCall
+from agent_regression.runs import BASELINE, CONDITIONS, GATED, PROMPTED, AgentRun, Provenance, ToolCall
 from agent_regression.traps import Trap, load_detector
 
 CLIENT = "claude-code"
@@ -280,9 +290,59 @@ def write_mcp_config(
     return path
 
 
+def gate_root(cache_dir: Path) -> Path:
+    """Where each gated run gets its own gate directory: the adapter's cache, outside every clone."""
+    return cache_dir / "gates"
+
+
+def gate_hook_command(hook_script: Path, state: Path) -> str:
+    """The shell command the client runs for the gate: this interpreter in isolated mode on the
+    run's hook copy and state file, every word quoted. No repository or task text is part of it."""
+    return f"{shlex.quote(sys.executable)} -I {shlex.quote(str(hook_script))} {shlex.quote(str(state))}"
+
+
+def install_gate(gate_root: Path, workdir: Path) -> Path:
+    """Create a fresh owner-only directory under `gate_root`, copy the gate hook into it and write
+    the `--settings` file that registers it as a `PreToolUse` command on the native file tools;
+    return the settings path. The hook's state lives there too, never in the clone: the agent
+    writes the clone with its own file tools, and a gate it could replace or pre-empt from there
+    gates nothing."""
+    if gate_root.resolve().is_relative_to(workdir.resolve()):
+        raise AdapterError(f"the gate directory {gate_root} must be outside the agent's workdir {workdir}")
+    gate_root.mkdir(mode=0o700, parents=True, exist_ok=True)
+    # `mkdtemp` makes a new 0700 directory per call, so no two runs ever share a gate.
+    gate_dir = Path(tempfile.mkdtemp(prefix="gate-", dir=gate_root))
+    hook_script = gate_dir / "gated_hook.py"
+    shutil.copyfile(gated_hook.__file__, hook_script)
+    hook_script.chmod(0o600)
+    command = gate_hook_command(hook_script, gate_dir / gated_hook.STATE_FILE)
+    settings = {
+        "hooks": {
+            "PreToolUse": [
+                {
+                    "matcher": "|".join(gated_hook.GATED_TOOLS),
+                    "hooks": [{"type": "command", "command": command}],
+                }
+            ]
+        }
+    }
+    path = gate_dir / "settings.json"
+    path.write_text(json.dumps(settings, indent=2) + "\n", encoding="utf-8")
+    path.chmod(0o600)
+    return path
+
+
 def command_line(
-    config: ClaudeCodeConfig, trap: Trap, condition: str, prompt: str, mcp_config: Path | None
+    config: ClaudeCodeConfig,
+    trap: Trap,
+    condition: str,
+    prompt: str,
+    mcp_config: Path | None,
+    *,
+    settings: Path | None = None,
 ) -> list[str]:
+    if (settings is not None) != (condition == GATED):
+        raise ValueError(f"gate settings are required for {GATED} and refused for every other condition")
     # `--allowedTools`, `--disallowedTools` and `--mcp-config` take several values each, so every
     # entry is its own argv element and the prompt comes first.
     argv = [
@@ -312,7 +372,10 @@ def command_line(
     ]
     if mcp_config is not None:
         argv += ["--mcp-config", str(mcp_config)]
-    if condition == PROMPTED:
+    if settings is not None:
+        argv += ["--settings", str(settings)]
+    # The gate's own instruction is its denial reason; the system prompt is `prompted`'s, unchanged.
+    if condition in (PROMPTED, GATED):
         argv += ["--append-system-prompt", PROMPTED_INSTRUCTION]
     if config.max_budget_usd_per_run is not None:
         argv += ["--max-budget-usd", str(config.max_budget_usd_per_run)]
@@ -572,8 +635,9 @@ class ClaudeCodeAdapter:
                 config_dir,
                 model_cache_dir=model_cache_dir(config.cache_dir),
             )
+        settings = install_gate(gate_root(config.cache_dir), workdir) if condition == GATED else None
 
-        argv = command_line(config, trap, condition, prompt, mcp_config)
+        argv = command_line(config, trap, condition, prompt, mcp_config, settings=settings)
         stdout, stderr, returncode, timed_out, elapsed = self._invoke(argv, workdir, trap.time_budget_seconds)
         transcript = self._write_transcript(trap, condition, repetition, stdout, stderr)
         summary = parse_stream(stdout.splitlines())

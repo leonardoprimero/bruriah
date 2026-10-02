@@ -39,7 +39,7 @@ _HERE = Path(__file__).resolve().parent
 if str(_HERE.parent) not in sys.path:
     sys.path.insert(0, str(_HERE.parent))
 
-from agent_regression.runs import CONDITIONS, AgentRun, run_from_json, run_to_json  # noqa: E402
+from agent_regression.runs import CONDITIONS, DEFAULT_CONDITIONS, AgentRun, run_from_json, run_to_json  # noqa: E402
 from agent_regression.traps import Trap, TrapError, load_traps  # noqa: E402
 
 DEFAULT_REPETITIONS = 5
@@ -96,7 +96,11 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--traps", type=Path, default=DEFAULT_TRAPS_DIR, help="directory of trap directories")
     parser.add_argument("--repetitions", type=_positive_int, default=DEFAULT_REPETITIONS, help="runs per trap")
     parser.add_argument(
-        "--conditions", nargs="+", choices=CONDITIONS, default=list(CONDITIONS), help="conditions to run"
+        "--conditions",
+        nargs="+",
+        choices=CONDITIONS,
+        default=list(DEFAULT_CONDITIONS),
+        help=f"conditions to run (default: {' '.join(DEFAULT_CONDITIONS)}; gated is opt-in)",
     )
     parser.add_argument("--out", type=Path, default=_HERE, help="directory the reports are written to")
     parser.add_argument("--claude", type=Path, default=None, help="the claude executable (default: found on PATH)")
