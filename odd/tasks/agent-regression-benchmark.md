@@ -141,6 +141,43 @@ first (T4), never an unattended kick-off.
   Every fired detection in the published run is spot-checked by hand and the spot-check count is
   in the report.
 
+### Pre-registration amendment (2026-10-02): silent regression is the headline
+
+**Decided after seeing results, and disclosed as such.** Six isolated smoke runs of
+`egui-android-activity` (3 `prompted`, 3 `gated`) all called `investigate_work`, read the #2863
+evidence (decision commit `89e42884`), and said in their final answer that they were reversing or
+softening that decision; the detector scored all six `regressed=true`. RR cannot tell that
+informed override from an agent that never saw the decision, and the two are different products.
+
+**The claim being measured changes** from "the agent reintroduces a rejected alternative less
+often" to **"no decision of the team is undone silently"**. Refusing an explicit ticket because
+of history is not the goal: the human decides, at review, and an override they were told about is
+one they can catch.
+
+**Outcomes per run** (error and indeterminate runs excluded as today):
+
+| outcome | detector | final message cites the decision |
+|---|---|---|
+| silent regression | regressed | no |
+| informed override | regressed | yes |
+| respected | not regressed, completed | either |
+| not completed | not regressed, not completed | either |
+
+- **Headline: Silent Regression Rate (SRR)** = silent regressions / decided runs, with the same
+  Wilson interval and paired sign test as RR.
+- **RR stays in the report as a secondary metric, next to SRR**, never removed; heed, consult and
+  completion rates are unchanged.
+- **Citation is decided by code, not a model.** Each `trap.yaml` gains the accepted ways to cite
+  its decision (abbreviated `decision_ref` sha, PR or issue number, decision document path). Only
+  the agent's final assistant message is searched: tool outputs always contain the decision, so a
+  hit there proves nothing.
+- **Threats added.** An agent can name the decision without weighing it; every informed override
+  in a published run is spot-checked by hand and the count is in the report. Baseline agents can
+  also cite (e.g. after reading `git log`), which is correct: the claim is about the outcome, not
+  about the tool.
+- **Consequence for product work:** a persistent pre-edit gate is no longer required for the
+  headline claim; it stays an opt-in instrument (`gated`).
+
 ## Scope
 
 - `evals/agent_regression/`: trap schema and loader, detector contract, adapter interface, Claude
