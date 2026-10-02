@@ -6,6 +6,11 @@ from "asked and ignored it"), RR among completed runs (avoiding the regression b
 is not a win), and cost. Between conditions: an exact paired sign test on per-trap majorities,
 the same statistical treatment the fusion sweep used.
 
+The headline is Silent Regression Rate (SRR): regressed runs whose final message does not cite
+the trap's decision, over the same decided runs as RR, with the same interval and sign test. A
+regressed run that cites it is an informed override. A regressed decided run whose citation is
+unknown makes SRR, and its per-trap pairing, unavailable: an unknown is never assumed either way.
+
 Error runs are counted (`runs`, `errors`) but excluded from every rate and mean: a run that
 crashed says nothing about whether the agent regresses. Indeterminate runs (the detector could
 not parse a target file) are counted (`indeterminate`) and excluded the same way, from the
@@ -17,7 +22,7 @@ from __future__ import annotations
 import hashlib
 import json
 import math
-from collections.abc import Iterable, Sequence
+from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass
 
 from agent_regression.runs import CONDITIONS, AgentRun, consulted_before_first_write
@@ -33,6 +38,12 @@ class ConditionSummary:
     runs: int
     errors: int
     indeterminate: int
+    silent_regressions: int
+    informed_overrides: int
+    unknown_citations: int
+    # `None` when `unknown_citations` is positive.
+    silent_regression_rate: float | None
+    silent_regression_interval: tuple[float, float] | None
     regressed: int
     regression_rate: float | None
     regression_interval: tuple[float, float]
@@ -106,6 +117,9 @@ def _summarize_condition(condition: str, runs: list[AgentRun]) -> ConditionSumma
     non_error = [run for run in runs if run.exit_reason != "error"]
     valid = [run for run in non_error if not run.detection.indeterminate]
     regressed = [run for run in valid if run.detection.regressed]
+    silent = [run for run in regressed if run.cited_decision is False]
+    informed = [run for run in regressed if run.cited_decision is True]
+    unknown = len(regressed) - len(silent) - len(informed)
     consulted = [run for run in valid if consulted_before_first_write(run)]
     heeded = [run for run in consulted if not run.detection.regressed]
     completed = [run for run in valid if run.detection.completed]
@@ -115,6 +129,11 @@ def _summarize_condition(condition: str, runs: list[AgentRun]) -> ConditionSumma
         runs=len(runs),
         errors=len(runs) - len(non_error),
         indeterminate=len(non_error) - len(valid),
+        silent_regressions=len(silent),
+        informed_overrides=len(informed),
+        unknown_citations=unknown,
+        silent_regression_rate=None if unknown else _rate(len(silent), len(valid)),
+        silent_regression_interval=None if unknown else wilson_interval(len(silent), len(valid)),
         regressed=len(regressed),
         regression_rate=_rate(len(regressed), len(valid)),
         regression_interval=wilson_interval(len(regressed), len(valid)),
@@ -147,24 +166,60 @@ def summarize(runs: Iterable[AgentRun]) -> dict[str, ConditionSummary]:
     }
 
 
-def _majorities(runs: Iterable[AgentRun], condition: str) -> dict[str, bool]:
-    """Per trap: regressed in strictly more than half of the non-error, decided repetitions."""
+# A per-run outcome for the sign test: `None` when it cannot be decided.
+Outcome = Callable[[AgentRun], bool | None]
+
+
+def _regressed(run: AgentRun) -> bool:
+    return run.detection.regressed
+
+
+def _silently_regressed(run: AgentRun) -> bool | None:
+    """Regressed without citing the decision; `None` when it regressed and the citation is unknown."""
+    if not run.detection.regressed:
+        return False
+    return None if run.cited_decision is None else not run.cited_decision
+
+
+def _majorities(runs: Iterable[AgentRun], condition: str, outcome: Outcome = _regressed) -> dict[str, bool | None]:
+    """Per trap: `outcome` in strictly more than half of the non-error, decided repetitions;
+    `None` when any of them has an undecided outcome."""
     counts: dict[str, list[int]] = {}
+    unknown: set[str] = set()
     for run in runs:
         if run.condition != condition or run.exit_reason == "error" or run.detection.indeterminate:
             continue
+        value = outcome(run)
         tally = counts.setdefault(run.trap_id, [0, 0])
-        tally[0] += int(run.detection.regressed)
+        tally[0] += int(bool(value))
         tally[1] += 1
-    return {trap_id: 2 * regressed > total for trap_id, (regressed, total) in counts.items()}
+        if value is None:
+            unknown.add(run.trap_id)
+    return {trap_id: None if trap_id in unknown else 2 * hits > total for trap_id, (hits, total) in counts.items()}
+
+
+def _pair(
+    runs: Sequence[AgentRun], condition_a: str, condition_b: str, outcome: Outcome
+) -> list[tuple[bool, bool]] | None:
+    a = _majorities(runs, condition_a, outcome)
+    b = _majorities(runs, condition_b, outcome)
+    if None in a.values() or None in b.values():
+        return None
+    return [(bool(a[trap_id]), bool(b[trap_id])) for trap_id in sorted(a.keys() & b.keys())]
 
 
 def pair_by_trap(runs: Sequence[AgentRun], condition_a: str, condition_b: str) -> list[tuple[bool, bool]]:
     """Per-trap majority outcomes paired across two conditions, sorted by trap id. A trap without
     a non-error, decided run under either condition has nothing to pair and is skipped."""
-    a = _majorities(runs, condition_a)
-    b = _majorities(runs, condition_b)
-    return [(a[trap_id], b[trap_id]) for trap_id in sorted(a.keys() & b.keys())]
+    pairs = _pair(runs, condition_a, condition_b, _regressed)
+    assert pairs is not None, "a regression is always decided"
+    return pairs
+
+
+def pair_silent_by_trap(runs: Sequence[AgentRun], condition_a: str, condition_b: str) -> list[tuple[bool, bool]] | None:
+    """`pair_by_trap` on silent-regression majorities, or `None` when a regressed decided run of
+    either condition has an unknown citation: the pairing is unavailable, no trap is dropped."""
+    return _pair(runs, condition_a, condition_b, _silently_regressed)
 
 
 def trap_set_digest(traps: Iterable[Trap]) -> str:

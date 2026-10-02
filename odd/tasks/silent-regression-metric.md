@@ -41,7 +41,7 @@ rescore the published run's 122 records from their stored transcripts, at no mod
 ## Work Units
 - [x] Citation cues per trap (loader + twelve manifests).
 - [x] Citation extraction/matching and `cited_decision` in records and adapter.
-- [ ] SRR in metrics and report.
+- [x] SRR in metrics and report.
 - [ ] Rescore the published run and spot-check informed overrides.
 
 ## Verification Evidence
@@ -61,6 +61,13 @@ rescore the published run's 122 records from their stored transcripts, at no mod
   text. Read-only rescoring (no file changed, mtimes and sizes identical): 36 of 122 runs cite
   their decision; among the 43 regressions only 2 cite it (baseline 0/13, unprompted 1/15,
   prompted 1/15, both `egui-datepicker-chrono`). The published run predates `fa26c59`.
+- Unit 3 (SRR): RED 20 tests for the intended reasons after a stub (first run failed at
+  collection); GREEN; the four benchmark test files pass 511; Ruff clean. SRR and its interval
+  are the first metric columns, RR next; the sign-test table has an SRR row above each RR row and
+  fails closed for a whole condition pair on any unknown citation. New read-only entry point
+  `python evals/agent_regression/report.py <run-dir> [--rescore-citations] [--traps DIR]
+  [--out DIR]`; it refuses an `--out` inside the run directory, and tests prove the run directory
+  is byte-identical after rendering.
 
 ## Commit Evidence
 _Pending._

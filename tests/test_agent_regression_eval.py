@@ -53,6 +53,7 @@ from agent_regression.runs import (  # noqa: E402
 from agent_regression.metrics import (  # noqa: E402
     ConditionSummary,
     pair_by_trap,
+    pair_silent_by_trap,
     paired_sign_test,
     summarize,
     trap_set_digest,
@@ -1166,6 +1167,150 @@ def test_pair_by_trap_does_not_count_exactly_half_as_a_majority() -> None:
     assert pair_by_trap(runs, BASELINE, PROMPTED) == [(False, True)]
 
 
+# Silent regression: regressed and the final message does not cite the decision.
+
+
+def _outcome_run(outcome: str, **overrides) -> AgentRun:
+    """A run with one of the amendment's outcomes: `silent` (regressed, not cited), `informed`
+    (regressed, cited), `unknown` (regressed, citation unknown), `clean` (not regressed)."""
+    regressed, cited = {
+        "silent": (True, False),
+        "informed": (True, True),
+        "unknown": (True, None),
+        "clean": (False, None),
+    }[outcome]
+    return _make_run(regressed=regressed, cited_decision=cited, **overrides)
+
+
+def _outcomes(trap_id: str, condition: str, outcomes: list[str]) -> list[AgentRun]:
+    return [
+        _outcome_run(outcome, trap_id=trap_id, condition=condition, repetition=index)
+        for index, outcome in enumerate(outcomes)
+    ]
+
+
+def test_summarize_counts_silent_regressions_and_informed_overrides_over_decided_runs() -> None:
+    """Five decided prompted runs: two silent, one informed, two clean (one of them citing). The
+    error run and the indeterminate run are regressed or uncited, and are excluded like in RR.
+
+    SRR 2/5 with the Wilson interval of 2 in 5; RR 3/5 as before."""
+    runs = [
+        _make_run(condition=PROMPTED, repetition=0, regressed=True, cited_decision=False),
+        _make_run(condition=PROMPTED, repetition=1, regressed=True, cited_decision=True),
+        _make_run(condition=PROMPTED, repetition=2, regressed=True, cited_decision=False),
+        _make_run(condition=PROMPTED, repetition=3, regressed=False, cited_decision=None),
+        _make_run(condition=PROMPTED, repetition=4, regressed=False, cited_decision=True),
+        _make_run(condition=PROMPTED, repetition=5, regressed=True, cited_decision=None, exit_reason="error"),
+        _make_run(condition=PROMPTED, repetition=6, indeterminate=True, cited_decision=None),
+    ]
+
+    summary = summarize(runs)[PROMPTED]
+
+    assert (summary.silent_regressions, summary.informed_overrides, summary.unknown_citations) == (2, 1, 0)
+    assert summary.silent_regression_rate == pytest.approx(2 / 5)
+    assert summary.silent_regression_interval == pytest.approx(wilson_interval(2, 5))
+    assert summary.regressed == 3
+    assert summary.regression_rate == pytest.approx(3 / 5)
+
+
+def test_summarize_makes_srr_unavailable_when_a_regressed_decided_run_has_an_unknown_citation() -> None:
+    runs = [
+        _outcome_run("silent", repetition=0),
+        _outcome_run("unknown", repetition=1),
+        _outcome_run("clean", repetition=2),
+    ]
+
+    summary = summarize(runs)[BASELINE]
+
+    assert (summary.silent_regressions, summary.informed_overrides, summary.unknown_citations) == (1, 0, 1)
+    assert summary.silent_regression_rate is None
+    assert summary.silent_regression_interval is None
+    assert summary.regression_rate == pytest.approx(2 / 3)
+
+
+def test_summarize_reports_srr_zero_when_every_regression_is_informed() -> None:
+    runs = [_outcome_run("informed", repetition=0), _outcome_run("clean", repetition=1)]
+
+    summary = summarize(runs)[BASELINE]
+
+    assert summary.silent_regression_rate == 0.0
+    assert summary.silent_regression_interval == pytest.approx(wilson_interval(0, 2))
+    assert summary.informed_overrides == 1
+
+
+@pytest.mark.parametrize("cited", [None, False, True])
+def test_summarize_leaves_every_pre_amendment_field_unchanged_by_citation(cited: bool | None) -> None:
+    """RR, consult, heed, completion and cost do not read the citation."""
+    runs = _report_runs()
+    cited_runs = [dataclasses.replace(run, cited_decision=cited) for run in runs]
+    srr_fields = {
+        "silent_regressions",
+        "informed_overrides",
+        "unknown_citations",
+        "silent_regression_rate",
+        "silent_regression_interval",
+    }
+
+    for condition, summary in summarize(cited_runs).items():
+        legacy = summarize(runs)[condition]
+        for field in dataclasses.fields(ConditionSummary):
+            if field.name not in srr_fields:
+                assert getattr(summary, field.name) == getattr(legacy, field.name), (condition, field.name)
+
+
+def test_pair_silent_by_trap_pairs_per_trap_silent_regression_majorities() -> None:
+    """trap-a regresses in a majority under both conditions, but only baseline does it silently;
+    trap-b is clean under baseline and silent under prompted."""
+    runs = [
+        *_outcomes("trap-a", BASELINE, ["silent", "silent", "informed"]),
+        *_outcomes("trap-a", PROMPTED, ["informed", "informed", "clean"]),
+        *_outcomes("trap-b", BASELINE, ["clean", "clean"]),
+        *_outcomes("trap-b", PROMPTED, ["silent", "silent"]),
+    ]
+
+    assert pair_silent_by_trap(runs, BASELINE, PROMPTED) == [(True, False), (False, True)]
+    assert pair_by_trap(runs, BASELINE, PROMPTED) == [(True, True), (False, True)]
+
+
+def test_pair_silent_by_trap_does_not_count_exactly_half_as_a_majority() -> None:
+    runs = [
+        *_outcomes("trap-a", BASELINE, ["silent", "informed"]),
+        *_outcomes("trap-a", PROMPTED, ["silent", "silent"]),
+    ]
+
+    assert pair_silent_by_trap(runs, BASELINE, PROMPTED) == [(False, True)]
+
+
+@pytest.mark.parametrize("unknown_under", [BASELINE, PROMPTED])
+def test_pair_silent_by_trap_is_unavailable_when_a_regressed_run_has_an_unknown_citation(unknown_under: str) -> None:
+    """One regressed decided run of unknown citation, under either condition, makes the whole
+    silent pairing unavailable rather than dropping its trap; the RR pairing is unaffected."""
+    runs = [
+        *_outcomes("trap-a", BASELINE, ["silent", "silent"]),
+        *_outcomes("trap-a", PROMPTED, ["clean", "clean"]),
+        _outcome_run("unknown", trap_id="trap-b", condition=unknown_under, repetition=0),
+        *_outcomes("trap-b", BASELINE if unknown_under == PROMPTED else PROMPTED, ["clean"]),
+    ]
+
+    assert pair_silent_by_trap(runs, BASELINE, PROMPTED) is None
+    assert pair_by_trap(runs, BASELINE, PROMPTED) == [
+        (True, False),
+        (unknown_under == BASELINE, unknown_under == PROMPTED),
+    ]
+
+
+def test_pair_silent_by_trap_ignores_unknown_citations_of_error_indeterminate_and_clean_runs() -> None:
+    runs = [
+        *_outcomes("trap-a", BASELINE, ["silent", "clean"]),
+        _outcome_run("silent", trap_id="trap-a", condition=BASELINE, repetition=2),
+        _outcome_run("unknown", trap_id="trap-a", condition=BASELINE, repetition=3, exit_reason="error"),
+        _make_run(trap_id="trap-a", condition=PROMPTED, repetition=1, indeterminate=True, cited_decision=None),
+        *_outcomes("trap-a", PROMPTED, ["clean"]),
+    ]
+
+    assert pair_silent_by_trap(runs, BASELINE, PROMPTED) == [(True, False)]
+
+
 def test_trap_set_digest_is_a_sha256_hex_digest_stable_across_load_order(tmp_path: Path) -> None:
     _make_trap(tmp_path, "trap-a")
     _make_trap(tmp_path, "trap-b", prompt="Move the tool declarations next to their handlers.")
@@ -1294,11 +1439,110 @@ def test_render_markdown_counts_indeterminate_runs_and_leaves_them_out_of_the_ta
     columns = [cell.strip() for cell in header.strip("|").split("|")]
     assert columns[:4] == ["condition", "runs", "errors", "indeterminate"]
     baseline = next(line for line in lines if line.startswith(f"| {BASELINE} |"))
-    assert [cell.strip() for cell in baseline.strip("|").split("|")][:5] == [BASELINE, "6", "0", "2", "1.00"]
+    cells = [cell.strip() for cell in baseline.strip("|").split("|")]
+    assert cells[:4] == [BASELINE, "6", "0", "2"]
+    assert cells[columns.index("RR")] == "1.00"
     prompted = next(line for line in lines if line.startswith(f"| {PROMPTED} |"))
     assert [cell.strip() for cell in prompted.strip("|").split("|")][:4] == [PROMPTED, "4", "0", "0"]
     assert next(line for line in lines if line.startswith("| trap-a |")).startswith("| trap-a | 2/2 |")
     assert any("indeterminate runs" in line and "excluded from every rate" in line for line in lines)
+
+
+def _cited_report_runs() -> list[AgentRun]:
+    """`_report_runs` with every citation known: baseline's first trap-a repetition is an informed
+    override, every other regression is silent. SRR: baseline 3/4, unprompted 2/4, prompted 0/4."""
+    runs = []
+    for run in _report_runs():
+        informed = run.condition == BASELINE and run.trap_id == "trap-a" and run.repetition == 0
+        runs.append(dataclasses.replace(run, cited_decision=informed if run.detection.regressed else False))
+    return runs
+
+
+def _condition_cells(lines: list[str], condition: str) -> dict[str, str]:
+    header = next(line for line in lines if line.startswith("| condition |"))
+    row = next(line for line in lines if line.startswith(f"| {condition} |"))
+    columns = [cell.strip() for cell in header.strip("|").split("|")]
+    return dict(zip(columns, (cell.strip() for cell in row.strip("|").split("|")), strict=True))
+
+
+def test_render_markdown_puts_srr_first_and_rr_next_to_it() -> None:
+    runs = _cited_report_runs()
+    summaries = summarize(runs)
+    lines = render_markdown(runs, summaries).splitlines()
+
+    header = next(line for line in lines if line.startswith("| condition |"))
+    columns = [cell.strip() for cell in header.strip("|").split("|")]
+    assert columns[4:10] == ["SRR", "SRR interval", "RR", "RR interval", "informed overrides", "unknown citations"]
+    low, high = summaries[BASELINE].silent_regression_interval
+    baseline = _condition_cells(lines, BASELINE)
+    assert baseline["SRR"] == "0.75"
+    assert baseline["SRR interval"] == f"[{low:.2f}, {high:.2f}]"
+    assert baseline["RR"] == "1.00"
+    assert (baseline["informed overrides"], baseline["unknown citations"]) == ("1", "0")
+    assert _condition_cells(lines, UNPROMPTED)["SRR"] == "0.50"
+    assert _condition_cells(lines, PROMPTED)["SRR"] == "0.00"
+
+
+def test_render_markdown_reports_srr_unavailable_with_the_count_of_unknown_citations() -> None:
+    runs = _report_runs()
+    runs[0] = dataclasses.replace(runs[0], cited_decision=False)
+    lines = render_markdown(runs, summarize(runs)).splitlines()
+
+    baseline = _condition_cells(lines, BASELINE)
+    assert baseline["SRR"] == "unavailable (3 regressed runs with unknown citation)"
+    assert baseline["SRR interval"] == "n/a"
+    assert baseline["RR"] == "1.00"
+    assert baseline["unknown citations"] == "3"
+    one = [dataclasses.replace(run, cited_decision=False) for run in runs]
+    one[1] = dataclasses.replace(one[1], cited_decision=None)
+    assert _condition_cells(render_markdown(one, summarize(one)).splitlines(), BASELINE)["SRR"] == (
+        "unavailable (1 regressed run with unknown citation)"
+    )
+    assert _condition_cells(lines, PROMPTED)["SRR"] == "0.00"
+
+
+def test_render_markdown_puts_the_srr_sign_test_next_to_the_rr_one() -> None:
+    """Silent majorities: baseline trap-a is 1 of 2 (no majority), trap-b 2 of 2; prompted none."""
+    runs = _cited_report_runs()
+    lines = render_markdown(runs, summarize(runs)).splitlines()
+
+    srr = lines.index("| baseline vs prompted | SRR | 2 | 1 | 0 | 1.0000 |")
+    assert lines[srr + 1] == "| baseline vs prompted | RR | 2 | 2 | 0 | 0.5000 |"
+
+
+def test_render_markdown_reports_the_srr_sign_test_unavailable_on_unknown_citations() -> None:
+    runs = _report_runs()
+    lines = render_markdown(runs, summarize(runs)).splitlines()
+
+    assert (
+        "| baseline vs prompted | SRR | n/a | n/a | n/a | unavailable (4 regressed runs with unknown citation) |"
+        in (lines)
+    )
+    assert "| baseline vs prompted | RR | 2 | 2 | 0 | 0.5000 |" in lines
+
+
+def test_render_markdown_defines_the_outcomes_and_how_citation_is_decided() -> None:
+    runs = _cited_report_runs()
+    text = render_markdown(runs, summarize(runs))
+
+    assert "Silent Regression Rate (SRR)" in text
+    paragraph = next(block for block in text.split("\n\n") if "informed override" in block)
+    assert "silent regression" in paragraph
+    assert "decided by code" in paragraph
+    assert "final message" in paragraph
+
+
+def test_render_json_carries_srr_and_its_interval_or_null() -> None:
+    runs = _cited_report_runs()
+    payload = json.loads(render_json(runs, summarize(runs)))
+    legacy = json.loads(render_json(_report_runs(), summarize(_report_runs())))
+
+    baseline = payload["conditions"][BASELINE]
+    assert baseline["silent_regression_rate"] == pytest.approx(0.75)
+    assert baseline["silent_regression_interval"] == pytest.approx(list(wilson_interval(3, 4)))
+    assert (baseline["silent_regressions"], baseline["informed_overrides"], baseline["unknown_citations"]) == (3, 1, 0)
+    assert legacy["conditions"][BASELINE]["silent_regression_rate"] is None
+    assert legacy["conditions"][BASELINE]["silent_regression_interval"] is None
 
 
 def test_render_markdown_states_the_provenance() -> None:
@@ -1665,3 +1909,128 @@ def test_recorded_runs_rejects_a_malformed_line_that_is_not_a_torn_final_line(tm
         run_module._recorded_runs(log, _RESUME_DIGEST, _RESUME_PLAN)
 
     assert log.read_bytes() == content
+
+
+# -------------------------------------------------------------------------------------------
+# Rendering a stored run: `report.py` main
+# -------------------------------------------------------------------------------------------
+
+_DECISION_CUE = "docs/decisions/0001-tool-declarations.md"
+
+
+def _transcript_lines(final: str, *, tool_output: str = "") -> str:
+    events = [
+        {"type": "system", "subtype": "init"},
+        {"type": "user", "message": {"content": [{"type": "tool_result", "content": tool_output}]}},
+        {"type": "assistant", "message": {"content": [{"type": "text", "text": final}]}},
+        {"type": "result", "subtype": "success", "result": final},
+    ]
+    return "\n".join(json.dumps(event) for event in events) + "\n"
+
+
+def _stored_run(tmp_path: Path) -> tuple[Path, Path]:
+    """A trap set and a stored run directory: `runs.jsonl` written before citation scoring (every
+    `cited_decision` unknown) and the transcripts it points at. Baseline regresses twice, once
+    citing the decision in its final message and once only reading it in tool output."""
+    traps_dir = tmp_path / "traps"
+    _make_trap(traps_dir, "trap-a")
+    run_dir = tmp_path / "out"
+    transcripts = run_dir / "transcripts"
+    transcripts.mkdir(parents=True)
+    (transcripts / "a-0.jsonl").write_text(_transcript_lines(f"Reverted, against {_DECISION_CUE}."), encoding="utf-8")
+    (transcripts / "a-1.jsonl").write_text(
+        _transcript_lines("Swapped in fastlib.", tool_output=f"see {_DECISION_CUE}"), encoding="utf-8"
+    )
+    (transcripts / "p-0.jsonl").write_text(_transcript_lines("Kept the declarations."), encoding="utf-8")
+    runs = [
+        _make_run(repetition=0, regressed=True, transcript="transcripts/a-0.jsonl"),
+        _make_run(repetition=1, regressed=True, transcript="transcripts/a-1.jsonl"),
+        _make_run(condition=PROMPTED, repetition=0, regressed=False, transcript="transcripts/p-0.jsonl"),
+    ]
+    (run_dir / "runs.jsonl").write_text(
+        "".join(json.dumps(run_to_json(run), ensure_ascii=False) + "\n" for run in runs), encoding="utf-8"
+    )
+    return traps_dir, run_dir
+
+
+def _tree_bytes(root: Path) -> dict[str, bytes]:
+    return {str(path.relative_to(root)): path.read_bytes() for path in sorted(root.rglob("*")) if path.is_file()}
+
+
+def test_report_main_rescores_citations_in_memory_and_leaves_the_run_byte_identical(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    traps_dir, run_dir = _stored_run(tmp_path)
+    before = _tree_bytes(run_dir)
+
+    assert report_module.main([str(run_dir), "--traps", str(traps_dir), "--rescore-citations"]) == 0
+
+    lines = capsys.readouterr().out.splitlines()
+    baseline = _condition_cells(lines, BASELINE)
+    assert (baseline["SRR"], baseline["RR"]) == ("0.50", "1.00")
+    assert (baseline["informed overrides"], baseline["unknown citations"]) == ("1", "0")
+    assert _tree_bytes(run_dir) == before
+
+
+def test_report_main_without_the_flag_keeps_legacy_citations_unknown(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    traps_dir, run_dir = _stored_run(tmp_path)
+    before = _tree_bytes(run_dir)
+
+    assert report_module.main([str(run_dir), "--traps", str(traps_dir)]) == 0
+
+    baseline = _condition_cells(capsys.readouterr().out.splitlines(), BASELINE)
+    assert baseline["SRR"] == "unavailable (2 regressed runs with unknown citation)"
+    assert baseline["RR"] == "1.00"
+    assert _tree_bytes(run_dir) == before
+
+
+def test_report_main_writes_the_rescored_reports_to_out_and_never_into_the_run(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    traps_dir, run_dir = _stored_run(tmp_path)
+    before = _tree_bytes(run_dir)
+    out = tmp_path / "scratch"
+    out.mkdir()
+
+    assert report_module.main([str(run_dir), "--traps", str(traps_dir), "--rescore-citations", "--out", str(out)]) == 0
+
+    payload = json.loads((out / "runs.json").read_text(encoding="utf-8"))
+    assert [run["cited_decision"] for run in payload["runs"]] == [True, False, False]
+    assert _condition_cells((out / "report.md").read_text(encoding="utf-8").splitlines(), BASELINE)["SRR"] == "0.50"
+    assert _tree_bytes(run_dir) == before
+
+    assert report_module.main([str(run_dir), "--rescore-citations", "--out", str(run_dir)]) == 2
+    assert "the run directory" in capsys.readouterr().err
+    assert _tree_bytes(run_dir) == before
+
+
+@pytest.mark.parametrize(
+    "content",
+    [
+        pytest.param(_record_line(0) + b'{"trap_id": "tr\n', id="malformed-line"),
+        pytest.param(_record_line(0) + _record_line(1)[:40], id="torn-final-line"),
+        pytest.param(_record_line(0) + _record_line(0), id="duplicate-invocation"),
+        pytest.param(
+            _record_line(0)
+            + (
+                json.dumps(run_to_json(_make_run(repetition=1, provenance=_make_provenance(trap_set_digest="b" * 64))))
+                + "\n"
+            ).encode("utf-8"),
+            id="two-trap-sets",
+        ),
+    ],
+)
+def test_report_main_rejects_a_bad_runs_log_without_touching_it(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], content: bytes
+) -> None:
+    """Rendering only reads: unlike a resumed run, it never cuts a torn final line back."""
+    run_dir = tmp_path / "out"
+    run_dir.mkdir()
+    (run_dir / "runs.jsonl").write_bytes(content)
+
+    assert report_module.main([str(run_dir)]) == 2
+
+    assert "runs.jsonl" in capsys.readouterr().err
+    assert (run_dir / "runs.jsonl").read_bytes() == content
