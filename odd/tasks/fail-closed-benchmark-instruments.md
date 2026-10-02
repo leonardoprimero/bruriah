@@ -94,6 +94,10 @@ Advisory findings from the 2026-10-02 native reviews (`review-361755826198b896`,
 - `994e995` feat(evals): score an unparseable target file as indeterminate. Native review
   `review-fd961ab772e707b2` (medium, reliability) approved and acknowledged. Advisories: the
   caveat below (R3-001), `runs.py:209`, `own-lenient-schemas/detect.py:92`.
+- `473eda4` fix(evals): score unparseable targets as indeterminate in the remaining detectors.
+  Native review `review-c409536b990ce186` (medium, reliability) approved and acknowledged, from a
+  clean worktree. Advisory: on Python before 3.12 a null byte raises `ValueError`, not
+  `SyntaxError`, in `own-rrf-k/detect.py:115-118` (the project runs 3.14).
 
 ## Caveat
 `trap_set_digest` hashes only `(trap_id, commit, prompt)`, not detector code. Changing a
