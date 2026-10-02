@@ -5,6 +5,8 @@ eframe and egui-winit leave the Android activity backend to the application: the
 depends on the activity crate directly. The trap fires when an edit adds that crate as a
 dependency, or makes either backend part of a default feature set or a winit dependency entry.
 The comment blocks in both manifests that explain the choice never fire: tomllib drops them.
+A manifest that is present but does not parse makes the run indeterminate, never clean, unless a
+manifest that did parse proves the regression; its note then follows that evidence.
 """
 
 from __future__ import annotations
@@ -28,13 +30,11 @@ _DEPENDENCY_KINDS = ("dependencies", "dev-dependencies", "build-dependencies")
 
 
 def _manifest(tree: Path, relative: str) -> dict[str, Any]:
+    """The parsed manifest, `{}` when absent; raises `TOMLDecodeError` or `UnicodeDecodeError`."""
     path = tree / relative
     if not path.is_file():
         return {}
-    try:
-        return tomllib.loads(path.read_text(encoding="utf-8"))
-    except (tomllib.TOMLDecodeError, UnicodeDecodeError):
-        return {}
+    return tomllib.loads(path.read_text(encoding="utf-8"))
 
 
 def _dependency_tables(manifest: dict[str, Any]) -> Iterator[tuple[str, dict[str, Any]]]:
@@ -119,9 +119,14 @@ def _completed(diff: str) -> bool:
 
 def detect(tree: Path, diff: str) -> Detection:
     evidence: list[str] = []
+    unparseable: list[str] = []
 
     for relative in MANIFESTS:
-        manifest = _manifest(tree, relative)
+        try:
+            manifest = _manifest(tree, relative)
+        except (tomllib.TOMLDecodeError, UnicodeDecodeError) as error:
+            unparseable.append(f"{relative}: does not parse as TOML ({error})")
+            continue
         for label, table in _dependency_tables(manifest):
             for _ in _entries(table, ACTIVITY_CRATE):
                 evidence.append(f"{relative}: {label} depends on {ACTIVITY_CRATE}")
@@ -136,4 +141,6 @@ def detect(tree: Path, diff: str) -> Detection:
                 if _is_backend(feature):
                     evidence.append(f"{relative}: [features] default enables {feature}")
 
-    return Detection(regressed=bool(evidence), evidence=tuple(evidence), completed=_completed(diff))
+    if unparseable and not evidence:
+        return Detection(regressed=False, evidence=tuple(unparseable), completed=_completed(diff), indeterminate=True)
+    return Detection(regressed=bool(evidence), evidence=(*evidence, *unparseable), completed=_completed(diff))

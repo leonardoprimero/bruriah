@@ -39,7 +39,7 @@ Advisory findings from the 2026-10-02 native reviews (`review-361755826198b896`,
 ## Work Units
 - [x] Gate fails closed on state or payload errors.
 - [x] Checkpoint tolerates only a torn final line.
-- [ ] Indeterminate detection state through contract, records, metrics, report and two detectors.
+- [x] Indeterminate detection state through contract, records, metrics, report and two detectors.
 
 ## Verification Evidence
 - Unit 1 (gate): RED 7 new failure-path cases (missing `GATE_ERROR_REASON`; `FileNotFoundError`,
@@ -55,8 +55,26 @@ Advisory findings from the 2026-10-02 native reviews (`review-361755826198b896`,
   `tests/test_agent_regression_eval.py` 154 passed; Ruff check clean. The log is now split on
   `\n` only, which also stops U+2028 in unescaped records from splitting a line. Formatted one
   pre-existing line from `eee486f` (`test_main_dry_run_plans_only_gated_when_asked_for_it`).
+- Unit 3 (indeterminate): RED 25 new tests (contract, fixture check, records incl. legacy record
+  without the field and non-bool rejection, summaries, pairing, report, both detectors on
+  unparseable TOML/Python incl. invalid UTF-8 and a null byte). GREEN. Parent then changed one
+  design choice: regression evidence from a file that parsed wins over another unparseable target
+  (indeterminate only when no regression evidence exists); RED 4 cases, GREEN. Final: the three
+  benchmark test files pass 401; Ruff check and format clean. Indeterminate runs are excluded
+  from every rate and mean (consult rate, turns, tokens included), like error runs; a run that is
+  both counts as an error. The report gains an `indeterminate` column, so re-rendering the
+  published report changes its table shape though its records load unchanged.
 
 ## Commit Evidence
 - `9b45fc8` fix(evals): fail the gated hook closed. Native review `review-52cb0e6fd58e86cd`
   (medium, reliability) approved and acknowledged; advisories at `gated_hook.py:67-71,87,90-94`
   and `tests/test_agent_regression_claude_code.py:977-986`.
+- `db0bea5` fix(evals): resume from a torn runs log. Native review `review-3c41e035c5772ca8`
+  (high, 4 lenses) approved and acknowledged. Advisory follow-up: an unterminated final line that
+  is complete JSON but fails record validation is also truncated (`run.py:163-173`); the U+2028
+  split claim is untested (`run.py:152`).
+
+## Caveat
+`trap_set_digest` hashes only `(trap_id, commit, prompt)`, not detector code. Changing a
+detector does not invalidate the published run's 122 records, which keep their original verdicts;
+resuming that run after unit 3 would mix detector semantics within one result set.

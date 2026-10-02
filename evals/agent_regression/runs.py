@@ -105,6 +105,7 @@ def run_to_json(run: AgentRun) -> dict[str, Any]:
             "regressed": run.detection.regressed,
             "evidence": list(run.detection.evidence),
             "completed": run.detection.completed,
+            "indeterminate": run.detection.indeterminate,
         },
         "provenance": {field.name: getattr(run.provenance, field.name) for field in fields(Provenance)},
         "cost_usd": run.cost_usd,
@@ -142,6 +143,13 @@ def _boolean(payload: object, key: str, where: str) -> bool:
     if not isinstance(value, bool):
         raise RunRecordError(f"{where}.{key} must be a boolean, got {value!r}")
     return value
+
+
+def _indeterminate(detection: dict[str, Any]) -> bool:
+    # Optional: records written before the indeterminate state (the published run) were all decisive.
+    if "indeterminate" not in detection:
+        return False
+    return _boolean(detection, "indeterminate", "run.detection")
 
 
 def _list(payload: object, key: str, where: str) -> list[Any]:
@@ -198,6 +206,7 @@ def run_from_json(payload: dict[str, Any]) -> AgentRun:
         regressed=_boolean(raw_detection, "regressed", "run.detection"),
         evidence=tuple(evidence),
         completed=_boolean(raw_detection, "completed", "run.detection"),
+        indeterminate=_indeterminate(raw_detection),
     )
 
     raw_provenance = _require(payload, "provenance", where)

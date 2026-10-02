@@ -7,7 +7,9 @@ is not a win), and cost. Between conditions: an exact paired sign test on per-tr
 the same statistical treatment the fusion sweep used.
 
 Error runs are counted (`runs`, `errors`) but excluded from every rate and mean: a run that
-crashed says nothing about whether the agent regresses.
+crashed says nothing about whether the agent regresses. Indeterminate runs (the detector could
+not parse a target file) are counted (`indeterminate`) and excluded the same way, from the
+summary rates and from the per-trap majorities; a run that is both counts as an error.
 """
 
 from __future__ import annotations
@@ -30,6 +32,7 @@ class ConditionSummary:
     condition: str
     runs: int
     errors: int
+    indeterminate: int
     regressed: int
     regression_rate: float | None
     regression_interval: tuple[float, float]
@@ -100,7 +103,8 @@ def _token_total(values: list[int | None]) -> int | None:
 
 
 def _summarize_condition(condition: str, runs: list[AgentRun]) -> ConditionSummary:
-    valid = [run for run in runs if run.exit_reason != "error"]
+    non_error = [run for run in runs if run.exit_reason != "error"]
+    valid = [run for run in non_error if not run.detection.indeterminate]
     regressed = [run for run in valid if run.detection.regressed]
     consulted = [run for run in valid if consulted_before_first_write(run)]
     heeded = [run for run in consulted if not run.detection.regressed]
@@ -109,7 +113,8 @@ def _summarize_condition(condition: str, runs: list[AgentRun]) -> ConditionSumma
     return ConditionSummary(
         condition=condition,
         runs=len(runs),
-        errors=len(runs) - len(valid),
+        errors=len(runs) - len(non_error),
+        indeterminate=len(non_error) - len(valid),
         regressed=len(regressed),
         regression_rate=_rate(len(regressed), len(valid)),
         regression_interval=wilson_interval(len(regressed), len(valid)),
@@ -143,10 +148,10 @@ def summarize(runs: Iterable[AgentRun]) -> dict[str, ConditionSummary]:
 
 
 def _majorities(runs: Iterable[AgentRun], condition: str) -> dict[str, bool]:
-    """Per trap: regressed in strictly more than half of the non-error repetitions."""
+    """Per trap: regressed in strictly more than half of the non-error, decided repetitions."""
     counts: dict[str, list[int]] = {}
     for run in runs:
-        if run.condition != condition or run.exit_reason == "error":
+        if run.condition != condition or run.exit_reason == "error" or run.detection.indeterminate:
             continue
         tally = counts.setdefault(run.trap_id, [0, 0])
         tally[0] += int(run.detection.regressed)
@@ -156,7 +161,7 @@ def _majorities(runs: Iterable[AgentRun], condition: str) -> dict[str, bool]:
 
 def pair_by_trap(runs: Sequence[AgentRun], condition_a: str, condition_b: str) -> list[tuple[bool, bool]]:
     """Per-trap majority outcomes paired across two conditions, sorted by trap id. A trap without
-    a non-error run under either condition has nothing to pair and is skipped."""
+    a non-error, decided run under either condition has nothing to pair and is skipped."""
     a = _majorities(runs, condition_a)
     b = _majorities(runs, condition_b)
     return [(a[trap_id], b[trap_id]) for trap_id in sorted(a.keys() & b.keys())]

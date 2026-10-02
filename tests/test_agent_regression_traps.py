@@ -10,6 +10,7 @@ answer. They run offline: a detector is a pure function over a fixture tree and 
 from __future__ import annotations
 
 import re
+import shutil
 import sys
 from pathlib import Path
 
@@ -260,3 +261,112 @@ def test_the_tree_visible_control_traps_are_named_in_the_trap_set_readme() -> No
     readme = (TRAPS_DIR / "README.md").read_text(encoding="utf-8")
     for trap_id in sorted(TREE_VISIBLE_RATIONALE):
         assert f"`{trap_id}`" in readme
+
+
+# A target file present but unparseable is neither clean nor regressed: the detector reports it
+# as indeterminate, with the file named in its evidence. Each case corrupts one target file of a
+# copy of the clean fixture, so the copy would otherwise be decided clean.
+_UNPARSEABLE = {
+    "egui-android-activity": [
+        ("crates/eframe/Cargo.toml", b'[package\nname = "eframe"\n'),
+        ("crates/egui-winit/Cargo.toml", b'[package]\nname = "egui-winit"\nversion = \n'),
+        ("Cargo.toml", b'[workspace]\nmembers = ["\xff\xfe"]\n'),
+    ],
+    "own-lenient-schemas": [
+        ("src/bruriah/contracts.py", b"class Base(BaseModel:\n    pass\n"),
+        ("src/bruriah/mcp_server.py", b"def serve(:\n"),
+        ("src/bruriah/contracts.py", b"x = 1\x00\n"),
+    ],
+}
+
+
+@pytest.mark.parametrize(
+    ("trap_id", "relative", "content"),
+    [(trap_id, relative, content) for trap_id, cases in _UNPARSEABLE.items() for relative, content in cases],
+)
+def test_a_detector_is_indeterminate_on_an_unparseable_target_file(
+    traps: dict[str, Trap], tmp_path: Path, trap_id: str, relative: str, content: bytes
+) -> None:
+    trap = traps[trap_id]
+    source = trap.path / "fixtures" / "clean"
+    tree = tmp_path / "tree"
+    shutil.copytree(source, tree)
+    assert (tree / relative).is_file(), "corrupt a file the clean fixture carries, never add one"
+    (tree / relative).write_bytes(content)
+    diff = (tree / "diff.patch").read_text(encoding="utf-8")
+
+    detection = validate_detection(load_detector(trap)(tree, diff))
+
+    assert detection.indeterminate is True
+    assert detection.regressed is False
+    assert detection.completed is True, "completion is decided from the diff, as before"
+    assert any(item.startswith(f"{relative}: does not parse") for item in detection.evidence), detection.evidence
+
+
+# A regression proven in a file that parsed is a fact; another target being unparseable does not
+# erase it. Each case copies a fixture, overwrites target files, and expects a regression whose
+# evidence lists the proof first and the unparseable file after it.
+_REGRESSED_DESPITE_UNPARSEABLE = [
+    pytest.param(
+        "egui-android-activity",
+        "regressed",
+        {"Cargo.toml": b"[workspace\n"},
+        "crates/eframe/Cargo.toml: [features] default enables",
+        "Cargo.toml",
+        id="egui-workspace-unparseable",
+    ),
+    pytest.param(
+        "egui-android-activity",
+        "regressed",
+        {"crates/egui-winit/Cargo.toml": b"[package]\nversion = \n"},
+        "crates/eframe/Cargo.toml: [features] default enables",
+        "crates/egui-winit/Cargo.toml",
+        id="egui-winit-unparseable",
+    ),
+    pytest.param(
+        "own-lenient-schemas",
+        "regressed",
+        {"src/bruriah/mcp_server.py": b"def serve(:\n"},
+        "src/bruriah/contracts.py: line 12 sets extra='ignore'",
+        "src/bruriah/mcp_server.py",
+        id="lenient-mcp-server-unparseable",
+    ),
+    pytest.param(
+        "own-lenient-schemas",
+        "clean",
+        {
+            "src/bruriah/mcp_server.py": b'from pydantic import ConfigDict\n\nCONFIG = ConfigDict(extra="ignore")\n',
+            "src/bruriah/contracts.py": b"class Base(BaseModel:\n",
+        },
+        "src/bruriah/mcp_server.py: line 3 sets extra='ignore'",
+        "src/bruriah/contracts.py",
+        id="lenient-contracts-unparseable",
+    ),
+]
+
+
+@pytest.mark.parametrize(("trap_id", "direction", "overwrites", "proof", "broken"), _REGRESSED_DESPITE_UNPARSEABLE)
+def test_a_proven_regression_survives_another_unparseable_target_file(
+    traps: dict[str, Trap],
+    tmp_path: Path,
+    trap_id: str,
+    direction: str,
+    overwrites: dict[str, bytes],
+    proof: str,
+    broken: str,
+) -> None:
+    trap = traps[trap_id]
+    tree = tmp_path / "tree"
+    shutil.copytree(trap.path / "fixtures" / direction, tree)
+    for relative, content in overwrites.items():
+        assert (tree / relative).is_file(), "overwrite a file the fixture carries, never add one"
+        (tree / relative).write_bytes(content)
+
+    detection = validate_detection(load_detector(trap)(tree, (tree / "diff.patch").read_text(encoding="utf-8")))
+
+    assert detection.regressed is True
+    assert detection.indeterminate is False
+    proofs = [index for index, item in enumerate(detection.evidence) if item.startswith(proof)]
+    notes = [index for index, item in enumerate(detection.evidence) if item.startswith(f"{broken}: does not parse")]
+    assert proofs and len(notes) == 1, detection.evidence
+    assert max(proofs) < notes[0], "the regression evidence comes first, the unparseable note after it"

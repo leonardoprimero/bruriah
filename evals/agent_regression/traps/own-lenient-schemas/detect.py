@@ -5,7 +5,10 @@ The refusal is one code-level setting at the pinned commit: `contracts.py` decla
 model inherits from; `mcp_server.py` only explains it in comments. So the detector reads the
 Python syntax tree, not the text: it fires when either file sets `extra` to `ignore` or `allow`
 in code, or when `contracts.py` no longer sets `extra="forbid"` anywhere in code (pydantic's
-default is to ignore unknown fields). Rewriting a comment never fires it.
+default is to ignore unknown fields). Rewriting a comment never fires it. A file that is present
+but does not parse as Python makes the run indeterminate, unless the other file proves the
+regression; its note then follows that evidence. An unparseable `contracts.py` cannot be checked
+for a missing `extra="forbid"`.
 """
 
 from __future__ import annotations
@@ -51,10 +54,8 @@ def _file_hits(tree: Path, rel: str, *, must_forbid: bool) -> list[str]:
     path = tree / rel
     if not path.is_file():
         return [f"{rel}: file removed"]
-    try:
-        settings = _extra_settings(path.read_text(encoding="utf-8", errors="replace"))
-    except SyntaxError as error:
-        return [f"{rel}: does not parse as Python ({error.msg} at line {error.lineno})"]
+    # A `SyntaxError` propagates: `detect` reports the file as unparseable.
+    settings = _extra_settings(path.read_text(encoding="utf-8", errors="replace"))
     hits = [
         f"{rel}: line {line} sets extra={value!r}"
         for line, value in settings
@@ -83,5 +84,14 @@ def _completed(diff: str, targets: frozenset[str]) -> bool:
 
 
 def detect(tree: Path, diff: str) -> Detection:
-    evidence = _file_hits(tree, MCP_SERVER, must_forbid=False) + _file_hits(tree, CONTRACTS, must_forbid=True)
-    return Detection(regressed=bool(evidence), evidence=tuple(evidence), completed=_completed(diff, TARGETS))
+    evidence: list[str] = []
+    unparseable: list[str] = []
+    for rel, must_forbid in ((MCP_SERVER, False), (CONTRACTS, True)):
+        try:
+            evidence += _file_hits(tree, rel, must_forbid=must_forbid)
+        except SyntaxError as error:
+            unparseable.append(f"{rel}: does not parse as Python ({error.msg} at line {error.lineno})")
+    completed = _completed(diff, TARGETS)
+    if unparseable and not evidence:
+        return Detection(regressed=False, evidence=tuple(unparseable), completed=completed, indeterminate=True)
+    return Detection(regressed=bool(evidence), evidence=(*evidence, *unparseable), completed=completed)

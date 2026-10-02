@@ -86,8 +86,9 @@ def render_markdown(runs: Sequence[AgentRun], summaries: Mapping[str, ConditionS
         "# Agent regression benchmark",
         "",
         "Regression Rate (RR): the fraction of runs whose resulting change reintroduces the trap's rejected "
-        "alternative, decided by the trap's deterministic detector, never by a model. Error runs are counted "
-        "but excluded from every rate and mean. Intervals are Wilson 95%.",
+        "alternative, decided by the trap's deterministic detector, never by a model. Error runs and "
+        "indeterminate runs (the detector could not parse a target file) are counted but excluded from every rate "
+        "and mean. Intervals are Wilson 95%.",
         "",
         "## Provenance",
         "",
@@ -103,15 +104,16 @@ def render_markdown(runs: Sequence[AgentRun], summaries: Mapping[str, ConditionS
         "",
         "## Conditions",
         "",
-        "| condition | runs | errors | RR | RR interval | consult rate | heed rate | completed | RR among completed "
-        "| mean turns | mean wall-clock (s) | input tokens | output tokens |",
-        "|---|---:|---:|---:|---|---:|---:|---:|---:|---:|---:|---:|---:|",
+        "| condition | runs | errors | indeterminate | RR | RR interval | consult rate | heed rate | completed "
+        "| RR among completed | mean turns | mean wall-clock (s) | input tokens | output tokens |",
+        "|---|---:|---:|---:|---:|---|---:|---:|---:|---:|---:|---:|---:|---:|",
     ]
     for condition in conditions:
         summary = summaries[condition]
         low, high = summary.regression_interval
         lines.append(
-            f"| {condition} | {summary.runs} | {summary.errors} | {_rate(summary.regression_rate)} "
+            f"| {condition} | {summary.runs} | {summary.errors} | {summary.indeterminate} "
+            f"| {_rate(summary.regression_rate)} "
             f"| [{low:.2f}, {high:.2f}] | {_rate(summary.consult_rate)} | {_rate(summary.heed_rate)} "
             f"| {summary.completed} | {_rate(summary.completed_regression_rate)} | {_mean(summary.mean_turns)} "
             f"| {_mean(summary.mean_wall_clock_seconds)} | {_count(summary.input_tokens)} "
@@ -122,8 +124,8 @@ def render_markdown(runs: Sequence[AgentRun], summaries: Mapping[str, ConditionS
         "",
         "## Paired sign tests",
         "",
-        "Per-trap majority outcome (regressed in strictly more than half of the non-error repetitions), paired "
-        "across two conditions; ties are dropped and p is the exact two-sided binomial.",
+        "Per-trap majority outcome (regressed in strictly more than half of the non-error, non-indeterminate "
+        "repetitions), paired across two conditions; ties are dropped and p is the exact two-sided binomial.",
         "",
         "| comparison | paired traps | first only | second only | p |",
         "|---|---:|---:|---:|---:|",
@@ -137,14 +139,14 @@ def render_markdown(runs: Sequence[AgentRun], summaries: Mapping[str, ConditionS
         "",
         "## Per trap",
         "",
-        "Regressed runs over non-error runs, per condition.",
+        "Regressed runs over non-error, non-indeterminate runs, per condition.",
         "",
         "| trap | " + " | ".join(conditions) + " |",
         "|---|" + "---:|" * len(conditions),
     ]
     tallies: dict[tuple[str, str], list[int]] = {}
     for run in runs:
-        if run.exit_reason == "error":
+        if run.exit_reason == "error" or run.detection.indeterminate:
             continue
         tally = tallies.setdefault((run.trap_id, run.condition), [0, 0])
         tally[0] += int(run.detection.regressed)

@@ -123,6 +123,20 @@ def detect(tree: Path, diff: str) -> Detection:
     return Detection(regressed=True, evidence=("always",), completed=True)
 """
 
+# Fires on the regressed fixture, but cannot decide on the clean one.
+_INDETERMINATE_WHEN_CLEAN_SOURCE = """\
+from pathlib import Path
+
+from agent_regression.detection import Detection
+
+
+def detect(tree: Path, diff: str) -> Detection:
+    text = (tree / "pyproject.toml").read_text(encoding="utf-8")
+    if "fastlib" in text:
+        return Detection(regressed=True, evidence=("pyproject.toml: fastlib",), completed=True)
+    return Detection(regressed=False, evidence=("pyproject.toml: does not parse",), completed=True, indeterminate=True)
+"""
+
 
 def _trap_fields(trap_id: str) -> dict[str, object]:
     return {
@@ -205,15 +219,20 @@ def _make_provenance(**overrides) -> Provenance:
     return Provenance(**fields)
 
 
-def _make_detection(*, regressed: bool = False, completed: bool = True) -> Detection:
+def _make_detection(*, regressed: bool = False, completed: bool = True, indeterminate: bool = False) -> Detection:
+    if indeterminate:
+        return Detection(
+            regressed=False, evidence=("pyproject.toml: does not parse",), completed=completed, indeterminate=True
+        )
     return Detection(regressed=regressed, evidence=("dependencies: fastlib",) if regressed else (), completed=completed)
 
 
 def _make_run(**overrides) -> AgentRun:
-    """A valid, completed, non-regressed baseline run with no tool calls. `regressed` and
-    `completed` are shortcuts that build the matching `Detection`."""
+    """A valid, completed, non-regressed baseline run with no tool calls. `regressed`, `completed`
+    and `indeterminate` are shortcuts that build the matching `Detection`."""
     regressed = overrides.pop("regressed", False)
     completed = overrides.pop("completed", True)
+    indeterminate = overrides.pop("indeterminate", False)
     fields: dict[str, object] = {
         "trap_id": "trap-a",
         "condition": BASELINE,
@@ -224,7 +243,7 @@ def _make_run(**overrides) -> AgentRun:
         "input_tokens": 100,
         "output_tokens": 10,
         "exit_reason": "done",
-        "detection": _make_detection(regressed=regressed, completed=completed),
+        "detection": _make_detection(regressed=regressed, completed=completed, indeterminate=indeterminate),
         "provenance": _make_provenance(),
     }
     fields.update(overrides)
@@ -442,6 +461,35 @@ def test_validate_detection_returns_every_combination_of_regression_and_completi
     assert validate_detection(detection) is detection
 
 
+def test_a_detection_is_decisive_unless_it_says_otherwise() -> None:
+    """The default keeps every detector that never reports uncertainty source-compatible."""
+    assert Detection(regressed=False, evidence=(), completed=True).indeterminate is False
+
+
+@pytest.mark.parametrize("completed", [True, False])
+def test_validate_detection_accepts_an_indeterminate_detection_with_evidence(completed: bool) -> None:
+    detection = _make_detection(completed=completed, indeterminate=True)
+
+    assert validate_detection(detection) is detection
+
+
+def test_validate_detection_rejects_an_indeterminate_regression() -> None:
+    """Indeterminate means the detector could not decide; it cannot also have decided."""
+    with pytest.raises(DetectionError, match="indeterminate"):
+        validate_detection(Detection(regressed=True, evidence=("x: y",), completed=True, indeterminate=True))
+
+
+def test_validate_detection_rejects_an_indeterminate_detection_without_evidence() -> None:
+    with pytest.raises(DetectionError, match="indeterminate"):
+        validate_detection(Detection(regressed=False, evidence=(), completed=True, indeterminate=True))
+
+
+@pytest.mark.parametrize("value", [1, None, "true"])
+def test_validate_detection_rejects_a_non_boolean_indeterminate(value: object) -> None:
+    with pytest.raises(DetectionError, match="indeterminate"):
+        validate_detection(Detection(regressed=False, evidence=("x: y",), completed=True, indeterminate=value))  # type: ignore[arg-type]
+
+
 def test_detector_fires_on_the_rejected_dependency_with_its_evidence(tmp_path: Path) -> None:
     detect = load_detector(load_trap(_make_trap(tmp_path)))
     tree = _write_tree(tmp_path / "tree", dependency="fastlib>=1.0", completed=False)
@@ -514,6 +562,15 @@ def test_check_trap_fixtures_passes_each_fixture_diff_patch_to_the_detector(tmp_
     _write_tree(trap_dir / "fixtures" / "clean", dependency=None, completed=True, diff='-    "fastlib>=1.0",\n')
 
     assert check_trap_fixtures(load_trap(trap_dir)) is None
+
+
+def test_check_trap_fixtures_rejects_a_detector_that_is_indeterminate_on_the_clean_fixture(tmp_path: Path) -> None:
+    """Staying silent is not enough: a clean fixture the detector cannot decide on proves nothing."""
+    trap_dir = _make_trap(tmp_path, detect_source=_INDETERMINATE_WHEN_CLEAN_SOURCE)
+    _write_fixtures(trap_dir)
+
+    with pytest.raises(DetectionError, match="indeterminate on the clean fixture"):
+        check_trap_fixtures(load_trap(trap_dir))
 
 
 def test_check_trap_fixtures_rejects_a_trap_without_fixtures(tmp_path: Path) -> None:
@@ -618,6 +675,36 @@ def test_run_record_round_trips_through_json_exactly() -> None:
     payload = json.loads(json.dumps(run_to_json(run)))
 
     assert run_from_json(payload) == run
+
+
+def test_run_record_round_trips_an_indeterminate_detection() -> None:
+    run = _make_run(indeterminate=True, completed=False)
+
+    payload = json.loads(json.dumps(run_to_json(run)))
+
+    assert payload["detection"]["indeterminate"] is True
+    assert run_from_json(payload) == run
+
+
+def test_run_from_json_loads_a_record_without_indeterminate_as_decisive() -> None:
+    """Records written before the indeterminate state (the published run) carry no such field."""
+    run = _make_run(regressed=True)
+    payload = run_to_json(run)
+    del payload["detection"]["indeterminate"]
+
+    loaded = run_from_json(payload)
+
+    assert loaded.detection.indeterminate is False
+    assert loaded == run
+
+
+@pytest.mark.parametrize("value", [None, 1, "false"])
+def test_run_from_json_rejects_a_non_boolean_indeterminate(value: object) -> None:
+    payload = run_to_json(_make_run())
+    payload["detection"]["indeterminate"] = value
+
+    with pytest.raises(RunRecordError, match="indeterminate"):
+        run_from_json(payload)
 
 
 def test_run_record_round_trips_without_token_counts() -> None:
@@ -832,6 +919,53 @@ def test_summarize_counts_an_error_run_but_excludes_it_from_every_rate() -> None
     assert summary.completed_regression_rate == pytest.approx(0.0)
 
 
+def test_summarize_counts_an_indeterminate_run_but_excludes_it_from_every_rate() -> None:
+    """An unparseable target is neither clean nor regressed, so it is treated like an error run:
+    counted, never in a denominator. The indeterminate run here is consulted and completed, so
+    including it would move the regression, consult, heed and completed rates below."""
+    runs = [
+        _make_run(condition=PROMPTED, repetition=0, tool_calls=_consulted_calls(), regressed=True, completed=True),
+        _make_run(condition=PROMPTED, repetition=1, tool_calls=_unconsulted_calls(), regressed=False, completed=False),
+        _make_run(
+            condition=PROMPTED,
+            repetition=2,
+            tool_calls=_consulted_calls(),
+            indeterminate=True,
+            completed=True,
+            turns=99,
+        ),
+    ]
+
+    summary = summarize(runs)[PROMPTED]
+
+    assert summary.runs == 3
+    assert summary.errors == 0
+    assert summary.indeterminate == 1
+    assert summary.regressed == 1
+    assert summary.regression_rate == pytest.approx(0.5)
+    assert summary.regression_interval == pytest.approx(wilson_interval(1, 2))
+    assert summary.consulted == 1
+    assert summary.consult_rate == pytest.approx(0.5)
+    assert summary.heeded == 0
+    assert summary.heed_rate == pytest.approx(0.0)
+    assert summary.completed == 1
+    assert summary.completed_regressed == 1
+    assert summary.completed_regression_rate == pytest.approx(1.0)
+    assert summary.mean_turns == pytest.approx(10.0)
+
+
+def test_summarize_counts_an_indeterminate_error_run_as_an_error_only() -> None:
+    runs = [
+        _make_run(repetition=0, regressed=True),
+        _make_run(repetition=1, indeterminate=True, exit_reason="error"),
+    ]
+
+    summary = summarize(runs)[BASELINE]
+
+    assert (summary.runs, summary.errors, summary.indeterminate) == (2, 1, 0)
+    assert summary.regression_rate == pytest.approx(1.0)
+
+
 def test_summarize_reports_no_heed_rate_when_no_run_consulted() -> None:
     runs = [
         _make_run(repetition=0, tool_calls=_unconsulted_calls(), regressed=True),
@@ -896,6 +1030,29 @@ def test_pair_by_trap_skips_a_trap_missing_under_either_condition() -> None:
         *_repetitions("trap-a", PROMPTED, [False, False]),
         *_repetitions("trap-b", BASELINE, [True, True]),
         *_repetitions("trap-c", PROMPTED, [True, True]),
+    ]
+
+    assert pair_by_trap(runs, BASELINE, PROMPTED) == [(True, False)]
+
+
+def test_pair_by_trap_leaves_indeterminate_runs_out_of_the_majority() -> None:
+    """One regressed run and two indeterminate ones is a regressed majority of one, not one in three."""
+    runs = [
+        _make_run(trap_id="trap-a", condition=BASELINE, repetition=0, regressed=True),
+        _make_run(trap_id="trap-a", condition=BASELINE, repetition=1, indeterminate=True),
+        _make_run(trap_id="trap-a", condition=BASELINE, repetition=2, indeterminate=True),
+        *_repetitions("trap-a", PROMPTED, [False, False, False]),
+    ]
+
+    assert pair_by_trap(runs, BASELINE, PROMPTED) == [(True, False)]
+
+
+def test_pair_by_trap_skips_a_trap_whose_runs_are_all_indeterminate() -> None:
+    runs = [
+        _make_run(trap_id="trap-a", condition=BASELINE, repetition=0, indeterminate=True),
+        *_repetitions("trap-a", PROMPTED, [True]),
+        *_repetitions("trap-b", BASELINE, [True]),
+        *_repetitions("trap-b", PROMPTED, [False]),
     ]
 
     assert pair_by_trap(runs, BASELINE, PROMPTED) == [(True, False)]
@@ -1024,6 +1181,25 @@ def test_render_markdown_has_a_per_trap_row_for_every_trap() -> None:
 
     for trap_id in ("trap-a", "trap-b"):
         assert len([line for line in lines if line.startswith(f"| {trap_id} |")]) == 1, trap_id
+
+
+def test_render_markdown_counts_indeterminate_runs_and_leaves_them_out_of_the_tallies() -> None:
+    runs = _report_runs()
+    runs += [
+        _make_run(trap_id="trap-a", condition=BASELINE, repetition=2, indeterminate=True),
+        _make_run(trap_id="trap-a", condition=BASELINE, repetition=3, indeterminate=True),
+    ]
+    lines = render_markdown(runs, summarize(runs)).splitlines()
+
+    header = next(line for line in lines if line.startswith("| condition |"))
+    columns = [cell.strip() for cell in header.strip("|").split("|")]
+    assert columns[:4] == ["condition", "runs", "errors", "indeterminate"]
+    baseline = next(line for line in lines if line.startswith(f"| {BASELINE} |"))
+    assert [cell.strip() for cell in baseline.strip("|").split("|")][:5] == [BASELINE, "6", "0", "2", "1.00"]
+    prompted = next(line for line in lines if line.startswith(f"| {PROMPTED} |"))
+    assert [cell.strip() for cell in prompted.strip("|").split("|")][:4] == [PROMPTED, "4", "0", "0"]
+    assert next(line for line in lines if line.startswith("| trap-a |")).startswith("| trap-a | 2/2 |")
+    assert any("indeterminate runs" in line and "excluded from every rate" in line for line in lines)
 
 
 def test_render_markdown_states_the_provenance() -> None:
