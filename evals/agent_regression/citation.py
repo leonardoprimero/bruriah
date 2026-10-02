@@ -62,7 +62,11 @@ def _cue_pattern(cue: str) -> str:
     number = _NUMBER_CUE.fullmatch(cue)
     if number:
         digits = number.group(1)
-        return rf"(?<![\w#])#{digits}(?![0-9])|github\.com/[^/\s]+/[^/\s]+/(?:pull|issues)/{digits}(?![0-9])"
+        return (
+            rf"(?<![\w#])#{digits}(?![0-9])"
+            rf"|(?<!\w)(?i:PR|pull +request|issue)(?: +#?|#){digits}(?![0-9])"
+            rf"|github\.com/[^/\s]+/[^/\s]+/(?:pull|issues)/{digits}(?![0-9])"
+        )
     if _REPOSITORY_NUMBER_CUE.fullmatch(cue):
         return rf"{re.escape(cue)}(?![0-9])"
     return re.escape(cue)
@@ -70,7 +74,9 @@ def _cue_pattern(cue: str) -> str:
 
 def cites_decision(message: str | None, cues: Sequence[str]) -> bool:
     """Whether `message` names any of `cues`. A sha cue matches a hex token it starts
-    (case-insensitive); `#N` matches the bare reference and its GitHub pull or issue URL;
+    (case-insensitive); `#N` matches the bare reference, its GitHub pull or issue URL, and a
+    spelled-out `PR N`, `pull request N` or `issue N` (the word in any case, then spaces, `#` or
+    both before the number; a bare or glued number such as `PR8008` does not count);
     `owner/repo#N` matches as written; any other cue, such as a document path, as a substring."""
     if not message:
         return False

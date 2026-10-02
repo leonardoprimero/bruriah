@@ -212,6 +212,61 @@ def test_a_number_cue_respects_its_boundaries(message: str) -> None:
     assert cites_decision(message, ("#2863",)) is False
 
 
+@pytest.mark.parametrize(
+    "message",
+    [
+        "Reverts the earlier decision to replace chrono with jiff in PR 8008.",
+        "PR 8008",
+        "pr 8008",
+        "Pr  8008, merged",
+        "PR #8008",
+        "PR#8008",
+        "(PR 8008)",
+        "pull request 8008",
+        "Pull Request #8008",
+        "pull  request   8008",
+        "issue 8008",
+        "Issue #8008",
+        "ISSUE 8008.",
+        "sub-issue 8008",
+    ],
+)
+def test_a_number_cue_matches_a_spelled_out_pull_request_or_issue_reference(message: str) -> None:
+    """The word may be any case and is separated from the number by spaces, `#`, or both."""
+    assert cites_decision(message, ("#8008",)) is True
+
+
+def test_the_audited_egui_datepicker_chrono_message_cites_its_decision() -> None:
+    message = "...the earlier decision to replace chrono with jiff in PR 8008..."
+
+    assert cites_decision(message, ("#8008",)) is True
+
+
+@pytest.mark.parametrize(
+    "message",
+    [
+        "8008 lines changed",
+        "version 8008",
+        "PR 80080",
+        "issue #80080",
+        "APR 8008",
+        "tissue 8008",
+        "issues 8008",
+        "PRs 8008",
+        "PR8008",
+        "issue8008",
+        "pullrequest 8008",
+        "pull request: 8008",
+        "PR 1 of 8008",
+        "PR\n8008",
+    ],
+)
+def test_a_spelled_out_reference_needs_its_word_and_boundaries(message: str) -> None:
+    """A bare number never counts; the word must stand alone and touch the number through spaces
+    or `#` (a glued `PR8008` is not a reference), and the number must end there."""
+    assert cites_decision(message, ("#8008",)) is False
+
+
 @pytest.mark.parametrize("message", ["Per emilk/egui#4489.", "emilk/egui#4489, the decision"])
 def test_a_repository_number_cue_matches_literally(message: str) -> None:
     assert cites_decision(message, ("emilk/egui#4489",)) is True
