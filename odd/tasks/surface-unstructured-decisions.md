@@ -34,4 +34,5 @@ Expose relevant historical commit references from ordinary repository history as
 - Native Gentle review: approved and acknowledged, reliability lens; no blocking findings or correction route. Informational follow-up: add a dedicated decision-pagination assertion in a later candidate.
 
 ## Commit Evidence
-- Pending explicit user authorization to create the required Conventional Commit; repository safety policy forbids committing without that authorization.
+- `fa26c59` — `feat(investigation): surface historical decision commits`
+- User explicitly authorized the commit after implementation and verification.
