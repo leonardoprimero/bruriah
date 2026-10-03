@@ -3,7 +3,14 @@
 Citation is decided by code, never by a model, and only the agent's final message counts: the
 transcript's last `result` event, or, when the run was stopped before one, its last assistant text.
 Tool inputs and tool results are never searched, so a decision the agent only read is not one it
-cited. Matching is strict: a missed citation over-counts silent regressions, never hides one.
+cited.
+
+The rule errs in both directions, so audit it by hand. A citation written in a form no cue covers
+is missed and over-counts silent regressions. An identifier mentioned only as context ("the picker
+moved to jiff in #8008, so I assumed NaiveDate") still matches, although the message does not say
+the change departs from that decision; that hides a silent regression. Run set B's hand audit
+found 5 such false positives among 15 matched runs, so every published informed override is
+checked by hand and the audited rate is reported next to the code-rule rate.
 """
 
 from __future__ import annotations

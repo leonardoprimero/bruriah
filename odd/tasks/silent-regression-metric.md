@@ -12,8 +12,9 @@ rescore the published run's 122 records from their stored transcripts, at no mod
 - Cues per trap = forms derived from `decision_ref` (sha prefix of at least 7 hex chars;
   `github:owner/repo#N` gives `#N` and its pull/issue URL) plus an explicit `citation_cues` list in
   `trap.yaml` for identifiers the ref does not carry (e.g. the PR that merged a decision commit).
-  Matching is strict and conservative: a missed citation over-counts silent regressions, never
-  hides one.
+  Matching is strict, but not one-sided: a missed citation over-counts silent regressions, and an
+  identifier mentioned only as context counts as a citation and hides one (corrected 2026-10-02
+  after run set B's audit: 5 false positives in 15 matched runs).
 - `AgentRun` gains `cited_decision: bool | None` (`None` = unknown, the published records).
   Rescoring computes it from the stored transcript in memory and never rewrites `runs.jsonl`.
 - SRR is unavailable for a condition if any of its decided regressed runs has an unknown citation:
