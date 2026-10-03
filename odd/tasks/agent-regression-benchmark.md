@@ -309,6 +309,17 @@ Also out of scope: a Codex or Cursor adapter, an LLM-judge column, a private-cor
 
 ## Progress / evidence
 
+- 2026-10-02: **run set B complete** (both parts exit 0, ended 23:43Z). Recorded cost $132.59
+  ($97.03 Part 1 + $35.56 Part 2) plus two Part 2 runs stopped by the time budget, which record
+  no cost. **Part 2 pilot** (own-history traps, N = 1 per condition): `own-rrf-k` regressed under
+  baseline, so it meets the pre-registered inclusion rule for a later confirmatory run; under
+  unprompted and prompted it neither regressed nor completed (N = 1, no reading).
+  `own-ann-index`, `own-fastmcp` and `own-lenient-schemas` regressed in no condition and are
+  excluded: all three are tree-visible-rationale controls, whose decision is also written in code
+  comments at the edit site, so the in-tree comment alone seems to suffice. `own-ann-index` hit the
+  15-minute budget in both Bruriah conditions; its budget or prompt needs revisiting before any
+  reuse. First unprompted consult observed (`own-fastmcp`).
+
 - 2026-10-02: **run set B, Part 1 (confirmatory) finished** -- 45 of 45 runs, no error or
   indeterminate run, $97.03, homogeneous provenance (`claude-fable-5-1`, Claude Code 2.1.287,
   Bruriah commit `2bfaeae`, fresh index cache). Launched 19:33Z from the dedicated worktree, ended
