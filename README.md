@@ -217,7 +217,7 @@ We evaluate Bruriah against real codebases and publish negative results alongsid
 | **Rejected alternatives from GitHub (236 questions)** | **115 recovered** from `square/leakcanary` (17) and `emilk/egui` (98); 34 of 236 questions carry a counterfactual | Opt-in via `bruriah corpus --github`, measured 2026-09-21; see [Issue ingestion, measured 2026-09-21](evals/project-memory/README.md#issue-ingestion-measured-2026-09-21) |
 | **Query Latency** | **≈46µs per passage** (linear) | 1,000 passages in 45ms, 16,000 in 734ms on M4 Pro |
 | **Index Size** | **≈5 KB per passage** | 16k passages ≈ 79 MB SQLite database |
-| **Test Suite** | **1,770 tests** · 0 failures · skips only when an environment prerequisite is absent | Full matrix on Python 3.12, 3.13, 3.14 across Linux, macOS, and Windows |
+| **Test Suite** | **1,775 tests** · 0 failures · skips only when an environment prerequisite is absent | Full matrix on Python 3.12, 3.13, 3.14 across Linux, macOS, and Windows |
 
 > **Want the full methodology and ablations?**  
 > Read our in-depth evaluation report: [**Evaluation Methodology & Benchmarks (`evals/project-memory/README.md`)**](evals/project-memory/README.md).
@@ -251,6 +251,18 @@ bruriah setup claude          # registers into .mcp.json (Claude Code)
 bruriah setup claude-desktop  # registers into Claude Desktop settings
 bruriah setup                 # auto-detects installed editors
 ```
+
+You do not need to tell the agent to use it. The server sends MCP `instructions` in its
+initialize result, saying when to call `investigate_work` (before changing architecture or
+dependencies, reverting existing behaviour, or explaining why the code is the way it is). Both tools
+also carry `_meta` `anthropic/alwaysLoad`, so Claude Code loads their full descriptions at session
+start instead of hiding them behind tool search. The instructions are static text, never built from
+your corpus. Measured on 2026-10-07 with Claude Code on three decision-reversal traps (15 runs per
+arm), unprompted agents consulted Bruriah in 15/15 runs with these, against 0/15 without. Every
+run still reversed the decision, because each task asks for it. Without Bruriah, 15/15 reversals
+were silent. With it, 10/15 named the decision they were departing from. The other 5 came from
+the one trap where retrieval did not surface the decision. Details:
+[`odd/tasks/agent-consult-instructions.md`](odd/tasks/agent-consult-instructions.md).
 
 Or run the MCP server directly via stdio:
 
