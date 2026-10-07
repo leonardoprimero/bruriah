@@ -32,8 +32,8 @@ Prompted runs reached the tools only because the instruction made them call
 - [x] 1. Server `instructions` with contract tests (length bounds, standalone lead, static text).
 - [x] 2. `anthropic/alwaysLoad` meta on both tools with contract tests.
 - [x] 3. CHANGELOG `Unreleased` entry and README mention.
-- [ ] 4. Measurement plan: unprompted condition on the three discriminating traps, against this
-      branch's commit (paid; awaits go-ahead). Plan written below; run not launched.
+- [x] 4. Measurement: unprompted condition on the three discriminating traps, control vs
+      treatment, as pre-registered. Results below.
 
 ## Evidence
 
@@ -95,3 +95,48 @@ Prompted runs reached the tools only because the instruction made them call
   same command, up to 3 attempts 300 s apart, as in run set B.
 - No change to the instructions text, the traps or the harness after seeing results; any such
   change needs a new pre-registered run set.
+
+## Results (2026-10-07)
+
+Launched 11:54:20Z, both arms ended 13:49:25Z, exit 0, no retries. Claude Code 2.1.292,
+`claude-fable-5-1`. Control `baa6174`, treatment `329f526`. Launcher and outputs:
+`~/bruriah-worktrees/consult-launch/` (`run.sh`, `run.log`, `out-{control,treatment}-2026-10-07`).
+Cost $84.68 (control $36.39, treatment $48.28). The pre-launch estimate was $65.
+
+Exclusions: none (30/30 `exit_reason` `done`). Interim looks were taken at the user's request
+during the run; nothing was changed.
+
+**Primary: consult rate.** Treatment 15/15, control 0/15. One-sided Fisher exact p = 6.4e-9.
+The hypothesis holds.
+
+| Trap | Arm | Consulted | Regressed | Cited (hand-audited) | Silent regression |
+|---|---|---|---|---|---|
+| egui-android-activity | control | 0/5 | 5/5 | 0/5 | 5/5 |
+| egui-android-activity | treatment | 5/5 | 5/5 | 5/5 | 0/5 |
+| egui-datepicker-chrono | control | 0/5 | 5/5 | 0/5 | 5/5 |
+| egui-datepicker-chrono | treatment | 5/5 | 5/5 | 5/5 | 0/5 |
+| egui-image-formats | control | 0/5 | 5/5 | 0/5 | 5/5 |
+| egui-image-formats | treatment | 5/5 | 5/5 | 0/5 | 5/5 |
+
+Secondary, descriptive:
+- RR is 15/15 in both arms. Consulting Bruriah did not prevent a single reversal. SRR: control
+  15/15, treatment 5/15. Every remaining silent regression is in `egui-image-formats`.
+- All 10 code-rule citations were read by hand and are genuine. Each names #2863 or #8008 and the
+  reason recorded for it, mostly under a "Departure from a recorded decision" heading, which the
+  instructions ask for. Two datepicker runs (2 and 4) argue that their opt-in `chrono` interop
+  "does not reverse" #8008. The detector still scores them as regressed, and both arms' detector
+  evidence is identical.
+- Tool loading: no treatment run called `ToolSearch` for Bruriah. One treatment run and four
+  control runs used it only for `select:Bash`, which the harness disallows. The `alwaysLoad`
+  meta works as intended.
+- `egui-image-formats`: treatment agents queried with the right vocabulary. One query, for
+  example, names "the image crate features". Results did not contain #4489, which refutes the
+  vocabulary-mismatch hypothesis from the 2026-10-07 audit. Locators are opaque `doc:v1:` hashes,
+  so whether #4489 is in that trap's index at all is unverified. Next diagnostic.
+- Cost and time: control runs average $2.43 and 329 s, treatment runs $3.22 and 381 s. Run set
+  B's unprompted runs on the same traps averaged about $1.80 and 170 s on Claude Code 2.1.287.
+  The increase appears in both arms, so the client upgrade drives it, not this change.
+
+Claim this supports: with server instructions, unprompted agents consult Bruriah every time, and a
+decision reversal is no longer silent when retrieval surfaces the decision. It does not support
+any claim that Bruriah prevents reversals.
