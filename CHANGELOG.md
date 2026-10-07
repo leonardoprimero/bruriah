@@ -3,6 +3,20 @@
 Notable changes, newest first. This project follows [semantic versioning](https://semver.org/),
 and the entries here name what changed for *you* rather than which files moved.
 
+## [Unreleased]
+
+### Added: agents learn when to consult Bruriah without being told
+- The MCP server now sends `instructions` in its initialize result: call `investigate_work` before
+  changing architecture or dependencies, reverting existing behaviour, or explaining why the code
+  is the way it is, and say so when a change departs from a recorded decision. Clients that defer
+  tool definitions behind tool search (Claude Code by default) showed the model only the tool
+  names until now, so the guidance in the tool descriptions never reached an unprompted agent.
+- Both tools carry `_meta` `{"anthropic/alwaysLoad": true}`, so Claude Code loads their full
+  descriptions and schemas at session start. Other clients ignore the key; there are still exactly
+  two tools.
+- The instructions are static text, never built from corpus content, so nothing retrieved can
+  reach the model as an instruction through this channel.
+
 ## [2.1.0] — 2026-09-24
 
 ### Added: framework comparison rows on the injection benchmark

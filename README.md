@@ -252,6 +252,14 @@ bruriah setup claude-desktop  # registers into Claude Desktop settings
 bruriah setup                 # auto-detects installed editors
 ```
 
+You do not need to tell the agent to use it. The server sends MCP `instructions` in its
+initialize result, saying when to call `investigate_work` (before changing architecture or
+dependencies, reverting existing behaviour, or explaining why the code is the way it is). Both tools
+also carry `_meta` `anthropic/alwaysLoad`, so Claude Code loads their full descriptions at session
+start instead of hiding them behind tool search. The instructions are static text, never built from
+your corpus. Whether agents now consult Bruriah unprompted has not been measured yet: in the last
+agent benchmark, without these, they never did.
+
 Or run the MCP server directly via stdio:
 
 ```bash
