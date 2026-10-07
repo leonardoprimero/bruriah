@@ -23,11 +23,13 @@ import anyio
 import pytest
 from bruriah.corpus import CorpusPolicy
 from bruriah.index import BuildConfig, build_candidate, promote_candidate, snapshot_active
-from bruriah.mcp_server import INVESTIGATE_TOOL, READ_TOOL, build_server
+from bruriah.mcp_server import INVESTIGATE_TOOL, READ_TOOL, SERVER_INSTRUCTIONS, build_server
 from bruriah.packs import load_pack
 from bruriah.registries import Registry
 from bruriah.service import ServiceDeps
-from mcp.shared.memory import create_connected_server_and_client_session
+from mcp.client.session import ClientSession
+from mcp.shared.memory import create_client_server_memory_streams, create_connected_server_and_client_session
+from mcp.types import InitializeResult
 
 FINGERPRINT = (
     '{"artifact":"model.onnx","artifact_sha256":"'
@@ -449,3 +451,49 @@ def test_an_alt_ref_dereferences_over_mcp_and_the_published_schema_names_the_new
 
     with _deps_for(tmp_path, notes) as deps:
         anyio.run(_drive, deps, body)
+
+
+async def _initialize_result(deps: ServiceDeps) -> InitializeResult:
+    # `create_connected_server_and_client_session` performs `initialize()` but discards its
+    # result, and `ClientSession` keeps only the capabilities. Same wiring, minus the discard:
+    # the real server loop and a real `ClientSession` over in-memory streams, returning the
+    # exact `InitializeResult` a stdio client receives.
+    server = build_server(deps)
+    async with create_client_server_memory_streams() as (client_streams, server_streams):
+        async with anyio.create_task_group() as tg:
+            tg.start_soon(lambda: server.run(*server_streams, server.create_initialization_options()))
+            async with ClientSession(*client_streams) as session:
+                result = await session.initialize()
+            tg.cancel_scope.cancel()
+    return result
+
+
+def test_initialize_result_carries_the_server_instructions(tmp_path) -> None:
+    # Clients that defer tool definitions behind tool search (Claude Code) show the model only
+    # tool names and server instructions upfront, so the instructions must reach the handshake.
+    with _deps_for(tmp_path, _default_notes()) as deps:
+        result = anyio.run(_initialize_result, deps)
+    assert result.instructions == SERVER_INSTRUCTIONS
+
+
+def test_server_instructions_fit_the_client_truncation_limit() -> None:
+    assert len(SERVER_INSTRUCTIONS) <= 2048  # Claude Code truncates server instructions here
+
+
+def test_server_instructions_lead_stands_alone() -> None:
+    # Codex guidance: the first 512 characters must make sense without the rest.
+    lead = SERVER_INSTRUCTIONS[:512]
+    assert INVESTIGATE_TOOL in lead
+    assert READ_TOOL in lead
+
+
+def test_server_instructions_are_static_across_deps(tmp_path) -> None:
+    # Never built from corpus content: different snapshots must yield identical instructions.
+    first_notes = _default_notes()
+    second_notes = {"other.md": f"# Other\nA different corpus about databases.\n{_FILLER}\n"}
+    (tmp_path / "a").mkdir()
+    (tmp_path / "b").mkdir()
+    with _deps_for(tmp_path / "a", first_notes) as first, _deps_for(tmp_path / "b", second_notes) as second:
+        first_result = anyio.run(_initialize_result, first)
+        second_result = anyio.run(_initialize_result, second)
+    assert first_result.instructions == second_result.instructions == SERVER_INSTRUCTIONS
