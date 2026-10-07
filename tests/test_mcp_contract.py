@@ -481,8 +481,10 @@ def test_server_instructions_fit_the_client_truncation_limit() -> None:
 
 
 def test_server_instructions_lead_stands_alone() -> None:
-    # Codex guidance: the first 512 characters must make sense without the rest.
-    lead = SERVER_INSTRUCTIONS[:512]
+    # Codex guidance: the first 512 characters must make sense without the rest -- so the whole
+    # first paragraph fits inside them and names both tools on its own.
+    lead = SERVER_INSTRUCTIONS.split("\n\n", 1)[0]
+    assert len(lead) <= 512
     assert INVESTIGATE_TOOL in lead
     assert READ_TOOL in lead
 
@@ -497,3 +499,21 @@ def test_server_instructions_are_static_across_deps(tmp_path) -> None:
         first_result = anyio.run(_initialize_result, first)
         second_result = anyio.run(_initialize_result, second)
     assert first_result.instructions == second_result.instructions == SERVER_INSTRUCTIONS
+
+
+def test_both_tools_are_marked_always_loaded_for_clients_that_defer_tools(tmp_path) -> None:
+    # Claude Code defers tool definitions behind tool search unless a tool's `_meta` carries
+    # `anthropic/alwaysLoad`. The client parses `meta` ONLY from the `_meta` wire key (a plain
+    # `meta` key would land in the model's extras and leave `meta` None), and the server
+    # serializes responses by alias -- so receiving it here already proves the wire key.
+    async def body(session) -> None:
+        listed = await session.list_tools()
+        assert {tool.name for tool in listed.tools} == {INVESTIGATE_TOOL, READ_TOOL}
+        for tool in listed.tools:
+            assert tool.meta == {"anthropic/alwaysLoad": True}
+            wire = tool.model_dump(by_alias=True, exclude_none=True)
+            assert wire["_meta"] == {"anthropic/alwaysLoad": True}
+            assert "meta" not in wire
+
+    with _deps_for(tmp_path, _default_notes()) as deps:
+        anyio.run(_drive, deps, body)

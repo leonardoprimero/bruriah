@@ -70,6 +70,14 @@ SERVER_INSTRUCTIONS = (
     "no network, no writes."
 )
 
+# Carried in each tool's `_meta`. Tool search would otherwise defer these definitions too, so even
+# with the instructions above the model sees only a name until it searches; this key makes Claude
+# Code load both full descriptions and schemas at session start. Other clients ignore it, and it
+# changes no contract: still exactly two tools. Each tool gets its own copy (`dict(...)`) so no
+# listed tool shares a mutable dict with this constant or with the other tool. Pass it as
+# `_meta=`: `Tool` does not populate fields by name, so `meta=` lands silently in its extras.
+ALWAYS_LOAD_META: dict[str, Any] = {"anthropic/alwaysLoad": True}
+
 # Schemas are computed once at import time from the frozen models -- never hand-authored, so
 # they cannot drift from the validation the handlers below actually perform.
 _INVESTIGATE_SCHEMA_IN = InvestigationRequest.model_json_schema()
@@ -197,6 +205,7 @@ def build_server(deps: ServiceDeps) -> Server:
                 ),
                 inputSchema=_INVESTIGATE_SCHEMA_IN,
                 outputSchema=_INVESTIGATE_SCHEMA_OUT,
+                _meta=dict(ALWAYS_LOAD_META),
             ),
             MCPTool(
                 name=READ_TOOL,
@@ -207,6 +216,7 @@ def build_server(deps: ServiceDeps) -> Server:
                 ),
                 inputSchema=_READ_SCHEMA_IN,
                 outputSchema=_READ_SCHEMA_OUT,
+                _meta=dict(ALWAYS_LOAD_META),
             ),
         ]
 
