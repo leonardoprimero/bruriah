@@ -257,8 +257,12 @@ initialize result, saying when to call `investigate_work` (before changing archi
 dependencies, reverting existing behaviour, or explaining why the code is the way it is). Both tools
 also carry `_meta` `anthropic/alwaysLoad`, so Claude Code loads their full descriptions at session
 start instead of hiding them behind tool search. The instructions are static text, never built from
-your corpus. Whether agents now consult Bruriah unprompted has not been measured yet: in the last
-agent benchmark, without these, they never did.
+your corpus. Measured on 2026-10-07 with Claude Code on three decision-reversal traps (15 runs per
+arm), unprompted agents consulted Bruriah in 15/15 runs with these, against 0/15 without. Every
+run still reversed the decision, because each task asks for it. Without Bruriah, 15/15 reversals
+were silent. With it, 10/15 named the decision they were departing from. The other 5 came from
+the one trap where retrieval did not surface the decision. Details:
+[`odd/tasks/agent-consult-instructions.md`](odd/tasks/agent-consult-instructions.md).
 
 Or run the MCP server directly via stdio:
 
