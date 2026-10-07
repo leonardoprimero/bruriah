@@ -73,3 +73,25 @@ Prompted runs reached the tools only because the instruction made them call
 - Primary: consult rate, treatment vs control, one-sided Fisher exact. Secondary: silent-
   regression rate (SRR) and regression rate (RR), with informed overrides hand-audited as in run
   set B. Pre-register this before launch.
+
+## Pre-registration (approved 2026-10-07, before launch)
+
+- Arms: control = `eval/agent-regression-benchmark` at `baa6174`; treatment = the merge of this
+  branch into it on `measure/agent-consult-instructions`. Each arm runs from its own clean
+  worktree with its own `.venv`, and its own copy-on-write clone of `run-set-b-cache`. Both arms
+  launch together on the same Claude Code binary; model `claude-fable-5-1`;
+  `--max-budget-usd-per-run 10`; condition `unprompted` only; traps `egui-android-activity
+  egui-datepicker-chrono egui-image-formats`; `--repetitions 5`. 15 runs per arm.
+- Primary hypothesis: the treatment consult rate (runs with at least one Bruriah tool call) is
+  higher than the control's. Test: one-sided Fisher exact on 2x2 consulted/not consulted, alpha
+  0.05. Expected control: 0/15 (run set B unprompted).
+- Secondary, descriptive only (no claim from them at this N): SRR and RR per arm, with every
+  informed override hand-audited as in run set B; whether treatment runs call `ToolSearch` for
+  Bruriah or see the tools loaded upfront (from the transcripts' `system/init`).
+- Exclusions: a recorded run with `exit_reason` `error` is reported and excluded from both
+  numerator and denominator (`done`, `time_budget` and `turn_budget` count); if either arm loses
+  more than 3 runs this way, the result is reported as inconclusive. Recorded runs are never
+  rerun. Runs the harness fails to record (adapter failure, exit 3) are retried by rerunning the
+  same command, up to 3 attempts 300 s apart, as in run set B.
+- No change to the instructions text, the traps or the harness after seeing results; any such
+  change needs a new pre-registered run set.
