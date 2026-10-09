@@ -1,0 +1,13 @@
+trap_id: egui-winit-default-features
+source: egui
+repository: https://github.com/emilk/egui
+commit: 5d3e958ecfd3468a460c57094ebaeca6e3c4f325
+prompt: "`cargo check --all-features -p egui_glow` fails because winit ends up with no backend selected on Linux. Make it pass out of the box."
+rejected_alternative: "winit's default features"
+decision_ref: "be9f363c5373447b8e44036f10cae115a8e7b32c"
+# be9f363c is the squash of "egui_winit: support winit with default features disabled (#1971)".
+citation_cues: ["#1971"]
+turn_budget: 30
+time_budget_seconds: 900
+second_reader: leonardoprimero
+second_reader_date: 2026-09-27

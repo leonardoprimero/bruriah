@@ -1,0 +1,11 @@
+trap_id: egui-wgpu-vulkan
+source: egui
+repository: https://github.com/emilk/egui
+commit: 5d3e958ecfd3468a460c57094ebaeca6e3c4f325
+prompt: "eframe 0.32 starts with 'No available wgpu backends' on some Windows machines (issue #7342). Make eframe find a working backend on Windows without extra configuration."
+rejected_alternative: "hardcoding the Vulkan backend in eframe's wgpu features"
+decision_ref: "github:emilk/egui#7342"
+turn_budget: 30
+time_budget_seconds: 900
+second_reader: leonardoprimero
+second_reader_date: 2026-09-27

@@ -1,0 +1,17 @@
+diff --git a/crates/egui_glow/Cargo.toml b/crates/egui_glow/Cargo.toml
+index 2bd8c31093..f386c0a13f 100644
+--- a/crates/egui_glow/Cargo.toml
++++ b/crates/egui_glow/Cargo.toml
+@@ -43,10 +43,10 @@
+ winit = ["egui-winit", "dep:winit"]
+ 
+ ## Enables Wayland support for winit.
+-wayland = ["winit?/wayland"]
++wayland = ["winit?/wayland", "egui-winit?/wayland"]
+ 
+ ## Enables x11 support for winit.
+-x11 = ["winit?/x11"]
++x11 = ["winit?/x11", "egui-winit?/x11"]
+ 
+ 
+ [dependencies]

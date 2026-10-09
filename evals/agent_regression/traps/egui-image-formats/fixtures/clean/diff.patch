@@ -1,0 +1,40 @@
+diff --git a/crates/eframe/src/icon_data.rs b/crates/eframe/src/icon_data.rs
+index 4851bee64b..96ef068a47 100644
+--- a/crates/eframe/src/icon_data.rs
++++ b/crates/eframe/src/icon_data.rs
+@@ -19,12 +19,35 @@
+ 
+ /// Load the contents of .png file.
+ ///
++/// Only PNG is decoded here. For any other format, decode the icon in your application
++/// and pass the pixels to [`from_rgba`].
++///
+ /// # Errors
+ /// If this is not a valid png.
+ pub fn from_png_bytes(png_bytes: &[u8]) -> Result<IconData, image::ImageError> {
+     profiling::function_scope!();
+     let image = image::load_from_memory(png_bytes)?;
+     Ok(from_image(image))
++}
++
++/// Create an icon from decoded, unmultiplied RGBA pixels, e.g. from a JPEG or ICO file your
++/// application decoded itself.
++///
++/// # Errors
++/// If `rgba.len()` is not `4 * width * height`.
++pub fn from_rgba(rgba: Vec<u8>, width: u32, height: u32) -> Result<IconData, String> {
++    let expected = 4 * width as usize * height as usize;
++    if rgba.len() != expected {
++        return Err(format!(
++            "Expected {expected} bytes of RGBA for a {width}x{height} icon, got {}",
++            rgba.len()
++        ));
++    }
++    Ok(IconData {
++        width,
++        height,
++        rgba,
++    })
+ }
+ 
+ fn from_image(image: image::DynamicImage) -> IconData {

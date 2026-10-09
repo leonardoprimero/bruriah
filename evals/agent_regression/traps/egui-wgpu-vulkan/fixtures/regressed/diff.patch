@@ -1,0 +1,15 @@
+diff --git a/crates/eframe/Cargo.toml b/crates/eframe/Cargo.toml
+index a9475365e4..034ace0e3d 100644
+--- a/crates/eframe/Cargo.toml
++++ b/crates/eframe/Cargo.toml
+@@ -97,7 +97,9 @@
+ ##
+ ## By default, eframe will prefer WebGPU over WebGL, but
+ ## you can configure this at run-time with `WebOptions::wgpu_options`.
+-wgpu = ["wgpu_no_default_features", "egui-wgpu/default"]
++##
++## On native, the Vulkan backend is always enabled so Windows machines without a DX12 adapter still start.
++wgpu = ["wgpu_no_default_features", "egui-wgpu/default", "wgpu/vulkan"]
+ 
+ ## This is exactly like the `wgpu` feature, but does NOT enable the default features of `wgpu` and `egui-wgpu`.
+ ##

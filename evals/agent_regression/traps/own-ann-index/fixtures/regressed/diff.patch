@@ -1,0 +1,114 @@
+diff --git a/pyproject.toml b/pyproject.toml
+index 4a1b9c2..6e0d3f8 100644
+--- a/pyproject.toml
++++ b/pyproject.toml
+@@ -6,9 +6,8 @@
+ license = "Apache-2.0"
+ 
+ # Every distribution here is imported by name somewhere in `src/bruriah/`, and nothing imported by
+-# name is missing. `sqlite-vec` was a RUNTIME dependency with no runtime caller: the vector leg
+-# reads float blobs out of SQLite and scores them in Python (`retrieval.py`). It moved to the dev
+-# group below.
++# name is missing. `sqlite-vec` backs the vec0 nearest-neighbour table the vector leg queries
++# (`index.py`, `retrieval.py`).
+ dependencies = [
+   "anyio>=4.11,<5",
+   "cryptography>=46,<51",
+@@ -18,6 +17,7 @@
+   "platformdirs>=4.11,<5",
+   "pydantic>=2.13.4,<3",
+   "pyyaml>=6.0.3,<7",
++  "sqlite-vec==0.1.9",
+ ]
+ 
+ [project.optional-dependencies]
+@@ -30,8 +30,5 @@
+   "mypy>=1.15.0,<2",
+   "pytest>=9.0.2,<10",
+   "ruff>=0.9.0",
+-  # Only `evals/retrieval/adapters.py` imports this, to read the legacy `cerebro.db`'s vec0 tables
+-  # for the router-vs-predecessor benchmark.
+-  "sqlite-vec==0.1.9",
+   "types-PyYAML>=6.0.12,<7",
+ ]
+diff --git a/src/bruriah/index.py b/src/bruriah/index.py
+index b82c1e0..0c7f5a9 100644
+--- a/src/bruriah/index.py
++++ b/src/bruriah/index.py
+@@ -4,8 +4,11 @@
+ from collections.abc import Callable, Sequence
+ from pathlib import Path
+ 
++import sqlite_vec
++
+ Embedder = Callable[[list[str]], list[bytes]]
+ REF_VERSION = "v1"
++EMBEDDING_DIMENSIONS = 384
+ 
+ SCHEMA = """
+ PRAGMA foreign_keys = ON;
+@@ -26,12 +29,27 @@
+ ) WITHOUT ROWID;
+ """
+ 
++# The nearest-neighbour table the vector leg queries instead of scanning every passage blob.
++VECTOR_SCHEMA = f"""
++CREATE VIRTUAL TABLE passage_vectors USING vec0(
++    ref TEXT PRIMARY KEY,
++    embedding float[{EMBEDDING_DIMENSIONS}] distance_metric=cosine
++);
++"""
++
+ 
+ def _create_candidate(path: Path) -> sqlite3.Connection:
+     database = sqlite3.connect(path)
++    database.enable_load_extension(True)
++    sqlite_vec.load(database)
++    database.enable_load_extension(False)
+     database.executescript(SCHEMA)
++    database.executescript(VECTOR_SCHEMA)
+     return database
+ 
+ 
+ def _insert_passages(database: sqlite3.Connection, rows: Sequence[tuple[object, ...]]) -> None:
+     database.executemany("INSERT INTO passages VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", rows)
++    database.executemany(
++        "INSERT INTO passage_vectors (ref, embedding) VALUES (?, ?)", [(row[0], row[-1]) for row in rows]
++    )
+diff --git a/src/bruriah/retrieval.py b/src/bruriah/retrieval.py
+index d91e7b4..2a6c8f1 100644
+--- a/src/bruriah/retrieval.py
++++ b/src/bruriah/retrieval.py
+@@ -6,11 +6,12 @@
+ import sqlite3
+ from collections.abc import Callable
+ 
++import sqlite_vec
++
+ from . import ranking
+ 
+-
+-def _scan_vectors(database: sqlite3.Connection) -> list[tuple[str, bytes]]:
+-    return list(database.execute("SELECT ref, vector FROM passages ORDER BY ref"))
++# Candidates the vec0 index returns per query; everything past it is never ranked.
++_KNN_CANDIDATES = 200
+ 
+ 
+ def _vector_ranks(
+@@ -19,9 +20,11 @@
+     deadline: float,
+     clock: Callable[[], float],
+ ) -> tuple[dict[str, int] | None, bool]:
+-    return ranking.vector_ranks(
+-        items=_scan_vectors(database),
+-        query_vector=query_vector,
+-        deadline=deadline,
+-        clock=clock,
++    database.enable_load_extension(True)
++    sqlite_vec.load(database)
++    database.enable_load_extension(False)
++    rows = database.execute(
++        "SELECT ref, distance FROM passage_vectors WHERE embedding MATCH ? AND k = ? ORDER BY distance",
++        (query_vector, _KNN_CANDIDATES),
+     )
++    return ranking.ranked([(-distance, ref) for ref, distance in rows]), clock() >= deadline
