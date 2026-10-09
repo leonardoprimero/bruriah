@@ -2068,6 +2068,20 @@ def test_main_runs_the_benchmark_end_to_end_and_writes_both_reports(rig: _Rig) -
     assert _API_KEY not in (out / "runs.json").read_text(encoding="utf-8")
 
 
+def test_main_reports_undocumented_decision_runs_apart_from_the_headline(rig: _Rig) -> None:
+    manifest = rig.root / "traps" / "trap-a" / "trap.yaml"
+    manifest.write_text(manifest.read_text(encoding="utf-8") + "decision_documented: false\n", encoding="utf-8")
+    out = rig.root / "out"
+
+    exit_code = run_module.main(_main_args(rig, out, "--model", _MODEL))
+
+    assert exit_code == 0
+    payload = json.loads((out / "runs.json").read_text(encoding="utf-8"))
+    assert payload["runs"] == []
+    assert payload["undocumented_decision_control"]["trap_ids"] == ["trap-a"]
+    assert "## Undocumented-decision control" in (out / "report.md").read_text(encoding="utf-8")
+
+
 def test_main_requires_an_explicit_model_for_a_real_run(rig: _Rig, capsys: pytest.CaptureFixture[str]) -> None:
     exit_code = run_module.main(_main_args(rig, rig.root / "out"))
 
