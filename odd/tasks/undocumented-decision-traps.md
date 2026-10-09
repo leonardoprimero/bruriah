@@ -32,7 +32,7 @@ a decision that was never written down.
       section in markdown and JSON. Test-first.
 - [x] 3. Post-hoc re-report of the 2026-10-07 control and treatment runs. Document it in the
       traps README and this file, labeled post-hoc.
-- [ ] 4. On a new branch from `main`: post-hoc note in `README.md` and
+- [x] 4. On a new branch from `main`: post-hoc note in `README.md` and
       `odd/tasks/agent-consult-instructions.md`. No push without approval.
 
 ## Evidence
@@ -79,3 +79,11 @@ changed. Reports were regenerated with `report.py <run-dir> --out DIR` into
   documented-decision traps, every regression is an informed override.
 - On the control trap, neither arm cites anything, which is what we expect when no rationale
   exists to find.
+
+### Task 4: `d6ee99d` on `docs/undocumented-decision-trap` (from `main` `e36695e`)
+
+`docs: record the post-hoc re-report without the undocumented-decision trap`. The README sentence
+that blamed retrieval now says the decision was never written down, and gives the post-hoc 10/10
+vs 0/10 while stating that the pre-registered result stands.
+`odd/tasks/agent-consult-instructions.md` gains a dated post-hoc section, and its "Next
+diagnostic" bullet points to it. Not pushed.
