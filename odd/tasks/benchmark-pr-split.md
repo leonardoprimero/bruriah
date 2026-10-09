@@ -38,8 +38,8 @@ without cutting single modules. Tests and fixture data dominate the size.
 - [x] 0. Create the local archive tag `archive/agent-regression-benchmark-2026-10-08` on the branch head.
 - [x] 1. Build slice 1 locally, then verify it.
 - [x] 2. Map the file dependencies for slices 2-5 (tests that load shipped traps, runner imports).
-- [ ] 3. Build slices 2-5 locally, verifying each one.
-- [ ] 4. Get approval, push the tag and the slice branches, and open PR 1 (later PRs as each parent merges).
+- [x] 3. Build slices 2-5 locally, verifying each one.
+- [x] 4. Get approval, push the tag and the slice branches, and open PR 1 (later PRs as each parent merges).
 
 ## Evidence
 
@@ -54,3 +54,41 @@ without cutting single modules. Tests and fixture data dominate the size.
 - Task 2: no S2 test imports `claude_code` or `gated_hook`. `run.py` imports them lazily in
   `_run()`, and the S2 tests use `--dry-run`. `test_agent_regression_claude_code.py` needs no
   shipped traps.
+- Task 3 (worker, worktree `~/bruriah-worktrees/split-2`). Files were extracted with
+  `git archive SRC <paths> | tar -x` and blob-checked against `SRC:<path>`.
+  - S2 `feat/benchmark-core`: `cafbac9` + count `3d29459`, 12 files, +5239/-1. 2137 passed.
+  - S3 `feat/benchmark-claude-code-adapter`: `6c6e848` + count `0b1f97e`, 4 files, +3351/-1.
+    2306 passed.
+  - S4 `feat/benchmark-traps`: `ac1ab0d` + count `644e39a`, 115 files, +9659/-1. 2469 passed.
+  - S5 `docs/benchmark-odd-records`: `4a4cdc8`, 7 files, +991. 2469 passed.
+  ruff check and format are clean on every slice, and each has 23 skips (missing environment
+  prerequisites). The `test_platform` flake failed once on S2, S3 and S4, and passed on rerun
+  each time.
+- Invariant, corrected: the plan compared against SRC, which lacks `main`'s later PRs #35-#37.
+  Against `origin/main`, the stack changes exactly SRC's 146 files, and every blob equals SRC's
+  except `README.md` (count line, 1,775 to 2,492) and `tests/test_context.py` (slice 1 format).
+- Task 4 (approved 2026-10-08): pushed tag `archive/agent-regression-benchmark-2026-10-08`
+  (-> `8b17046`) and the 5 branches. Opened stacked PRs:
+  - #38 `feat/surface-decision-commits` -> `main`
+  - #39 `feat/benchmark-core` -> #38's branch
+  - #40 `feat/benchmark-claude-code-adapter` -> #39's branch
+  - #41 `feat/benchmark-traps` -> #40's branch
+  - #42 `docs/benchmark-odd-records` -> #41's branch
+  The bodies first numbered the chain #1-#5, which GitHub autolinks to old issues; they were
+  edited to the real numbers. CI (`pull_request`, no branch filter) runs on every PR. No native
+  re-review of the slices: they are byte-identical rebuilds of commits already reviewed on the
+  source branch, as recorded in the ODD records.
+- Remaining: merge in order, retargeting each next PR to `main` after its parent merges. Then
+  retire `eval/agent-regression-benchmark` and the split worktrees (the tag keeps the history).
+- CI found 6 Windows-only failures in #40 (and so in #41), all test-side POSIX assumptions:
+  - five command-line tests compared argv against POSIX path strings;
+  - one tests `#!/usr/bin/env` lookup, which is POSIX-only.
+  Fix `0d4b962` on `feat/benchmark-claude-code-adapter` builds the expected paths with
+  `str(Path(...))` and skips the env-shebang test on Windows. It was merged forward into #41 and
+  #42 (`3dc1fc6`, `46d35d4`), without a force-push, and explained in a #40 comment. The source
+  branch had never run CI, so nothing had exercised Windows before. #38 and #39 were 15/15 green.
+- Merged #38 as `358ddfc` (merge commit), then retargeted #39 to `main`. Its diff is exactly its 12 slice files.
+- Merged #39 as `1a309eb`, then retargeted #40 to `main`: 4 files, CI 15/15, including the Windows fix.
+- Merged #40 as `7db9d63`, then retargeted #41 to `main`.
+- Merged #41 as `fdd7e32` (115 files; `gh --json files` caps at 100, so use `changedFiles`). Retargeted #42 to `main`.
+- Before merging #42, this record was refreshed into it from the source branch's latest version.
