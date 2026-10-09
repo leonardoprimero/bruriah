@@ -858,3 +858,40 @@ def test_compaction_measures_the_payload_it_actually_returns() -> None:
         if "output_budget_unmet" in compacted.degradation:
             continue  # honestly reported as unreachable -- the other test covers that case
         assert size <= budget, f"budget {budget}: returned {size} while claiming it fit"
+
+
+# === Decision signal: route-gated and backstop results default it empty; compaction forwards it ==
+
+
+def test_route_gated_and_backstop_results_carry_no_decisions() -> None:
+    decision = _proceeding_decision()
+    record, assessment = _supported_claim_fixture()
+    rollback = assemble_context(
+        _request(), decision, assessments=[assessment], evidence_pool=[record], mode="route_only"
+    )
+    assert rollback.status == "route_only" and rollback.decisions == []
+    assert assemble_context(None, decision).decisions == []  # type: ignore[arg-type]
+    assembled = assemble_context(_request(), decision, assessments=[assessment], evidence_pool=[record])
+    assert assembled.decisions == []
+
+
+def test_compact_to_budget_never_drops_decisions() -> None:
+    padding = [_evidence_record(f"drop:{i}", digest_content=f"padding evidence body {i} " * 20) for i in range(6)]
+    full = InvestigationResult(
+        schema_version="2",
+        status="complete",
+        request_id=f"sha256:{'c' * 64}",
+        decisions=["a1b2c3d4e5f6", "0f1e2d3c4b5a"],
+        evidence=padding,
+        claims=[],
+        conflicts=[],
+        gaps=[],
+        host_actions=[],
+        warnings=[],
+        degradation=[],
+        budgets=Budgets(),
+        next_cursor=None,
+    )
+    compacted = compact_to_budget(full, max_output_chars=len(full.model_dump_json()) // 2)
+    assert len(compacted.evidence) < len(full.evidence)
+    assert compacted.decisions == full.decisions
