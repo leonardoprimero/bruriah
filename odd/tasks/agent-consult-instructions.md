@@ -132,8 +132,8 @@ Secondary, descriptive:
 - `egui-image-formats`: treatment agents queried with the right vocabulary. One query, for
   example, names "the image crate features". Results did not contain #4489, which refutes the
   vocabulary-mismatch hypothesis from the 2026-10-07 audit. Locators are opaque `doc:v1:` hashes,
-  so whether #4489 is in that trap's index at all is unverified. Next diagnostic. Resolved on
-  2026-10-08, see "Post-hoc: undocumented-decision trap" below.
+  so whether #4489 is in that trap's index at all was unverified here. Resolved on 2026-10-08:
+  #4489 holds no rationale to retrieve. See "Post-hoc: undocumented-decision trap" below.
 - Cost and time: control runs average $2.43 and 329 s, treatment runs $3.22 and 381 s. Run set
   B's unprompted runs on the same traps averaged about $1.80 and 170 s on Claude Code 2.1.287.
   The increase appears in both arms, so the client upgrade drives it, not this change.
@@ -153,7 +153,8 @@ above stand.
 - The png-only eframe dependency arrived in `7b76161a6` (#2996), with no stated reason. The only
   trace is the Cargo.toml comment `# Needed for app icon`.
 
-No retrieval can surface a decision that was never written, `--github` ingestion included. On
+No history records a rationale for the decision, so retrieval has at most that four-word comment
+to offer, `--github` ingestion included. On
 the `eval/agent-regression-benchmark` branch, the trap is now marked `decision_documented: false`
 and reported as a control outside the headline (`odd/tasks/undocumented-decision-traps.md` there).
 The same runs, re-reported:
