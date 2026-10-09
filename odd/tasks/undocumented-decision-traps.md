@@ -87,3 +87,15 @@ that blamed retrieval now says the decision was never written down, and gives th
 vs 0/10 while stating that the pre-registered result stands.
 `odd/tasks/agent-consult-instructions.md` gains a dated post-hoc section, and its "Next
 diagnostic" bullet points to it. Not pushed.
+
+### Native review
+
+`review-9ed7e4765c290c06` covered `baa6174..db5c2a0`: 9 files, high tier, 4 lenses. Result:
+approved, and the acknowledgement was burned. Its non-blocking findings are follow-ups, none
+opened a correction:
+- `report.py:136-143`: the control section in `runs.json` carries no provenance of its own
+  (reliability and resilience, WARNING).
+- `report.py:465-476`: the report does not record which trap classification it used, so a later
+  manifest change could silently re-split old runs (reliability, WARNING).
+- `report.py:465-470`: `main()` now always loads `--traps`, so a missing trap set fails a plain
+  re-report (reliability, SUGGESTION).
