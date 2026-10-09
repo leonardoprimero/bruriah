@@ -5,6 +5,11 @@ call. Both renderings are deterministic (sorted keys, fixed ordering, fixed numb
 carry no absolute paths and no timestamps other than the provenance date, so a committed report
 reproduces byte-identically from its run records.
 
+Runs of a trap whose decision has no written rationale (`decision_documented: false`) are an
+undocumented-decision control: retrieval cannot surface a reason nobody wrote down. They are split
+from the rest before any metric is computed, kept out of every headline table, and summarized in a
+separate section of both renderings.
+
 Run as a script, it renders the report of a stored run from its `runs.jsonl`, read-only:
 `--rescore-citations` scores the citations a record predating citation scoring left unknown from
 its stored transcript, in memory. Without `--out` the Markdown goes to stdout; with it, `runs.json`
@@ -45,7 +50,7 @@ from agent_regression.metrics import (  # noqa: E402
     summarize,
 )
 from agent_regression.runs import CONDITIONS, AgentRun, Provenance, run_from_json, run_to_json  # noqa: E402
-from agent_regression.traps import TrapError, load_traps  # noqa: E402
+from agent_regression.traps import Trap, TrapError, load_traps  # noqa: E402
 
 DEFAULT_TRAPS_DIR = _HERE / "traps"
 # Provenance fields that can differ between the runs of one run set, so the header lists every
@@ -61,6 +66,8 @@ _MIXED_PROVENANCE = (
 )
 # How the Markdown header shows a provenance value a record does not carry (`None`).
 _UNRECORDED = "unrecorded"
+_CONTROL_KEY = "undocumented_decision_control"
+_CONTROL_HEADING = "## Undocumented-decision control"
 
 
 def write_report(path: Path, text: str) -> None:
@@ -104,12 +111,36 @@ def _provenance_to_json(runs: Sequence[AgentRun]) -> dict[str, Any]:
     }
 
 
-def render_json(runs: Sequence[AgentRun], summaries: Mapping[str, ConditionSummary]) -> str:
-    payload = {
+def split_undocumented(runs: Sequence[AgentRun], traps: Sequence[Trap]) -> tuple[list[AgentRun], list[AgentRun]]:
+    """(headline runs, undocumented-decision control runs), each in the order of `runs`. A run whose
+    trap is not in `traps` stays in the headline, as every run did before traps were classified."""
+    undocumented = {trap.trap_id for trap in traps if not trap.decision_documented}
+    headline = [run for run in runs if run.trap_id not in undocumented]
+    control = [run for run in runs if run.trap_id in undocumented]
+    return headline, control
+
+
+def _trap_ids(runs: Sequence[AgentRun]) -> list[str]:
+    return sorted({run.trap_id for run in runs})
+
+
+def render_json(
+    runs: Sequence[AgentRun], summaries: Mapping[str, ConditionSummary], control_runs: Sequence[AgentRun] = ()
+) -> str:
+    """`runs` and `summaries` are the headline; `control_runs`, when any, go under their own key."""
+    payload: dict[str, Any] = {
         "provenance": _provenance_to_json(runs) if runs else None,
         "conditions": {condition: _summary_to_json(summary) for condition, summary in summaries.items()},
         "runs": [run_to_json(run) for run in runs],
     }
+    if control_runs:
+        payload[_CONTROL_KEY] = {
+            "trap_ids": _trap_ids(control_runs),
+            "conditions": {
+                condition: _summary_to_json(summary) for condition, summary in summarize(control_runs).items()
+            },
+            "runs": [run_to_json(run) for run in control_runs],
+        }
     return json.dumps(payload, indent=2, sort_keys=True) + "\n"
 
 
@@ -195,7 +226,71 @@ def _provenance_lines(runs: Sequence[AgentRun]) -> list[str]:
     return lines
 
 
-def render_markdown(runs: Sequence[AgentRun], summaries: Mapping[str, ConditionSummary]) -> str:
+def _conditions_table(summaries: Mapping[str, ConditionSummary]) -> list[str]:
+    lines = [
+        "| condition | runs | errors | indeterminate | SRR | SRR interval | RR | RR interval | informed overrides "
+        "| unknown citations | consult rate | heed rate | completed | RR among completed | mean turns "
+        "| mean wall-clock (s) | input tokens | output tokens |",
+        "|---|---:|---:|---:|---:|---|---:|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|",
+    ]
+    for condition in _ordered_conditions(summaries):
+        summary = summaries[condition]
+        low, high = summary.regression_interval
+        lines.append(
+            f"| {condition} | {summary.runs} | {summary.errors} | {summary.indeterminate} | {_srr_cells(summary)} "
+            f"| {_rate(summary.regression_rate)} | [{low:.2f}, {high:.2f}] "
+            f"| {summary.informed_overrides} | {summary.unknown_citations} "
+            f"| {_rate(summary.consult_rate)} | {_rate(summary.heed_rate)} "
+            f"| {summary.completed} | {_rate(summary.completed_regression_rate)} | {_mean(summary.mean_turns)} "
+            f"| {_mean(summary.mean_wall_clock_seconds)} | {_count(summary.input_tokens)} "
+            f"| {_count(summary.output_tokens)} |"
+        )
+    return lines
+
+
+def _per_trap_table(runs: Sequence[AgentRun], conditions: Sequence[str]) -> list[str]:
+    lines = [
+        "| trap | " + " | ".join(conditions) + " |",
+        "|---|" + "---:|" * len(conditions),
+    ]
+    tallies: dict[tuple[str, str], list[int]] = {}
+    for run in runs:
+        if run.exit_reason == "error" or run.detection.indeterminate:
+            continue
+        tally = tallies.setdefault((run.trap_id, run.condition), [0, 0])
+        tally[0] += int(run.detection.regressed)
+        tally[1] += 1
+    for trap_id in _trap_ids(runs):
+        cells = []
+        for condition in conditions:
+            counts = tallies.get((trap_id, condition))
+            cells.append(f"{counts[0]}/{counts[1]}" if counts else "n/a")
+        lines.append(f"| {trap_id} | " + " | ".join(cells) + " |")
+    return lines
+
+
+def _control_lines(control_runs: Sequence[AgentRun]) -> list[str]:
+    summaries = summarize(control_runs)
+    return [
+        "",
+        _CONTROL_HEADING,
+        "",
+        "Runs of traps whose decision is real in the code but has no written rationale in the project's history "
+        "(`decision_documented: false`), so no retrieval can surface it. They are counted the same way as the "
+        "headline and kept out of every table above; no comparison is computed on them.",
+        "",
+        *_conditions_table(summaries),
+        "",
+        "Regressed runs over non-error, non-indeterminate runs, per condition.",
+        "",
+        *_per_trap_table(control_runs, _ordered_conditions(summaries)),
+    ]
+
+
+def render_markdown(
+    runs: Sequence[AgentRun], summaries: Mapping[str, ConditionSummary], control_runs: Sequence[AgentRun] = ()
+) -> str:
+    """`runs` and `summaries` are the headline; `control_runs`, when any, get their own section."""
     conditions = _ordered_conditions(summaries)
     lines = [
         "# Agent regression benchmark",
@@ -211,9 +306,16 @@ def render_markdown(runs: Sequence[AgentRun], summaries: Mapping[str, ConditionS
         "agent's final message only, against the trap's accepted citation cues; tool output never counts. SRR is "
         "unavailable for a condition while any of its regressed runs has an unknown citation.",
         "",
-        "## Provenance",
-        "",
     ]
+    if control_runs:
+        names = ", ".join(f"`{trap_id}`" for trap_id in _trap_ids(control_runs))
+        lines += [
+            f"Set aside from every headline metric: {names} (`decision_documented: false`), a decision with no "
+            "written rationale, which no retrieval can surface; its runs are in the undocumented-decision control "
+            "section.",
+            "",
+        ]
+    lines += ["## Provenance", ""]
     if runs:
         lines += _provenance_lines(runs)
     else:
@@ -223,23 +325,8 @@ def render_markdown(runs: Sequence[AgentRun], summaries: Mapping[str, ConditionS
         "",
         "## Conditions",
         "",
-        "| condition | runs | errors | indeterminate | SRR | SRR interval | RR | RR interval | informed overrides "
-        "| unknown citations | consult rate | heed rate | completed | RR among completed | mean turns "
-        "| mean wall-clock (s) | input tokens | output tokens |",
-        "|---|---:|---:|---:|---:|---|---:|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|",
+        *_conditions_table(summaries),
     ]
-    for condition in conditions:
-        summary = summaries[condition]
-        low, high = summary.regression_interval
-        lines.append(
-            f"| {condition} | {summary.runs} | {summary.errors} | {summary.indeterminate} | {_srr_cells(summary)} "
-            f"| {_rate(summary.regression_rate)} | [{low:.2f}, {high:.2f}] "
-            f"| {summary.informed_overrides} | {summary.unknown_citations} "
-            f"| {_rate(summary.consult_rate)} | {_rate(summary.heed_rate)} "
-            f"| {summary.completed} | {_rate(summary.completed_regression_rate)} | {_mean(summary.mean_turns)} "
-            f"| {_mean(summary.mean_wall_clock_seconds)} | {_count(summary.input_tokens)} "
-            f"| {_count(summary.output_tokens)} |"
-        )
 
     gated = [condition for condition in conditions if summaries[condition].gate_runs is not None]
     if gated:
@@ -311,22 +398,10 @@ def render_markdown(runs: Sequence[AgentRun], summaries: Mapping[str, ConditionS
         "",
         "Regressed runs over non-error, non-indeterminate runs, per condition.",
         "",
-        "| trap | " + " | ".join(conditions) + " |",
-        "|---|" + "---:|" * len(conditions),
+        *_per_trap_table(runs, conditions),
     ]
-    tallies: dict[tuple[str, str], list[int]] = {}
-    for run in runs:
-        if run.exit_reason == "error" or run.detection.indeterminate:
-            continue
-        tally = tallies.setdefault((run.trap_id, run.condition), [0, 0])
-        tally[0] += int(run.detection.regressed)
-        tally[1] += 1
-    for trap_id in sorted({run.trap_id for run in runs}):
-        cells = []
-        for condition in conditions:
-            counts = tallies.get((trap_id, condition))
-            cells.append(f"{counts[0]}/{counts[1]}" if counts else "n/a")
-        lines.append(f"| {trap_id} | " + " | ".join(cells) + " |")
+    if control_runs:
+        lines += _control_lines(control_runs)
     lines.append("")
     return "\n".join(lines)
 
@@ -363,7 +438,12 @@ def _parser() -> argparse.ArgumentParser:
         action="store_true",
         help="score every unknown citation from its stored transcript, in memory; runs.jsonl is never rewritten",
     )
-    parser.add_argument("--traps", type=Path, default=DEFAULT_TRAPS_DIR, help="trap set the citation cues come from")
+    parser.add_argument(
+        "--traps",
+        type=Path,
+        default=DEFAULT_TRAPS_DIR,
+        help="trap set that classifies the runs and supplies the citation cues",
+    )
     parser.add_argument(
         "--out", type=Path, default=None, help="write runs.json and report.md here (default: Markdown to stdout)"
     )
@@ -382,21 +462,23 @@ def main(argv: Sequence[str] | None = None) -> int:
     except (OSError, ValueError) as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 2
+    # The trap set classifies the runs into headline and control, and supplies the citation cues.
+    try:
+        traps = load_traps(args.traps)
+    except TrapError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
     if args.rescore_citations:
-        try:
-            traps = load_traps(args.traps)
-        except TrapError as exc:
-            print(f"error: {exc}", file=sys.stderr)
-            return 2
         runs = rescore_citations(runs, {trap.trap_id: trap for trap in traps}, run_dir)
 
-    summaries = summarize(runs)
-    markdown = render_markdown(runs, summaries)
+    headline, control = split_undocumented(runs, traps)
+    summaries = summarize(headline)
+    markdown = render_markdown(headline, summaries, control)
     if out is None:
         sys.stdout.write(markdown)
         return 0
     out.mkdir(parents=True, exist_ok=True)
-    write_report(out / "runs.json", render_json(runs, summaries))
+    write_report(out / "runs.json", render_json(headline, summaries, control))
     write_report(out / "report.md", markdown)
     print(f"{len(runs)} runs rendered into {out / 'runs.json'} and {out / 'report.md'}")
     return 0

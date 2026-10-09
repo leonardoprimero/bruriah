@@ -25,8 +25,9 @@ committed. The loader refuses a prompt that names the alternative or Bruriah.
 
 `decision_documented` is a YAML bool, true by default. A trap that sets it to false is an
 undocumented-decision control: its decision is real in the code, but no history records a
-rationale, so retrieval cannot surface it. The manifest states the evidence in a comment above the
-key. `egui-image-formats` is the only such trap.
+rationale, so retrieval cannot surface it. The report keeps its runs out of every headline metric
+and summarizes them in a separate control section. The manifest states the evidence in a comment
+above the key. `egui-image-formats` is the only such trap.
 
 ## Citation cues
 

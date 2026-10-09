@@ -2154,6 +2154,119 @@ def test_write_report_keeps_the_previous_report_when_publication_fails(
     assert sorted(p.name for p in tmp_path.iterdir()) == ["report.json"]
 
 
+# Undocumented-decision control: runs of a trap whose decision has no written rationale stay out
+# of the headline and are summarized in their own section.
+
+_CONTROL_HEADING = "## Undocumented-decision control"
+
+
+def _classified_traps(tmp_path: Path) -> tuple[Trap, ...]:
+    """`trap-a` and `trap-b` documented, `trap-u` an undocumented-decision control."""
+    _make_trap(tmp_path, "trap-a")
+    _make_trap(tmp_path, "trap-b")
+    _make_trap(tmp_path, "trap-u", decision_documented=False)
+    return load_traps(tmp_path)
+
+
+def _control_runs() -> list[AgentRun]:
+    """`trap-u` regresses in every baseline run and in one of two prompted runs, never citing."""
+    return [
+        _make_run(trap_id="trap-u", repetition=0, regressed=True, cited_decision=False),
+        _make_run(trap_id="trap-u", repetition=1, regressed=True, cited_decision=False),
+        _make_run(
+            trap_id="trap-u",
+            condition=PROMPTED,
+            repetition=0,
+            tool_calls=_consulted_calls(),
+            regressed=True,
+            cited_decision=False,
+        ),
+        _make_run(trap_id="trap-u", condition=PROMPTED, repetition=1, tool_calls=_consulted_calls()),
+    ]
+
+
+def _headline_and_control(lines: list[str]) -> tuple[list[str], list[str]]:
+    index = lines.index(_CONTROL_HEADING)
+    return lines[:index], lines[index:]
+
+
+def test_split_undocumented_keeps_run_order_and_leaves_unknown_traps_in_the_headline(tmp_path: Path) -> None:
+    """A run whose trap is not in the loaded set stays in the headline, as every run did before
+    traps were classified."""
+    traps = _classified_traps(tmp_path)
+    unknown = _make_run(trap_id="trap-x", repetition=0)
+    documented = _report_runs()
+    control = _control_runs()
+    runs = [control[0], *documented[:3], unknown, *control[1:], *documented[3:]]
+
+    assert report_module.split_undocumented(runs, traps) == ([*documented[:3], unknown, *documented[3:]], control)
+
+
+def test_render_markdown_keeps_undocumented_decision_runs_out_of_the_headline(tmp_path: Path) -> None:
+    documented = _report_runs()
+    headline, control = report_module.split_undocumented(documented + _control_runs(), _classified_traps(tmp_path))
+
+    lines = render_markdown(headline, summarize(headline), control).splitlines()
+
+    before, _ = _headline_and_control(lines)
+    alone = render_markdown(documented, summarize(documented)).splitlines()
+    for condition in DEFAULT_CONDITIONS:
+        assert _condition_cells(before, condition) == _condition_cells(alone, condition), condition
+    tables = [line for line in before if line.startswith("| ")]
+    assert tables == [line for line in alone if line.startswith("| ")]
+    # The one line that names what was set aside and why; no headline table mentions the trap.
+    named = [line for line in before if "trap-u" in line]
+    assert len(named) == 1
+    assert not named[0].startswith("|")
+    assert "decision_documented: false" in named[0]
+    assert "no written rationale" in named[0]
+
+
+def test_render_markdown_summarizes_undocumented_decision_runs_in_the_control_section(tmp_path: Path) -> None:
+    headline, control = report_module.split_undocumented(_report_runs() + _control_runs(), _classified_traps(tmp_path))
+
+    _, section = _headline_and_control(render_markdown(headline, summarize(headline), control).splitlines())
+
+    columns = ("runs", "SRR", "RR", "consult rate")
+    baseline = _condition_cells(section, BASELINE)
+    assert [baseline[column] for column in columns] == ["2", "1.00", "1.00", "0.00"]
+    prompted = _condition_cells(section, PROMPTED)
+    assert [prompted[column] for column in columns] == ["2", "0.50", "0.50", "1.00"]
+    assert not any(line.startswith(f"| {UNPROMPTED} |") for line in section)
+    assert "| trap-u | 2/2 | 1/2 |" in section
+    assert not any(line.startswith(("| trap-a |", "| trap-b |")) for line in section)
+
+
+def test_render_json_puts_undocumented_decision_runs_under_their_own_key(tmp_path: Path) -> None:
+    documented = _report_runs()
+    headline, control = report_module.split_undocumented(documented + _control_runs(), _classified_traps(tmp_path))
+    summaries = summarize(headline)
+
+    payload = json.loads(render_json(headline, summaries, control))
+
+    assert payload["conditions"] == json.loads(render_json(documented, summarize(documented)))["conditions"]
+    assert payload["runs"] == [run_to_json(run) for run in documented]
+    section = payload["undocumented_decision_control"]
+    assert section["trap_ids"] == ["trap-u"]
+    assert sorted(section["conditions"]) == sorted([BASELINE, PROMPTED])
+    assert section["conditions"][BASELINE]["silent_regression_rate"] == pytest.approx(1.0)
+    assert section["conditions"][PROMPTED]["regression_rate"] == pytest.approx(0.5)
+    assert section["runs"] == [run_to_json(run) for run in control]
+
+
+def test_reports_without_undocumented_decision_runs_are_unchanged(tmp_path: Path) -> None:
+    runs = _report_runs()
+    headline, control = report_module.split_undocumented(runs, _classified_traps(tmp_path))
+    summaries = summarize(headline)
+
+    assert (headline, control) == (runs, [])
+    markdown = render_markdown(headline, summaries, control)
+    assert markdown == render_markdown(runs, summarize(runs))
+    assert "Undocumented-decision" not in markdown
+    assert render_json(headline, summaries, control) == render_json(runs, summarize(runs))
+    assert "undocumented_decision_control" not in json.loads(render_json(headline, summaries, control))
+
+
 # -------------------------------------------------------------------------------------------
 # Runner plan, dry run, and replay adapter
 # -------------------------------------------------------------------------------------------
@@ -2638,3 +2751,23 @@ def test_report_main_rejects_a_bad_runs_log_without_touching_it(
 
     assert "runs.jsonl" in capsys.readouterr().err
     assert (run_dir / "runs.jsonl").read_bytes() == content
+
+
+def test_report_main_reports_undocumented_decision_runs_apart_from_the_headline(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    traps_dir = tmp_path / "traps"
+    _make_trap(traps_dir, "trap-a")
+    _make_trap(traps_dir, "trap-u", decision_documented=False)
+    run_dir = tmp_path / "out"
+    run_dir.mkdir()
+    runs = [_make_run(repetition=0), *_control_runs()[:2]]
+    (run_dir / "runs.jsonl").write_text(
+        "".join(json.dumps(run_to_json(run), ensure_ascii=False) + "\n" for run in runs), encoding="utf-8"
+    )
+
+    assert report_module.main([str(run_dir), "--traps", str(traps_dir)]) == 0
+
+    headline, section = _headline_and_control(capsys.readouterr().out.splitlines())
+    assert (_condition_cells(headline, BASELINE)["runs"], _condition_cells(headline, BASELINE)["RR"]) == ("1", "0.00")
+    assert (_condition_cells(section, BASELINE)["runs"], _condition_cells(section, BASELINE)["RR"]) == ("2", "1.00")
