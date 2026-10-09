@@ -132,7 +132,8 @@ Secondary, descriptive:
 - `egui-image-formats`: treatment agents queried with the right vocabulary. One query, for
   example, names "the image crate features". Results did not contain #4489, which refutes the
   vocabulary-mismatch hypothesis from the 2026-10-07 audit. Locators are opaque `doc:v1:` hashes,
-  so whether #4489 is in that trap's index at all is unverified. Next diagnostic.
+  so whether #4489 is in that trap's index at all is unverified. Next diagnostic. Resolved on
+  2026-10-08, see "Post-hoc: undocumented-decision trap" below.
 - Cost and time: control runs average $2.43 and 329 s, treatment runs $3.22 and 381 s. Run set
   B's unprompted runs on the same traps averaged about $1.80 and 170 s on Claude Code 2.1.287.
   The increase appears in both arms, so the client upgrade drives it, not this change.
@@ -140,3 +141,29 @@ Secondary, descriptive:
 Claim this supports: with server instructions, unprompted agents consult Bruriah every time, and a
 decision reversal is no longer silent when retrieval surfaces the decision. It does not support
 any claim that Bruriah prevents reversals.
+
+### Post-hoc: undocumented-decision trap (2026-10-08)
+
+This section is a post-hoc analysis, not part of the pre-registration. The pre-registered results
+above stand.
+
+`egui-image-formats` cites `github:emilk/egui#4489`, which holds no rationale:
+- The issue is titled and bodied "Gif Support", with one comment, "#3951".
+- PR #4620, which closes it, adds GIF to `egui_extras`. PR #3951 is a DynamicImage loader.
+- The png-only eframe dependency arrived in `7b76161a6` (#2996), with no stated reason. The only
+  trace is the Cargo.toml comment `# Needed for app icon`.
+
+No retrieval can surface a decision that was never written, `--github` ingestion included. On
+the `eval/agent-regression-benchmark` branch, the trap is now marked `decision_documented: false`
+and reported as a control outside the headline (`odd/tasks/undocumented-decision-traps.md` there).
+The same runs, re-reported:
+
+| | control | treatment |
+| --- | --- | --- |
+| documented-decision traps (10 runs) | SRR 10/10 | SRR 0/10, all 10 informed overrides |
+| undocumented-decision control (5 runs) | SRR 5/5 | SRR 5/5 |
+
+Fisher exact on the documented-decision traps gives p = 5.4e-6 one-sided. RR stays 10/10 in both
+arms. A partial `bruriah corpus --github` build on egui showed that ingestion fetches every
+self-PR named in a commit subject: about 2400 PRs plus issues and comments, roughly 45-60 minutes
+and close to GitHub's 5000/h limit. `--github` stays opt-in.
