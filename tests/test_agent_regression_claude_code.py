@@ -592,7 +592,7 @@ def test_command_line_isolates_the_client_and_bounds_the_run(tmp_path: Path) -> 
 
     argv = command_line(config, trap, BASELINE, trap.prompt, None)
 
-    assert argv[:3] == ["/opt/claude/bin/claude", "-p", _PROMPT]
+    assert argv[:3] == [str(Path("/opt/claude/bin/claude")), "-p", _PROMPT]
     for flag in ("--verbose", "--no-session-persistence", "--strict-mcp-config", "--disable-slash-commands"):
         assert flag in argv, flag
     # The client runs logged in, so `--bare` (which never reads the login) is out. No setting
@@ -857,7 +857,7 @@ def test_only_the_prompted_command_line_carries_an_instruction(tmp_path: Path, c
 
 
 _BASE_ARGV = [
-    "/opt/claude",
+    str(Path("/opt/claude")),
     "-p",
     _PROMPT,
     "--setting-sources",
@@ -1784,6 +1784,7 @@ def test_the_interpreter_is_the_console_script_s_shebang(tmp_path: Path) -> None
     assert executable_interpreter(script) == Path(sys.executable)
 
 
+@pytest.mark.skipif(os.name == "nt", reason="`#!/usr/bin/env` lookup is POSIX; Windows has no shebang")
 def test_the_interpreter_of_an_env_shebang_is_found_on_path(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     bin_dir = tmp_path / "elsewhere"
     python = _write_stub(bin_dir / "python3", "")
