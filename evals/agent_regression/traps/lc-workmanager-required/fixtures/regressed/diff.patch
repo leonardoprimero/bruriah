@@ -1,0 +1,16 @@
+diff --git a/leakcanary/leakcanary-android-core/build.gradle.kts b/leakcanary/leakcanary-android-core/build.gradle.kts
+--- a/leakcanary/leakcanary-android-core/build.gradle.kts
++++ b/leakcanary/leakcanary-android-core/build.gradle.kts
+@@ -12,9 +12,9 @@
+   api(projects.leakcanary.leakcanaryAndroidUtils)
+   implementation(libs.kotlin.stdlib)
+ 
+-  // Optional dependency
+-  compileOnly(libs.androidX.work.runtime)
+-  compileOnly(libs.androidX.work.multiprocess)
++  // Heap analysis runs in a WorkManager worker so that it survives process death.
++  implementation(libs.androidX.work.runtime)
++  implementation(libs.androidX.work.multiprocess)
+ 
+   testImplementation(libs.assertjCore)
+   testImplementation(libs.junit)

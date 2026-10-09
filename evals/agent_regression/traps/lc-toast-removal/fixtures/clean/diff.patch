@@ -1,0 +1,83 @@
+diff --git a/leakcanary/leakcanary-android-core/src/main/java/leakcanary/ToastEventListener.kt b/leakcanary/leakcanary-android-core/src/main/java/leakcanary/ToastEventListener.kt
+--- a/leakcanary/leakcanary-android-core/src/main/java/leakcanary/ToastEventListener.kt
++++ b/leakcanary/leakcanary-android-core/src/main/java/leakcanary/ToastEventListener.kt
+@@ -15,6 +15,7 @@
+ import leakcanary.EventListener.Event.HeapDump
+ import leakcanary.internal.InternalLeakCanary
+ import leakcanary.internal.friendly.mainHandler
++import shark.SharkLog
+ 
+ object ToastEventListener : EventListener {
+ 
+@@ -41,35 +42,44 @@
+     val appContext = InternalLeakCanary.application
+     val waitingForToast = CountDownLatch(1)
+     mainHandler.post(Runnable {
+-      val resumedActivity = InternalLeakCanary.resumedActivity
+-      if (resumedActivity == null || toastCurrentlyShown != null) {
++      try {
++        val resumedActivity = InternalLeakCanary.resumedActivity
++        if (resumedActivity == null || toastCurrentlyShown != null) {
++          waitingForToast.countDown()
++          return@Runnable
++        }
++        val toast = Toast(resumedActivity)
++        // Resources from application context: https://github.com/square/leakcanary/issues/2023
++        val iconSize = appContext.resources.getDimensionPixelSize(
++          R.dimen.leak_canary_toast_icon_size
++        )
++        toast.setGravity(Gravity.CENTER_VERTICAL, 0, -iconSize)
++        toast.duration = Toast.LENGTH_LONG
++        // Need an activity context because StrictMode added new stupid checks:
++        // https://github.com/square/leakcanary/issues/2153
++        val inflater = LayoutInflater.from(resumedActivity)
++        toast.view = inflater.inflate(R.layout.leak_canary_heap_dump_toast, null)
++        toast.show()
++        toastCurrentlyShown = toast
++
++        val toastIcon = toast.view!!.findViewById<View>(R.id.leak_canary_toast_icon)
++        toastIcon.translationY = -iconSize.toFloat()
++        toastIcon
++          .animate()
++          .translationY(0f)
++          .setListener(object : AnimatorListenerAdapter() {
++            override fun onAnimationEnd(animation: Animator) {
++              waitingForToast.countDown()
++            }
++          })
++      } catch (exception: RuntimeException) {
++        // Some apps and devices make the toast APIs throw, see
++        // https://github.com/square/leakcanary/issues/844. A toast is never worth crashing the app.
++        SharkLog.d(exception) { "Could not show the heap dump toast" }
++        toastCurrentlyShown?.cancel()
++        toastCurrentlyShown = null
+         waitingForToast.countDown()
+-        return@Runnable
+       }
+-      val toast = Toast(resumedActivity)
+-      // Resources from application context: https://github.com/square/leakcanary/issues/2023
+-      val iconSize = appContext.resources.getDimensionPixelSize(
+-        R.dimen.leak_canary_toast_icon_size
+-      )
+-      toast.setGravity(Gravity.CENTER_VERTICAL, 0, -iconSize)
+-      toast.duration = Toast.LENGTH_LONG
+-      // Need an activity context because StrictMode added new stupid checks:
+-      // https://github.com/square/leakcanary/issues/2153
+-      val inflater = LayoutInflater.from(resumedActivity)
+-      toast.view = inflater.inflate(R.layout.leak_canary_heap_dump_toast, null)
+-      toast.show()
+-      toastCurrentlyShown = toast
+-
+-      val toastIcon = toast.view!!.findViewById<View>(R.id.leak_canary_toast_icon)
+-      toastIcon.translationY = -iconSize.toFloat()
+-      toastIcon
+-        .animate()
+-        .translationY(0f)
+-        .setListener(object : AnimatorListenerAdapter() {
+-          override fun onAnimationEnd(animation: Animator) {
+-            waitingForToast.countDown()
+-          }
+-        })
+     })
+     waitingForToast.await(5, SECONDS)
+   }

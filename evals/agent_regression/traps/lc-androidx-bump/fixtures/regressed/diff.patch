@@ -1,0 +1,53 @@
+diff --git a/gradle/libs.versions.toml b/gradle/libs.versions.toml
+--- a/gradle/libs.versions.toml
++++ b/gradle/libs.versions.toml
+@@ -23,9 +23,9 @@
+ # Exposed transitively by shark, avoid increasing
+ coroutines = "1.7.3"
+ androidXTest = "1.7.0"
+-androidXJunit = "1.3.0"
++androidXJunit = "1.3.1"
+ # Exposed transitively by leakcanary-android-process, avoid increasing
+-workManager = "2.7.0"
++workManager = "2.10.5"
+ detekt = "1.23.8"
+ dokka = "2.2.0"
+ hilt = "2.60.1"
+@@ -73,30 +73,30 @@
+ # relies on), we're sticking a bit older because most apps will be using a more recent version
+ # and they'll automatically resolve to higher version without having to necessarily resort to a
+ # resolution strategy.
+-androidX-fragment = { module = "androidx.fragment:fragment", version = "1.0.0" }
++androidX-fragment = { module = "androidx.fragment:fragment", version = "1.8.10" }
+ # androidx.fragment 1.1.0 changed Fragment#initState() to reset a destroyed fragment back to an
+ # INITIALIZED lifecycle state, which LeakCanary has to account for. Instrumentation tests run
+ # against a recent version so that they cover the behavior that apps actually run, while the
+ # compileOnly dependency above stays at the lowest version LeakCanary supports.
+-androidX-fragment-test = { module = "androidx.fragment:fragment", version = "1.8.9" }
++androidX-fragment-test = { module = "androidx.fragment:fragment", version = "1.8.10" }
+ androidX-multidex = { module = "androidx.multidex:multidex", version = "2.0.1" }
+ # Exposed transitively, avoid increasing
+-androidX-startup = { module = "androidx.startup:startup-runtime", version = "1.0.0" }
++androidX-startup = { module = "androidx.startup:startup-runtime", version = "1.2.0" }
+ androidX-test-core = { module = "androidx.test:core", version = "1.7.0" }
+ androidX-test-monitor = { module = "androidx.test:monitor", version = "1.8.0" }
+ androidX-test-rules = { module = "androidx.test:rules", version.ref = "androidXTest" }
+ # Exposed transitively, avoid increasing
+-androidX-test-runner = { module = "androidx.test:runner", version = "1.5.2" }
++androidX-test-runner = { module = "androidx.test:runner", version = "1.7.0" }
+ androidX-test-orchestrator = { module = "androidx.test:orchestrator", version = "1.6.1" }
+-androidX-test-espresso = { module = "androidx.test.espresso:espresso-core", version = "3.7.0" }
++androidX-test-espresso = { module = "androidx.test.espresso:espresso-core", version = "3.7.1" }
+ androidX-test-junit = { module = "androidx.test.ext:junit", version.ref = "androidXJunit" }
+ androidX-test-junitKtx = { module = "androidx.test.ext:junit-ktx", version.ref = "androidXJunit" }
+ # Exposed transitively by leakcanary-android-uiautomator, avoid increasing
+-androidX-test-uiautomator = { module = "androidx.test.uiautomator:uiautomator", version = "2.2.0" }
++androidX-test-uiautomator = { module = "androidx.test.uiautomator:uiautomator", version = "2.3.0" }
+ androidX-work-runtime = { module = "androidx.work:work-runtime", version.ref = "workManager" }
+ androidX-work-multiprocess = { module = "androidx.work:work-multiprocess", version.ref = "workManager" }
+ # Exposed transitively by shark-graph, avoid increasing
+-androidX-collections = { module = "androidx.collection:collection-ktx", version = "1.4.0" }
++androidX-collections = { module = "androidx.collection:collection-ktx", version = "1.5.0" }
+ 
+ assertjCore = { module = "org.assertj:assertj-core", version = "3.27.7" }
+ # AssertJ 3.16.0 builds java.time formatters in StandardRepresentation's static initializer, and

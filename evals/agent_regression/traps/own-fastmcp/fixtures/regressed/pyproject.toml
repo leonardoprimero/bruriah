@@ -1,0 +1,30 @@
+[project]
+name = "bruriah"
+version = "2.1.0"
+description = "Evidence-backed project memory for coding agents"
+requires-python = ">=3.12,<3.15"
+license = "Apache-2.0"
+
+# Every distribution here is imported by name somewhere in `src/bruriah/`, and nothing imported by
+# name is missing.
+dependencies = [
+  "anyio>=4.11,<5",
+  "cryptography>=46,<51",
+  "fastembed==0.8.0",
+  "markdown-it-py>=4.0.0,<5",
+  "mcp>=1.28.1,<2",
+  "platformdirs>=4.11,<5",
+  "pydantic>=2.13.4,<3",
+  "pyyaml>=6.0.3,<7",
+]
+
+[project.scripts]
+bruriah = "bruriah.cli:bruriah_main"
+
+[dependency-groups]
+dev = [
+  "mypy>=1.15.0,<2",
+  "pytest>=9.0.2,<10",
+  "ruff>=0.9.0",
+  "sqlite-vec==0.1.9",
+]

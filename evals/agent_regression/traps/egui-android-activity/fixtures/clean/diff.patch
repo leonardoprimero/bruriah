@@ -1,0 +1,18 @@
+diff --git a/crates/eframe/README.md b/crates/eframe/README.md
+index 63d5872c6e..2a6b8a9f89 100644
+--- a/crates/eframe/README.md
++++ b/crates/eframe/README.md
+@@ -27,6 +27,13 @@
+ You need to either use `edition = "2024"`, or set `resolver = "2"` in the `[workspace]` section of your to-level `Cargo.toml`. See [this link](https://doc.rust-lang.org/edition-guide/rust-2021/default-cargo-resolver.html) for more info.
+ 
+ You can opt-in to the using [`egui_glow`](https://github.com/emilk/egui/tree/main/crates/egui_glow) for rendering by enabling the `glow` feature and setting `NativeOptions::renderer` to `Renderer::Glow`.
++
++To run on Android, enable exactly one of the `android-native-activity` or `android-game-activity` features.
++They pick the Android activity backend through `winit`; only one backend can be linked into an app, so the choice is left to your application:
++
++```toml
++eframe = { version = "0.36", features = ["android-native-activity"] }
++```
+ 
+ ## Alternatives
+ `eframe` is not the only way to write an app using `egui`! You can also try [`egui-miniquad`](https://github.com/not-fl3/egui-miniquad), [`bevy_egui`](https://github.com/mvlabat/bevy_egui), [`egui_sdl2_gl`](https://github.com/ArjunNair/egui_sdl2_gl), and others.

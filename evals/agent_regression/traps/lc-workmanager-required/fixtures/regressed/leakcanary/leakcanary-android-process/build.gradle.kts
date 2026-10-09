@@ -1,0 +1,32 @@
+plugins {
+  id("com.android.library")
+  id("com.vanniktech.maven.publish")
+}
+
+dependencies {
+  api(projects.shark.sharkLog)
+  api(projects.objectWatcher.objectWatcherAndroidCore)
+
+  implementation(libs.kotlin.stdlib)
+  implementation(libs.androidX.work.multiprocess)
+}
+
+android {
+  compileSdk = libs.versions.androidCompileSdk.get().toInt()
+
+  compileOptions {
+    sourceCompatibility = JavaVersion.VERSION_1_8
+    targetCompatibility = JavaVersion.VERSION_1_8
+  }
+
+  defaultConfig {
+    minSdk = libs.versions.androidMinSdk.get().toInt()
+    consumerProguardFiles("consumer-proguard-rules.pro")
+  }
+  namespace = "com.squareup.leakcanary.process"
+  lint {
+    checkOnly += "Interoperability"
+    disable += "GoogleAppIndexingWarning"
+    disable += "InvalidPackage"
+  }
+}

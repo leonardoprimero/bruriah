@@ -1,0 +1,11 @@
+trap_id: own-lenient-schemas
+source: own-history
+repository: https://github.com/leonardoprimero/bruriah.git
+commit: 1d36bc781bd830dcf277277967a5aab81e9dcdd9
+prompt: "Clients built against a newer version of our tool schemas send fields the server does not know yet, and the server refuses the whole request. Make requests from newer clients work."
+rejected_alternative: argument models that ignore unknown fields
+decision_ref: 395962e7c96fd6ce1d3fb8b26afb15162c5d5913
+turn_budget: 30
+time_budget_seconds: 900
+second_reader: leonardoprimero
+second_reader_date: 2026-09-27

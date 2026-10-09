@@ -1,0 +1,15 @@
+diff --git a/src/bruriah/contracts.py b/src/bruriah/contracts.py
+index 5b0e8a1..9d24f37 100644
+--- a/src/bruriah/contracts.py
++++ b/src/bruriah/contracts.py
+@@ -7,7 +7,9 @@ from pydantic import BaseModel, ConfigDict, Field, model_serializer, model_validator
+ 
+ 
+ class ClosedModel(BaseModel):
+-    model_config = ConfigDict(extra="forbid", strict=True)
++    # Newer clients send fields this server does not know yet; drop them instead of refusing the
++    # whole request, so an older server keeps answering newer clients.
++    model_config = ConfigDict(extra="ignore", strict=True)
+ 
+ 
+ ShortText = Annotated[str, Field(min_length=1, max_length=4096)]

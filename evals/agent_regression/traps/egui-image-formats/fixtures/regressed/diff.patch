@@ -1,0 +1,30 @@
+diff --git a/crates/eframe/Cargo.toml b/crates/eframe/Cargo.toml
+index a9475365e4..9d0177cf65 100644
+--- a/crates/eframe/Cargo.toml
++++ b/crates/eframe/Cargo.toml
+@@ -156,7 +156,7 @@
+ # native:
+ [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+ egui-winit = { workspace = true, default-features = false, features = ["clipboard"] }
+-image = { workspace = true, features = ["png"] } # Needed for app icon
++image = { workspace = true, features = ["bmp", "gif", "ico", "jpeg", "png", "webp"] } # Needed for app icon
+ winit = { workspace = true, default-features = false, features = ["rwh_06"] }
+ 
+ # optional native:
+diff --git a/crates/eframe/src/icon_data.rs b/crates/eframe/src/icon_data.rs
+index 4851bee64b..7cccf562fc 100644
+--- a/crates/eframe/src/icon_data.rs
++++ b/crates/eframe/src/icon_data.rs
+@@ -17,10 +17,10 @@
+     fn to_png_bytes(&self) -> Result<Vec<u8>, String>;
+ }
+ 
+-/// Load the contents of .png file.
++/// Load the contents of an image file: PNG, JPEG, GIF, BMP, ICO, or WebP.
+ ///
+ /// # Errors
+-/// If this is not a valid png.
++/// If this is not a valid image in one of those formats.
+ pub fn from_png_bytes(png_bytes: &[u8]) -> Result<IconData, image::ImageError> {
+     profiling::function_scope!();
+     let image = image::load_from_memory(png_bytes)?;
