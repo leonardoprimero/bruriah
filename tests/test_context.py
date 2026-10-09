@@ -866,7 +866,9 @@ def test_compaction_measures_the_payload_it_actually_returns() -> None:
 def test_route_gated_and_backstop_results_carry_no_decisions() -> None:
     decision = _proceeding_decision()
     record, assessment = _supported_claim_fixture()
-    rollback = assemble_context(_request(), decision, assessments=[assessment], evidence_pool=[record], mode="route_only")
+    rollback = assemble_context(
+        _request(), decision, assessments=[assessment], evidence_pool=[record], mode="route_only"
+    )
     assert rollback.status == "route_only" and rollback.decisions == []
     assert assemble_context(None, decision).decisions == []  # type: ignore[arg-type]
     assembled = assemble_context(_request(), decision, assessments=[assessment], evidence_pool=[record])
