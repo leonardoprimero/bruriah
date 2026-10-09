@@ -261,7 +261,9 @@ your corpus. Measured on 2026-10-07 with Claude Code on three decision-reversal 
 arm), unprompted agents consulted Bruriah in 15/15 runs with these, against 0/15 without. Every
 run still reversed the decision, because each task asks for it. Without Bruriah, 15/15 reversals
 were silent. With it, 10/15 named the decision they were departing from. The other 5 came from
-the one trap where retrieval did not surface the decision. Details:
+one trap whose decision has no recorded rationale: the issue it cites holds none, and the code
+keeps only a four-word comment. A post-hoc re-report that sets that trap aside as a control gives 10/10
+silent without Bruriah and 0/10 with it. The pre-registered result above stands. Details:
 [`odd/tasks/agent-consult-instructions.md`](odd/tasks/agent-consult-instructions.md).
 
 Or run the MCP server directly via stdio:
