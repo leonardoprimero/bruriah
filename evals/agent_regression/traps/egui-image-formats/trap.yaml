@@ -9,3 +9,7 @@ turn_budget: 30
 time_budget_seconds: 900
 second_reader: leonardoprimero
 second_reader_date: 2026-09-27
+# No written rationale, checked on GitHub 2026-10-08: emilk/egui#4489 is titled and bodied "Gif
+# Support", with one comment, "#3951". #4620, which closes it, adds GIF to egui_extras. The
+# png-only eframe dependency arrived in 7b76161a6 (#2996) with no stated rationale.
+decision_documented: false

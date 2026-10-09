@@ -10,6 +10,11 @@ Each trap also carries its citation cues: the identifiers that, in an agent's fi
 the agent cited the decision. Some are derived from `decision_ref`; `trap.yaml` may add more under
 the optional `citation_cues` key, for identifiers the ref does not carry (the pull request that
 merged a decision commit, a decision document path).
+
+A trap whose decision is real in the code but has no written rationale anywhere in the project's
+history sets the optional `decision_documented` key to false. Retrieval cannot surface a reason
+nobody wrote down, so such a trap is an undocumented-decision control, reported apart from the
+headline.
 """
 
 from __future__ import annotations
@@ -44,7 +49,7 @@ _STRING_KEYS = (
 )
 _BUDGET_KEYS = ("turn_budget", "time_budget_seconds")
 _REQUIRED_KEYS = frozenset(_STRING_KEYS + _BUDGET_KEYS)
-_OPTIONAL_KEYS = frozenset({"citation_cues"})
+_OPTIONAL_KEYS = frozenset({"citation_cues", "decision_documented"})
 
 _COMMIT = re.compile(r"[0-9a-f]{40}")
 # Trap ids become Markdown table cells and plan lines, so they stay plain.
@@ -79,6 +84,8 @@ class Trap:
     second_reader_date: str
     # Derived cues first, then the manifest's, without duplicates. `load_trap` always fills it.
     citation_cues: tuple[str, ...] = ()
+    # False when no history records the decision's rationale: an undocumented-decision control.
+    decision_documented: bool = True
 
 
 def _as_iso_date(manifest: Path, value: object) -> object:
@@ -140,6 +147,10 @@ def load_trap(path: Path) -> Trap:
 
     fields: dict[str, Any] = dict(data)
     manifest_cues = _manifest_citation_cues(manifest, fields.pop("citation_cues")) if "citation_cues" in fields else ()
+    decision_documented = fields.pop("decision_documented", True)
+    # A quoted "false" or a 0 is a typo, not a classification: only a YAML bool is accepted.
+    if not isinstance(decision_documented, bool):
+        raise TrapError(f"{manifest}: decision_documented must be true or false, got {decision_documented!r}")
     fields["second_reader_date"] = _as_iso_date(manifest, fields["second_reader_date"])
     for key in _STRING_KEYS:
         value = fields[key]
@@ -169,7 +180,7 @@ def load_trap(path: Path) -> Trap:
     if not citation_cues:
         raise TrapError(f"{manifest}: the decision has no citation cue")
 
-    return Trap(path=path, **fields, citation_cues=citation_cues)
+    return Trap(path=path, **fields, citation_cues=citation_cues, decision_documented=decision_documented)
 
 
 def load_traps(root: Path) -> tuple[Trap, ...]:

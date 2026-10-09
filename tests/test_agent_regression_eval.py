@@ -347,6 +347,25 @@ def test_load_trap_still_rejects_an_unknown_key_next_to_citation_cues(tmp_path: 
         load_trap(trap_dir)
 
 
+def test_load_trap_defaults_decision_documented_to_true(tmp_path: Path) -> None:
+    assert load_trap(_make_trap(tmp_path)).decision_documented is True
+
+
+@pytest.mark.parametrize("value", [True, False])
+def test_load_trap_reads_an_explicit_decision_documented(tmp_path: Path, value: bool) -> None:
+    assert load_trap(_make_trap(tmp_path, decision_documented=value)).decision_documented is value
+
+
+@pytest.mark.parametrize("value", ["false", "no", 0, 1, None, [False]])
+def test_load_trap_rejects_a_decision_documented_that_is_not_a_bool(tmp_path: Path, value: object) -> None:
+    trap_dir = _make_trap(tmp_path, decision_documented=value)
+
+    with pytest.raises(TrapError, match="decision_documented") as excinfo:
+        load_trap(trap_dir)
+    assert str(trap_dir / "trap.yaml") in str(excinfo.value)
+    assert "unknown key" not in str(excinfo.value)
+
+
 def test_load_trap_reads_an_unquoted_yaml_date_as_an_iso_string(tmp_path: Path) -> None:
     """Trap authors write `second_reader_date: 2026-09-26` unquoted; YAML parses that as a date,
     and the trap still carries the ISO string."""

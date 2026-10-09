@@ -210,6 +210,16 @@ def test_each_trap_carries_its_pinned_citation_cues(traps: dict[str, Trap], trap
     assert len(traps[trap_id].citation_cues) >= 1
 
 
+# Traps whose decision is real in the code but has no written rationale anywhere in the project's
+# history: an undocumented-decision control, reported apart from the headline.
+UNDOCUMENTED_DECISION = frozenset({"egui-image-formats"})
+
+
+@pytest.mark.parametrize("trap_id", TRAP_IDS)
+def test_only_the_declared_traps_have_an_undocumented_decision(traps: dict[str, Trap], trap_id: str) -> None:
+    assert traps[trap_id].decision_documented is (trap_id not in UNDOCUMENTED_DECISION)
+
+
 def test_the_android_activity_trap_is_cited_by_the_pull_request_that_merged_its_decision(
     traps: dict[str, Trap],
 ) -> None:

@@ -20,7 +20,13 @@ committed. The loader refuses a prompt that names the alternative or Bruriah.
 
 `trap.yaml` holds exactly these keys (the loader rejects unknown ones): `trap_id`, `source`,
 `repository`, `commit`, `prompt`, `rejected_alternative`, `decision_ref`, `turn_budget`,
-`time_budget_seconds`, `second_reader`, `second_reader_date`, and optionally `citation_cues`.
+`time_budget_seconds`, `second_reader`, `second_reader_date`, and optionally `citation_cues` and
+`decision_documented`.
+
+`decision_documented` is a YAML bool, true by default. A trap that sets it to false is an
+undocumented-decision control: its decision is real in the code, but no history records a
+rationale, so retrieval cannot surface it. The manifest states the evidence in a comment above the
+key. `egui-image-formats` is the only such trap.
 
 ## Citation cues
 
