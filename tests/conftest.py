@@ -18,6 +18,7 @@ import sqlite3
 import traceback
 from pathlib import Path
 
+import platformdirs
 import pytest
 
 # Owner-only file modes are a POSIX guarantee that Windows does not express: `os.chmod` there only
@@ -63,6 +64,27 @@ requires_baseline_script = pytest.mark.skipif(
     ),
     reason="the legacy recovery baseline is not part of this checkout",
 )
+
+
+# The private dirs default to the user's profile through `platformdirs`, and a test that leaves them
+# at that default reads and writes the real one. That was not hypothetical: the auto-discovery test
+# created `projects/scoped-repo-<hash>` in the real data dir on every run -- 205 of them before it
+# was caught -- and because the hash is of `tmp_path`, whose `pytest-N` number pytest reuses once
+# the OS clears its temp root, a reused number found its folder already there and failed with
+# `FileExistsError`, intermittently. Reading the real `config.json` is the same leak inward: a
+# setting the developer chose would change what the precedence tests observe.
+#
+# Each test therefore gets its own profile under `tmp_path`. `platformdirs` is patched at the
+# module, which is where `bruriah.platform` looks it up on every call.
+@pytest.fixture(autouse=True)
+def private_dirs_stay_inside_the_test(monkeypatch, tmp_path):
+    profile = tmp_path / "user-profile"
+    for kind in ("config", "data", "cache", "log"):
+        monkeypatch.setattr(
+            platformdirs,
+            f"user_{kind}_dir",
+            lambda *args, _kind=kind, **kwargs: str(profile / _kind),
+        )
 
 
 # An unclosed SQLite connection is not cosmetic in this package. On POSIX it is a descriptor nobody

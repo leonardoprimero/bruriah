@@ -716,6 +716,19 @@ def test_project_id_for_repo_is_deterministic_and_collision_free(tmp_path: Path)
     assert id1 != id2  # Different paths must never collide
 
 
+def test_private_defaults_never_point_at_the_real_user_profile(tmp_path: Path) -> None:
+    """Every test resolves the private dirs inside its own `tmp_path`, never the user's profile.
+
+    Project-scoped data lives under the private data dir, so a test that creates it wrote a
+    `projects/<name>-<hash>` folder into the real profile on every run -- and the hash is of the
+    test's `tmp_path`, whose `pytest-N` number pytest reuses once the OS clears its temp root.
+    A reused number meant an existing folder and a `FileExistsError` that came and went."""
+    scoped = project_scoped_paths(tmp_path / "repo")
+    for path in (scoped.config_dir, scoped.data_dir, scoped.cache_dir, scoped.log_dir):
+        assert path.is_relative_to(tmp_path)
+    assert resolve_paths(env={}).data_dir.is_relative_to(tmp_path)
+
+
 def test_resolve_paths_auto_discovery_precedence(tmp_path: Path) -> None:
     repo = tmp_path / "test-repo"
     (repo / ".git").mkdir(parents=True)
