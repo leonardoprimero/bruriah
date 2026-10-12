@@ -75,16 +75,57 @@ requires_baseline_script = pytest.mark.skipif(
 # setting the developer chose would change what the precedence tests observe.
 #
 # Each test therefore gets its own profile under `tmp_path`. `platformdirs` is patched at the
-# module, which is where `bruriah.platform` looks it up on every call.
-@pytest.fixture(autouse=True)
-def private_dirs_stay_inside_the_test(monkeypatch, tmp_path):
-    profile = tmp_path / "user-profile"
+# module, which is where `bruriah.platform` looks it up on every call. Module-scoped fixtures are
+# set up before any function-scoped one, so a per-test patch alone left them on the real profile;
+# a session-wide profile covers them.
+#
+# The CLI resolver also pins FASTEMBED_CACHE_PATH in `os.environ` with `setdefault`, for the rest
+# of the process. Under these fixtures that value names a temp profile, so it is restored after
+# every test and every module: left in place, every later subprocess would inherit it, and the
+# injection demo, which loads the real model, would download it into a temp dir.
+#
+# Subprocesses are deliberately not isolated here. The only one that runs this package is the
+# injection demo, which already points its data and config dirs at a throwaway root. What it still
+# takes from the real profile is the model cache, and sharing that is the point: isolating it would
+# download the model on every run.
+def _point_private_dirs_at(monkeypatch: pytest.MonkeyPatch, profile: Path) -> None:
     for kind in ("config", "data", "cache", "log"):
         monkeypatch.setattr(
             platformdirs,
             f"user_{kind}_dir",
             lambda *args, _kind=kind, **kwargs: str(profile / _kind),
         )
+
+
+def _restore_model_cache_pin_afterwards(monkeypatch: pytest.MonkeyPatch) -> None:
+    # `setenv` registers the restore and keeps an operator's own value as it is. `delenv` of an
+    # absent variable registers nothing, hence the placeholder before it when there is none.
+    if "FASTEMBED_CACHE_PATH" in os.environ:
+        monkeypatch.setenv("FASTEMBED_CACHE_PATH", os.environ["FASTEMBED_CACHE_PATH"])
+    else:
+        monkeypatch.setenv("FASTEMBED_CACHE_PATH", "placeholder")
+        monkeypatch.delenv("FASTEMBED_CACHE_PATH")
+
+
+@pytest.fixture(scope="session", autouse=True)
+def private_dirs_stay_inside_the_session(tmp_path_factory):
+    with pytest.MonkeyPatch.context() as monkeypatch:
+        _point_private_dirs_at(monkeypatch, tmp_path_factory.mktemp("session-user-profile"))
+        _restore_model_cache_pin_afterwards(monkeypatch)
+        yield
+
+
+@pytest.fixture(scope="module", autouse=True)
+def model_cache_pin_stays_inside_the_module():
+    with pytest.MonkeyPatch.context() as monkeypatch:
+        _restore_model_cache_pin_afterwards(monkeypatch)
+        yield
+
+
+@pytest.fixture(autouse=True)
+def private_dirs_stay_inside_the_test(monkeypatch, tmp_path):
+    _point_private_dirs_at(monkeypatch, tmp_path / "user-profile")
+    _restore_model_cache_pin_afterwards(monkeypatch)
 
 
 # An unclosed SQLite connection is not cosmetic in this package. On POSIX it is a descriptor nobody

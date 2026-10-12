@@ -30,8 +30,8 @@ still be found; the reason behind them was never written down. The report keeps 
 every headline metric and summarizes them in a separate control section, with their own
 provenance and the classification of every reported trap at render time. `report.py` refuses to
 render without a loadable trap set, because without it every run would land in the headline. The
-manifest states the evidence in a comment above the key. `egui-image-formats` is the only such trap. It was reclassified on 2026-10-08,
-after the pre-registered 2026-10-07 consult measurement. The post-hoc re-report of that
+manifest states the evidence in a comment above the key. `egui-image-formats` is the only such
+trap. It was reclassified on 2026-10-08, after the pre-registered 2026-10-07 consult measurement. The post-hoc re-report of that
 measurement is in `odd/tasks/undocumented-decision-traps.md`, and the published, pre-registered
 result stands unchanged.
 

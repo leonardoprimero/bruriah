@@ -124,10 +124,12 @@ def trap_classification(runs: Sequence[AgentRun], traps: Sequence[Trap]) -> dict
     """`decision_documented` of every trap with a run in `runs`, sorted by trap id; `None` for a trap
     the loaded set does not hold, which `split_undocumented` keeps in the headline.
 
-    The split is decided by the manifests at render time, not by anything stored in the runs, so a
-    report records this to make a later re-split of the same runs visible."""
-    documented = {trap.trap_id: trap.decision_documented for trap in traps}
-    return {trap_id: documented.get(trap_id) for trap_id in _trap_ids(runs)}
+    Nothing stored in the runs says which of them are control: the trap manifests decide it when
+    the report is rendered. Recording this mapping in the report means that re-rendering the same
+    runs after a manifest change shows a different classification, instead of moving runs between
+    the headline and the control section without a trace."""
+    documented_by_trap_id = {trap.trap_id: trap.decision_documented for trap in traps}
+    return {trap_id: documented_by_trap_id.get(trap_id) for trap_id in _trap_ids(runs)}
 
 
 def _trap_ids(runs: Sequence[AgentRun]) -> list[str]:

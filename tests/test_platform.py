@@ -3,6 +3,7 @@
 # real investigate_work/read_evidence over the mcp in-memory transport (constraint 1 discipline).
 from __future__ import annotations
 
+import argparse
 import json
 import os
 import stat
@@ -14,6 +15,7 @@ import anyio
 import pytest
 
 from conftest import requires_legacy_database
+from bruriah._cli.common import resolve_cli_paths
 from bruriah.corpus import CorpusPolicy
 from bruriah.index import BuildConfig, build_candidate, promote_candidate
 from bruriah.mcp_server import build_server
@@ -724,9 +726,36 @@ def test_private_defaults_never_point_at_the_real_user_profile(tmp_path: Path) -
     test's `tmp_path`, whose `pytest-N` number pytest reuses once the OS clears its temp root.
     A reused number meant an existing folder and a `FileExistsError` that came and went."""
     scoped = project_scoped_paths(tmp_path / "repo")
-    for path in (scoped.config_dir, scoped.data_dir, scoped.cache_dir, scoped.log_dir):
-        assert path.is_relative_to(tmp_path)
-    assert resolve_paths(env={}).data_dir.is_relative_to(tmp_path)
+    resolved = resolve_paths(env={})
+    for paths in (scoped, resolved):
+        for path in (paths.config_dir, paths.data_dir, paths.cache_dir, paths.log_dir):
+            assert path.is_relative_to(tmp_path)
+
+
+# Read at collection, before any test has run.
+_MODEL_CACHE_BEFORE_ANY_TEST = os.environ.get("FASTEMBED_CACHE_PATH")
+
+
+def test_a_cli_path_resolution_pins_the_model_cache_for_this_test_only(tmp_path: Path) -> None:
+    """First of an ordered pair. The CLI resolver pins FASTEMBED_CACHE_PATH in `os.environ` for
+    the rest of the process, and that value now names this test's `tmp_path`. If it outlived the
+    test, every later subprocess -- the injection demo, which loads the real model -- would inherit
+    it and download the model into a temp dir. The environment is changed here without
+    `monkeypatch` on purpose: undoing it is the autouse fixture's job, which the next test checks."""
+    os.environ.pop("FASTEMBED_CACHE_PATH", None)
+    args = argparse.Namespace(
+        config_dir=None, data_dir=None, cache_dir=None, log_dir=None, network_enabled=None, skill_ceiling=None
+    )
+
+    paths = resolve_cli_paths(args, cwd=tmp_path)
+
+    assert os.environ["FASTEMBED_CACHE_PATH"] == str(paths.cache_dir / "models")
+    assert paths.cache_dir.is_relative_to(tmp_path)
+
+
+def test_b_the_model_cache_pin_does_not_outlive_its_test() -> None:
+    """Second of the ordered pair: pytest runs a module's tests in definition order."""
+    assert os.environ.get("FASTEMBED_CACHE_PATH") == _MODEL_CACHE_BEFORE_ANY_TEST
 
 
 def test_resolve_paths_auto_discovery_precedence(tmp_path: Path) -> None:
