@@ -256,7 +256,13 @@ def _run(args: argparse.Namespace, traps: Sequence[Trap], conditions: Sequence[s
     from agent_regression.adapters import AdapterError, run_benchmark
     from agent_regression.claude_code import ClaudeCodeAdapter, ClaudeCodeConfig
     from agent_regression.metrics import summarize, trap_set_digest
-    from agent_regression.report import render_json, render_markdown, split_undocumented, write_report
+    from agent_regression.report import (
+        render_json,
+        render_markdown,
+        split_undocumented,
+        trap_classification,
+        write_report,
+    )
 
     import bruriah
 
@@ -364,9 +370,10 @@ def _run(args: argparse.Namespace, traps: Sequence[Trap], conditions: Sequence[s
         return 3 if failed else 0
 
     headline, control = split_undocumented(runs, traps)
+    classification = trap_classification(runs, traps)
     summaries = summarize(headline)
-    write_report(out / "runs.json", render_json(headline, summaries, control))
-    write_report(out / "report.md", render_markdown(headline, summaries, control))
+    write_report(out / "runs.json", render_json(headline, summaries, control, classification))
+    write_report(out / "report.md", render_markdown(headline, summaries, control, classification))
     print(f"{len(runs)} runs recorded in {out / 'runs.json'}; report in {out / 'report.md'}")
     return 3 if failed else 0
 

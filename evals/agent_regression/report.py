@@ -120,14 +120,28 @@ def split_undocumented(runs: Sequence[AgentRun], traps: Sequence[Trap]) -> tuple
     return headline, control
 
 
+def trap_classification(runs: Sequence[AgentRun], traps: Sequence[Trap]) -> dict[str, bool | None]:
+    """`decision_documented` of every trap with a run in `runs`, sorted by trap id; `None` for a trap
+    the loaded set does not hold, which `split_undocumented` keeps in the headline.
+
+    The split is decided by the manifests at render time, not by anything stored in the runs, so a
+    report records this to make a later re-split of the same runs visible."""
+    documented = {trap.trap_id: trap.decision_documented for trap in traps}
+    return {trap_id: documented.get(trap_id) for trap_id in _trap_ids(runs)}
+
+
 def _trap_ids(runs: Sequence[AgentRun]) -> list[str]:
     return sorted({run.trap_id for run in runs})
 
 
 def render_json(
-    runs: Sequence[AgentRun], summaries: Mapping[str, ConditionSummary], control_runs: Sequence[AgentRun] = ()
+    runs: Sequence[AgentRun],
+    summaries: Mapping[str, ConditionSummary],
+    control_runs: Sequence[AgentRun] = (),
+    classification: Mapping[str, bool | None] | None = None,
 ) -> str:
-    """`runs` and `summaries` are the headline; `control_runs`, when any, go under their own key."""
+    """`runs` and `summaries` are the headline; `control_runs`, when any, go under their own key,
+    with their own provenance and, when given, the `trap_classification` that split them."""
     payload: dict[str, Any] = {
         "provenance": _provenance_to_json(runs) if runs else None,
         "conditions": {condition: _summary_to_json(summary) for condition, summary in summaries.items()},
@@ -136,11 +150,14 @@ def render_json(
     if control_runs:
         payload[_CONTROL_KEY] = {
             "trap_ids": _trap_ids(control_runs),
+            "provenance": _provenance_to_json(control_runs),
             "conditions": {
                 condition: _summary_to_json(summary) for condition, summary in summarize(control_runs).items()
             },
             "runs": [run_to_json(run) for run in control_runs],
         }
+        if classification is not None:
+            payload[_CONTROL_KEY]["classification"] = dict(classification)
     return json.dumps(payload, indent=2, sort_keys=True) + "\n"
 
 
@@ -269,15 +286,32 @@ def _per_trap_table(runs: Sequence[AgentRun], conditions: Sequence[str]) -> list
     return lines
 
 
-def _control_lines(control_runs: Sequence[AgentRun]) -> list[str]:
+def _classification_line(classification: Mapping[str, bool | None]) -> str:
+    groups = (
+        ("documented", True),
+        ("undocumented", False),
+        ("not in the trap set, kept in the headline", None),
+    )
+    parts = [
+        f"{label}: {', '.join(ids)}"
+        for label, value in groups
+        if (ids := [trap_id for trap_id, documented in classification.items() if documented is value])
+    ]
+    return "Trap classification used for this split: " + "; ".join(parts) + "."
+
+
+def _control_lines(
+    control_runs: Sequence[AgentRun], classification: Mapping[str, bool | None] | None = None
+) -> list[str]:
     summaries = summarize(control_runs)
     return [
         "",
         _CONTROL_HEADING,
         "",
         "Runs of traps whose decision is real in the code but has no written rationale in the project's history "
-        "(`decision_documented: false`), so no retrieval can surface it. They are counted the same way as the "
-        "headline and kept out of every table above; no comparison is computed on them.",
+        "(`decision_documented: false`), so there is no rationale for retrieval to surface. They are counted the "
+        "same way as the headline and kept out of every table above; no comparison is computed on them.",
+        *(["", _classification_line(classification)] if classification is not None else []),
         "",
         *_conditions_table(summaries),
         "",
@@ -288,9 +322,13 @@ def _control_lines(control_runs: Sequence[AgentRun]) -> list[str]:
 
 
 def render_markdown(
-    runs: Sequence[AgentRun], summaries: Mapping[str, ConditionSummary], control_runs: Sequence[AgentRun] = ()
+    runs: Sequence[AgentRun],
+    summaries: Mapping[str, ConditionSummary],
+    control_runs: Sequence[AgentRun] = (),
+    classification: Mapping[str, bool | None] | None = None,
 ) -> str:
-    """`runs` and `summaries` are the headline; `control_runs`, when any, get their own section."""
+    """`runs` and `summaries` are the headline; `control_runs`, when any, get their own section,
+    which states the `trap_classification` that split them when it is given."""
     conditions = _ordered_conditions(summaries)
     lines = [
         "# Agent regression benchmark",
@@ -401,7 +439,7 @@ def render_markdown(
         *_per_trap_table(runs, conditions),
     ]
     if control_runs:
-        lines += _control_lines(control_runs)
+        lines += _control_lines(control_runs, classification)
     lines.append("")
     return "\n".join(lines)
 
@@ -442,7 +480,10 @@ def _parser() -> argparse.ArgumentParser:
         "--traps",
         type=Path,
         default=DEFAULT_TRAPS_DIR,
-        help="trap set that classifies the runs and supplies the citation cues",
+        help=(
+            "trap set that classifies the runs and supplies the citation cues; "
+            "required to load, the report is not rendered without it"
+        ),
     )
     parser.add_argument(
         "--out", type=Path, default=None, help="write runs.json and report.md here (default: Markdown to stdout)"
@@ -463,22 +504,30 @@ def main(argv: Sequence[str] | None = None) -> int:
         print(f"error: {exc}", file=sys.stderr)
         return 2
     # The trap set classifies the runs into headline and control, and supplies the citation cues.
+    # Without it every run would land in the headline, control runs included, so this fails closed
+    # rather than render that mis-split.
     try:
         traps = load_traps(args.traps)
     except TrapError as exc:
-        print(f"error: {exc}", file=sys.stderr)
+        print(
+            f"error: cannot load the trap set at {args.traps}: {exc}. The trap set decides which runs are "
+            "headline and which are undocumented-decision control, so the report is not rendered without it. "
+            "Pass --traps with the trap set the runs were made from.",
+            file=sys.stderr,
+        )
         return 2
     if args.rescore_citations:
         runs = rescore_citations(runs, {trap.trap_id: trap for trap in traps}, run_dir)
 
     headline, control = split_undocumented(runs, traps)
+    classification = trap_classification(runs, traps)
     summaries = summarize(headline)
-    markdown = render_markdown(headline, summaries, control)
+    markdown = render_markdown(headline, summaries, control, classification)
     if out is None:
         sys.stdout.write(markdown)
         return 0
     out.mkdir(parents=True, exist_ok=True)
-    write_report(out / "runs.json", render_json(headline, summaries, control))
+    write_report(out / "runs.json", render_json(headline, summaries, control, classification))
     write_report(out / "report.md", markdown)
     print(f"{len(runs)} runs rendered into {out / 'runs.json'} and {out / 'report.md'}")
     return 0

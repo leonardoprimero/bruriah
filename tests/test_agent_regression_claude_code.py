@@ -2080,6 +2080,7 @@ def test_main_reports_undocumented_decision_runs_apart_from_the_headline(rig: _R
     payload = json.loads((out / "runs.json").read_text(encoding="utf-8"))
     assert payload["runs"] == []
     assert payload["undocumented_decision_control"]["trap_ids"] == ["trap-a"]
+    assert payload["undocumented_decision_control"]["classification"] == {"trap-a": False}
     assert "## Undocumented-decision control" in (out / "report.md").read_text(encoding="utf-8")
 
 
