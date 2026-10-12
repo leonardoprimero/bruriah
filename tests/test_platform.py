@@ -22,6 +22,7 @@ from bruriah.mcp_server import build_server
 from bruriah.dispatch import DEFAULT_SKILL_CEILING
 from bruriah.platform import (
     PlatformError,
+    PlatformPaths,
     ensure_private_dirs,
     find_project_root,
     load_build_descriptor,
@@ -732,8 +733,27 @@ def test_private_defaults_never_point_at_the_real_user_profile(tmp_path: Path) -
             assert path.is_relative_to(tmp_path)
 
 
+@pytest.fixture(scope="module")
+def module_scoped_paths() -> PlatformPaths:
+    return resolve_paths(env={})
+
+
+def test_module_scoped_fixtures_resolve_inside_the_session_profile(
+    module_scoped_paths: PlatformPaths, tmp_path_factory: pytest.TempPathFactory
+) -> None:
+    """A module-scoped fixture is set up before any function-scoped one, so the per-test profile
+    cannot reach it. The session-wide profile in conftest must, or such fixtures resolve -- and
+    write -- against the real user profile."""
+    base = tmp_path_factory.getbasetemp()
+    paths = module_scoped_paths
+    for path in (paths.config_dir, paths.data_dir, paths.cache_dir, paths.log_dir):
+        assert path.is_relative_to(base)
+
+
 # Read at collection, before any test has run.
 _MODEL_CACHE_BEFORE_ANY_TEST = os.environ.get("FASTEMBED_CACHE_PATH")
+# Set by the first test of the ordered pair, so the second can tell it really ran first.
+_PINNING_TEST_RAN: list[bool] = []
 
 
 def test_a_cli_path_resolution_pins_the_model_cache_for_this_test_only(tmp_path: Path) -> None:
@@ -751,10 +771,14 @@ def test_a_cli_path_resolution_pins_the_model_cache_for_this_test_only(tmp_path:
 
     assert os.environ["FASTEMBED_CACHE_PATH"] == str(paths.cache_dir / "models")
     assert paths.cache_dir.is_relative_to(tmp_path)
+    _PINNING_TEST_RAN.append(True)
 
 
 def test_b_the_model_cache_pin_does_not_outlive_its_test() -> None:
-    """Second of the ordered pair: pytest runs a module's tests in definition order."""
+    """Second of the ordered pair: pytest runs a module's tests in definition order. Run alone,
+    filtered or reordered, there is no pin to outlive, so it skips rather than pass vacuously."""
+    if not _PINNING_TEST_RAN:
+        pytest.skip("only meaningful right after test_a_cli_path_resolution_pins_the_model_cache_for_this_test_only")
     assert os.environ.get("FASTEMBED_CACHE_PATH") == _MODEL_CACHE_BEFORE_ANY_TEST
 
 
