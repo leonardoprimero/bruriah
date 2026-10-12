@@ -25,9 +25,12 @@ committed. The loader refuses a prompt that names the alternative or Bruriah.
 
 `decision_documented` is a YAML bool, true by default. A trap that sets it to false is an
 undocumented-decision control: its decision is real in the code, but no history records a
-rationale, so retrieval cannot surface it. The report keeps its runs out of every headline metric
-and summarizes them in a separate control section. The manifest states the evidence in a comment
-above the key. `egui-image-formats` is the only such trap. It was reclassified on 2026-10-08,
+rationale, so there is no rationale for retrieval to surface. The commit and any code comment can
+still be found; the reason behind them was never written down. The report keeps its runs out of
+every headline metric and summarizes them in a separate control section, with their own
+provenance and the classification of every reported trap at render time. `report.py` refuses to
+render without a loadable trap set, because without it every run would land in the headline. The
+manifest states the evidence in a comment above the key. `egui-image-formats` is the only such trap. It was reclassified on 2026-10-08,
 after the pre-registered 2026-10-07 consult measurement. The post-hoc re-report of that
 measurement is in `odd/tasks/undocumented-decision-traps.md`, and the published, pre-registered
 result stands unchanged.

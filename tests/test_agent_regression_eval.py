@@ -2265,6 +2265,48 @@ def test_reports_without_undocumented_decision_runs_are_unchanged(tmp_path: Path
     assert "Undocumented-decision" not in markdown
     assert render_json(headline, summaries, control) == render_json(runs, summarize(runs))
     assert "undocumented_decision_control" not in json.loads(render_json(headline, summaries, control))
+    # Recording the classification never changes a report that had nothing to set aside.
+    classification = report_module.trap_classification(runs, _classified_traps(tmp_path))
+    assert render_markdown(headline, summaries, control, classification) == markdown
+    assert render_json(headline, summaries, control, classification) == render_json(runs, summarize(runs))
+
+
+def test_render_json_gives_the_control_section_its_own_provenance(tmp_path: Path) -> None:
+    """The control runs are reported apart, so their provenance is too: a reader of the section
+    must not have to assume it matches the headline's."""
+    headline, control = report_module.split_undocumented(_report_runs() + _control_runs(), _classified_traps(tmp_path))
+
+    section = json.loads(render_json(headline, summarize(headline), control))["undocumented_decision_control"]
+
+    assert section["provenance"] == json.loads(render_json(control, summarize(control)))["provenance"]
+
+
+def test_trap_classification_names_every_reported_trap_and_flags_the_unknown_ones(tmp_path: Path) -> None:
+    runs = [*_report_runs(), *_control_runs(), _make_run(trap_id="trap-x", repetition=0)]
+
+    classification = report_module.trap_classification(runs, _classified_traps(tmp_path))
+
+    assert classification == {"trap-a": True, "trap-b": True, "trap-u": False, "trap-x": None}
+    assert list(classification) == sorted(classification)
+
+
+def test_reports_record_the_trap_classification_that_split_them(tmp_path: Path) -> None:
+    """The split depends on the trap manifests at render time, so the report states what it used:
+    a later manifest change re-splits a re-rendered report visibly, never silently."""
+    runs = [*_report_runs(), *_control_runs(), _make_run(trap_id="trap-x", repetition=0)]
+    traps = _classified_traps(tmp_path)
+    headline, control = report_module.split_undocumented(runs, traps)
+    classification = report_module.trap_classification(runs, traps)
+    summaries = summarize(headline)
+
+    section = json.loads(render_json(headline, summaries, control, classification))["undocumented_decision_control"]
+    assert section["classification"] == {"trap-a": True, "trap-b": True, "trap-u": False, "trap-x": None}
+
+    _, lines = _headline_and_control(render_markdown(headline, summaries, control, classification).splitlines())
+    assert (
+        "Trap classification used for this split: documented: trap-a, trap-b; undocumented: trap-u; "
+        "not in the trap set, kept in the headline: trap-x."
+    ) in lines
 
 
 # -------------------------------------------------------------------------------------------
@@ -2771,3 +2813,28 @@ def test_report_main_reports_undocumented_decision_runs_apart_from_the_headline(
     headline, section = _headline_and_control(capsys.readouterr().out.splitlines())
     assert (_condition_cells(headline, BASELINE)["runs"], _condition_cells(headline, BASELINE)["RR"]) == ("1", "0.00")
     assert (_condition_cells(section, BASELINE)["runs"], _condition_cells(section, BASELINE)["RR"]) == ("2", "1.00")
+    assert "Trap classification used for this split: documented: trap-a; undocumented: trap-u." in section
+
+
+def test_report_main_refuses_to_render_without_the_trap_set_that_classifies_the_runs(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Without the trap set, every run would land in the headline, control runs included -- the
+    silent mis-split the classification exists to prevent. So the report fails closed, says why,
+    and writes nothing."""
+    run_dir = tmp_path / "out"
+    run_dir.mkdir()
+    (run_dir / "runs.jsonl").write_text(json.dumps(run_to_json(_make_run(repetition=0))) + "\n", encoding="utf-8")
+    missing = tmp_path / "no-traps-here"
+    reports = tmp_path / "reports"
+
+    assert report_module.main([str(run_dir), "--traps", str(missing), "--out", str(reports)]) == 2
+
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert captured.err.startswith(f"error: cannot load the trap set at {missing}: ")
+    assert captured.err.rstrip("\n").endswith(
+        "The trap set decides which runs are headline and which are undocumented-decision control, so "
+        "the report is not rendered without it. Pass --traps with the trap set the runs were made from."
+    )
+    assert not reports.exists()
