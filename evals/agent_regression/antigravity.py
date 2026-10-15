@@ -88,6 +88,9 @@ _CLIENT_CONFIGURATION = (".agents", ".gemini")
 # The client's file-writing tools, as `runs.WRITE_TOOLS` lists them for the consult window.
 _MCP_CALL = "call_mcp_tool"
 _CLIENT_ENV_VARS = ("PATH", "USER", "LOGNAME", "TMPDIR", "LANG")
+# Measured: agy updated itself (1.3.5 to 1.3.6) between runs of one set, which the runner then
+# refuses to mix. The variable is named in the agy binary; it plays `DISABLE_AUTOUPDATER`'s role.
+_CLIENT_PINNED_ENV = {"AGY_CLI_DISABLE_AUTO_UPDATE": "1"}
 _VERSION_TIMEOUT_SECONDS = 60
 # The file this adapter runs from. Its commit must be the server's: a record states one commit.
 HARNESS_SOURCE = Path(__file__).resolve()
@@ -322,6 +325,7 @@ def _client_env(home: Path) -> dict[str, str]:
     `GEMINI_*` or `GOOGLE_*` key, no proxy, nothing of the operator's shell."""
     env = {name: os.environ[name] for name in _CLIENT_ENV_VARS if os.environ.get(name)}
     env.update(_windows_essentials())
+    env.update(_CLIENT_PINNED_ENV)
     env["HOME"] = str(home)
     if os.name == "nt":
         env["USERPROFILE"] = str(home)

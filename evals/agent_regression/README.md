@@ -63,6 +63,8 @@ same clean clone and the same real `bruriah serve`. The differences were measure
   - Before the agent starts, `agy mcp list` must show exactly the condition's servers. A clone
     carrying `.agents/` or `.gemini/` is refused.
   - SIGTERM stops a set like Ctrl+C, so the client is stopped and the `HOME` removed.
+  - The client runs with `AGY_CLI_DISABLE_AUTO_UPDATE=1`: `agy` updated itself between runs once,
+    and the runner refuses a set that mixes client versions.
 - **Tools.** Permissions deny the shell (`command(*)`) and URL access (`read_url(*)`,
   `execute_url(*)`). They allow reads and writes in the clone, and reads of the MCP files the client
   writes for Bruriah. Measured on `agy` 1.3.5:

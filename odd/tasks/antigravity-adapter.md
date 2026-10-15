@@ -235,3 +235,14 @@ of the activation matrix with only what is measured. Paid runs need the owner's 
   - Code: `outside_paths` and the new `settings_for`. The operator-home deny and the live-HOME guard
     are gone, because other homes' token copies are denied siblings. The sweep and marker stay.
     Test-first: RED at import, then GREEN, 67 adapter tests.
+- L20 Smoke run `out-pilot3-datepicker-2026-10-15` (`5568652`, datepicker `baseline`, 1 rep).
+  - Isolation held: 7 reads were denied by rule (outside paths, URLs), the run continued, and the
+    run left no HOME or process behind.
+  - The run hit `time_budget` at 1800 s, not completed and with no write. It made 153 calls: 79
+    `view_file` and 70 `search_web`. The web searches hunted the decision's history
+    (`site:github.com/emilk/egui/pull "DatePickerButton" chrono`); no chrono sources exist in
+    `~/.cargo/registry/src`.
+  - This is agent behavior, not an instrument fault: a not-completed outcome, counted as such.
+  - agy had updated itself from 1.3.5 to 1.3.6. The client now runs with
+    `AGY_CLI_DISABLE_AUTO_UPDATE=1`, a variable named in the binary, so that a set does not stop
+    halfway on a version change. Test-first: 1 RED, then GREEN, 68 adapter tests.

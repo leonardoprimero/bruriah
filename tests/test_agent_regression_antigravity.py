@@ -1035,3 +1035,12 @@ def test_a_real_run_restores_the_sigterm_handler_it_replaced(tmp_path: Path) -> 
     argv += ["--agy", str(tmp_path / "missing-agy"), "--out", str(tmp_path / "out")]
     assert run_module.main(argv) == 2
     assert signal.getsignal(signal.SIGTERM) is before
+
+
+def test_the_client_never_updates_itself_during_a_set(rig: _Rig) -> None:
+    # Measured: agy 1.3.5 updated itself to 1.3.6 between runs; the runner refuses a set that mixes
+    # client versions, so a set that updates halfway stops halfway.
+    assert antigravity_module._client_env(rig.root)["AGY_CLI_DISABLE_AUTO_UPDATE"] == "1"
+    rig.run(UNPROMPTED)
+    (call,) = rig.print_calls()
+    assert "AGY_CLI_DISABLE_AUTO_UPDATE" in call["env"]
