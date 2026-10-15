@@ -34,6 +34,7 @@ import argparse
 import json
 import os
 import shutil
+import signal
 import sys
 from collections.abc import Collection, Iterable, Mapping, Sequence
 from datetime import date
@@ -63,6 +64,17 @@ _UNRECORDED = "unrecorded"
 CLAUDE_CODE = "claude-code"
 ANTIGRAVITY = "antigravity"
 CLIENTS = (CLAUDE_CODE, ANTIGRAVITY)
+
+
+def _interrupt(signum: int, frame: object) -> None:
+    raise KeyboardInterrupt
+
+
+def interrupt_on_sigterm() -> Any:
+    """Handle SIGTERM as an interrupt, and return the handler it replaces. A run set stopped with
+    SIGTERM then unwinds like Ctrl+C: the adapter stops its client and removes the run's own
+    files, instead of leaving them to a kill that no cleanup outlives."""
+    return signal.signal(signal.SIGTERM, _interrupt)
 
 
 class ProvenanceMismatch(RuntimeError):
@@ -477,7 +489,11 @@ def main(argv: Sequence[str] | None = None) -> int:
         selected = ", ".join(sorted(trap.trap_id for trap in traps))
         print(f"restricted by --trap-ids to {len(traps)} of {len(loaded)} traps: {selected}")
     if not args.dry_run:
-        return _run(args, traps, conditions)
+        previous = interrupt_on_sigterm()
+        try:
+            return _run(args, traps, conditions)
+        finally:
+            signal.signal(signal.SIGTERM, previous)
 
     print(
         f"{len(plan)} planned invocations: {len(traps)} traps x {len(conditions)} conditions x "

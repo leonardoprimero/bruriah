@@ -18,9 +18,11 @@ from __future__ import annotations
 import json
 import os
 import shutil
+import signal
 import stat
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -39,6 +41,8 @@ from agent_regression.adapters import AdapterError  # noqa: E402
 from agent_regression.antigravity import (  # noqa: E402
     CLIENT,
     DENIED_PERMISSIONS,
+    HOME_MARKER,
+    TOKEN_RELATIVE,
     AntigravityAdapter,
     AntigravityConfig,
     exit_reason_for,
@@ -122,6 +126,7 @@ record({
     "env": sorted(os.environ),
     "home": str(home),
     "token_present": token.is_file(),
+    "marker_present": (home / ".agent-regression-home").is_file(),
     "token_mode": oct(token.stat().st_mode & 0o777) if token.is_file() else None,
     "token_sha256": hashlib.sha256(token.read_bytes()).hexdigest() if token.is_file() else None,
     "settings": json.loads(settings_file.read_text(encoding="utf-8")) if settings_file.is_file() else None,
@@ -325,6 +330,9 @@ class _Rig:
     def calls(self) -> list[dict]:
         return _read_jsonl(self.bin_dir / "calls.jsonl")
 
+    def homes(self) -> list[Path]:
+        return sorted(path for path in (self.root / "system-tmp").iterdir() if path.name.startswith("agy-home-"))
+
     def print_calls(self) -> list[dict]:
         return [call for call in self.calls() if "argv" in call]
 
@@ -354,6 +362,10 @@ class _Rig:
 def _rig(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, files: dict[str, str] | None = None) -> _Rig:
     if os.name == "nt" or not GIT_AVAILABLE:
         pytest.skip("the stub executables are `#!` Python scripts, which Windows does not execute, and git is needed")
+    # Run homes go to the system temp dir; each test gets its own, so a sweep never touches a real one.
+    system_tmp = tmp_path / "system-tmp"
+    system_tmp.mkdir()
+    monkeypatch.setattr(tempfile, "tempdir", str(system_tmp))
     monkeypatch.setenv(_SENTINEL, "must-not-reach-the-client")
     monkeypatch.setenv("GEMINI_API_KEY", "gemini-key-must-not-reach-the-client")
     origin, commit = _make_origin(tmp_path / "upstream", files or {"README.md": "# demo\n"})
@@ -546,13 +558,7 @@ def test_unprompted_allows_bruriah_and_the_files_the_client_writes_for_it(tmp_pa
     work.mkdir()
     home.mkdir()
     settings = settings_for(UNPROMPTED, work, home)
-    mcp_dir = home.resolve() / ".gemini" / "antigravity-cli" / "mcp"
-    assert settings["permissions"]["allow"] == [
-        f"read_file({work.resolve()})",
-        f"write_file({work.resolve()})",
-        f"read_file({mcp_dir})",
-        "mcp(bruriah/*)",
-    ]
+    assert settings["permissions"]["allow"] == ["read_file(/)", f"write_file({work.resolve()})", "mcp(bruriah/*)"]
     assert "mcp(*)" not in settings["permissions"]["deny"]
 
 
@@ -719,7 +725,7 @@ def test_a_home_that_fails_halfway_is_removed_with_its_token_copy(rig: _Rig, mon
     monkeypatch.setattr(antigravity_module.Path, "write_text", broken_write)
     with pytest.raises(AdapterError, match="cannot prepare the run's HOME"):
         rig.run(UNPROMPTED)
-    assert list((rig.root / "cache" / "homes").iterdir()) == []
+    assert rig.homes() == []
     assert rig.print_calls() == []
 
 
@@ -727,7 +733,7 @@ def test_a_home_that_cannot_be_removed_fails_the_run_naming_it(rig: _Rig, monkey
     monkeypatch.setattr(antigravity_module.shutil, "rmtree", lambda *args, **kwargs: None)
     with pytest.raises(AdapterError, match="still holds a copy of the sign-in token") as raised:
         rig.run(UNPROMPTED)
-    (home,) = (rig.root / "cache" / "homes").iterdir()
+    (home,) = rig.homes()
     assert str(home) in str(raised.value)
 
 
@@ -747,7 +753,7 @@ def test_a_transcript_that_cannot_be_written_still_removes_the_home(rig: _Rig, m
     monkeypatch.setattr(antigravity_module.AntigravityAdapter, "_write_transcript", broken_transcript)
     with pytest.raises(OSError, match="disk full"):
         rig.run(UNPROMPTED)
-    assert list((rig.root / "cache" / "homes").iterdir()) == []
+    assert rig.homes() == []
 
 
 def test_an_interrupted_run_stops_the_client_and_removes_its_home(rig: _Rig, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -772,13 +778,76 @@ def test_an_interrupted_run_stops_the_client_and_removes_its_home(rig: _Rig, mon
     with pytest.raises(KeyboardInterrupt):
         rig.run(UNPROMPTED)
     assert len(killed) == 1
-    assert list((rig.root / "cache" / "homes").iterdir()) == []
+    assert rig.homes() == []
 
 
 def test_a_missing_bruriah_executable_is_an_adapter_error(rig: _Rig) -> None:
     adapter = rig.adapter(bruriah_executable=rig.root / "no-such-bruriah")
     with pytest.raises(AdapterError, match="no-such-bruriah"):
         rig.run(UNPROMPTED, adapter)
+
+
+@pytest.mark.parametrize("condition", [BASELINE, UNPROMPTED])
+def test_every_condition_reads_everywhere_but_the_operators_home_and_the_token_copy(
+    tmp_path: Path, condition: str
+) -> None:
+    # Measured: in print mode a path no rule matches ends the run, and a deny wins over any allow.
+    work, home, operator = tmp_path / "work", tmp_path / "home", tmp_path / "operator"
+    settings = settings_for(condition, work, home, operator)
+    assert "read_file(/)" in settings["permissions"]["allow"]
+    assert f"read_file({operator.resolve()})" in settings["permissions"]["deny"]
+    assert f"read_file({home.resolve() / TOKEN_RELATIVE})" in settings["permissions"]["deny"]
+
+
+def test_a_clone_inside_the_operators_home_is_refused(rig: _Rig) -> None:
+    # The deny on the operator's home would hide the clone from the agent.
+    with pytest.raises(AdapterError, match="operator's home"):
+        rig.run(UNPROMPTED, rig.adapter(operator_home=rig.root))
+    assert rig.print_calls() == []
+    assert rig.homes() == []
+
+
+def test_run_homes_live_in_the_system_temp_dir_and_carry_the_marker(rig: _Rig) -> None:
+    rig.run(UNPROMPTED)
+    (call,) = rig.print_calls()
+    assert Path(call["home"]).parent == (rig.root / "system-tmp").resolve()
+    assert call["marker_present"] is True
+    assert HOME_MARKER == ".agent-regression-home"
+
+
+def test_a_leftover_home_is_swept_and_nothing_else_is(rig: _Rig) -> None:
+    system_tmp = rig.root / "system-tmp"
+    leftover = system_tmp / "agy-home-leftover"
+    (leftover / ".gemini" / "antigravity-cli").mkdir(parents=True)
+    (leftover / ".agent-regression-home").write_text("", encoding="utf-8")
+    (leftover / TOKEN_RELATIVE).write_text(_TOKEN, encoding="utf-8")
+    unmarked = system_tmp / "agy-home-not-ours"
+    unmarked.mkdir()
+    rig.run(UNPROMPTED)
+    assert not leftover.exists()
+    assert unmarked.is_dir()
+
+
+def test_another_live_run_home_refuses_the_run(rig: _Rig) -> None:
+    # Reads are allowed outside the operator's home, so another live run's token copy would be readable.
+    live = rig.root / "system-tmp" / "agy-home-live"
+    live.mkdir()
+    (live / ".agent-regression-home").write_text(f"{os.getpid()}\n", encoding="utf-8")
+    with pytest.raises(AdapterError, match="another Antigravity run"):
+        rig.run(UNPROMPTED)
+    assert rig.print_calls() == []
+    assert live.is_dir()
+
+
+def test_sigterm_is_handled_as_an_interrupt() -> None:
+    previous = run_module.interrupt_on_sigterm()
+    try:
+        handler = signal.getsignal(signal.SIGTERM)
+        assert callable(handler)
+        with pytest.raises(KeyboardInterrupt):
+            handler(signal.SIGTERM, None)
+    finally:
+        signal.signal(signal.SIGTERM, previous)
 
 
 def test_client_version_needs_no_home_of_the_callers(rig: _Rig) -> None:
@@ -929,3 +998,11 @@ def test_final_message_still_reads_a_claude_code_result(tmp_path: Path) -> None:
     events = [{"type": "result", "subtype": "success", "result": "Claude says #2863."}]
     transcript.write_text("\n".join(json.dumps(event) for event in events) + "\n")
     assert final_message(transcript) == "Claude says #2863."
+
+
+def test_a_real_run_restores_the_sigterm_handler_it_replaced(tmp_path: Path) -> None:
+    before = signal.getsignal(signal.SIGTERM)
+    argv = ["--client", "antigravity", "--conditions", "unprompted", "--model", _MODEL]
+    argv += ["--agy", str(tmp_path / "missing-agy"), "--out", str(tmp_path / "out")]
+    assert run_module.main(argv) == 2
+    assert signal.getsignal(signal.SIGTERM) is before

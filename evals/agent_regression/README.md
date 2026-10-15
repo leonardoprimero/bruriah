@@ -54,14 +54,24 @@ same clean clone and the same real `bruriah serve`. The differences were measure
 (`odd/tasks/antigravity-adapter.md`) and are stated here because they change what a run means:
 
 - **Isolation.** `agy` reads its configuration, MCP servers, rules, skills, hooks and memory from
-  under `HOME`, so each run gets a fresh owner-only `HOME` outside the clone. That `HOME` holds a
-  copy of the operator's sign-in token and the run's own permissions, and it is deleted when the
-  run ends. Before the agent starts, `agy mcp list` must show exactly the condition's servers. A
-  clone carrying `.agents/` or `.gemini/` is refused.
+  under `HOME`, so each run gets a fresh owner-only `HOME` in the system temp dir, outside the clone
+  and outside the operator's home.
+  - That `HOME` holds a copy of the operator's sign-in token and the run's own permissions, and it
+    is deleted when the run ends.
+  - Each `HOME` carries a marker with its process id. A `HOME` left by a run that was killed
+    outright is removed at the next run. A live one from another set refuses the run: one set at a
+    time.
+  - Before the agent starts, `agy mcp list` must show exactly the condition's servers. A clone
+    carrying `.agents/` or `.gemini/` is refused.
+  - SIGTERM stops a set like Ctrl+C, so the client is stopped and the `HOME` removed.
 - **Tools.** Permissions deny the shell (`command(*)`) and URL access (`read_url(*)`,
-  `execute_url(*)`), and allow reads and writes inside the clone only. **Web search cannot be
-  turned off** with any mechanism found, so it stays on and every `search_web` call is in the record.
-  Claude Code runs have no web search.
+  `execute_url(*)`), and allow writes inside the clone only.
+  - In print mode, a path no rule matches ends the whole run, and a deny wins over any allow. So
+    reads are allowed everywhere (`read_file(/)`, as Claude Code's `Read` is) except the
+    operator's home and the run's token copy, which are denied. A denied read fails and the agent
+    carries on.
+  - **Web search cannot be turned off** with any mechanism found, so it stays on and every
+    `search_web` call is in the record. Claude Code runs have no web search.
 - **MCP delivery.** `agy` reaches MCP tools through one generic `call_mcp_tool`, recorded as
   `mcp__<server>__<tool>`. It writes the server instructions and each tool's schema to files the
   agent reads before calling, so Bruriah's `anthropic/alwaysLoad` meta has no effect on this client.

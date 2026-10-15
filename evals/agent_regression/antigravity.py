@@ -78,6 +78,8 @@ DENIED_PERMISSIONS: tuple[str, ...] = ("command(*)", "read_url(*)", "execute_url
 TOKEN_RELATIVE = Path(".gemini") / "antigravity-cli" / "antigravity-oauth-token"
 _SETTINGS_RELATIVE = Path(".gemini") / "antigravity-cli" / "settings.json"
 _MCP_FILES_RELATIVE = Path(".gemini") / "antigravity-cli" / "mcp"
+# Marks a run `HOME` this adapter made, so a sweep removes only those.
+HOME_MARKER = ".agent-regression-home"
 
 # Project configuration the client reads from a repository: hooks, skills and workflows under
 # `.agents/`, settings and MCP servers under `.gemini/`. A trap that can steer the client is no trap.
@@ -103,6 +105,8 @@ class AntigravityConfig:
     token_source: Path = Path.home() / TOKEN_RELATIVE
     # Replaces every trap's time budget for this client when set; `None` keeps the trap's own.
     time_budget_seconds: int | None = None
+    # Denied to the agent's reads; the clone and the run's `HOME` must lie outside it.
+    operator_home: Path = Path.home()
 
 
 @dataclass(frozen=True)
@@ -128,19 +132,52 @@ def _require_supported(condition: str) -> None:
         )
 
 
-def settings_for(condition: str, workdir: Path, home: Path) -> dict[str, Any]:
-    """The run's `settings.json`: read and write inside the clone, no shell or URL access, and the
-    MCP tools of Bruriah only where it is registered, with read access to the instruction and
-    schema files the client writes for it under `home`."""
+def settings_for(condition: str, workdir: Path, home: Path, operator_home: Path | None = None) -> dict[str, Any]:
+    """The run's `settings.json`: no shell or URL access, writes inside the clone only, and the MCP
+    tools of Bruriah only where it is registered.
+
+    Reads are allowed everywhere except the operator's home and the run's token copy. Measured on
+    agy 1.3.5: in print mode a read no rule matches ends the whole run, and a deny wins over any
+    allow, however specific. So every read must match a rule, and the private paths are denied: a
+    denied read fails and the agent carries on. The clone and the run's `HOME` must therefore lie
+    outside the operator's home."""
     _require_supported(condition)
-    work = workdir.resolve()
-    allow = [f"read_file({work})", f"write_file({work})"]
-    deny = list(DENIED_PERMISSIONS)
+    operator = (operator_home if operator_home is not None else Path.home()).resolve()
+    allow = ["read_file(/)", f"write_file({workdir.resolve()})"]
+    deny = [*DENIED_PERMISSIONS, f"read_file({operator})", f"read_file({home.resolve() / TOKEN_RELATIVE})"]
     if condition == BASELINE:
         deny.append("mcp(*)")
     else:
-        allow += [f"read_file({home.resolve() / _MCP_FILES_RELATIVE})", f"mcp({SERVER_NAME}/*)"]
+        allow.append(f"mcp({SERVER_NAME}/*)")
     return {"permissions": {"allow": allow, "deny": deny}}
+
+
+def _owner_alive(marker: Path) -> bool:
+    """Whether the process a run `HOME` marker names is still running."""
+    try:
+        pid = int(marker.read_text(encoding="utf-8").strip())
+    except (OSError, ValueError):
+        return False
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    return True
+
+
+def sweep_leftover_homes(root: Path) -> list[Path]:
+    """Remove run `HOME`s under `root` that this adapter made and whose process is gone: a run
+    killed outright never reaches its own cleanup and leaves its token copy behind. A directory
+    without the marker, or whose owner still runs, is left alone. Returns what was removed."""
+    removed = []
+    for entry in sorted(root.glob("agy-home-*")):
+        marker = entry / HOME_MARKER
+        if entry.is_dir() and not entry.is_symlink() and marker.is_file() and not _owner_alive(marker):
+            shutil.rmtree(entry, ignore_errors=True)
+            removed.append(entry)
+    return removed
 
 
 def _count(value: object) -> int | None:
@@ -360,28 +397,45 @@ class AntigravityAdapter:
         return self._bruriah_commit
 
     def _make_home(self, condition: str, workdir: Path) -> Path:
-        """A fresh owner-only `HOME` under the cache, outside the clone, with the token copy and
-        the condition's settings."""
+        """A fresh owner-only `HOME` in the system temp dir, outside the clone and the operator's
+        home, marked with this process's id, with the token copy and the condition's settings."""
         source = self._config.token_source
         if not source.is_file():
             raise AdapterError(
                 f"no Antigravity login at {source}; sign in by running `agy` once, or pass the token file the "
                 "signed-in client keeps"
             )
-        root = self._config.cache_dir / "homes"
-        root.mkdir(mode=0o700, parents=True, exist_ok=True)
+        root = Path(tempfile.gettempdir()).resolve()
+        operator = self._config.operator_home.resolve()
+        for what, path in (("agent's workdir", workdir.resolve()), ("temp dir for the run's HOME", root)):
+            if path.is_relative_to(operator):
+                raise AdapterError(
+                    f"the {what} {path} is inside the operator's home {operator}, which every run denies to the "
+                    "agent's reads; run with TMPDIR outside it"
+                )
+        sweep_leftover_homes(root)
+        # Reads outside the operator's home are allowed, so another live run's token copy would be
+        # readable by this run's agent: one run at a time per temp dir.
+        live = [entry for entry in sorted(root.glob("agy-home-*")) if (entry / HOME_MARKER).is_file()]
+        if live:
+            raise AdapterError(
+                f"another Antigravity run is live in {root} ({', '.join(entry.name for entry in live)}); its token "
+                "copy would be readable by this run's agent, so run one set at a time"
+            )
         home = Path(tempfile.mkdtemp(prefix="agy-home-", dir=root)).resolve()
         if home.is_relative_to(workdir.resolve()):
             shutil.rmtree(home, ignore_errors=True)
             raise AdapterError(f"the run's HOME {home} must be outside the agent's workdir {workdir}")
         # Every step from here can leave a token copy behind, so any failure removes the home.
         try:
+            (home / HOME_MARKER).write_text(f"{os.getpid()}\n", encoding="utf-8")
             token = home / TOKEN_RELATIVE
             token.parent.mkdir(mode=0o700, parents=True)
             shutil.copyfile(source, token)
             token.chmod(0o600)
             settings = home / _SETTINGS_RELATIVE
-            settings.write_text(json.dumps(settings_for(condition, workdir, home), indent=2) + "\n", encoding="utf-8")
+            payload = settings_for(condition, workdir, home, self._config.operator_home)
+            settings.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
         except BaseException as error:
             shutil.rmtree(home, ignore_errors=True)
             if isinstance(error, OSError):
