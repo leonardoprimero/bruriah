@@ -428,6 +428,20 @@ def main(argv: Sequence[str] | None = None) -> int:
     args = _parser().parse_args(argv)
     # Canonical order, duplicates dropped, whatever order the flags came in.
     conditions = tuple(condition for condition in CONDITIONS if condition in args.conditions)
+    # A flag of the other client would be ignored, and the run would bill the client it did not name.
+    foreign = (["--claude"] if args.client == ANTIGRAVITY and args.claude is not None else []) or [
+        flag
+        for flag, value in (("--agy", args.agy), ("--agy-token", args.agy_token))
+        if args.client == CLAUDE_CODE and value is not None
+    ]
+    if foreign:
+        other = CLAUDE_CODE if args.client == ANTIGRAVITY else ANTIGRAVITY
+        print(
+            f"error: {', '.join(foreign)} only apply to --client {other}, but this run is --client {args.client}; "
+            f"pass --client {other} or drop them",
+            file=sys.stderr,
+        )
+        return 2
     if args.client == ANTIGRAVITY:
         from agent_regression.antigravity import SUPPORTED_CONDITIONS
 

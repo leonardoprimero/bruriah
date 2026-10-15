@@ -722,6 +722,26 @@ def test_an_antigravity_run_refuses_a_spend_cap_it_cannot_enforce(
     assert not (tmp_path / "out").exists()
 
 
+@pytest.mark.parametrize(
+    ("argv", "flags"),
+    [
+        (["--agy", "/usr/bin/agy", "--agy-token", "/tmp/token"], "--agy, --agy-token"),
+        (["--client", "antigravity", "--claude", "/usr/bin/claude"], "--claude"),
+    ],
+)
+def test_a_flag_of_the_other_client_is_refused(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], argv: list[str], flags: str
+) -> None:
+    # Silently ignoring it would run, and bill, the other client.
+    out = tmp_path / "out"
+    code = run_module.main([*argv, "--conditions", "unprompted", "--model", _MODEL, "--out", str(out)])
+    captured = capsys.readouterr()
+    assert code == 2
+    assert captured.out == ""
+    assert f"error: {flags} only apply to" in captured.err
+    assert not out.exists()
+
+
 def test_a_real_antigravity_run_records_its_runs(
     rig: _Rig, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
