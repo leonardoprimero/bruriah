@@ -667,6 +667,57 @@ def test_the_harness_source_is_this_package_directory() -> None:
     assert antigravity_module.HARNESS_SOURCE.parent == claude_code_module.HARNESS_SOURCE.parent
 
 
+def test_a_home_that_fails_halfway_is_removed_with_its_token_copy(rig: _Rig, monkeypatch: pytest.MonkeyPatch) -> None:
+    def broken_write(self: Path, *args: object, **kwargs: object) -> int:
+        raise OSError("disk full")
+
+    # The token is already copied when the settings write fails.
+    monkeypatch.setattr(antigravity_module.Path, "write_text", broken_write)
+    with pytest.raises(AdapterError, match="cannot prepare the run's HOME"):
+        rig.run(UNPROMPTED)
+    assert list((rig.root / "cache" / "homes").iterdir()) == []
+    assert rig.print_calls() == []
+
+
+def test_a_home_that_cannot_be_removed_fails_the_run_naming_it(rig: _Rig, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(antigravity_module.shutil, "rmtree", lambda *args, **kwargs: None)
+    with pytest.raises(AdapterError, match="still holds a copy of the sign-in token") as raised:
+        rig.run(UNPROMPTED)
+    (home,) = (rig.root / "cache" / "homes").iterdir()
+    assert str(home) in str(raised.value)
+
+
+def test_an_interrupted_run_stops_the_client_and_removes_its_home(rig: _Rig, monkeypatch: pytest.MonkeyPatch) -> None:
+    killed: list[int] = []
+    real_kill = antigravity_module._kill
+
+    def record_kill(process: subprocess.Popen[str]) -> None:
+        killed.append(process.pid)
+        real_kill(process)
+
+    real_communicate = subprocess.Popen.communicate
+
+    def interrupted(self: subprocess.Popen[str], *args: object, **kwargs: object) -> tuple[str, str]:
+        # Only the agent's own run is interrupted; git and the version probes run as usual.
+        if "--print" in self.args:
+            raise KeyboardInterrupt
+        return real_communicate(self, *args, **kwargs)  # type: ignore[arg-type]
+
+    rig.behave(sleep=30)
+    monkeypatch.setattr(antigravity_module, "_kill", record_kill)
+    monkeypatch.setattr(subprocess.Popen, "communicate", interrupted)
+    with pytest.raises(KeyboardInterrupt):
+        rig.run(UNPROMPTED)
+    assert len(killed) == 1
+    assert list((rig.root / "cache" / "homes").iterdir()) == []
+
+
+def test_a_missing_bruriah_executable_is_an_adapter_error(rig: _Rig) -> None:
+    adapter = rig.adapter(bruriah_executable=rig.root / "no-such-bruriah")
+    with pytest.raises(AdapterError, match="no-such-bruriah"):
+        rig.run(UNPROMPTED, adapter)
+
+
 def test_client_version_needs_no_home_of_the_callers(rig: _Rig) -> None:
     assert rig.adapter().client_version() == _CLIENT_VERSION
     (call,) = [call for call in rig.calls() if "version" in call]

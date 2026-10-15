@@ -131,3 +131,26 @@ of the activation matrix with only what is measured. Paid runs need the owner's 
     `mypy` are clean.
   - Docs: `evals/agent_regression/README.md` has a "second client" section that states every
     difference. The README test count is 2,586.
+- L10 Verification and review of `35ed6fd`:
+  - The independent `gentle-ai-verify` gave PASS on S2, S3, S4, S6 and S7, with one low defect: a
+    partial `_make_home` left the dir behind.
+  - Native review `review-0996d6d103a9b6dc` (base `24fae8b`, high tier, risk/resilience/
+    reliability) confirmed one CRITICAL: R3-silent-client-flags. `--agy` and `--agy-token` were
+    ignored without `--client antigravity`, and `--claude` under it, so the run billed the other
+    client. It was fixed in `62ea163` (a mismatch exits 2, plus 2 tests); the validator confirmed
+    the fix, and the review is APPROVED and acknowledged.
+  - Host config: the refuter and validator roles pointed at the removed
+    `antigravity/gemini-3.7-flash`. `gemini-3.8-flash` tried tool calls in the text-only relay.
+    With owner OK, both roles now use `claude-bridge/claude-sonnet-5` in
+    `~/.pi/gentle-ai/models.json` and in profile `planning`, with backups.
+- L11 Hardening before any paid run (review advisories R1/R3/R4). Test-first: 4 RED, then GREEN
+  (54 adapter tests).
+  - A failure while preparing a run's `HOME` removes it with the token copy and is an
+    `AdapterError`.
+  - A `HOME` that cannot be removed fails the run, naming the path.
+  - An interrupt kills the client and removes the `HOME`.
+  - A missing `bruriah` executable is an `AdapterError`.
+  - README count is 2,592.
+  - Native review `review-915ba3e7e8b8c9e7` (high tier, risk/resilience/reliability) is APPROVED
+    and acknowledged. Its advisory: all three lenses flagged that `_remove_home` runs before
+    `_write_transcript`, so a `HOME` that cannot be removed discards a paid transcript.

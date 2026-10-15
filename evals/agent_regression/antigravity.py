@@ -310,13 +310,16 @@ class AntigravityAdapter:
     def _check_bruriah_version(self) -> None:
         if self._bruriah_checked:
             return
-        completed = subprocess.run(
-            [str(self._config.bruriah_executable), "--version"],
-            stdin=subprocess.DEVNULL,
-            capture_output=True,
-            text=True,
-            timeout=_VERSION_TIMEOUT_SECONDS,
-        )
+        try:
+            completed = subprocess.run(
+                [str(self._config.bruriah_executable), "--version"],
+                stdin=subprocess.DEVNULL,
+                capture_output=True,
+                text=True,
+                timeout=_VERSION_TIMEOUT_SECONDS,
+            )
+        except (OSError, subprocess.TimeoutExpired) as error:
+            raise AdapterError(f"{self._config.bruriah_executable} --version did not run: {error}") from error
         words = completed.stdout.split()
         reported = words[-1] if words else ""
         if completed.returncode != 0 or reported != bruriah.__version__:
@@ -356,13 +359,30 @@ class AntigravityAdapter:
         if home.is_relative_to(workdir.resolve()):
             shutil.rmtree(home, ignore_errors=True)
             raise AdapterError(f"the run's HOME {home} must be outside the agent's workdir {workdir}")
-        token = home / TOKEN_RELATIVE
-        token.parent.mkdir(mode=0o700, parents=True)
-        shutil.copyfile(source, token)
-        token.chmod(0o600)
-        settings = home / _SETTINGS_RELATIVE
-        settings.write_text(json.dumps(settings_for(condition, workdir, home), indent=2) + "\n", encoding="utf-8")
+        # Every step from here can leave a token copy behind, so any failure removes the home.
+        try:
+            token = home / TOKEN_RELATIVE
+            token.parent.mkdir(mode=0o700, parents=True)
+            shutil.copyfile(source, token)
+            token.chmod(0o600)
+            settings = home / _SETTINGS_RELATIVE
+            settings.write_text(json.dumps(settings_for(condition, workdir, home), indent=2) + "\n", encoding="utf-8")
+        except BaseException as error:
+            shutil.rmtree(home, ignore_errors=True)
+            if isinstance(error, OSError):
+                raise AdapterError(f"cannot prepare the run's HOME {home}: {error}") from error
+            raise
         return home
+
+    @staticmethod
+    def _remove_home(home: Path) -> None:
+        """Delete the run's `HOME`, and fail the run when the token copy in it survives."""
+        shutil.rmtree(home, ignore_errors=True)
+        if home.exists():
+            raise AdapterError(
+                f"the run's HOME {home} still holds a copy of the sign-in token and could not be removed; "
+                "delete it by hand"
+            )
 
     def _register_bruriah(self, home: Path, trap: Trap, workdir: Path, bruriah_commit: str) -> None:
         config = self._config
@@ -424,6 +444,10 @@ class AntigravityAdapter:
             _kill(process)
             stdout, stderr = process.communicate()
             timed_out = True
+        except BaseException:
+            # An interrupt must not leave the client, and the server it spawned, running.
+            _kill(process)
+            raise
         elapsed = time.monotonic() - started
         return stdout or "", stderr or "", process.returncode, timed_out, elapsed
 
@@ -470,8 +494,11 @@ class AntigravityAdapter:
             stdout, stderr, returncode, timed_out, elapsed = self._invoke(
                 self.command_line(prompt, trap), workdir, home, trap.time_budget_seconds
             )
-        finally:
+        except BaseException:
+            # Best effort only: an error removing the home must not hide the one already raised.
             shutil.rmtree(home, ignore_errors=True)
+            raise
+        self._remove_home(home)
 
         transcript = self._write_transcript(trap, condition, repetition, stdout, stderr)
         summary = parse_stream(stdout.splitlines())
