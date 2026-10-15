@@ -34,8 +34,11 @@ cues are specified in [`traps/README.md`](traps/README.md).
 
 `claude_code.py` runs Claude Code headless in a fresh temporary clone at the trap's pinned commit:
 
-- **Tools.** Only read, edit, write, grep and glob are allowed. There is no shell, so the agent
-  cannot push, install packages or start a process.
+- **Tools.** The allowlist is `Read`, `Edit`, `MultiEdit`, `Write`, `Glob` and `Grep`. Where
+  Bruriah is registered, its two MCP tools are added. `Bash`, `WebFetch`, `WebSearch`, `Task`
+  and `NotebookEdit` are disallowed. With no shell, the agent cannot push, install packages or
+  start a process. The client still offers a few built-ins of its own, such as tool search, and
+  every call is recorded.
 - **Configuration.** No setting source is loaded, and MCP config is strict: the operator's hooks,
   plugins, `CLAUDE.md` and other MCP servers stay out of the run. A clone carrying `.claude/` or
   `.mcp.json` at the pinned commit is refused.
@@ -91,7 +94,8 @@ With the trap set as registered, all 15 runs per arm are in the headline
 | treatment | 15/15 | 15/15 | 5/15 = 0.33 [0.15, 0.58] | 10 |
 
 - **Primary, consult rate:** treatment 15/15 against control 0/15. The pre-registered one-sided
-  Fisher exact p is 6.4e-9.
+  Fisher exact p is 6.4e-9. With the margins fixed at 15 and 15, all 15 consulting runs falling
+  in treatment is the single most extreme table: p = 1 / C(30, 15).
 - **Citations:** all 10 informed overrides were read by hand and are genuine. Each names #2863 or
   #8008 and the reason recorded for it.
 - **Remaining silent regressions:** all 5 in treatment are `egui-image-formats`.
@@ -108,8 +112,8 @@ trap set ([`post-hoc/`](results/consult-2026-10-07/post-hoc/)):
 | documented-decision traps (10 runs per arm) | SRR 10/10 | SRR 0/10, all 10 informed overrides |
 | undocumented-decision control (5 runs per arm) | SRR 5/5 | SRR 5/5 |
 
-On the documented-decision traps, the one-sided Fisher exact p is 5.4e-6, and RR stays 10/10 in
-both arms. The pre-registered result above stands; this table does not replace it.
+On the documented-decision traps, the one-sided Fisher exact p is 5.4e-6, that is
+1 / C(20, 10), and RR stays 10/10 in both arms. The pre-registered result above stands; this table does not replace it.
 
 ### What this supports
 
