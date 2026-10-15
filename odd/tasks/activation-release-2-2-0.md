@@ -43,7 +43,7 @@ reproducible benchmark records. Plan of record: multi-model planning chain of 20
 
 | ID | Specs | Route | Commit |
 |---|---|---|---|
-| T1 | S5 | inline, test-first | |
+| T1 | S5 | inline, test-first | `b21e026` |
 | T2 | S6 | inline, test-first | |
 | T3 | S7 | inline | |
 | T4 | S8 | inline, test-first | |
@@ -67,5 +67,21 @@ slices stacked on it: `release/2.2.0-1-wire-check` (T1, T2), `release/2.2.0-2-be
   adapter) starts right after the release, without the adoption gate.
 - L4 (owner): "si dale arranca". Defaults applied: version 2.2.0; records only, no transcripts;
   post-release replication (T9 of the plan) left to the owner.
+- L6 T1 evidence: text identical at `329f526` and `HEAD` (sha256 `d3401a48…`, 708/421 chars).
+  A one-character mutation of `SERVER_INSTRUCTIONS` makes the pin test fail; the real text passes it
+  (`tests/test_mcp_contract.py`, 22 passed). RDD assess: medium, deferred to the slice.
+- L7 T2 RED: the 14 `tests/test_verify_activation.py` tests failed at collection because the
+  script did not exist; GREEN came after `scripts/verify_activation.py` was written (14 passed).
+- L8 T2 evidence:
+  - The real-index end-to-end run passed: `init` then `verify_activation.py` gave "activation
+    check passed" and the repository stayed clean.
+  - A local simulation of the CI `package` job passed: wheel built, clean venv, the step extracted
+    from `ci.yml`, isolated `HOME`, `doctor` healthy, activation check passed.
+  - The full suite gave 2492 passed and 23 skipped, 0 failures (2515 collected, matching the README).
+- L9 (owner): "bien por hoy cerremos sesion seguimos en otra dale". The session stopped after T2.
+  Next: RDD assess for T2. Then close slice 1 with a native review (base `20ab5c8e38fe7f14a96e67d3c940035fe30d201b`,
+  committedOnly) and start T3 on `release/2.2.0-2-benchmark-records`, branched from the slice 1 tip.
+  Precheck already done for T4: the 2026-10-07 records have 15 rows per arm, every row has
+  `cited_decision`, and no private path appears.
 - L5 (owner): delivery "Cadena de PRs sobre una rama de feature"; read access granted to
   `/Users/leguillo/bruriah-worktrees/consult-launch/` for the 2026-10-07 records.
