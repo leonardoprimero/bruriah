@@ -44,10 +44,10 @@ reproducible benchmark records. Plan of record: multi-model planning chain of 20
 | ID | Specs | Route | Commit |
 |---|---|---|---|
 | T1 | S5 | inline, test-first | `b21e026` |
-| T2 | S6 | inline, test-first | |
-| T3 | S7 | inline | |
-| T4 | S8 | inline, test-first | |
-| T5 | S9 | inline (docs) | |
+| T2 | S6 | inline, test-first | `6029497` |
+| T3 | S7 | inline | no change: report byte-identical (L11) |
+| T4 | S8 | inline, test-first | this slice's records commit (rebuilt, L14) |
+| T5 | S9 | inline (docs) | this slice's docs commit (rebuilt, L14) |
 | T6 | S10 | inline, test-first | |
 | T7 | S3, S4 | inline (notes + bump last, after content is final) | |
 
@@ -85,3 +85,56 @@ slices stacked on it: `release/2.2.0-1-wire-check` (T1, T2), `release/2.2.0-2-be
   `cited_decision`, and no private path appears.
 - L5 (owner): delivery "Cadena de PRs sobre una rama de feature"; read access granted to
   `/Users/leguillo/bruriah-worktrees/consult-launch/` for the 2026-10-07 records.
+- L10 Slice 1 review: native lineage `review-0f5b6d48616a496e` (base `20ab5c8`, commits `b21e026`,
+  `6029497`), tier high, lenses resilience and reliability. APPROVED and acknowledged. Four
+  non-blocking follow-ups:
+  - the console-script assert at `tests/test_verify_activation.py:164-165`;
+  - the timeout branch, which has no test (`tests/test_verify_activation.py:184-186`);
+  - the exception-group diagnostics at `scripts/verify_activation.py:119-120`;
+  - the exact equality of the meta at `scripts/verify_activation.py:68-69`.
+- L11 (2026-10-15, owner: "continuemos dale") T3 evidence: `evals/injection/run.py` regenerated
+  the report byte-identical, ASR 0/17. It scans the whole `model_dump(mode="json")`, `decisions`
+  included. A probe showed `decisions` non-empty in 7 of the 17 cases (every git, github and
+  code-target case). The field is `list[CommitSha]`, so it cannot carry a marker. No commit was
+  needed.
+- L12 T4: records copied with sha256 unchanged. They go to
+  `evals/agent_regression/results/consult-2026-10-07/records/{control,treatment}/runs.jsonl`.
+  `render.py` there renders two views:
+  - `pre-registered/`: the trap set at `329f526`, read with `git archive`; that commit is
+    reachable from the tag `archive/agent-consult-measurement-2026-10-07`, and CI checks out with
+    `fetch-depth: 0`;
+  - `post-hoc/`: the current trap set.
+
+  The registered and current trap sets differ only in `egui-image-formats`
+  `decision_documented: false`. RED: the 12 `tests/test_consult_records.py` tests failed, with no
+  artifacts yet. GREEN: 12 passed. The pre-registered reports are byte-identical to the original
+  2026-10-07 `out-*/report.md`. The post-hoc reports match the 2026-10-08 ones except for prose and
+  the classification line added in `01ac1c2`; the numbers are identical:
+  - pre-registered SRR: control 15/15, treatment 5/15;
+  - post-hoc SRR: control 10/10, treatment 0/10, with 10 informed overrides; the control section
+    is SRR 5/5 in both arms.
+
+  Full suite: 2503 passed, 23 skipped, and 1 failure, the README count (2515 against 2527
+  collected), which was then corrected to 2,527. Ruff check and format are clean.
+- L13 T5: added `evals/agent_regression/README.md` with method, conditions, the client run,
+  definitions, both result tables, the claim scope, threats and reproduce commands. Every number
+  was recomputed from the committed records:
+  - cost $36.39 and $48.28, mean wall-clock 329 s and 381 s;
+  - consult 0/15 and 15/15;
+  - one-sided Fisher p = 6.4e-9 for consult and 5.4e-6 for documented SRR.
+
+  The `--dry-run` command quoted there lists the 15 invocations and exits 0. A row was added to the
+  `README.md` evidence table, scoped to one client and model. `traps/README.md` now points at the
+  committed renders. ODD `agent-regression-benchmark.md` T3-T6 are ticked.
+- L14 Slice 2 verify and review:
+  - Independent `gentle-ai-verify` returned S7, S8 and S9 PASS with no defects.
+  - RDD assess on base `6029497` gave high risk (`process_boundary`: `render.py` shells out to
+    `git archive`). The native START failed in preflight with `lens_context_budget_exceeded`, and
+    no authority was created. The cause was the four generated `runs.json` renders, about 280 KB
+    that repeat the records.
+  - Owner decision (choice): "No commitear los runs.json (recomendado)".
+  - `render.py` now renders in a scratch directory and keeps only each view's `report.md`. The
+    tests read the views from the Markdown and require only Markdown. RED: 2 failed. GREEN: 13
+    passed, and the four `report.md` stayed byte-identical.
+  - The two local slice-2 commits were rebuilt (`0eff16f` and `c58bacd`, never pushed). README
+    count is 2,528.
