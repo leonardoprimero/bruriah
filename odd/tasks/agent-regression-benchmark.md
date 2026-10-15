@@ -276,16 +276,20 @@ Also out of scope: a Codex or Cursor adapter, an LLM-judge column, a private-cor
   condition (writes the client config into the temporary clone, never into the user's), run
   record capture from the JSON output, budget enforcement. Tested with a stub `claude`
   executable on `PATH` that emits recorded JSON; the real binary is never invoked under pytest.
-- [ ] **T3 -- Trap set.** 12 to 15 traps across the three sources, each with `trap.yaml`,
+- [x] **T3 -- Trap set.** (`ac1ab0d`, twelve signed-off traps; see Progress, 2026-09-27) 12 to 15 traps across the three sources, each with `trap.yaml`,
   `detect.py`, a regression fixture, a clean fixture, a completion check, and a second-reader
   sign-off recorded in `trap.yaml`. This is the largest and most valuable task; it is allowed
   to be its own PR.
-- [ ] **T4 -- Cost estimate and go-ahead.** Dry-run the runner to count planned invocations
+- [x] **T4 -- Cost estimate and go-ahead.** (Progress, 2026-09-27: budget approved for N=5;
+  run set B re-approved 2026-10-02) Dry-run the runner to count planned invocations
   (traps x conditions x N), estimate tokens from one pilot trap, and stop for the user's
   decision before any paid run. Record the approved budget here.
-- [ ] **T5 -- Published run.** Execute, spot-check every fired detection by hand, commit the
+- [x] **T5 -- Published run.** (Run set B, 2026-10-02, in Progress below. The committed and
+  reproducible run is the pre-registered 2026-10-07 consult measurement: records and both renders
+  in `evals/agent_regression/results/consult-2026-10-07/`, release 2.2.0 T4.) Execute, spot-check every fired detection by hand, commit the
   report with provenance. Publish the number as measured.
-- [ ] **T6 -- Docs.** `evals/agent_regression/README.md` (method, conditions, threats to
+- [x] **T6 -- Docs.** (Release 2.2.0 T5. The CHANGELOG entry goes in with the 2.2.0 notes.)
+  `evals/agent_regression/README.md` (method, conditions, threats to
   validity, reproduce block), a row in the top-level README's measured-evidence table, and a
   CHANGELOG entry. The README row states the one-client one-model scope in the same cell as the
   number.
