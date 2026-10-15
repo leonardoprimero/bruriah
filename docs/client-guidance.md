@@ -58,6 +58,31 @@ follow-up blocked on a `cli.py` freeze; the freeze ended, the flag
 shipped, and `test_it_reports_its_own_version_without_a_subcommand`
 pins it.
 
+## Activation matrix
+
+The server tells an agent when to consult Bruriah in two ways. Its initialize result carries MCP
+`instructions`, and both tools carry `_meta` `anthropic/alwaysLoad`, so a client that honors it
+loads their full descriptions at session start. The server sends both to every client. What a
+client does with them is up to the client.
+
+- **emitted**: the server sends the activation to this client. CI checks it against the built
+  wheel over stdio (`scripts/verify_activation.py`).
+- **delivered**: the client puts the instructions in front of its model and loads both tool
+  descriptions up front.
+- **consult measured**: a benchmark measured unprompted agents in this client calling Bruriah.
+
+| client | emitted | delivered | consult measured |
+|---|---|---|---|
+| Claude Code | yes | yes, on Claude Code 2.1.292: no treatment run needed tool search to find Bruriah | 15/15 runs with the activation, 0/15 without, `claude-fable-5-1`, 2026-10-07 ([evals/agent_regression/README.md](../evals/agent_regression/README.md)) |
+| OpenCode | yes | unknown | not measured |
+| Cursor | yes | unknown | not measured |
+| Gemini CLI | yes | unknown | not measured |
+| Antigravity | yes | unknown | not measured |
+| Generic stdio MCP client | yes | unknown | not measured |
+
+"unknown" means nobody has checked; it is not a known failure. In those clients, an agent may
+still need to be told to use Bruriah, for example with a line in the project's agent instructions.
+
 ## Claude Code
 
 - **Config file**: `.mcp.json` at the project root, or the equivalent

@@ -489,6 +489,17 @@ def test_server_instructions_lead_stands_alone() -> None:
     assert READ_TOOL in lead
 
 
+def test_server_instructions_are_the_measured_text() -> None:
+    # The unprompted-consult result (0/15 -> 15/15, odd/tasks/agent-consult-instructions.md) was
+    # measured at 329f526 with exactly this text. The pre-registration ties the claim to the text:
+    # any change to it needs a new pre-registered run before a release can cite that result, so
+    # this pin fails first and says why.
+    digest = hashlib.sha256(SERVER_INSTRUCTIONS.encode("utf-8")).hexdigest()
+    assert digest == "d3401a484a5426ed340156a8afb0ccf63bac7e7cb9481ae99a71b3605d6bbc3e"
+    assert len(SERVER_INSTRUCTIONS) == 708
+    assert len(SERVER_INSTRUCTIONS.split("\n\n", 1)[0]) == 421
+
+
 def test_server_instructions_are_static_across_deps(tmp_path) -> None:
     # Never built from corpus content: different snapshots must yield identical instructions.
     first_notes = _default_notes()

@@ -215,9 +215,10 @@ We evaluate Bruriah against real codebases and publish negative results alongsid
 | **External Retrieval (236 questions)** | recall@3 **0.436** · recall@10 0.559 · MRR@10 0.380 (before: 0.373 · 0.500 · 0.325) | Real issue titles & closing commits from `square/leakcanary` (884 docs) and `emilk/egui` (2,180 docs), measured with `jinaai/jina-embeddings-v2-base-es`, the default as of 1.4.0; "before" is the previous default, `paraphrase-multilingual-MiniLM-L12-v2` |
 | **Own-History Retrieval (24 questions)** | English recall@3 **0.750** · recall@10 0.917 · Spanish recall@3 **0.750** · recall@10 0.917 (before: Spanish 0.500) | 209-document corpus of Bruriah's own git history as of v1.4.0 (`fff2a71`) |
 | **Rejected alternatives from GitHub (236 questions)** | **115 recovered** from `square/leakcanary` (17) and `emilk/egui` (98); 34 of 236 questions carry a counterfactual | Opt-in via `bruriah corpus --github`, measured 2026-09-21; see [Issue ingestion, measured 2026-09-21](evals/project-memory/README.md#issue-ingestion-measured-2026-09-21) |
+| **Agent decision reversals (30 runs)** | Unprompted consult **15/15** with Bruriah vs 0/15 without · silent reversals **5/15** vs 15/15 · reversals 15/15 in both arms: Bruriah makes a reversal visible, it does not prevent it | One client and one model only: Claude Code 2.1.292, `claude-fable-5-1`, three `emilk/egui` traps, N = 5 per trap, pre-registered, measured 2026-10-07; see [Agent regression benchmark](evals/agent_regression/README.md) |
 | **Query Latency** | **≈46µs per passage** (linear) | 1,000 passages in 45ms, 16,000 in 734ms on M4 Pro |
 | **Index Size** | **≈5 KB per passage** | 16k passages ≈ 79 MB SQLite database |
-| **Test Suite** | **2,500 tests** · 0 failures · skips only when an environment prerequisite is absent | Full matrix on Python 3.12, 3.13, 3.14 across Linux, macOS, and Windows |
+| **Test Suite** | **2,533 tests** · 0 failures · skips only when an environment prerequisite is absent | Full matrix on Python 3.12, 3.13, 3.14 across Linux, macOS, and Windows |
 
 > **Want the full methodology and ablations?**  
 > Read our in-depth evaluation report: [**Evaluation Methodology & Benchmarks (`evals/project-memory/README.md`)**](evals/project-memory/README.md).
@@ -252,7 +253,7 @@ bruriah setup claude-desktop  # registers into Claude Desktop settings
 bruriah setup                 # auto-detects installed editors
 ```
 
-You do not need to tell the agent to use it. The server sends MCP `instructions` in its
+In Claude Code, you do not need to tell the agent to use it. The server sends MCP `instructions` in its
 initialize result, saying when to call `investigate_work` (before changing architecture or
 dependencies, reverting existing behaviour, or explaining why the code is the way it is). Both tools
 also carry `_meta` `anthropic/alwaysLoad`, so Claude Code loads their full descriptions at session
@@ -264,7 +265,9 @@ were silent. With it, 10/15 named the decision they were departing from. The oth
 one trap whose decision has no recorded rationale: the issue it cites holds none, and the code
 keeps only a four-word comment. A post-hoc re-report that sets that trap aside as a control gives 10/10
 silent without Bruriah and 0/10 with it. The pre-registered result above stands. Details:
-[`odd/tasks/agent-consult-instructions.md`](odd/tasks/agent-consult-instructions.md).
+[`evals/agent_regression/README.md`](evals/agent_regression/README.md). Other clients receive the
+same instructions, but whether they show them to the model is not measured: see the
+[activation matrix](docs/client-guidance.md#activation-matrix).
 
 Or run the MCP server directly via stdio:
 

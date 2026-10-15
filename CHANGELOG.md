@@ -3,19 +3,49 @@
 Notable changes, newest first. This project follows [semantic versioning](https://semver.org/),
 and the entries here name what changed for *you* rather than which files moved.
 
-## [Unreleased]
+## [2.2.0] — 2026-10-15
 
-### Added: agents learn when to consult Bruriah without being told
+### Added: in Claude Code, agents consult Bruriah without being told
 - The MCP server now sends `instructions` in its initialize result: call `investigate_work` before
   changing architecture or dependencies, reverting existing behaviour, or explaining why the code
   is the way it is, and say so when a change departs from a recorded decision. Clients that defer
   tool definitions behind tool search (Claude Code by default) showed the model only the tool
   names until now, so the guidance in the tool descriptions never reached an unprompted agent.
 - Both tools carry `_meta` `{"anthropic/alwaysLoad": true}`, so Claude Code loads their full
-  descriptions and schemas at session start. Other clients ignore the key; there are still exactly
-  two tools.
-- The instructions are static text, never built from corpus content, so nothing retrieved can
-  reach the model as an instruction through this channel.
+  descriptions and schemas at session start. The key is Anthropic's; whether any other client
+  acts on it is not measured. There are still exactly two tools.
+- The instructions are static text, never built from corpus content: this channel carries no
+  retrieved text.
+- Measured on Claude Code 2.1.292 with `claude-fable-5-1`, on three `emilk/egui` decision-reversal
+  traps, N = 5 runs per trap and arm, with the server at `329f526`. Unprompted agents consulted
+  Bruriah in 15/15 runs with the instructions, against 0/15 without. Every run in both arms still
+  reversed the decision, because each task asks for it. Without the instructions all 15 reversals
+  were silent. With them, 10 of 15 named the decision they departed from, and the other 5 came
+  from the one trap whose decision has no recorded rationale. This was measured on the server at
+  that commit, not on the 2.2.0 wheel, and it says nothing about other clients or models. Method,
+  records and both renders: `evals/agent_regression/README.md`.
+
+### Added: `decisions` on every `investigate_work` result
+- `InvestigationResult.decisions` lists the historical decision commits whose records matched the
+  task, as validated shas in retrieval order, ahead of `evidence`. It is additive: the field
+  defaults to an empty list, and `schema_version` stays `"2"`. A listed commit is retrieved
+  history, not a judgment that the task conflicts with it.
+- Only validated commit shas reach the field, never corpus text. The injection benchmark,
+  regenerated with `decisions` present (non-empty in 7 of its 17 cases), still measures ASR 0/17.
+
+### Added: the activation is checked, documented and reproducible
+- CI's `package` job now starts the installed wheel's `bruriah serve` over stdio. It checks for
+  the instructions (at most 2048 characters, with a lead that names both tools), for exactly two
+  tools, each with `alwaysLoad` and an output schema, and for a `decisions` list in a real
+  `investigate_work` call (`scripts/verify_activation.py`). A contract test pins the instruction
+  text to the one that was measured.
+- `docs/client-guidance.md` has an activation matrix that shows, per client, whether the activation
+  is emitted, delivered and consult-measured. Every client is sent it; only Claude Code is known
+  to deliver it, and only Claude Code was measured.
+- The 2026-10-07 consult records are committed under
+  `evals/agent_regression/results/consult-2026-10-07/`, without transcripts. They are rendered
+  twice and reproduced byte for byte by test: pre-registered, with all 15 runs per arm, and post
+  hoc, with the undocumented-decision trap set apart.
 
 ## [2.1.0] — 2026-09-24
 
