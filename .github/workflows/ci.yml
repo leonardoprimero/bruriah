@@ -148,6 +148,12 @@ jobs:
           # or fails for its own reasons.
           bruriah doctor --data-dir "$B/data" | tee /tmp/doctor.json
           grep -q '"healthy": true' /tmp/doctor.json
+          # The installed wheel, over stdio, must deliver the consult activation the benchmark
+          # measured: server instructions, `alwaysLoad` on both tools, and `decisions`. Same step,
+          # so it inherits the clean PATH and the quickstart's "$B"; the script runs from the
+          # checkout because it is a check, not part of the wheel.
+          /tmp/clean/bin/python "$GITHUB_WORKSPACE/scripts/verify_activation.py" \
+            --bruriah /tmp/clean/bin/bruriah --data-dir "$B/data" --config-dir "$B/config"
           test -z "$(git status --porcelain)"  # the quickstart must not write into the repo it reads
 
   # Architectural drift detection gates PRs and commits against Bruriah's own decision lineage DAG.
