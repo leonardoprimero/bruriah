@@ -498,9 +498,13 @@ class AntigravityAdapter:
             # Best effort only: an error removing the home must not hide the one already raised.
             shutil.rmtree(home, ignore_errors=True)
             raise
-        self._remove_home(home)
+        # The transcript is written first so a HOME that cannot be removed still keeps the paid run,
+        # and the HOME is removed even when writing the transcript fails.
+        try:
+            transcript = self._write_transcript(trap, condition, repetition, stdout, stderr)
+        finally:
+            self._remove_home(home)
 
-        transcript = self._write_transcript(trap, condition, repetition, stdout, stderr)
         summary = parse_stream(stdout.splitlines())
         cited = cites_decision(summary.response, trap.citation_cues)
         _check_no_remote(workdir, trap)

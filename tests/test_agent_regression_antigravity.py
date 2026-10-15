@@ -687,6 +687,25 @@ def test_a_home_that_cannot_be_removed_fails_the_run_naming_it(rig: _Rig, monkey
     assert str(home) in str(raised.value)
 
 
+def test_a_home_that_cannot_be_removed_keeps_the_paid_transcript(rig: _Rig, monkeypatch: pytest.MonkeyPatch) -> None:
+    rig.behave(write={}, steps=[], response="Kept.")
+    monkeypatch.setattr(antigravity_module.shutil, "rmtree", lambda *args, **kwargs: None)
+    with pytest.raises(AdapterError, match="still holds a copy of the sign-in token"):
+        rig.run(UNPROMPTED)
+    (transcript,) = [path for path in (rig.root / "report" / "transcripts").rglob("*") if path.is_file()]
+    assert "Kept." in transcript.read_text(encoding="utf-8")
+
+
+def test_a_transcript_that_cannot_be_written_still_removes_the_home(rig: _Rig, monkeypatch: pytest.MonkeyPatch) -> None:
+    def broken_transcript(*args: object, **kwargs: object) -> str:
+        raise OSError("disk full")
+
+    monkeypatch.setattr(antigravity_module.AntigravityAdapter, "_write_transcript", broken_transcript)
+    with pytest.raises(OSError, match="disk full"):
+        rig.run(UNPROMPTED)
+    assert list((rig.root / "cache" / "homes").iterdir()) == []
+
+
 def test_an_interrupted_run_stops_the_client_and_removes_its_home(rig: _Rig, monkeypatch: pytest.MonkeyPatch) -> None:
     killed: list[int] = []
     real_kill = antigravity_module._kill

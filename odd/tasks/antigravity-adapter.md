@@ -154,3 +154,14 @@ of the activation matrix with only what is measured. Paid runs need the owner's 
   - Native review `review-915ba3e7e8b8c9e7` (high tier, risk/resilience/reliability) is APPROVED
     and acknowledged. Its advisory: all three lenses flagged that `_remove_home` runs before
     `_write_transcript`, so a `HOME` that cannot be removed discards a paid transcript.
+  - Hardening committed in `f0846f2`; full suite 2569 passed, 23 skipped; ruff, format and mypy
+    clean.
+- L12 Advisory fix: the transcript is written before the `HOME` is removed, inside `try/finally`
+  so a transcript write failure still removes the `HOME`. RED observed for the kept transcript;
+  the removal test is a guard (green before and after). README count is 2,594.
+  Full suite 2571 passed, 23 skipped; ruff, format and mypy clean.
+- L13 (owner, 2026-10-15): "dale vamos con tu recomendacion y tenes mi ok". Recommendation
+  accepted: model `gemini-3.8-flash-high`, one pilot run first to measure tokens and wall-clock,
+  then the 30-invocation set (3 egui traps, `baseline` and `unprompted`, N = 5). The OK covers
+  both. Runs launch from a dedicated worktree at the reviewed commit, left untouched until the set
+  finishes.
