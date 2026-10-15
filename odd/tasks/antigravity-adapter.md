@@ -181,3 +181,20 @@ of the activation matrix with only what is measured. Paid runs need the owner's 
     claude-code.
 
   README count is 2,598. Next: a second pilot at 1800 s, then the 30-invocation set.
+- L16 Pilot 2 (2026-10-15, `0cf7c67`, `egui-android-activity`, `unprompted`, 1800 s budget).
+  - Run: `done` in 749 s; 73 turns; 468k input and 84k output tokens; completed.
+  - Consult: `investigate_work` was call 4 (5 calls in all, plus 5 `read_evidence`); the first
+    write was call 63.
+  - Outcome: regressed, and an informed override. The final message names `89e42884fcc3`
+    (#2863) as a recorded decision and states why it departs from it.
+  - Isolation held: `read_url_content` on github.com and both `run_command` calls were denied by
+    rule, and the HOME was removed.
+  - Web: 21 `search_web` calls, targeted at `site:github.com/emilk/egui`. The stream does not carry
+    search results, so web exposure to the decision cannot be measured by code.
+- L16 Analysis plan, fixed before the set launches. Web search is on in both `baseline` and
+  `unprompted`, so the difference between the two conditions is Bruriah's effect on agy as
+  shipped. Each condition reports its `search_web` counts. The "runs that did not search" table
+  from S5 is reported only if both conditions have such runs; otherwise it is stated as
+  degenerate. The primary is SRR, `unprompted` vs `baseline`, pooled Fisher exact, with consult
+  rate and RR next to it. The estimate for 30 runs is 7-9 h and about 14M input and 2.5M output
+  tokens.
