@@ -28,7 +28,20 @@ CONDITIONS = (*DEFAULT_CONDITIONS, GATED)
 EXIT_REASONS = ("done", "turn_budget", "time_budget", "error")
 
 # The tools that mutate files. "Consulted" means `investigate_work` ran before the first of these.
-WRITE_TOOLS = frozenset({"Edit", "Write", "MultiEdit", "NotebookEdit"})
+# Claude Code's names, then Antigravity CLI's (measured on agy 1.3.5); runs keep each client's names.
+WRITE_TOOLS = frozenset(
+    {
+        "Edit",
+        "Write",
+        "MultiEdit",
+        "NotebookEdit",
+        "write_to_file",
+        "replace_file_content",
+        "multi_replace_file_content",
+        "sed_file",
+        "notebook_edit",
+    }
+)
 
 _INVESTIGATE = "investigate_work"
 

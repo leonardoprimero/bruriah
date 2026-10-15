@@ -6,7 +6,9 @@ so it never runs in CI and never starts unattended. `--dry-run` lists every plan
 (traps x conditions x repetitions) without constructing an adapter, which is how the cost
 estimate is made before anyone approves a paid run.
 
-A real run drives the Claude Code headless adapter (`claude_code.py`) and writes `runs.json` (every
+A real run drives the client `--client` names: Claude Code headless (`claude_code.py`, the default)
+or Antigravity CLI (`antigravity.py`, which runs `baseline` and `unprompted` only and records no
+cost, so it refuses `--max-budget-usd-per-run`). It writes `runs.json` (every
 run record), `report.md`, and the raw client transcripts under `transcripts/` into `--out`. Each run
 record is appended to `runs.jsonl` as soon as the run finishes, and a run the adapter could not
 record is appended to `failures.jsonl` and the benchmark moves on (exit code 3). Running the same
@@ -22,6 +24,8 @@ Usage:
     uv run python evals/agent_regression/run.py --dry-run --traps <dir> --repetitions 5
     uv run python evals/agent_regression/run.py --dry-run --trap-ids <id> [<id> ...]
     uv run python evals/agent_regression/run.py --model <id> [--claude <path>] [--bruriah <path>]
+    uv run python evals/agent_regression/run.py --client antigravity --conditions baseline unprompted \
+        --model <id> [--agy <path>] [--agy-token <path>] [--bruriah <path>]
 """
 
 from __future__ import annotations
@@ -55,6 +59,10 @@ DEFAULT_CACHE_DIR = Path(platformdirs.user_cache_dir("bruriah")) / "agent-regres
 PINNED_PROVENANCE = ("client_version", "model_id", "bruriah_version", "bruriah_commit")
 # How a refusal names a pinned value a recorded run does not carry (`None`).
 _UNRECORDED = "unrecorded"
+
+CLAUDE_CODE = "claude-code"
+ANTIGRAVITY = "antigravity"
+CLIENTS = (CLAUDE_CODE, ANTIGRAVITY)
 
 
 class ProvenanceMismatch(RuntimeError):
@@ -137,7 +145,17 @@ def _parser() -> argparse.ArgumentParser:
         help=f"conditions to run (default: {' '.join(DEFAULT_CONDITIONS)}; gated is opt-in)",
     )
     parser.add_argument("--out", type=Path, default=_HERE, help="directory the reports are written to")
+    parser.add_argument(
+        "--client", choices=CLIENTS, default=CLAUDE_CODE, help=f"the agent client to run (default: {CLAUDE_CODE})"
+    )
     parser.add_argument("--claude", type=Path, default=None, help="the claude executable (default: found on PATH)")
+    parser.add_argument("--agy", type=Path, default=None, help="the agy executable (default: found on PATH)")
+    parser.add_argument(
+        "--agy-token",
+        type=Path,
+        default=None,
+        help="the signed-in agy token file, copied into each run's own HOME (default: the operator's)",
+    )
     parser.add_argument("--bruriah", type=Path, default=None, help="the bruriah executable (default: found on PATH)")
     parser.add_argument("--model", default=None, help="model id; required for a real run, never defaulted")
     parser.add_argument(
@@ -253,7 +271,8 @@ def _provenance_mismatch(recorded: Mapping[str, set[str | None]], current: Mappi
 def _run(args: argparse.Namespace, traps: Sequence[Trap], conditions: Sequence[str]) -> int:
     # Imported here, not at module level: `adapters` imports `plan_invocations` from this module,
     # and a dry run never needs the adapter.
-    from agent_regression.adapters import AdapterError, run_benchmark
+    from agent_regression.adapters import AdapterError, AgentAdapter, run_benchmark
+    from agent_regression.antigravity import AntigravityAdapter, AntigravityConfig
     from agent_regression.claude_code import ClaudeCodeAdapter, ClaudeCodeConfig
     from agent_regression.metrics import summarize, trap_set_digest
     from agent_regression.report import (
@@ -269,8 +288,17 @@ def _run(args: argparse.Namespace, traps: Sequence[Trap], conditions: Sequence[s
     if not args.model:
         print("error: --model is required for a real run; the provenance must name the model", file=sys.stderr)
         return 2
+    antigravity = args.client == ANTIGRAVITY
+    if antigravity and args.max_budget_usd_per_run is not None:
+        print(
+            "error: --max-budget-usd-per-run cannot be enforced on Antigravity CLI, which has no spend cap and "
+            "reports no cost; leave it out and bound the run with the trap time budgets",
+            file=sys.stderr,
+        )
+        return 2
+    client_name, client_given = ("agy", args.agy) if antigravity else ("claude", args.claude)
     executables = {}
-    for name, given in (("claude", args.claude), ("bruriah", args.bruriah)):
+    for name, given in ((client_name, client_given), ("bruriah", args.bruriah)):
         resolved = _executable(given, name)
         if resolved is None:
             where = f"{given} is not an executable file" if given else f"no `{name}` executable on PATH"
@@ -279,15 +307,6 @@ def _run(args: argparse.Namespace, traps: Sequence[Trap], conditions: Sequence[s
         executables[name] = resolved
 
     out: Path = args.out
-    config = ClaudeCodeConfig(
-        claude_executable=executables["claude"],
-        bruriah_executable=executables["bruriah"],
-        model=args.model,
-        cache_dir=args.cache_dir.absolute(),
-        transcripts_dir=out.absolute() / "transcripts",
-        provenance_date=args.date,
-        max_budget_usd_per_run=args.max_budget_usd_per_run,
-    )
     plan = plan_invocations(traps, conditions, args.repetitions)
     digest = trap_set_digest(traps)
     runs_log = out / "runs.jsonl"
@@ -330,16 +349,43 @@ def _run(args: argparse.Namespace, traps: Sequence[Trap], conditions: Sequence[s
             pinned[field].add(value)
 
     try:
-        adapter = ClaudeCodeAdapter(config, trap_set_digest=digest, repetitions=args.repetitions)
+        adapter: AgentAdapter
+        if antigravity:
+            agy_config = AntigravityConfig(
+                agy_executable=executables["agy"],
+                bruriah_executable=executables["bruriah"],
+                model=args.model,
+                cache_dir=args.cache_dir.absolute(),
+                transcripts_dir=out.absolute() / "transcripts",
+                provenance_date=args.date,
+                **({"token_source": args.agy_token.absolute()} if args.agy_token else {}),
+            )
+            adapter = agy_adapter = AntigravityAdapter(agy_config, trap_set_digest=digest, repetitions=args.repetitions)
+            bruriah_commit = agy_adapter.bruriah_commit()
+            client_version = agy_adapter.client_version
+        else:
+            claude_config = ClaudeCodeConfig(
+                claude_executable=executables["claude"],
+                bruriah_executable=executables["bruriah"],
+                model=args.model,
+                cache_dir=args.cache_dir.absolute(),
+                transcripts_dir=out.absolute() / "transcripts",
+                provenance_date=args.date,
+                max_budget_usd_per_run=args.max_budget_usd_per_run,
+            )
+            adapter = claude_adapter = ClaudeCodeAdapter(
+                claude_config, trap_set_digest=digest, repetitions=args.repetitions
+            )
+            bruriah_commit = claude_adapter.bruriah_commit()
+            client_version = claude_adapter.client_version
         # A Bruriah source that is not one clean commit, the harness's own, refuses here rather than
         # failing every run. The client version and Bruriah version and commit are known before any
         # run, so a resume that changed them stops here and spends nothing. The model is only known
         # from a run's init line, so `record_run` checks it before that run's record is appended.
-        bruriah_commit = adapter.bruriah_commit()
         if any(pinned.values()):
             check_provenance(
                 {
-                    "client_version": adapter.client_version(),
+                    "client_version": client_version(),
                     "bruriah_version": bruriah.__version__,
                     "bruriah_commit": bruriah_commit,
                 }
@@ -382,6 +428,18 @@ def main(argv: Sequence[str] | None = None) -> int:
     args = _parser().parse_args(argv)
     # Canonical order, duplicates dropped, whatever order the flags came in.
     conditions = tuple(condition for condition in CONDITIONS if condition in args.conditions)
+    if args.client == ANTIGRAVITY:
+        from agent_regression.antigravity import SUPPORTED_CONDITIONS
+
+        unsupported = [condition for condition in conditions if condition not in SUPPORTED_CONDITIONS]
+        if unsupported:
+            print(
+                f"error: Antigravity CLI cannot run {', '.join(unsupported)}: it has no flag to append to the system "
+                "prompt and its PreToolUse hook does not run in print mode; pass --conditions "
+                f"{' '.join(SUPPORTED_CONDITIONS)}",
+                file=sys.stderr,
+            )
+            return 2
     try:
         loaded = load_traps(args.traps)
         traps = select_traps(loaded, args.trap_ids)

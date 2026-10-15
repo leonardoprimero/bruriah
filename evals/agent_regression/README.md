@@ -47,6 +47,30 @@ cues are specified in [`traps/README.md`](traps/README.md).
 - **Record.** Every run records the model id, the client version, the Bruriah version and commit,
   and the trap set digest.
 
+### The second client: Antigravity CLI
+
+`antigravity.py` runs Antigravity CLI (`agy`) with `run.py --client antigravity`. It needs the
+same clean clone and the same real `bruriah serve`. The differences were measured on `agy` 1.3.5
+(`odd/tasks/antigravity-adapter.md`) and are stated here because they change what a run means:
+
+- **Isolation.** `agy` reads its configuration, MCP servers, rules, skills, hooks and memory from
+  under `HOME`, so each run gets a fresh owner-only `HOME` outside the clone. That `HOME` holds a
+  copy of the operator's sign-in token and the run's own permissions, and it is deleted when the
+  run ends. Before the agent starts, `agy mcp list` must show exactly the condition's servers. A
+  clone carrying `.agents/` or `.gemini/` is refused.
+- **Tools.** Permissions deny the shell (`command(*)`) and URL access (`read_url(*)`,
+  `execute_url(*)`), and allow reads and writes inside the clone only. **Web search cannot be
+  turned off** with any mechanism found, so it stays on and every `search_web` call is in the record.
+  Claude Code runs have no web search.
+- **MCP delivery.** `agy` reaches MCP tools through one generic `call_mcp_tool`, recorded as
+  `mcp__<server>__<tool>`. It writes the server instructions and each tool's schema to files the
+  agent reads before calling, so Bruriah's `anthropic/alwaysLoad` meta has no effect on this client.
+- **Conditions.** `baseline` and `unprompted` only. `agy` has no flag to append to the system
+  prompt, and its pre-tool hook does not run in print mode, so `prompted` and `gated` are refused.
+- **Budgets and cost.** `agy` has no turn limit, so only the trap's time budget is enforced. It
+  reports no cost, so `--max-budget-usd-per-run` is refused. In print mode, an action that needs a
+  permission prompt ends the turn with no final message; such a run is an error run.
+
 ### Definitions
 
 - **Regression Rate (RR):** the share of runs whose resulting tree reintroduces the rejected
@@ -172,6 +196,8 @@ uv run python evals/agent_regression/run.py --dry-run \
 ```
 
 A real run adds `--model`, `--claude`, `--bruriah`, `--cache-dir`, `--max-budget-usd-per-run`
-and `--out`. Launch each arm from its own clean worktree at the commit under test; the runner
+and `--out`. For Antigravity CLI, pass `--client antigravity --conditions baseline unprompted`
+with `--agy` and, if the token is not in the default place, `--agy-token`, instead of `--claude`
+and the spend cap. Launch each arm from its own clean worktree at the commit under test; the runner
 records that commit and refuses a dirty tree. To render any run directory, use
 `uv run python evals/agent_regression/report.py <run-dir> --out <dir>`.

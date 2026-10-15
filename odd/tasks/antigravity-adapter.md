@@ -17,8 +17,9 @@ of the activation matrix with only what is measured. Paid runs need the owner's 
     corrida"). The copy lives in a `0700` directory, is deleted after the run, and is never logged,
     committed, written back or placed in a transcript.
   - A run that loads any MCP server other than the one its condition registers is refused.
-- S4. Conditions `baseline`, `unprompted` and `prompted`. `gated` is supported only if `agy` has a
-  pre-tool hook equivalent; otherwise it is refused with a clear error.
+- S4. Conditions `baseline` and `unprompted` (narrowed in L8). `prompted` and `gated` are refused
+  with a clear error: `agy` has no system-prompt append flag, and its `PreToolUse` hook did not run
+  in print mode.
 - S5. Comparability: the Claude Code runs have no shell tool. If `agy` cannot run without a
   terminal, that is reported to the owner as a decision, never hidden. Decided (L7):
   - The shell is denied (`deny: command(*)`), and URL reads and executions are denied too.
@@ -38,8 +39,8 @@ of the activation matrix with only what is measured. Paid runs need the owner's 
 | ID | Specs | Route | Commit |
 |---|---|---|---|
 | T1 | S3, S5 | inline probe: headless wire format, tool controls, MCP and instructions delivery | T1 doc commit |
-| T2 | S2, S3, S4, S7 | inline, test-first: adapter with stub `agy` | |
-| T3 | S6, S7 | inline, test-first: client selector in `run.py` | |
+| T2 | S2, S3, S4, S7 | inline, test-first: adapter with stub `agy` | adapter commit (L9) |
+| T3 | S6, S7 | inline, test-first: client selector in `run.py` | same commit as T2 (L9) |
 | T4 | S8 | inline: dry run, estimate, owner OK | |
 | T5 | S9 | measured run, report, matrix row, docs | |
 
@@ -82,3 +83,51 @@ of the activation matrix with only what is measured. Paid runs need the owner's 
   - S5 consequence: the shell can be removed like in Claude Code, but web search cannot, as far
     as found. That makes it an owner decision.
 - L7 (owner choice): "Medir con la web prendida y declararlo (recomendado)".
+- L8 Two more probes, with paths resolved; both throwaway dirs were removed.
+  - macOS `/tmp` resolves to `/private/tmp`, and permission rules match the resolved path. With
+    resolved allow rules on the workdir (read, write) and on `$HOME/.gemini/antigravity-cli/mcp`
+    (read), plus `mcp(bruriah/*)`, the run had no denial.
+  - `agy` writes each server's instructions to `mcp/<server>/instructions.md` and each tool's
+    schema to `mcp/<server>/<tool>.json`. The agent read `instructions.md`, quoted its first sentence
+    exactly, read `investigate_work.json`, and called
+    `call_mcp_tool {"ServerName": "bruriah", "ToolName": "investigate_work", "Arguments": {...}}`.
+    It then named the returned decision commit in `result.response`. The instructions are
+    delivered, but as a file the agent must open, not in the prompt.
+  - Project configuration that `agy` reads: `.agents/` (hooks, skills, workflows) and `.gemini/`.
+- L8 Design:
+  - New module `evals/agent_regression/antigravity.py`. It reuses the mirror, clone, index, diff and
+    source-commit helpers of `claude_code.py`.
+  - Each run gets a fresh `0700` `HOME` with the token copy and a `settings.json` holding the
+    permissions above, deny `command(*)`, `read_url(*)` and `execute_url(*)`, and for baseline
+    `deny mcp(*)`. Bruriah is registered with `agy mcp add`. Before the run, `agy mcp list` must show
+    exactly the condition's servers, and the whole `HOME` is deleted after the run.
+  - `call_mcp_tool` is recorded as `mcp__<server>__<tool>`; other tools keep their native names, so
+    `search_web` calls are countable. `runs.WRITE_TOOLS` gains `agy`'s file-writing tools.
+    `citation.final_message` also reads `agy`'s `result.response`.
+  - Turns are the agent-response steps. Tokens: input as reported, output plus thinking. Cost is
+    not reported by `agy` and stays unset.
+  - Exit reasons: `time_budget` on timeout; `done` only on SUCCESS with no auto-denied action; else
+    `error`. A run cut short by an auto-denial is an error run, excluded from every rate and counted.
+  - Limit stated in the report: `agy` has no turn limit flag, so only the time budget is enforced.
+  - S4 narrowed: the 2.2.0 question for this client is whether unprompted agents consult Bruriah
+    and stop reversing silently, which `baseline` against `unprompted` answers. `prompted` would
+    need the instruction inside the task prompt, which is a different condition.
+- L9 T2 and T3, test-first, with a stub `agy` that reproduces the measured wire format:
+  - New: `evals/agent_regression/antigravity.py` and `tests/test_agent_regression_antigravity.py`.
+  - RED, at first: collection failed because the module did not exist.
+  - With the adapter written and the shared code untouched, exactly 4 tests failed: the three
+    `agy` write tools and the `final_message` read of `result.response`. The Claude Code regression
+    tests passed.
+  - Shared changes: `runs.WRITE_TOOLS` gains `write_to_file`, `replace_file_content`,
+    `multi_replace_file_content`, `sed_file` and `notebook_edit`. The pin
+    `test_write_tools_are_exactly_the_file_mutating_tools` was updated on purpose.
+    `citation.final_message` also reads `{"event": "result", "result": {"response": ...}}`.
+  - T3 RED: 7 failed (selector, condition refusal, spend-cap refusal, missing `--agy`, end-to-end
+    record, argument-free `client_version`).
+  - `run.py` gains `--client {claude-code,antigravity}` (default claude-code), `--agy` and
+    `--agy-token`. Unsupported conditions are refused at exit 2 even in a dry run, and so is
+    `--max-budget-usd-per-run` for antigravity.
+  - GREEN: 526 passed across the antigravity, eval and claude_code test modules. `ruff` and
+    `mypy` are clean.
+  - Docs: `evals/agent_regression/README.md` has a "second client" section that states every
+    difference. The README test count is 2,586.
