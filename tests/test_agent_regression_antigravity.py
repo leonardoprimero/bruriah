@@ -42,6 +42,7 @@ from agent_regression.antigravity import (  # noqa: E402
     CLIENT,
     DENIED_PERMISSIONS,
     HOME_MARKER,
+    outside_paths,
     TOKEN_RELATIVE,
     AntigravityAdapter,
     AntigravityConfig,
@@ -553,13 +554,64 @@ def test_baseline_denies_every_mcp_tool(tmp_path: Path) -> None:
     assert not [rule for rule in settings["permissions"]["allow"] if rule.startswith("mcp(")]
 
 
-def test_unprompted_allows_bruriah_and_the_files_the_client_writes_for_it(tmp_path: Path) -> None:
-    work, home = tmp_path / "work", tmp_path / "home"
-    work.mkdir()
-    home.mkdir()
-    settings = settings_for(UNPROMPTED, work, home)
-    assert settings["permissions"]["allow"] == ["read_file(/)", f"write_file({work.resolve()})", "mcp(bruriah/*)"]
-    assert "mcp(*)" not in settings["permissions"]["deny"]
+def _tree(root: Path, *paths: str) -> None:
+    for relative in paths:
+        target = root / relative
+        if relative.endswith("/"):
+            target.mkdir(parents=True, exist_ok=True)
+        else:
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_text("x", encoding="utf-8")
+
+
+def test_outside_paths_are_every_sibling_on_the_way_to_the_allowed_roots(tmp_path: Path) -> None:
+    # Measured: a deny wins over any allow, and a broad allow with denied carve-outs is read through
+    # a firmlink or a case variant. So nothing broad is allowed; every path beside the way to an
+    # allowed root is denied by name.
+    top = tmp_path.resolve()
+    _tree(top, "a/allowed/f.txt", "a/other/g.txt", "a/x.txt", "b/", "c.txt")
+    assert outside_paths([top / "a" / "allowed"], top) == [
+        top / "a" / "other",
+        top / "a" / "x.txt",
+        top / "b",
+        top / "c.txt",
+    ]
+
+
+def test_outside_paths_never_hide_an_allowed_root_or_its_ancestors(tmp_path: Path) -> None:
+    top = tmp_path.resolve()
+    _tree(top, "w/clone/f.txt", "h/.gemini/cli/mcp/", "h/.gemini/cli/token", "h/.gemini/cli/settings.json", "z/")
+    allowed = [top / "w" / "clone", top / "h" / ".gemini" / "cli" / "mcp"]
+    denied = outside_paths(allowed, top)
+    assert denied == [
+        top / "h" / ".gemini" / "cli" / "settings.json",
+        top / "h" / ".gemini" / "cli" / "token",
+        top / "z",
+    ]
+    for root in allowed:
+        assert not [path for path in denied if path == root or path in root.parents]
+
+
+@pytest.mark.parametrize("condition", [BASELINE, UNPROMPTED])
+def test_settings_allow_nothing_broad_and_deny_the_token_copy(tmp_path: Path, condition: str) -> None:
+    top = tmp_path.resolve()
+    work, home = top / "work", top / "home"
+    _tree(top, "work/a.txt", "secret/x.txt")
+    (home / TOKEN_RELATIVE).parent.mkdir(parents=True)
+    (home / TOKEN_RELATIVE).write_text(_TOKEN, encoding="utf-8")
+    permissions = settings_for(condition, work, home, top=top)["permissions"]
+    assert not [rule for rule in permissions["allow"] if rule in ("read_file(/)", "write_file(/)", "read_file(*)")]
+    assert f"read_file({work})" in permissions["allow"] and f"write_file({work})" in permissions["allow"]
+    for path in (top / "secret",):
+        assert f"read_file({path})" in permissions["deny"] and f"write_file({path})" in permissions["deny"]
+    if condition == UNPROMPTED:
+        assert f"read_file({home / TOKEN_RELATIVE})" in permissions["deny"]
+        assert f"read_file({home / '.gemini' / 'antigravity-cli' / 'mcp'})" in permissions["allow"]
+        assert "mcp(bruriah/*)" in permissions["allow"]
+    else:
+        # Without Bruriah nothing under the run's HOME is needed: the whole HOME is denied.
+        assert f"read_file({home})" in permissions["deny"]
+        assert "mcp(*)" in permissions["deny"]
 
 
 @pytest.mark.parametrize("condition", [PROMPTED, GATED])
@@ -646,7 +698,15 @@ def test_the_settings_the_client_sees_are_the_conditions(rig: _Rig) -> None:
     rig.run(UNPROMPTED)
     (call,) = rig.print_calls()
     home = Path(call["home"])
-    assert call["settings"] == settings_for(UNPROMPTED, rig.root / "work" / UNPROMPTED, home)
+    work = (rig.root / "work" / UNPROMPTED).resolve()
+    permissions = call["settings"]["permissions"]
+    assert permissions["allow"] == [
+        f"read_file({work})",
+        f"write_file({work})",
+        f"read_file({home / '.gemini' / 'antigravity-cli' / 'mcp'})",
+        "mcp(bruriah/*)",
+    ]
+    assert f"read_file({home / TOKEN_RELATIVE})" in permissions["deny"]
 
 
 def test_unprompted_registers_bruriah_only(rig: _Rig) -> None:
@@ -787,26 +847,6 @@ def test_a_missing_bruriah_executable_is_an_adapter_error(rig: _Rig) -> None:
         rig.run(UNPROMPTED, adapter)
 
 
-@pytest.mark.parametrize("condition", [BASELINE, UNPROMPTED])
-def test_every_condition_reads_everywhere_but_the_operators_home_and_the_token_copy(
-    tmp_path: Path, condition: str
-) -> None:
-    # Measured: in print mode a path no rule matches ends the run, and a deny wins over any allow.
-    work, home, operator = tmp_path / "work", tmp_path / "home", tmp_path / "operator"
-    settings = settings_for(condition, work, home, operator)
-    assert "read_file(/)" in settings["permissions"]["allow"]
-    assert f"read_file({operator.resolve()})" in settings["permissions"]["deny"]
-    assert f"read_file({home.resolve() / TOKEN_RELATIVE})" in settings["permissions"]["deny"]
-
-
-def test_a_clone_inside_the_operators_home_is_refused(rig: _Rig) -> None:
-    # The deny on the operator's home would hide the clone from the agent.
-    with pytest.raises(AdapterError, match="operator's home"):
-        rig.run(UNPROMPTED, rig.adapter(operator_home=rig.root))
-    assert rig.print_calls() == []
-    assert rig.homes() == []
-
-
 def test_run_homes_live_in_the_system_temp_dir_and_carry_the_marker(rig: _Rig) -> None:
     rig.run(UNPROMPTED)
     (call,) = rig.print_calls()
@@ -826,17 +866,6 @@ def test_a_leftover_home_is_swept_and_nothing_else_is(rig: _Rig) -> None:
     rig.run(UNPROMPTED)
     assert not leftover.exists()
     assert unmarked.is_dir()
-
-
-def test_another_live_run_home_refuses_the_run(rig: _Rig) -> None:
-    # Reads are allowed outside the operator's home, so another live run's token copy would be readable.
-    live = rig.root / "system-tmp" / "agy-home-live"
-    live.mkdir()
-    (live / ".agent-regression-home").write_text(f"{os.getpid()}\n", encoding="utf-8")
-    with pytest.raises(AdapterError, match="another Antigravity run"):
-        rig.run(UNPROMPTED)
-    assert rig.print_calls() == []
-    assert live.is_dir()
 
 
 def test_sigterm_is_handled_as_an_interrupt() -> None:

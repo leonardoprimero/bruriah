@@ -59,17 +59,23 @@ same clean clone and the same real `bruriah serve`. The differences were measure
   - That `HOME` holds a copy of the operator's sign-in token and the run's own permissions, and it
     is deleted when the run ends.
   - Each `HOME` carries a marker with its process id. A `HOME` left by a run that was killed
-    outright is removed at the next run. A live one from another set refuses the run: one set at a
-    time.
+    outright is removed at the next run.
   - Before the agent starts, `agy mcp list` must show exactly the condition's servers. A clone
     carrying `.agents/` or `.gemini/` is refused.
   - SIGTERM stops a set like Ctrl+C, so the client is stopped and the `HOME` removed.
 - **Tools.** Permissions deny the shell (`command(*)`) and URL access (`read_url(*)`,
-  `execute_url(*)`), and allow writes inside the clone only.
-  - In print mode, a path no rule matches ends the whole run, and a deny wins over any allow. So
-    reads are allowed everywhere (`read_file(/)`, as Claude Code's `Read` is) except the
-    operator's home and the run's token copy, which are denied. A denied read fails and the agent
-    carries on.
+  `execute_url(*)`). They allow reads and writes in the clone, and reads of the MCP files the client
+  writes for Bruriah. Measured on `agy` 1.3.5:
+  - a path no rule matches ends the whole run, and a deny wins over any allow;
+  - a broad allow with denied carve-outs is read through by another spelling of the same file (a
+    macOS firmlink under `/System/Volumes/Data`, or another letter case).
+
+  So nothing broad is allowed. Every path around the allowed ones, from `/` down, is denied by
+  name for reads and writes: the operator's home, `/System`, the other temp files, and the run's
+  token copy. A denied read fails and the agent carries on. Two kinds of read match no rule and
+  end the run: another spelling of a path, and a read of a directory above the clone. Either way
+  it is an error run, counted and kept out of every rate, and nothing is read. Claude Code's
+  `Read` has no such limit.
   - **Web search cannot be turned off** with any mechanism found, so it stays on and every
     `search_web` call is in the record. Claude Code runs have no web search.
 - **MCP delivery.** `agy` reaches MCP tools through one generic `call_mcp_tool`, recorded as

@@ -220,3 +220,18 @@ of the activation matrix with only what is measured. Paid runs need the owner's 
   - Leftover homes whose owner is gone are swept. Another live home refuses the run, since its
     token copy would be readable.
   - SIGTERM is handled as an interrupt during real runs, and the previous handler is restored.
+- L19 Review `review-62f289a1de744259` (base `0cf7c67`, high tier) approved `d54e8b2` with 14
+  advisories. Probing them showed a real hole: with `allow read_file(/)`, a file inside a denied
+  directory was read through the firmlink path `/System/Volumes/Data/...` and through a case
+  variant. The operator-home deny was no boundary, so the set was not launched.
+  - New design, probed first: allow nothing broad, and deny by name (reads and writes) every
+    sibling on the way from `/` to the allowed roots, which are the clone and the HOME's `mcp/`.
+    That covers `/System`, the operator's home, other temp files and the token copy.
+  - Probe (147 deny rules): the clone was read; `/etc/hosts`, the secret dir and its firmlink
+    spelling were all denied by rule; the run continued, and the marker never reached the
+    transcript.
+  - Residual risk, disclosed: another spelling, or a read of a directory above the clone, matches
+    no rule and ends the run as an error. That is safe, since nothing is read.
+  - Code: `outside_paths` and the new `settings_for`. The operator-home deny and the live-HOME guard
+    are gone, because other homes' token copies are denied siblings. The sweep and marker stay.
+    Test-first: RED at import, then GREEN, 67 adapter tests.

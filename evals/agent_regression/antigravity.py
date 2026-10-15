@@ -37,7 +37,7 @@ import shutil
 import subprocess
 import tempfile
 import time
-from collections.abc import Iterable
+from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from typing import Any
@@ -105,8 +105,6 @@ class AntigravityConfig:
     token_source: Path = Path.home() / TOKEN_RELATIVE
     # Replaces every trap's time budget for this client when set; `None` keeps the trap's own.
     time_budget_seconds: int | None = None
-    # Denied to the agent's reads; the clone and the run's `HOME` must lie outside it.
-    operator_home: Path = Path.home()
 
 
 @dataclass(frozen=True)
@@ -132,23 +130,49 @@ def _require_supported(condition: str) -> None:
         )
 
 
-def settings_for(condition: str, workdir: Path, home: Path, operator_home: Path | None = None) -> dict[str, Any]:
-    """The run's `settings.json`: no shell or URL access, writes inside the clone only, and the MCP
-    tools of Bruriah only where it is registered.
+def outside_paths(allowed: Sequence[Path], top: Path = Path("/")) -> list[Path]:
+    """Every path beside the way from `top` to each allowed root: the entries of each ancestor
+    directory that are neither an allowed root nor one of its ancestors, sorted.
 
-    Reads are allowed everywhere except the operator's home and the run's token copy. Measured on
-    agy 1.3.5: in print mode a read no rule matches ends the whole run, and a deny wins over any
-    allow, however specific. So every read must match a rule, and the private paths are denied: a
-    denied read fails and the agent carries on. The clone and the run's `HOME` must therefore lie
-    outside the operator's home."""
+    Measured on agy 1.3.5: a deny wins over any allow, however specific, and a broad allow with a
+    denied carve-out is read straight through by another spelling of the same file (a macOS
+    firmlink under `/System/Volumes/Data`, or another letter case). So nothing broad is allowed,
+    and everything around the allowed roots is denied by name: a read there fails and the agent
+    carries on. Any other spelling matches no rule, which ends the run rather than leaking. The
+    listing is a snapshot taken when the run starts; a directory that cannot be listed is left to
+    that same rule."""
+    roots = [root.resolve() for root in allowed]
+    keep = {ancestor for root in roots for ancestor in (root, *root.parents)}
+    denied: set[Path] = set()
+    for root in roots:
+        for directory in reversed(root.parents):
+            if directory != top and top not in directory.parents:
+                continue
+            try:
+                entries = [Path(entry.path) for entry in os.scandir(directory)]
+            except OSError:
+                continue
+            denied.update(entry for entry in entries if entry not in keep)
+    return sorted(denied)
+
+
+def settings_for(condition: str, workdir: Path, home: Path, *, top: Path = Path("/")) -> dict[str, Any]:
+    """The run's `settings.json`: no shell or URL access; reads and writes in the clone; reads of
+    the MCP files the client writes for Bruriah where it is registered; and every path around
+    those denied for reads and writes (`outside_paths`), the run's token copy among them."""
     _require_supported(condition)
-    operator = (operator_home if operator_home is not None else Path.home()).resolve()
-    allow = ["read_file(/)", f"write_file({workdir.resolve()})"]
-    deny = [*DENIED_PERMISSIONS, f"read_file({operator})", f"read_file({home.resolve() / TOKEN_RELATIVE})"]
+    work = workdir.resolve()
+    allow = [f"read_file({work})", f"write_file({work})"]
+    deny = list(DENIED_PERMISSIONS)
+    roots = [work]
     if condition == BASELINE:
         deny.append("mcp(*)")
     else:
-        allow.append(f"mcp({SERVER_NAME}/*)")
+        mcp_files = home.resolve() / _MCP_FILES_RELATIVE
+        allow += [f"read_file({mcp_files})", f"mcp({SERVER_NAME}/*)"]
+        roots.append(mcp_files)
+    outside = outside_paths(roots, top)
+    deny += [f"read_file({path})" for path in outside] + [f"write_file({path})" for path in outside]
     return {"permissions": {"allow": allow, "deny": deny}}
 
 
@@ -397,8 +421,9 @@ class AntigravityAdapter:
         return self._bruriah_commit
 
     def _make_home(self, condition: str, workdir: Path) -> Path:
-        """A fresh owner-only `HOME` in the system temp dir, outside the clone and the operator's
-        home, marked with this process's id, with the token copy and the condition's settings."""
+        """A fresh owner-only `HOME` in the system temp dir, outside the clone, marked with this
+        process's id, with the token copy and the condition's settings. The token copy is in place
+        before the settings are written, so the settings deny it by name."""
         source = self._config.token_source
         if not source.is_file():
             raise AdapterError(
@@ -406,22 +431,7 @@ class AntigravityAdapter:
                 "signed-in client keeps"
             )
         root = Path(tempfile.gettempdir()).resolve()
-        operator = self._config.operator_home.resolve()
-        for what, path in (("agent's workdir", workdir.resolve()), ("temp dir for the run's HOME", root)):
-            if path.is_relative_to(operator):
-                raise AdapterError(
-                    f"the {what} {path} is inside the operator's home {operator}, which every run denies to the "
-                    "agent's reads; run with TMPDIR outside it"
-                )
         sweep_leftover_homes(root)
-        # Reads outside the operator's home are allowed, so another live run's token copy would be
-        # readable by this run's agent: one run at a time per temp dir.
-        live = [entry for entry in sorted(root.glob("agy-home-*")) if (entry / HOME_MARKER).is_file()]
-        if live:
-            raise AdapterError(
-                f"another Antigravity run is live in {root} ({', '.join(entry.name for entry in live)}); its token "
-                "copy would be readable by this run's agent, so run one set at a time"
-            )
         home = Path(tempfile.mkdtemp(prefix="agy-home-", dir=root)).resolve()
         if home.is_relative_to(workdir.resolve()):
             shutil.rmtree(home, ignore_errors=True)
@@ -434,7 +444,7 @@ class AntigravityAdapter:
             shutil.copyfile(source, token)
             token.chmod(0o600)
             settings = home / _SETTINGS_RELATIVE
-            payload = settings_for(condition, workdir, home, self._config.operator_home)
+            payload = settings_for(condition, workdir, home)
             settings.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
         except BaseException as error:
             shutil.rmtree(home, ignore_errors=True)
