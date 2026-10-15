@@ -101,6 +101,8 @@ class AntigravityConfig:
     provenance_date: str
     # The operator's signed-in token, copied into each run's `HOME` and never written to.
     token_source: Path = Path.home() / TOKEN_RELATIVE
+    # Replaces every trap's time budget for this client when set; `None` keeps the trap's own.
+    time_budget_seconds: int | None = None
 
 
 @dataclass(frozen=True)
@@ -168,6 +170,7 @@ def parse_stream(lines: Iterable[str]) -> StreamSummary:
     order. A line that is not a JSON object is skipped; a missing result leaves its fields unset."""
     tools: dict[int, str] = {}
     responses: set[int] = set()
+    step_usage: dict[int, tuple[int, int]] = {}
     init: dict[str, Any] | None = None
     result: dict[str, Any] | None = None
     for line in lines:
@@ -187,10 +190,18 @@ def parse_stream(lines: Iterable[str]) -> StreamSummary:
                 continue
             if step.get("step_type") == "agent_response":
                 responses.add(index)
+                usage = _object(step.get("usage"))
+                if step.get("state") == "DONE" and usage:
+                    generated = (_count(usage.get("output_tokens")) or 0) + (_count(usage.get("thinking_tokens")) or 0)
+                    step_usage[index] = (_count(usage.get("input_tokens")) or 0, generated)
             elif step.get("step_type") == "tool" and step.get("state") in ("DONE", "ERROR"):
                 name = _tool_name(step)
                 if name is not None:
                     tools[index] = name
+            elif step.get("step_type") == "subagent" and step.get("state") in ("DONE", "ERROR"):
+                # What a subagent does is not streamed; the invocation itself is the record.
+                name = step.get("tool_name")
+                tools[index] = name if isinstance(name, str) else "invoke_subagent"
         elif kind == "result":
             result = _object(event.get("result"))
 
@@ -207,6 +218,10 @@ def parse_stream(lines: Iterable[str]) -> StreamSummary:
         response = result["response"] if isinstance(result.get("response"), str) else None
         actions = result.get("denied_actions")
         denied = len(actions) if isinstance(actions, list) else 0
+    elif step_usage:
+        # No result event (a run stopped by the time budget): the steps' own usage is the record.
+        input_tokens = sum(used for used, _ in step_usage.values())
+        output_tokens = sum(generated for _, generated in step_usage.values())
 
     calls = tuple(ToolCall(name=name, ordinal=ordinal) for ordinal, (_, name) in enumerate(sorted(tools.items())))
     model = init.get("model") if init is not None and isinstance(init.get("model"), str) else None
@@ -460,6 +475,9 @@ class AntigravityAdapter:
             (directory / f"{name}.stderr.txt").write_text(stderr, encoding="utf-8", newline="\n")
         return PurePosixPath(self._config.transcripts_dir.name, trap.trap_id, f"{name}.jsonl").as_posix()
 
+    def _time_budget(self, trap: Trap) -> int:
+        return self._config.time_budget_seconds or trap.time_budget_seconds
+
     def command_line(self, prompt: str, trap: Trap) -> list[str]:
         return [
             str(self._config.agy_executable),
@@ -473,7 +491,7 @@ class AntigravityAdapter:
             "accept-edits",
             "--disable-slash-commands",
             "--print-timeout",
-            f"{trap.time_budget_seconds}s",
+            f"{self._time_budget(trap)}s",
         ]
 
     def run(self, workdir: Path, prompt: str, condition: str, trap: Trap, repetition: int) -> AgentRun:
@@ -492,7 +510,7 @@ class AntigravityAdapter:
                 self._register_bruriah(home, trap, workdir, bruriah_commit)
             self._check_mcp_servers(home, condition, trap)
             stdout, stderr, returncode, timed_out, elapsed = self._invoke(
-                self.command_line(prompt, trap), workdir, home, trap.time_budget_seconds
+                self.command_line(prompt, trap), workdir, home, self._time_budget(trap)
             )
         except BaseException:
             # Best effort only: an error removing the home must not hide the one already raised.

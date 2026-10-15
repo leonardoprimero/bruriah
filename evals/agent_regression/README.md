@@ -67,8 +67,16 @@ same clean clone and the same real `bruriah serve`. The differences were measure
   agent reads before calling, so Bruriah's `anthropic/alwaysLoad` meta has no effect on this client.
 - **Conditions.** `baseline` and `unprompted` only. `agy` has no flag to append to the system
   prompt, and its pre-tool hook does not run in print mode, so `prompted` and `gated` are refused.
-- **Budgets and cost.** `agy` has no turn limit, so only the trap's time budget is enforced. It
-  reports no cost, so `--max-budget-usd-per-run` is refused. In print mode, an action that needs a
+- **Subagents.** The agent can start a subagent (`invoke_subagent`), and what the subagent does is
+  not streamed. The invocation is recorded as a call; the subagent's own tool calls are not. The
+  detector still reads the final tree, so a regression made by a subagent is still scored.
+- **Budgets and cost.** `agy` has no turn limit, so only the time budget is enforced.
+  `--agy-time-budget-seconds` replaces every trap's budget for this client: each tool call passes
+  through the client's own server-side safety checks, which make it slower than Claude Code, and a
+  pilot on the trap budget (900 s) ran out of time before writing anything. A report states the
+  budget it ran with. `agy` reports no cost, so `--max-budget-usd-per-run` is refused. A run
+  stopped by the time budget prints no final event; its token counts are then the sum of the
+  steps' own usage. In print mode, an action that needs a
   permission prompt ends the turn with no final message; such a run is an error run.
 
 ### Definitions

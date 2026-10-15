@@ -165,3 +165,19 @@ of the activation matrix with only what is measured. Paid runs need the owner's 
   then the 30-invocation set (3 egui traps, `baseline` and `unprompted`, N = 5). The OK covers
   both. Runs launch from a dedicated worktree at the reviewed commit, left untouched until the set
   finishes.
+- L14 Pilot (2026-10-15, `d943931`, `egui-android-activity`, `unprompted`, `gemini-3.8-flash-high`).
+  - Ended `time_budget` at 900 s with no write. Unprompted consult happened: `investigate_work`
+    was the 3rd call, and `read_evidence` ran 3 times. Isolation held.
+  - Cause: model time summed ~246 s. Every tool call goes through the client's server-side
+    safety monitors. At step 52 the agent called `invoke_subagent` (step type `subagent`), and
+    nothing more streamed until the kill.
+  - Instrument gaps found: the subagent invocation was not recorded, and tokens were unset
+    without a result event (step usage sums to ~196k in and ~28k out).
+- L15 (owner choice): "30 minutos y declararlo (recomendado)". Fixes, test-first (4 RED, then
+  GREEN, 538 passed across the three benchmark test modules):
+  - a `subagent` step is recorded as a call;
+  - without a result, tokens are the sum of the steps' usage;
+  - `--agy-time-budget-seconds` replaces the trap budget for agy runs and is refused for
+    claude-code.
+
+  README count is 2,598. Next: a second pilot at 1800 s, then the 30-invocation set.

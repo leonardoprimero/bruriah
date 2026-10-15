@@ -156,6 +156,12 @@ def _parser() -> argparse.ArgumentParser:
         default=None,
         help="the signed-in agy token file, copied into each run's own HOME (default: the operator's)",
     )
+    parser.add_argument(
+        "--agy-time-budget-seconds",
+        type=_positive_int,
+        default=None,
+        help="replace every trap's time budget for agy runs (default: the trap's own); state it in the report",
+    )
     parser.add_argument("--bruriah", type=Path, default=None, help="the bruriah executable (default: found on PATH)")
     parser.add_argument("--model", default=None, help="model id; required for a real run, never defaulted")
     parser.add_argument(
@@ -359,6 +365,7 @@ def _run(args: argparse.Namespace, traps: Sequence[Trap], conditions: Sequence[s
                 transcripts_dir=out.absolute() / "transcripts",
                 provenance_date=args.date,
                 **({"token_source": args.agy_token.absolute()} if args.agy_token else {}),
+                time_budget_seconds=args.agy_time_budget_seconds,
             )
             adapter = agy_adapter = AntigravityAdapter(agy_config, trap_set_digest=digest, repetitions=args.repetitions)
             bruriah_commit = agy_adapter.bruriah_commit()
@@ -431,7 +438,11 @@ def main(argv: Sequence[str] | None = None) -> int:
     # A flag of the other client would be ignored, and the run would bill the client it did not name.
     foreign = (["--claude"] if args.client == ANTIGRAVITY and args.claude is not None else []) or [
         flag
-        for flag, value in (("--agy", args.agy), ("--agy-token", args.agy_token))
+        for flag, value in (
+            ("--agy", args.agy),
+            ("--agy-token", args.agy_token),
+            ("--agy-time-budget-seconds", args.agy_time_budget_seconds),
+        )
         if args.client == CLAUDE_CODE and value is not None
     ]
     if foreign:

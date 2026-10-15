@@ -449,6 +449,50 @@ def test_parse_stream_skips_lines_that_are_not_json_objects_and_tolerates_a_miss
     assert summary.input_tokens is None
 
 
+def test_parse_stream_records_a_subagent_invocation_as_a_call() -> None:
+    # Measured in the pilot: a subagent step has its own step type, and what it does is not streamed.
+    subagent = {
+        "event": "step_update",
+        "step_update": {"step_index": 3, "state": "DONE", "step_type": "subagent", "tool_name": "invoke_subagent"},
+    }
+    summary = parse_stream(_stream(_tool(1, "view_file"), subagent, _tool(5, "write_to_file")))
+    assert [call.name for call in summary.tool_calls] == ["view_file", "invoke_subagent", "write_to_file"]
+
+
+def test_parse_stream_sums_step_usage_when_the_run_ends_without_a_result() -> None:
+    # A run stopped by the time budget prints no result event; its steps still report usage.
+    def response(index: int, input_tokens: int, output_tokens: int, thinking: int) -> dict:
+        usage = {"input_tokens": input_tokens, "output_tokens": output_tokens, "thinking_tokens": thinking}
+        step = {"step_index": index, "state": "DONE", "step_type": "agent_response", "usage": usage}
+        return {"event": "step_update", "step_update": step}
+
+    active = {
+        "event": "step_update",
+        "step_update": {"step_index": 3, "state": "ACTIVE", "step_type": "agent_response"},
+    }
+    summary = parse_stream(_stream(response(1, 100, 5, 2), active, response(3, 40, 1, 0)))
+    assert summary.input_tokens == 140
+    assert summary.output_tokens == 8
+
+
+def test_a_time_budget_override_bounds_the_client(rig: _Rig) -> None:
+    rig.run(UNPROMPTED, rig.adapter(time_budget_seconds=1800))
+    (call,) = rig.print_calls()
+    assert call["argv"][call["argv"].index("--print-timeout") + 1] == "1800s"
+
+
+def test_the_agy_time_budget_flag_is_refused_for_claude_code(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    out = tmp_path / "out"
+    argv = ["--agy-time-budget-seconds", "1800", "--conditions", "unprompted", "--model", _MODEL, "--out", str(out)]
+    code = run_module.main(argv)
+    captured = capsys.readouterr()
+    assert code == 2
+    assert "error: --agy-time-budget-seconds only apply to --client antigravity" in captured.err
+    assert not out.exists()
+
+
 def test_parse_stream_counts_auto_denied_actions() -> None:
     summary = parse_stream(
         _stream({"event": "init", "init": {"model": "m"}}, _result(response="", denied_actions=[{"action": "x"}]))
