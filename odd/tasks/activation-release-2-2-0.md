@@ -48,8 +48,8 @@ reproducible benchmark records. Plan of record: multi-model planning chain of 20
 | T3 | S7 | inline | no change: report byte-identical (L11) |
 | T4 | S8 | inline, test-first | `c23d8d4` |
 | T5 | S9 | inline (docs) | `9db7f6c` |
-| T6 | S10 | inline, test-first | slice 3 matrix commit |
-| T7 | S3, S4 | inline (notes + bump last, after content is final) | |
+| T6 | S10 | inline, test-first | `1ecd9f7`; slice-2 advisories `d0e6fd2` |
+| T7 | S3, S4 | inline (notes + bump last, after content is final) | slice 3 release commit |
 
 Delivery forecast: about 700 authored changed lines (generated reports and records excluded).
 Delivery: `chain_strategy=feature-branch-chain` (owner, L5). Tracker branch `release/2.2.0-activation`;
@@ -158,3 +158,23 @@ slices stacked on it: `release/2.2.0-1-wire-check` (T1, T2), `release/2.2.0-2-be
   pass: the sentence splitter merged the preceding code block, which says "(Claude Code)". The fix
   splits by paragraph and drops fences, and the RED then had 5 failures. GREEN: 66 passed, with
   `tests/test_clients.py`. README count is 2,533.
+- L16 `d0e6fd2` fixes the two slice-2 README advisories. The README now lists the real allowlist:
+  `Read`, `Edit`, `MultiEdit`, `Write`, `Glob`, `Grep`, plus the two MCP tools where registered;
+  the disallowed tools; and the client built-ins such as tool search. It also gives the closed
+  forms of the one-sided p values: 1 / C(30, 15) and 1 / C(20, 10).
+- L17 T7: `[Unreleased]` becomes `[2.2.0] — 2026-10-15`.
+  - The old heading "agents learn when to consult Bruriah without being told" and the claim
+    "Other clients ignore the key" were scoped down: the heading now says "in Claude Code", and
+    whether other clients act on the key "is not measured".
+  - Added the measurement paragraph (Claude Code 2.1.292, `claude-fable-5-1`, three egui traps,
+    N = 5, `329f526`, not the wheel, not other clients), the `decisions` section, and the
+    checked/documented/reproducible section.
+  - Version is 2.2.0 in `pyproject.toml`, `src/bruriah/__init__.py` and `uv.lock`
+    (`uv lock --offline`: "Updated bruriah v2.1.0 -> v2.2.0").
+
+  Checks:
+  - S5: `git diff 329f526` touches neither `SERVER_INSTRUCTIONS` nor `ALWAYS_LOAD_META`; the
+    extracted constants are identical.
+  - `scripts/changelog_section.py 2.2.0` exits 0 with 41 lines.
+  - A grep of the notes for prevent, can never, never instruct, works in, all clients and any
+    client finds nothing.
