@@ -528,3 +528,50 @@ def test_both_tools_are_marked_always_loaded_for_clients_that_defer_tools(tmp_pa
 
     with _deps_for(tmp_path, _default_notes()) as deps:
         anyio.run(_drive, deps, body)
+
+
+# The departure rule, carried in the `investigate_work` description itself. Measured on Antigravity
+# (odd/tasks/heed-rule-and-codex.md, L2): Gemini read the tool's schema file in 15 of 15 runs but
+# the server instructions in 2 of 15, so a rule that lives only in the instructions does not reach
+# it. The instructions keep their measured text; this sentence is added where every client reads.
+DEPARTURE_RULE = (
+    "If a returned decision covers what you are about to change, open it with read_evidence "
+    "first. If your change then departs from it, say so in your final message and name that "
+    "decision's commit."
+)
+
+
+def _investigate_description(tools) -> str:
+    return next(tool for tool in tools if tool.name == INVESTIGATE_TOOL).description
+
+
+def test_investigate_description_carries_the_departure_rule(tmp_path) -> None:
+    async def body(session) -> None:
+        listed = await session.list_tools()
+        description = _investigate_description(listed.tools)
+        assert DEPARTURE_RULE in description
+        assert READ_TOOL in DEPARTURE_RULE
+        # The read tool's description is untouched: the rule belongs to the tool that returns
+        # decisions, once.
+        read = next(tool for tool in listed.tools if tool.name == READ_TOOL)
+        assert DEPARTURE_RULE not in read.description
+
+    with _deps_for(tmp_path, _default_notes()) as deps:
+        anyio.run(_drive, deps, body)
+
+
+def test_investigate_description_is_static_across_corpora(tmp_path) -> None:
+    # Like the instructions, the description is never built from corpus content.
+    second_notes = {"other.md": f"# Other\nA different corpus about databases.\n{_FILLER}\n"}
+    descriptions: list[str] = []
+
+    async def body(session) -> None:
+        descriptions.append(_investigate_description((await session.list_tools()).tools))
+
+    (tmp_path / "a").mkdir()
+    (tmp_path / "b").mkdir()
+    with _deps_for(tmp_path / "a", _default_notes()) as first, _deps_for(tmp_path / "b", second_notes) as second:
+        anyio.run(_drive, first, body)
+        anyio.run(_drive, second, body)
+    assert descriptions[0] == descriptions[1]
+    assert DEPARTURE_RULE in descriptions[0]

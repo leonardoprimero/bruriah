@@ -195,6 +195,12 @@ def build_server(deps: ServiceDeps) -> Server:
                     "Use it before answering anything where the project's own decisions, "
                     "conventions or history matter, and where being confidently out of date "
                     "would be costly.\n\n"
+                    # The departure rule, also in the server instructions. Repeated here because a
+                    # client may hand the model this description and never the instructions:
+                    # Antigravity wrote them to a file Gemini opened in 2 of 15 measured runs.
+                    "If a returned decision covers what you are about to change, open it with "
+                    f"{READ_TOOL} first. If your change then departs from it, say so in your final "
+                    "message and name that decision's commit.\n\n"
                     "Pass `host_skills` (an empty list is fine) to also receive the skills that "
                     "apply, each with the permissions its signed pack declares. Omit that field "
                     "and no skill guidance is returned.\n\n"
