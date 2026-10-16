@@ -39,8 +39,8 @@ client, and measures both. Every run that spends model quota needs the owner's O
 
 | ID | Specs | Route | Commit |
 |---|---|---|---|
-| T1 | S1, S2 | inline, test-first: the departure rule in the `investigate_work` description | |
-| T2 | S3 | inline probe: `codex exec` wire format, MCP delivery, sandbox, auth isolation | |
+| T1 | S1, S2 | inline, test-first: the departure rule in the `investigate_work` description | `1abf6bb` |
+| T2 | S3 | inline probe: `codex exec` wire format, MCP delivery, sandbox, auth isolation | T2 doc commit |
 | T3 | S3, S4 | inline, test-first: Codex adapter with stub and `run.py --client codex` | |
 | T4 | S5 | `agy` set with the rule (owner OK) | |
 | T5 | S5 | Codex pilot, then the three Codex arms (owner OK each) | |
@@ -73,3 +73,43 @@ client, and measures both. Every run that spends model quota needs the owner's O
   - `SERVER_INSTRUCTIONS` is untouched, so its measured-text pin still holds.
   - `evals/injection/run.py` re-ran byte-identical: ASR 0/17.
   - `docs/client-guidance.md` states where the rule lives. The README count is 2,618.
+- L7 T2 probes (2026-10-16): three tiny `gpt-6-luna` calls plus model-free `codex sandbox` checks.
+  Each ran in a throwaway `HOME` and `CODEX_HOME` with a copy of `auth.json`, and the probe directory
+  was removed afterwards. The copied `auth.json` hash never changed, and the owner's `codex` stayed
+  "Logged in using ChatGPT".
+  - Wire format, `codex exec --json`:
+    - `thread.started`, `turn.started`, `item.completed`, and `turn.completed` with `usage`
+      {`input_tokens`, `cached_input_tokens`, `output_tokens`, `reasoning_output_tokens`};
+    - item types `agent_message`, `command_execution` {`command`, `exit_code`,
+      `aggregated_output`} and `mcp_tool_call` {`server`, `tool`, `arguments`, `result`
+      {`content`, `structured_content`}, `error`, `status`}.
+    - Unlike `agy`, the MCP output is in the stream, so no replay is needed.
+  - stdin must be closed (`< /dev/null`), or exec waits on "Reading additional input from stdin".
+  - Without the shell, Codex cannot read the clone. With `features.shell_tool = false` it listed
+    no file-read tool and said it "can't read `hello.txt`". The shell has to stay, so the runs
+    are not comparable on tools with the Claude Code and `agy` runs; this is disclosed.
+  - `features.multi_agent = false` was not honored: `collaboration.spawn_agent` etc. were still
+    listed. `agents.enabled = false` is set as well. `image_gen__imagegen` stays listed.
+  - The permissions profile (`default_permissions`, `[permissions.<name>.filesystem]`) is
+    enforced by the macOS sandbox on the resolved file. Under `codex sandbox`, these were all
+    denied, "Operation not permitted":
+    - `/Users/<owner>/.zshrc`, also via `/System/Volumes/Data/Users/...`, `/users/LEGUILLO/...`
+      and `/USERS/...`;
+    - `ls /Users/<owner>`;
+    - the copied `auth.json`, via its `/tmp`, `/private/tmp` and firmlink spellings;
+    - writes to `/tmp`.
+    Allowed: reading and writing the clone and reading `/etc/hosts`. Network failed with "Could
+    not resolve host". The firmlink and case-variant hole of `agy` (L18 of the Antigravity doc)
+    does not exist here.
+  - In the sandbox `git` does not run (the `/usr/bin/git` shim needs the denied CommandLineTools),
+    and `rg` is not on the path. `grep`, `find`, `sed` and `cat` are. Keeping `git` out is
+    intended: it would let a `baseline` run read the decision from history, which no Claude Code
+    or `agy` run could.
+  - The model sees its permissions. Asked to read denied paths, it declined without trying.
+  - MCP: a `[mcp_servers.bruriah]` stdio entry with `required = true` worked. Codex quoted the new
+    departure rule from the `investigate_work` description verbatim, and the call returned 41
+    `decisions` for the android task.
+  - Token use per tiny call: about 18k to 42k input tokens, about 50% cached.
+  - Auth risk: `last_refresh` was 2026-10-09 and the access token had about 79 h left. A copy that
+    refreshes could rotate the refresh token away from the owner's original, so the adapter
+    compares the copy's hash after each run and stops the set if it changed.
