@@ -162,3 +162,37 @@ client, and measures both. Every run that spends model quota needs the owner's O
       still work.
   - Left as follow-ups: the final-message divergence between `parse_stream` and
     `citation.final_message`, and an unproved config-write failure path.
+- L11 T5 Codex pilot 1 (`38804fb`, `unprompted`, `egui-android-activity`, `gpt-6-luna`, 1800 s),
+  owner OK.
+  - About 10 minutes of the run was the index build for the new commit. The run itself took 32 s.
+  - Tokens: 115,318 input (79,616 cached) and 707 output. The owner's `auth.json` hash was
+    unchanged before and after (`937be2111e9672ca`).
+  - The required MCP server started; a failed start would have stopped exec.
+  - The agent never called `investigate_work`. It ran 4 shell reads and 1 `file_change`, then
+    regressed silently: it enabled `android-game-activity` by default without citing #2863. It
+    had read the `Cargo.toml` comment saying the backend is deliberately left to downstream
+    crates.
+  - Correction to L7: `rg` does run inside `codex exec` (Codex provides its own), though not
+    under `codex sandbox`. `git` stays blocked by the OS sandbox, since the CommandLineTools are
+    denied.
+  - After the pilot, the owner's `/status` showed 96% of the 5-hour limit and 99% of the weekly
+    limit left. Owner choice: "Sí, lanzá los 3 brazos (recomendado)".
+  - Arms, alternating by repetition round, 3 egui traps x 5 each:
+    - `baseline` at `38804fb`;
+    - `unprompted` without the rule at `bench/codex-norule` `f62dd43` (38804fb minus the
+      1abf6bb paragraph and its tests; a measurement branch, never merged);
+    - `unprompted` with the rule at `38804fb`.
+  - Launcher `codex-launch/run-codex-arms.sh`, outputs `out-{baseline,norule,rule}-2026-10-16`.
+    It stops on any error, failure or rotated auth copy.
+- L12 (owner, 2026-10-16 ~13:16Z): "si va a demorar tanto mejor para aca nomas y en otra seguimos",
+  then "Frenarlas ahora". Both launchers were stopped first with SIGTERM, then both run.py
+  processes. After that there were 0 client processes and 0 run homes left, and the owner's Codex
+  `auth.json` hash was unchanged (`937be2111e9672ca`). Recorded so far:
+  - agy A/B (`out-ab-norule-2026-10-16`): 2 runs, android and datepicker rep 0. Both consulted
+    and regressed without citing. `out-ab-rule` has 0 runs. The image-formats rep 0 run was in
+    flight and is lost.
+  - Codex (`out-baseline-2026-10-16`): 3 runs, rep 0 for each trap, all regressed. `norule` and
+    `rule` have 0 runs; the norule arm was still building its index.
+  - Resume: rerun `agy-launch/run-rule-ab.sh` and `codex-launch/run-codex-arms.sh` unchanged.
+    The runner skips recorded runs and the arms realign by round. Check `agy --version` first:
+    the A/B is pinned to 1.4.0 by its first records, so a newer agy is refused.
