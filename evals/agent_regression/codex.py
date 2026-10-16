@@ -39,6 +39,7 @@ import json
 import os
 import shutil
 import subprocess
+import sys
 import tempfile
 import time
 from collections.abc import Iterable, Sequence
@@ -95,7 +96,9 @@ _NOT_TOOLS = frozenset({"agent_message", "reasoning", "todo_list", "error"})
 # Denied in the `bench` profile beside the run's own directory: the operator's home by both
 # spellings the sandbox resolves (`/Users` and its firmlink).
 _DENIED_ROOTS = ("/Users", "/System/Volumes/Data/Users")
-_READ_ROOTS = ("/tmp", "/private/tmp")
+# `/tmp` is shared with every other process on the machine, so it is neither readable nor writable
+# (measured under `codex sandbox`: `grep`, `find`, `sed`, `awk`, `sort` and heredocs still work).
+_TMP_ROOTS = ("/tmp", "/private/tmp")
 
 _CLIENT_ENV_VARS = ("PATH", "USER", "LOGNAME", "TMPDIR", "LANG")
 _VERSION_TIMEOUT_SECONDS = 60
@@ -107,6 +110,24 @@ class AuthRotated(RuntimeError):
     """Raised when the run's copy of `auth.json` changed during the run: the client refreshed it,
     which may have rotated the operator's refresh token. Not an `AdapterError`, so the driver stops
     the whole set instead of recording one failed run and starting the next."""
+
+
+def _rotation_message(where: str, detail: str) -> str:
+    return (
+        f"{where}: the run's copy of the Codex sign-in changed during the run, so the client refreshed it "
+        "and may have rotated the operator's refresh token. The set is stopped; check `codex login status` "
+        f"(sign in again if needed) before running more. {detail}"
+    )
+
+
+def _raise_or_warn_rotated(where: str, detail: str, error: BaseException) -> None:
+    """A rotation found while another error is in flight. An interrupt keeps stopping the program,
+    so the rotation is printed before it propagates; any other error becomes `AuthRotated`."""
+    message = _rotation_message(where, detail)
+    if isinstance(error, (KeyboardInterrupt, SystemExit)):
+        print(f"warning: {message}", file=sys.stderr)
+        return
+    raise AuthRotated(message) from error
 
 
 @dataclass(frozen=True)
@@ -195,7 +216,7 @@ def config_toml(condition: str, home: Path, model: str, server: tuple[str, Seque
         f"{toml_string(':minimal')} = {toml_string('read')}",
     ]
     lines += [f"{toml_string(path)} = {toml_string('deny')}" for path in (*_DENIED_ROOTS, str(home.resolve()))]
-    lines += [f"{toml_string(path)} = {toml_string('read')}" for path in _READ_ROOTS]
+    lines += [f"{toml_string(path)} = {toml_string('deny')}" for path in _TMP_ROOTS]
     lines += [
         "",
         f"[permissions.{PERMISSION_PROFILE}.filesystem.{toml_string(':workspace_roots')}]",
@@ -287,7 +308,10 @@ def parse_stream(lines: Iterable[str]) -> StreamSummary:
                 input_tokens.append(used)
             if produced is not None:
                 output_tokens.append(produced)
-        elif kind in ("turn.failed", "error"):
+        elif kind == "turn.failed":
+            # Only a failed turn fails the run. A bare `error` event is also how Codex reports a
+            # transient reconnect ("Reconnecting... 1/5") before it completes the turn; a stream
+            # with errors and no `turn.completed` is still an error run, by `exit_reason_for`.
             failed = True
 
     names = [name for _, name in sorted(tools.items(), key=lambda entry: first_seen[entry[0]])]
@@ -561,6 +585,8 @@ class CodexAdapter:
         prepare_workdir(trap, mirror, workdir)
         _check_no_client_configuration(workdir, trap)
         home = self._make_home(workdir)
+        where = f"trap {trap.trap_id}, condition {condition}, repetition {repetition}"
+        auth_before: str | None = None
         try:
             client_version = self.client_version()
             server = self._server(trap, workdir, bruriah_commit) if condition == UNPROMPTED else None
@@ -569,23 +595,31 @@ class CodexAdapter:
             stdout, stderr, returncode, timed_out, elapsed = self._invoke(
                 self.command_line(prompt, workdir), workdir, home, self._time_budget(trap)
             )
-            auth_after = _digest(home / AUTH_NAME)
-        except BaseException:
+        except BaseException as error:
+            # The rotation check runs on this path too: a client that refreshed its copy and then
+            # failed or was interrupted may still have rotated the operator's refresh token.
+            rotated = auth_before is not None and _digest(home / AUTH_NAME) != auth_before
             # Best effort only: an error removing the home must not hide the one already raised.
             shutil.rmtree(home, ignore_errors=True)
+            if rotated:
+                _raise_or_warn_rotated(where, f"The run did not finish: {error!r}", error)
             raise
+        rotated = _digest(home / AUTH_NAME) != auth_before
         # The transcript is written first so a home that cannot be removed still keeps the paid run,
-        # and the home is removed even when writing the transcript fails.
+        # and the home is removed even when writing the transcript fails. Neither failure may hide a
+        # rotation, which is the one that stops the set.
         try:
-            transcript = self._write_transcript(trap, condition, repetition, stdout, stderr)
-        finally:
-            self._remove_home(home)
-        if auth_after is None or auth_after != auth_before:
+            try:
+                transcript = self._write_transcript(trap, condition, repetition, stdout, stderr)
+            finally:
+                self._remove_home(home)
+        except BaseException as error:
+            if rotated:
+                _raise_or_warn_rotated(where, f"Finishing the run then failed: {error}", error)
+            raise
+        if rotated:
             raise AuthRotated(
-                f"trap {trap.trap_id}, condition {condition}, repetition {repetition}: the run's copy of the Codex "
-                "sign-in changed during the run, so the client refreshed it and may have rotated the operator's "
-                "refresh token. The set is stopped; check `codex login status` (sign in again if needed) before "
-                f"running more. The run's transcript is kept at {transcript}; its record is not written"
+                _rotation_message(where, f"The run's transcript is kept at {transcript}; its record is not written")
             )
 
         summary = parse_stream(stdout.splitlines())

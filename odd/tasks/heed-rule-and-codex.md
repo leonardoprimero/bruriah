@@ -143,3 +143,22 @@ client, and measures both. Every run that spends model quota needs the owner's O
       and `apply_patch` are.
     - `.agents/` is refused alongside `.codex/`.
     - `model_id` is the requested model.
+- L10 T3b. The `ef81d18` review `review-56f466f5a0d17f3b` was approved with 8 advisories. Three were
+  fixed before the pilot, test-first: 6 RED (2 of them existing assertions inverted), then GREEN.
+  - A bare `error` event no longer fails a completed run; only `turn.failed` does. Seen on the
+    real client: "Reconnecting... 4/5" arrives as `type: error`.
+  - The auth rotation check runs on every exit path:
+    - a failed or interrupted invocation;
+    - a transcript that cannot be written;
+    - a home that cannot be removed.
+    An interrupt prints the rotation warning and still stops the program. Anything else becomes
+    `AuthRotated`.
+  - `/tmp` and `/private/tmp` are denied, not readable. Measured under `codex sandbox` with the
+    generated config:
+    - a sibling `agy`-style home in the system temp dir was "Operation not permitted", and so was
+      listing that dir, so the concurrent `agy` A/B's token copies are not readable from a Codex
+      run;
+    - with `/tmp` denied, `grep`, `find`, `sed`, `awk`, `sort`, heredocs and writes in the clone
+      still work.
+  - Left as follow-ups: the final-message divergence between `parse_stream` and
+    `citation.final_message`, and an unproved config-write failure path.

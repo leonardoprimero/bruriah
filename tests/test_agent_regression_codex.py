@@ -25,6 +25,7 @@ import stat
 import subprocess
 import sys
 import tempfile
+import time
 import tomllib
 from pathlib import Path
 
@@ -446,7 +447,10 @@ def test_parse_stream_records_an_unknown_tool_item_by_its_type() -> None:
 
 def test_parse_stream_marks_a_failed_turn_and_an_error_event() -> None:
     assert parse_stream(_stream(*_START, {"type": "turn.failed", "error": {"message": "x"}})).failed is True
-    assert parse_stream(_stream(*_START, {"type": "error", "message": "x"}, _completed())).failed is True
+    # An `error` event alone is not a failure: Codex emits "Reconnecting... 1/5" as one and then
+    # completes the turn (odd/tasks/heed-rule-and-codex.md, L10). Only `turn.failed` fails a turn.
+    reconnect = {"type": "error", "message": "Reconnecting... 1/5"}
+    assert parse_stream(_stream(*_START, reconnect, _completed())).failed is False
 
 
 @pytest.mark.parametrize(
@@ -455,7 +459,8 @@ def test_parse_stream_marks_a_failed_turn_and_an_error_event() -> None:
         (_stream(*_START, _completed()), False, 0, "done"),
         (_stream(*_START, _completed()), True, 0, "time_budget"),
         (_stream(*_START, {"type": "turn.failed", "error": {"message": "x"}}), False, 0, "error"),
-        (_stream(*_START, {"type": "error", "message": "x"}, _completed()), False, 0, "error"),
+        (_stream(*_START, {"type": "error", "message": "Reconnecting... 1/5"}, _completed()), False, 0, "done"),
+        (_stream(*_START, {"type": "error", "message": "x"}), False, 0, "error"),
         (_stream(*_START, _completed()), False, 1, "error"),
         (_stream(*_START), False, 0, "error"),
         (_stream(_completed()), False, 0, "error"),
@@ -496,8 +501,8 @@ def test_baseline_config_is_the_measured_profile_and_registers_no_server(tmp_pat
                     "/Users": "deny",
                     "/System/Volumes/Data/Users": "deny",
                     str(home): "deny",
-                    "/tmp": "read",
-                    "/private/tmp": "read",
+                    "/tmp": "deny",
+                    "/private/tmp": "deny",
                     ":workspace_roots": {".": "write"},
                 },
                 "network": {"enabled": False},
@@ -995,3 +1000,46 @@ def test_final_message_ignores_tool_output_in_a_codex_transcript(tmp_path: Path)
     lines = _stream(*_START, _item("item.completed", "item_0", "command_execution", aggregated_output="5dc26aa"))
     transcript.write_text("\n".join(lines) + "\n", encoding="utf-8")
     assert final_message(transcript) is None
+
+
+def test_a_rotated_auth_copy_is_reported_even_when_the_home_cannot_be_removed(
+    rig: _Rig, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # The rotation must not be masked by the removal failure: it is the one that stops the set.
+    rig.behave(write={}, items=[], response="Refreshed.", rotate_auth=True)
+    monkeypatch.setattr(codex_module.shutil, "rmtree", lambda *args, **kwargs: None)
+    with pytest.raises(AuthRotated, match="codex login status") as raised:
+        rig.run(UNPROMPTED)
+    (home,) = rig.homes()
+    assert str(home) in str(raised.value)
+
+
+def test_an_interrupted_run_whose_auth_copy_rotated_warns_before_stopping(
+    rig: _Rig, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    real_communicate = subprocess.Popen.communicate
+
+    def interrupted(self: subprocess.Popen[str], *args: object, **kwargs: object) -> tuple[str, str]:
+        if "exec" in self.args:
+            time.sleep(1)  # the stub rewrites its auth copy first, then sleeps
+            raise KeyboardInterrupt
+        return real_communicate(self, *args, **kwargs)  # type: ignore[arg-type]
+
+    rig.behave(sleep=30, rotate_auth=True)
+    monkeypatch.setattr(subprocess.Popen, "communicate", interrupted)
+    with pytest.raises(KeyboardInterrupt):
+        rig.run(UNPROMPTED)
+    assert "codex login status" in capsys.readouterr().err
+    assert rig.homes() == []
+    assert rig.auth_source.read_text(encoding="utf-8") == _AUTH
+
+
+def test_a_run_that_fails_after_its_auth_copy_rotated_stops_the_set(rig: _Rig, monkeypatch: pytest.MonkeyPatch) -> None:
+    def broken_transcript(*args: object, **kwargs: object) -> str:
+        raise OSError("disk full")
+
+    rig.behave(write={}, items=[], response="Refreshed.", rotate_auth=True)
+    monkeypatch.setattr(codex_module.CodexAdapter, "_write_transcript", broken_transcript)
+    with pytest.raises(AuthRotated, match="codex login status"):
+        rig.run(UNPROMPTED)
+    assert rig.homes() == []

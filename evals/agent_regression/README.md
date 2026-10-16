@@ -123,10 +123,18 @@ run means:
   rotate the refresh token away from the operator's original. The copy is hashed before and after
   each run. If it changed, the set stops (exit code 2) and the operator is told to check
   `codex login status`. That run's transcript is kept and its record is not written. The copy is
-  never written back.
+  never written back. The check also runs when the run fails, when its home cannot be removed and
+  when it is interrupted (then it prints a warning before stopping), so no exit path hides a
+  rotation.
+- **Errors.** Only `turn.failed` makes an error run. Codex also reports a transient reconnect
+  (`Reconnecting... 1/5`) as an `error` event and then completes the turn; a stream without
+  `turn.completed` is an error run either way.
 - **Tools.** The shell is required: without it Codex has no tool that reads the clone. It runs in
   the client's own sandbox under a `bench` permissions profile:
-  - reads of the minimal system set, `/tmp` and the clone; writes in the clone only;
+  - reads of the minimal system set and the clone; writes in the clone only;
+  - `/tmp` denied, since every other process on the machine shares it (measured: `grep`, `find`,
+    `sed`, `awk`, `sort` and heredocs still work). The system temp directory, where other runs'
+    homes live, is not readable either;
   - the operator's home denied (`/Users` and its firmlink `/System/Volumes/Data/Users`), and the
     run's own directory denied by its resolved path, so the agent cannot read the `auth.json` copy;
   - no network.
