@@ -3,6 +3,34 @@
 Notable changes, newest first. This project follows [semantic versioning](https://semver.org/),
 and the entries here name what changed for *you* rather than which files moved.
 
+## [2.2.1] — 2026-10-16
+
+### Fixed: the `mcp` dependency no longer allows a version with a known vulnerability
+- Bruriah now requires `mcp>=1.30.0,<2`, up from `>=1.28.1`. `mcp` 1.28.1 has CVE-2026-59951, which
+  1.30.0 fixes. Install or upgrade Bruriah to get it; an environment that already resolved 1.30.0
+  changes nothing.
+- The 1.30.0 behaviour changes are in the HTTP/SSE clients, OAuth and stateful HTTP sessions.
+  Bruriah serves over stdio, so none applies. The two tools, their schemas and the server
+  instructions are unchanged.
+- Existing indexes keep working. The snapshot's recorded `mcp_range` is part of its identity and
+  did not change, so nothing is re-embedded.
+
+### Added: a measurement on Antigravity CLI with Gemini
+- The agent regression benchmark gained a second client: `run.py --client antigravity` runs
+  Antigravity CLI (`agy`) headless, each run with a throwaway `HOME`. This is benchmark tooling
+  in the repository, not part of the installed package.
+- Measured on `agy` 1.3.6 with `gemini-3.8-flash-high`: three `emilk/egui` traps, `baseline` (no
+  Bruriah) and `unprompted`, N = 5 per trap and condition. Unprompted agents consulted Bruriah in
+  14 of 15 runs, but silent regressions did not drop: 9/10 in both conditions on the two
+  documented traps.
+- A replay of every Bruriah call shows it returned the decision and its rationale before the
+  agent's first write in all 10 documented-trap runs. The agent read it and went ahead without
+  saying so. On this client and model, the gap is in heeding the decision, not in retrieving it.
+- The activation matrix in `docs/client-guidance.md` now has a measured Antigravity row. Records,
+  report, audit and every difference from the Claude Code runs (web search on, an 1800 s time
+  budget, a baseline without Bruriah) are in
+  `evals/agent_regression/results/antigravity-2026-10-15/`.
+
 ## [2.2.0] — 2026-10-15
 
 ### Added: in Claude Code, agents consult Bruriah without being told
