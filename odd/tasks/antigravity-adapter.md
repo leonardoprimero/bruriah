@@ -41,8 +41,8 @@ of the activation matrix with only what is measured. Paid runs need the owner's 
 | T1 | S3, S5 | inline probe: headless wire format, tool controls, MCP and instructions delivery | T1 doc commit |
 | T2 | S2, S3, S4, S7 | inline, test-first: adapter with stub `agy` | adapter commit (L9) |
 | T3 | S6, S7 | inline, test-first: client selector in `run.py` | same commit as T2 (L9) |
-| T4 | S8 | inline: dry run, estimate, owner OK | |
-| T5 | S9 | measured run, report, matrix row, docs | |
+| T4 | S8 | inline: dry run, estimate, owner OK | `41e1224` (pilots, analysis plan) |
+| T5 | S9 | measured run, report, matrix row, docs | `263cd17` (records), `3a60799`, `c4571a5` |
 
 ## Log
 
@@ -261,3 +261,15 @@ of the activation matrix with only what is measured. Paid runs need the owner's 
   - Published: records, `report.md` (byte-for-byte render), `audit.json`, a results README with
     every disclosure; Antigravity matrix row (`delivered`: no, files on demand; `consult
     measured`: 14/15, SRR unchanged). Test-first for the matrix: 2 RED, then GREEN.
+- L22 Review `review-cb99b0acde189973` (base `263cd17`, high tier, 4 lenses) of `3a60799`. The
+  first candidate, `f8fd5e6` with the records, exceeded the reviewer context budget, so it was split
+  with an identical final tree: generated data in `263cd17`, authored change in `3a60799`.
+  - One BLOCKER, `R3-missing-committed-records`: "none of them is in the candidate". This is false.
+    `git ls-tree 3a60799` lists `records/runs.jsonl`, `report.md` and `audit.json`; they come
+    unchanged from the base, and the full suite passed on that tree. The reviewer saw only the diff.
+  - The one bounded correction, `c4571a5`, says in the test and the results README where the
+    generated files live. The targeted validator also read only the diff and rejected it, so the
+    lineage ended `escalated`, which is informational.
+  - An independent `gentle-ai-verify` returned PASS on 6/6: every README number was recomputed
+    from the records, the render was byte-identical, there are no private paths, and the claims
+    stay within the data.
