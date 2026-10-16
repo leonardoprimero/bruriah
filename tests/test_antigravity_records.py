@@ -6,6 +6,8 @@ committed under `evals/agent_regression/results/antigravity-2026-10-15/records/`
 transcripts, with the rendered `report.md` and `audit.json`, the replay of what Bruriah returned to
 each `unprompted` run. These tests pin the published numbers to the records, and the claims the
 results README makes about the audit to `audit.json`.
+Those three generated files arrive in the commit before the one that adds this module, so the
+authored change can be reviewed on its own; every test here reads them from the tree.
 """
 
 from __future__ import annotations

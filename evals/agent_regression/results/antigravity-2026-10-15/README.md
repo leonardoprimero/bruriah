@@ -16,6 +16,9 @@ retrieval failure.
 - [`audit.json`](audit.json), written by [`audit.py`](audit.py): what Bruriah returned to each
   `unprompted` run (see [Audit](#audit)).
 
+The records, `report.md` and `audit.json` are generated, so they are committed apart from the
+script, this README and the tests that read them.
+
 ## Headline
 
 Documented traps (`egui-android-activity`, `egui-datepicker-chrono`), 10 runs per condition:
