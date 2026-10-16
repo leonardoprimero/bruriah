@@ -113,3 +113,33 @@ client, and measures both. Every run that spends model quota needs the owner's O
   - Auth risk: `last_refresh` was 2026-10-09 and the access token had about 79 h left. A copy that
     refreshes could rotate the refresh token away from the owner's original, so the adapter
     compares the copy's hash after each run and stops the set if it changed.
+- L8 (owner choice): "Las dos condiciones en 1.4.0 (recomendado)". Before T4 launched, `agy` reported
+  1.4.0, but the 2026-10-15 set ran on 1.3.6. Rule against that set would mix the rule with a
+  client change, so T4 became an A/B on one client version:
+  - arm `norule`: Bruriah at `main` `d9b702f`, worktree `~/bruriah-worktrees/agy-norule`;
+  - arm `rule`: Bruriah at `1abf6bb`, worktree `~/bruriah-worktrees/agy-run`.
+  - Each arm is `unprompted`, three egui traps x 5, `gemini-3.8-flash-high`, 1800 s.
+  - The arms alternate by repetition round (norule r, rule r, ...), so time of day does not line
+    up with an arm. A round that records any error or failure stops the launcher.
+  - Launcher: `agy-launch/run-rule-ab.sh`. Outputs: `out-ab-{norule,rule}-2026-10-16`. Launched
+    as job-33. Both arms' dry runs planned 3 invocations per round.
+  - The 2026-10-15 `baseline` is not reused: it ran on 1.3.6.
+- L9 T3 Codex adapter, written by a worker test-first and reviewed by the parent.
+  - The worker started from a `NotImplementedError` skeleton: 66 RED, then GREEN.
+  - The parent's model-free checks against the real codex-cli 0.157.1:
+    - The adapter's generated config loads under `--strict-config`. It reached authentication
+      and failed with a 401 in a home without `auth.json`. A control key `bogus_key_xyz` failed
+      at load with "unknown configuration field".
+    - `codex debug prompt-input`: a marker in a clone's `AGENTS.md` is absent from the
+      model-visible prompt with `project_doc_max_bytes = 0` and present with 65536.
+  - Added, test-first (1 RED, then GREEN): the client now runs with `--strict-config`.
+  - Mirrors: egui (`5d3e958`) and bruriah carry no `AGENTS.md`. leakcanary (`0f7dbab`) has
+    `AGENTS.md` and `CLAUDE.md` at the root and in `shark/shark-explorer/`, which the config
+    switches off.
+  - The worker's design calls, accepted:
+    - `AuthRotated` stops the set with exit 2. The rotated run's transcript is kept and its
+      record is not written.
+    - `shell` is not a write tool, because it is also Codex's only way to read. `file_change`
+      and `apply_patch` are.
+    - `.agents/` is refused alongside `.codex/`.
+    - `model_id` is the requested model.

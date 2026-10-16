@@ -6,9 +6,10 @@ so it never runs in CI and never starts unattended. `--dry-run` lists every plan
 (traps x conditions x repetitions) without constructing an adapter, which is how the cost
 estimate is made before anyone approves a paid run.
 
-A real run drives the client `--client` names: Claude Code headless (`claude_code.py`, the default)
-or Antigravity CLI (`antigravity.py`, which runs `baseline` and `unprompted` only and records no
-cost, so it refuses `--max-budget-usd-per-run`). It writes `runs.json` (every
+A real run drives the client `--client` names: Claude Code headless (`claude_code.py`, the default),
+Antigravity CLI (`antigravity.py`) or Codex CLI (`codex.py`). The last two run `baseline` and
+`unprompted` only and record no cost, so they refuse `--max-budget-usd-per-run`. A Codex run whose
+copy of the sign-in changed stops the set (exit code 2). It writes `runs.json` (every
 run record), `report.md`, and the raw client transcripts under `transcripts/` into `--out`. Each run
 record is appended to `runs.jsonl` as soon as the run finishes, and a run the adapter could not
 record is appended to `failures.jsonl` and the benchmark moves on (exit code 3). Running the same
@@ -26,6 +27,8 @@ Usage:
     uv run python evals/agent_regression/run.py --model <id> [--claude <path>] [--bruriah <path>]
     uv run python evals/agent_regression/run.py --client antigravity --conditions baseline unprompted \
         --model <id> [--agy <path>] [--agy-token <path>] [--bruriah <path>]
+    uv run python evals/agent_regression/run.py --client codex --conditions baseline unprompted \
+        --model <id> [--codex <path>] [--codex-auth <path>] [--bruriah <path>]
 """
 
 from __future__ import annotations
@@ -63,7 +66,14 @@ _UNRECORDED = "unrecorded"
 
 CLAUDE_CODE = "claude-code"
 ANTIGRAVITY = "antigravity"
-CLIENTS = (CLAUDE_CODE, ANTIGRAVITY)
+CODEX = "codex"
+CLIENTS = (CLAUDE_CODE, ANTIGRAVITY, CODEX)
+# What each client is called in an error, and the reason a client runs only some conditions.
+_CLIENT_TITLES = {ANTIGRAVITY: "Antigravity CLI", CODEX: "Codex CLI"}
+_CONDITION_LIMITS = {
+    ANTIGRAVITY: "it has no flag to append to the system prompt and its PreToolUse hook does not run in print mode",
+    CODEX: "this adapter appends no instruction to the system prompt and has no pre-edit gate for it",
+}
 
 
 def _interrupt(signum: int, frame: object) -> None:
@@ -173,6 +183,19 @@ def _parser() -> argparse.ArgumentParser:
         type=_positive_int,
         default=None,
         help="replace every trap's time budget for agy runs (default: the trap's own); state it in the report",
+    )
+    parser.add_argument("--codex", type=Path, default=None, help="the codex executable (default: found on PATH)")
+    parser.add_argument(
+        "--codex-auth",
+        type=Path,
+        default=None,
+        help="the signed-in codex auth.json, copied into each run's own CODEX_HOME (default: the operator's)",
+    )
+    parser.add_argument(
+        "--codex-time-budget-seconds",
+        type=_positive_int,
+        default=None,
+        help="replace every trap's time budget for codex runs (default: the trap's own); state it in the report",
     )
     parser.add_argument("--bruriah", type=Path, default=None, help="the bruriah executable (default: found on PATH)")
     parser.add_argument("--model", default=None, help="model id; required for a real run, never defaulted")
@@ -292,6 +315,7 @@ def _run(args: argparse.Namespace, traps: Sequence[Trap], conditions: Sequence[s
     from agent_regression.adapters import AdapterError, AgentAdapter, run_benchmark
     from agent_regression.antigravity import AntigravityAdapter, AntigravityConfig
     from agent_regression.claude_code import ClaudeCodeAdapter, ClaudeCodeConfig
+    from agent_regression.codex import AuthRotated, CodexAdapter, CodexConfig
     from agent_regression.metrics import summarize, trap_set_digest
     from agent_regression.report import (
         render_json,
@@ -307,14 +331,19 @@ def _run(args: argparse.Namespace, traps: Sequence[Trap], conditions: Sequence[s
         print("error: --model is required for a real run; the provenance must name the model", file=sys.stderr)
         return 2
     antigravity = args.client == ANTIGRAVITY
-    if antigravity and args.max_budget_usd_per_run is not None:
+    codex = args.client == CODEX
+    if args.client in _CLIENT_TITLES and args.max_budget_usd_per_run is not None:
         print(
-            "error: --max-budget-usd-per-run cannot be enforced on Antigravity CLI, which has no spend cap and "
-            "reports no cost; leave it out and bound the run with the trap time budgets",
+            f"error: --max-budget-usd-per-run cannot be enforced on {_CLIENT_TITLES[args.client]}, which has no "
+            "spend cap and reports no cost; leave it out and bound the run with the trap time budgets",
             file=sys.stderr,
         )
         return 2
-    client_name, client_given = ("agy", args.agy) if antigravity else ("claude", args.claude)
+    client_name, client_given = {
+        CLAUDE_CODE: ("claude", args.claude),
+        ANTIGRAVITY: ("agy", args.agy),
+        CODEX: ("codex", args.codex),
+    }[args.client]
     executables = {}
     for name, given in ((client_name, client_given), ("bruriah", args.bruriah)):
         resolved = _executable(given, name)
@@ -382,6 +411,20 @@ def _run(args: argparse.Namespace, traps: Sequence[Trap], conditions: Sequence[s
             adapter = agy_adapter = AntigravityAdapter(agy_config, trap_set_digest=digest, repetitions=args.repetitions)
             bruriah_commit = agy_adapter.bruriah_commit()
             client_version = agy_adapter.client_version
+        elif codex:
+            codex_config = CodexConfig(
+                codex_executable=executables["codex"],
+                bruriah_executable=executables["bruriah"],
+                model=args.model,
+                cache_dir=args.cache_dir.absolute(),
+                transcripts_dir=out.absolute() / "transcripts",
+                provenance_date=args.date,
+                **({"auth_source": args.codex_auth.absolute()} if args.codex_auth else {}),
+                time_budget_seconds=args.codex_time_budget_seconds,
+            )
+            adapter = codex_adapter = CodexAdapter(codex_config, trap_set_digest=digest, repetitions=args.repetitions)
+            bruriah_commit = codex_adapter.bruriah_commit()
+            client_version = codex_adapter.client_version
         else:
             claude_config = ClaudeCodeConfig(
                 claude_executable=executables["claude"],
@@ -419,7 +462,7 @@ def _run(args: argparse.Namespace, traps: Sequence[Trap], conditions: Sequence[s
             on_run=record_run,
             on_failure=record_failure,
         )
-    except (AdapterError, ProvenanceMismatch) as exc:
+    except (AdapterError, ProvenanceMismatch, AuthRotated) as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 2
 
@@ -447,33 +490,38 @@ def main(argv: Sequence[str] | None = None) -> int:
     args = _parser().parse_args(argv)
     # Canonical order, duplicates dropped, whatever order the flags came in.
     conditions = tuple(condition for condition in CONDITIONS if condition in args.conditions)
-    # A flag of the other client would be ignored, and the run would bill the client it did not name.
-    foreign = (["--claude"] if args.client == ANTIGRAVITY and args.claude is not None else []) or [
-        flag
-        for flag, value in (
+    # A flag of another client would be ignored, and the run would bill the client it did not name.
+    client_flags = {
+        CLAUDE_CODE: (("--claude", args.claude),),
+        ANTIGRAVITY: (
             ("--agy", args.agy),
             ("--agy-token", args.agy_token),
             ("--agy-time-budget-seconds", args.agy_time_budget_seconds),
-        )
-        if args.client == CLAUDE_CODE and value is not None
-    ]
-    if foreign:
-        other = CLAUDE_CODE if args.client == ANTIGRAVITY else ANTIGRAVITY
-        print(
-            f"error: {', '.join(foreign)} only apply to --client {other}, but this run is --client {args.client}; "
-            f"pass --client {other} or drop them",
-            file=sys.stderr,
-        )
-        return 2
-    if args.client == ANTIGRAVITY:
-        from agent_regression.antigravity import SUPPORTED_CONDITIONS
+        ),
+        CODEX: (
+            ("--codex", args.codex),
+            ("--codex-auth", args.codex_auth),
+            ("--codex-time-budget-seconds", args.codex_time_budget_seconds),
+        ),
+    }
+    for other in CLIENTS:
+        foreign = [flag for flag, value in client_flags[other] if value is not None]
+        if other != args.client and foreign:
+            print(
+                f"error: {', '.join(foreign)} only apply to --client {other}, but this run is --client {args.client}; "
+                f"pass --client {other} or drop them",
+                file=sys.stderr,
+            )
+            return 2
+    if args.client in _CONDITION_LIMITS:
+        from agent_regression import antigravity, codex
 
-        unsupported = [condition for condition in conditions if condition not in SUPPORTED_CONDITIONS]
+        supported = {ANTIGRAVITY: antigravity.SUPPORTED_CONDITIONS, CODEX: codex.SUPPORTED_CONDITIONS}[args.client]
+        unsupported = [condition for condition in conditions if condition not in supported]
         if unsupported:
             print(
-                f"error: Antigravity CLI cannot run {', '.join(unsupported)}: it has no flag to append to the system "
-                "prompt and its PreToolUse hook does not run in print mode; pass --conditions "
-                f"{' '.join(SUPPORTED_CONDITIONS)}",
+                f"error: {_CLIENT_TITLES[args.client]} cannot run {', '.join(unsupported)}: "
+                f"{_CONDITION_LIMITS[args.client]}; pass --conditions {' '.join(supported)}",
                 file=sys.stderr,
             )
             return 2

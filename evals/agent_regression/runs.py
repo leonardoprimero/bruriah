@@ -28,7 +28,9 @@ CONDITIONS = (*DEFAULT_CONDITIONS, GATED)
 EXIT_REASONS = ("done", "turn_budget", "time_budget", "error")
 
 # The tools that mutate files. "Consulted" means `investigate_work` ran before the first of these.
-# Claude Code's names, then Antigravity CLI's (measured on agy 1.3.5); runs keep each client's names.
+# Claude Code's names, then Antigravity CLI's (measured on agy 1.3.5), then Codex CLI's (a `file_change`
+# item, and `apply_patch` should it appear as a call); runs keep each client's names. Codex's `shell`
+# is its only way to read the clone, so it is not a write tool, although the agent can write with it.
 WRITE_TOOLS = frozenset(
     {
         "Edit",
@@ -40,6 +42,8 @@ WRITE_TOOLS = frozenset(
         "multi_replace_file_content",
         "sed_file",
         "notebook_edit",
+        "file_change",
+        "apply_patch",
     }
 )
 

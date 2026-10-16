@@ -97,6 +97,65 @@ same clean clone and the same real `bruriah serve`. The differences were measure
   steps' own usage. In print mode, an action that needs a
   permission prompt ends the turn with no final message; such a run is an error run.
 
+### The third client: Codex CLI
+
+`codex.py` runs Codex CLI (`codex exec --json`) with `run.py --client codex`. It needs the same
+clean clone and the same real `bruriah serve`. The differences were measured on `codex-cli`
+0.157.1 (`odd/tasks/heed-rule-and-codex.md`, L7) and are stated here because they change what a
+run means:
+
+- **Isolation.** Each run gets a fresh owner-only directory in the system temp dir, used as both
+  `HOME` and `CODEX_HOME`, outside the clone and outside the operator's home.
+  - It holds a copy of the operator's `auth.json` (`--codex-auth`, default `~/.codex/auth.json`)
+    and the run's own `config.toml`. It is deleted when the run ends, on failure and on Ctrl+C or
+    SIGTERM too. The marker and the sweep of leftovers work as for `agy`.
+  - The operator's config, `AGENTS.md`, rules, skills, memories and MCP servers stay out of the run.
+    `--ignore-rules` skips the execpolicy `.rules` files, and `project_doc_max_bytes = 0` switches
+    off the clone's `AGENTS.md` files (checked on codex-cli 0.157.1 with `codex debug prompt-input`:
+    a marker in a clone's `AGENTS.md` is absent from the model-visible prompt at 0 and present at
+    65536). A clone carrying `.codex/` or `.agents/` is refused.
+  - The client runs with `--strict-config`. Every generated key loads on 0.157.1, and an unknown
+    key stops the client at config load, so a key a later client drops fails the run instead of
+    being ignored.
+  - The environment is `PATH`, `USER`, `LOGNAME`, `TMPDIR` and `LANG`, plus the two directories.
+    No `OPENAI_*` or `CODEX_*` variable of the operator's reaches the client.
+- **Auth rotation guard.** The client may refresh its copy of the sign-in, and a refresh may
+  rotate the refresh token away from the operator's original. The copy is hashed before and after
+  each run. If it changed, the set stops (exit code 2) and the operator is told to check
+  `codex login status`. That run's transcript is kept and its record is not written. The copy is
+  never written back.
+- **Tools.** The shell is required: without it Codex has no tool that reads the clone. It runs in
+  the client's own sandbox under a `bench` permissions profile:
+  - reads of the minimal system set, `/tmp` and the clone; writes in the clone only;
+  - the operator's home denied (`/Users` and its firmlink `/System/Volumes/Data/Users`), and the
+    run's own directory denied by its resolved path, so the agent cannot read the `auth.json` copy;
+  - no network.
+
+  Measured under the sandbox, the firmlink and letter-case spellings of a denied path are denied
+  too, unlike `agy`. **`git` does not run in the sandbox, and `rg` is not on its path**; `grep`,
+  `find`, `sed` and `cat` are. Keeping `git` out is intended: with it, a `baseline` run could read
+  the decision from history, which no Claude Code or `agy` run could. So the tools are not the
+  same as the other clients': every shell call is recorded as `shell`. A write the agent makes
+  through the shell does not end the consult window, because the shell is also how it reads.
+  Writes through the client's own patch tool are recorded as `file_change`.
+- **Web search** is disabled in the config, so Codex runs have none, like Claude Code runs and
+  unlike `agy` runs. A `web_search` item, should one appear, is recorded.
+- **Subagents cannot be turned off.** `features.multi_agent = false` is set but not honored: the
+  subagent tools stay listed. `agents.enabled = false` is set as well. A subagent call is
+  recorded by its item type; what the subagent does is not in the stream. The detector still
+  reads the final tree.
+- **MCP delivery.** Bruriah is a required stdio server in the run's `config.toml`, and its tools
+  are approved. A `mcp_tool_call` item is recorded as `mcp__<server>__<tool>`. Its result is in the
+  stream, so no replay is needed. `baseline` registers no server at all.
+- **Conditions.** `baseline` and `unprompted` only; `prompted` and `gated` are refused, also in a
+  dry run.
+- **Budgets and cost.** Codex has no turn limit and no timeout flag. The time budget (the trap's,
+  or `--codex-time-budget-seconds` for every trap) is enforced by stopping the client's process
+  group, which ends the run as `time_budget`. Codex reports no cost, so `--max-budget-usd-per-run`
+  is refused and `cost_usd` is empty. The tokens are the sum of each completed turn's `usage`
+  `input_tokens` and `output_tokens`. The stream does not name the model, so the record names
+  the one asked for. `turns` counts the model's outputs: tool calls and messages.
+
 ### Definitions
 
 - **Regression Rate (RR):** the share of runs whose resulting tree reintroduces the rejected
@@ -242,6 +301,7 @@ uv run python evals/agent_regression/run.py --dry-run \
 A real run adds `--model`, `--claude`, `--bruriah`, `--cache-dir`, `--max-budget-usd-per-run`
 and `--out`. For Antigravity CLI, pass `--client antigravity --conditions baseline unprompted`
 with `--agy` and, if the token is not in the default place, `--agy-token`, instead of `--claude`
-and the spend cap. Launch each arm from its own clean worktree at the commit under test; the runner
+and the spend cap. For Codex CLI, pass `--client codex --conditions baseline unprompted` with
+`--codex` and, if needed, `--codex-auth`. Launch each arm from its own clean worktree at the commit under test; the runner
 records that commit and refuses a dirty tree. To render any run directory, use
 `uv run python evals/agent_regression/report.py <run-dir> --out <dir>`.

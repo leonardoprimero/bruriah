@@ -1,7 +1,8 @@
 """Whether a run's final agent message cites the trap's historical decision.
 
 Citation is decided by code, never by a model, and only the agent's final message counts: the
-transcript's last `result` event, or, when the run was stopped before one, its last assistant text.
+transcript's last `result` event, or, when the run was stopped before one, its last assistant text
+(for Codex CLI, its last `agent_message` item).
 Tool inputs and tool results are never searched, so a decision the agent only read is not one it
 cited.
 
@@ -44,8 +45,8 @@ def _assistant_text(event: dict) -> str | None:
 def final_message(transcript: Path) -> str | None:
     """The agent's final message in a stream-json transcript. Claude Code: the last `result`
     event's `result`, else the text blocks of the last assistant event that has any text.
-    Antigravity CLI: the last `result` event's `response`. Else `None`. A line that is not a JSON
-    object is skipped."""
+    Antigravity CLI: the last `result` event's `response`. Codex CLI: the text of the last completed
+    `agent_message` item. Else `None`. A line that is not a JSON object is skipped."""
     result: str | None = None
     assistant: str | None = None
     for line in transcript.read_text(encoding="utf-8", errors="replace").splitlines():
@@ -64,6 +65,10 @@ def final_message(transcript: Path) -> str | None:
                 result = response
         elif kind == "assistant":
             assistant = _assistant_text(event) or assistant
+        elif kind == "item.completed" and isinstance(event.get("item"), dict):
+            item = event["item"]
+            if item.get("type") == "agent_message" and isinstance(item.get("text"), str) and item["text"].strip():
+                assistant = item["text"]
     return result if result is not None else assistant
 
 
