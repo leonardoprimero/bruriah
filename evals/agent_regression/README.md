@@ -185,8 +185,9 @@ audit: [`results/antigravity-2026-10-15/`](results/antigravity-2026-10-15/README
 - On the two documented traps, silent regressions were 9/10 in both conditions (pooled Fisher exact
   p = 1.00). Bruriah had no measurable effect on this client and model.
 - A replay of every Bruriah call shows it returned the decision document, with its rationale, in
-  all 10 documented-trap `unprompted` runs, before the agent's first write. The agent read it and
-  went ahead without saying so: a heed failure, not a retrieval failure.
+  all 10 documented-trap `unprompted` runs, before the agent's first write in each of the 9 that
+  wrote. The agent read it and went ahead without saying so: a heed failure, not a retrieval
+  failure.
 
 It differs from the Claude Code runs in ways the results README lists: web search on in both
 conditions, an 1800 s time budget, and a baseline without Bruriah instead of one with the

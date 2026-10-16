@@ -23,9 +23,9 @@ and the entries here name what changed for *you* rather than which files moved.
   Bruriah) and `unprompted`, N = 5 per trap and condition. Unprompted agents consulted Bruriah in
   14 of 15 runs, but silent regressions did not drop: 9/10 in both conditions on the two
   documented traps.
-- A replay of every Bruriah call shows it returned the decision and its rationale before the
-  agent's first write in all 10 documented-trap runs. The agent read it and went ahead without
-  saying so. On this client and model, the gap is in heeding the decision, not in retrieving it.
+- A replay of every Bruriah call shows it returned the decision and its rationale in all 10
+  documented-trap runs, before the agent's first write in each of the 9 that wrote. The agent read
+  it and went ahead without saying so. On this client and model, the gap is in heeding the decision, not in retrieving it.
 - The activation matrix in `docs/client-guidance.md` now has a measured Antigravity row. Records,
   report, audit and every difference from the Claude Code runs (web search on, an 1800 s time
   budget, a baseline without Bruriah) are in
