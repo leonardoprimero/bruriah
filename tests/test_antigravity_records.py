@@ -88,7 +88,10 @@ def test_the_report_reproduces_byte_for_byte(tmp_path: Path) -> None:
         check=False,
     )
     assert completed.returncode == 0, completed.stderr
-    assert (rendered / "report.md").read_bytes() == (RESULTS / "report.md").read_bytes()
+    # `write_report` writes in text mode, so Windows writes CRLF; the checkout is LF
+    # (`.gitattributes`). Line endings are the only difference allowed.
+    produced = (rendered / "report.md").read_bytes().replace(b"\r\n", b"\n")
+    assert produced == (RESULTS / "report.md").read_bytes()
 
 
 def test_the_report_states_the_null_result() -> None:
