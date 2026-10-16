@@ -246,3 +246,18 @@ of the activation matrix with only what is measured. Paid runs need the owner's 
   - agy had updated itself from 1.3.5 to 1.3.6. The client now runs with
     `AGY_CLI_DISABLE_AUTO_UPDATE=1`, a variable named in the binary, so that a set does not stop
     halfway on a version change. Test-first: 1 RED, then GREEN, 68 adapter tests.
+- L21 Run set 2, `out-set2-budget1800-2026-10-15` (`08a81db`, agy 1.3.6, `gemini-3.8-flash-high`,
+  1800 s): 30/30 runs, 0 errors, 12 hit the time budget, every run on 1.3.6. It ran from
+  2026-10-15T21:14Z to 2026-10-16T08:22Z.
+  - Documented traps: SRR 9/10 `baseline` vs 9/10 `unprompted`, RR the same, pooled Fisher p = 1.00.
+    The `unprompted` consult rate was 10/10 (14/15 with the control trap).
+  - Audit: the `agy` stream records no MCP output, so `results/antigravity-2026-10-15/audit.py`
+    replays every Bruriah call (93 `investigate_work`, 129 `read_evidence`) on the same executable
+    and a copy of each run's index. In 10/10 documented `unprompted` runs a `read_evidence` reply
+    returned the decision document with its rationale (steps 14-62), before the first write
+    (steps 108-349). The `egui-android-activity` final messages never name it; every
+    `egui-datepicker-chrono` `unprompted` run hit the budget, with no final message.
+    Conclusion: heed failure, not retrieval failure.
+  - Published: records, `report.md` (byte-for-byte render), `audit.json`, a results README with
+    every disclosure; Antigravity matrix row (`delivered`: no, files on demand; `consult
+    measured`: 14/15, SRR unchanged). Test-first for the matrix: 2 RED, then GREEN.
