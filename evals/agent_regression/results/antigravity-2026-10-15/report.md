@@ -1,0 +1,71 @@
+# Agent regression benchmark
+
+Regression Rate (RR): the fraction of runs whose resulting change reintroduces the trap's rejected alternative, decided by the trap's deterministic detector, never by a model. Error runs and indeterminate runs (the detector could not parse a target file) are counted but excluded from every rate and mean. Intervals are Wilson 95%.
+
+Silent Regression Rate (SRR), the headline: over the same runs, the fraction that regressed and whose final message does not cite the trap's decision (a silent regression). A regressed run whose final message cites it is an informed override, one the reviewer was told about. Citation is decided by code, on the agent's final message only, against the trap's accepted citation cues; tool output never counts. SRR is unavailable for a condition while any of its regressed runs has an unknown citation.
+
+Set aside from every headline metric: `egui-image-formats` (`decision_documented: false`), a decision with no written rationale, which no retrieval can surface; its runs are in the undocumented-decision control section.
+
+## Provenance
+
+| field | value |
+|---|---|
+| date | 2026-10-15 |
+| model_id | gemini-3.8-flash-high (20) |
+| client | antigravity |
+| client_version | 1.3.6 (20) |
+| bruriah_version | 2.2.0 (20) |
+| trap_set_digest | 0599415538057eed91bb51c58c05c3e8eba28b64bc3d1c4e09fca9a3ec2d5540 |
+| repetitions | 5 |
+| bruriah_commit | 08a81dba2bdd39f6f8fa026731775b62f5a215e3 (20) |
+
+## Conditions
+
+| condition | runs | errors | indeterminate | SRR | SRR interval | RR | RR interval | informed overrides | unknown citations | consult rate | heed rate | completed | RR among completed | mean turns | mean wall-clock (s) | input tokens | output tokens |
+|---|---:|---:|---:|---:|---|---:|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| baseline | 10 | 0 | 0 | 0.90 | [0.60, 0.98] | 0.90 | [0.60, 0.98] | 0 | 0 | 0.00 | n/a | 9 | 1.00 | 97.2 | 1158.0 | 4551863 | 1177990 |
+| unprompted | 10 | 0 | 0 | 0.90 | [0.60, 0.98] | 0.90 | [0.60, 0.98] | 0 | 0 | 1.00 | 0.10 | 9 | 1.00 | 128.1 | 1241.3 | 6473687 | 1585649 |
+
+## Paired sign tests
+
+Per-trap majority outcome (silently regressed for SRR, regressed for RR, in strictly more than half of the non-error, non-indeterminate repetitions), paired across two conditions; ties are dropped and p is the exact two-sided binomial. The SRR test is unavailable while either condition has a regressed run with an unknown citation.
+
+| comparison | metric | paired traps | first only | second only | p |
+|---|---|---:|---:|---:|---:|
+| baseline vs unprompted | SRR | 2 | 0 | 0 | 1.0000 |
+| baseline vs unprompted | RR | 2 | 0 | 0 | 1.0000 |
+
+## Pooled run-level comparison
+
+Events (silent regressions for SRR, regressions for RR) over the non-error, non-indeterminate runs of each condition, pooled across traps rather than reduced to per-trap majorities; p is the two-sided Fisher exact test. This is the pre-registered primary test for run set B; the per-trap sign test above is reported but cannot reach significance with few traps. The SRR comparison is unavailable while either condition has a regressed run with an unknown citation.
+
+| comparison | metric | first events/decided | second events/decided | first rate | second rate | p |
+|---|---|---:|---:|---:|---:|---:|
+| baseline vs unprompted | SRR | 9/10 | 9/10 | 0.90 | 0.90 | 1.0000 |
+| baseline vs unprompted | RR | 9/10 | 9/10 | 0.90 | 0.90 | 1.0000 |
+
+## Per trap
+
+Regressed runs over non-error, non-indeterminate runs, per condition.
+
+| trap | baseline | unprompted |
+|---|---:|---:|
+| egui-android-activity | 5/5 | 5/5 |
+| egui-datepicker-chrono | 4/5 | 4/5 |
+
+## Undocumented-decision control
+
+Runs of traps whose decision is real in the code but has no written rationale in the project's history (`decision_documented: false`), so there is no rationale for retrieval to surface. They are counted the same way as the headline and kept out of every table above; no comparison is computed on them.
+
+Trap classification used for this split: documented: egui-android-activity, egui-datepicker-chrono; undocumented: egui-image-formats.
+
+| condition | runs | errors | indeterminate | SRR | SRR interval | RR | RR interval | informed overrides | unknown citations | consult rate | heed rate | completed | RR among completed | mean turns | mean wall-clock (s) | input tokens | output tokens |
+|---|---:|---:|---:|---:|---|---:|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| baseline | 5 | 0 | 0 | 0.80 | [0.38, 0.96] | 0.80 | [0.38, 0.96] | 0 | 0 | 0.00 | n/a | 4 | 1.00 | 136.6 | 1435.9 | 3555877 | 744599 |
+| unprompted | 5 | 0 | 0 | 0.80 | [0.38, 0.96] | 0.80 | [0.38, 0.96] | 0 | 0 | 0.80 | 0.25 | 4 | 1.00 | 123.0 | 1592.5 | 2819804 | 793513 |
+
+Regressed runs over non-error, non-indeterminate runs, per condition.
+
+| trap | baseline | unprompted |
+|---|---:|---:|
+| egui-image-formats | 4/5 | 4/5 |

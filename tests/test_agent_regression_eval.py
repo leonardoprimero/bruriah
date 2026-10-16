@@ -696,7 +696,9 @@ def test_run_from_json_accepts_a_gated_run() -> None:
 
 
 def test_write_tools_are_exactly_the_file_mutating_tools() -> None:
-    assert WRITE_TOOLS == frozenset({"Edit", "Write", "MultiEdit", "NotebookEdit"})
+    claude_code = {"Edit", "Write", "MultiEdit", "NotebookEdit"}
+    antigravity = {"write_to_file", "replace_file_content", "multi_replace_file_content", "sed_file", "notebook_edit"}
+    assert WRITE_TOOLS == frozenset(claude_code | antigravity)
 
 
 def test_run_record_and_provenance_are_immutable() -> None:

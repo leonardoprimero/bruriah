@@ -77,7 +77,7 @@ client does with them is up to the client.
 | OpenCode | yes | unknown | not measured |
 | Cursor | yes | unknown | not measured |
 | Gemini CLI | yes | unknown | not measured |
-| Antigravity | yes | unknown | not measured |
+| Antigravity | yes | no, on agy 1.3.6: the instructions and both tool schemas are files the agent opens on demand, so `anthropic/alwaysLoad` has no effect | 14/15 unprompted runs called Bruriah, `gemini-3.8-flash-high`, 2026-10-15; the baseline had no Bruriah registered, and silent regressions did not drop: 9/10 in both conditions ([results](../evals/agent_regression/results/antigravity-2026-10-15/README.md)) |
 | Generic stdio MCP client | yes | unknown | not measured |
 
 "unknown" means nobody has checked; it is not a known failure. In those clients, an agent may

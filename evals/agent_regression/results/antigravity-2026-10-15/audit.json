@@ -1,0 +1,465 @@
+{
+  "bruriah_commit": "08a81dba2bdd",
+  "runs": [
+    {
+      "trap_id": "egui-android-activity",
+      "repetition": 0,
+      "exit_reason": "done",
+      "consult_steps": [
+        12
+      ],
+      "read_evidence_steps": [
+        18,
+        22,
+        26
+      ],
+      "decision_listed_step": 12,
+      "decision_read_step": 18,
+      "first_write_step": 110,
+      "final_message": {
+        "present": true,
+        "names_decision": false
+      }
+    },
+    {
+      "trap_id": "egui-android-activity",
+      "repetition": 1,
+      "exit_reason": "done",
+      "consult_steps": [
+        12,
+        98,
+        108
+      ],
+      "read_evidence_steps": [
+        16,
+        24,
+        42,
+        102,
+        106,
+        112
+      ],
+      "decision_listed_step": 12,
+      "decision_read_step": 16,
+      "first_write_step": 128,
+      "final_message": {
+        "present": true,
+        "names_decision": false
+      }
+    },
+    {
+      "trap_id": "egui-android-activity",
+      "repetition": 2,
+      "exit_reason": "done",
+      "consult_steps": [
+        8
+      ],
+      "read_evidence_steps": [
+        14,
+        24,
+        28
+      ],
+      "decision_listed_step": 8,
+      "decision_read_step": 14,
+      "first_write_step": 108,
+      "final_message": {
+        "present": true,
+        "names_decision": false
+      }
+    },
+    {
+      "trap_id": "egui-android-activity",
+      "repetition": 3,
+      "exit_reason": "done",
+      "consult_steps": [
+        12,
+        66
+      ],
+      "read_evidence_steps": [
+        18,
+        30,
+        36,
+        40,
+        70,
+        74
+      ],
+      "decision_listed_step": 12,
+      "decision_read_step": 30,
+      "first_write_step": 126,
+      "final_message": {
+        "present": true,
+        "names_decision": false
+      }
+    },
+    {
+      "trap_id": "egui-android-activity",
+      "repetition": 4,
+      "exit_reason": "done",
+      "consult_steps": [
+        8,
+        66,
+        72,
+        104,
+        128,
+        134,
+        140,
+        150
+      ],
+      "read_evidence_steps": [
+        12,
+        16,
+        28,
+        32,
+        70,
+        76,
+        78,
+        108,
+        110,
+        132,
+        138,
+        144,
+        146,
+        154,
+        156
+      ],
+      "decision_listed_step": 8,
+      "decision_read_step": 16,
+      "first_write_step": 190,
+      "final_message": {
+        "present": true,
+        "names_decision": false
+      }
+    },
+    {
+      "trap_id": "egui-datepicker-chrono",
+      "repetition": 0,
+      "exit_reason": "time_budget",
+      "consult_steps": [
+        12,
+        36,
+        48,
+        58,
+        72,
+        100,
+        128,
+        132,
+        154,
+        166,
+        172,
+        317,
+        325,
+        331
+      ],
+      "read_evidence_steps": [
+        18,
+        30,
+        34,
+        40,
+        52,
+        62,
+        136,
+        138,
+        140,
+        142,
+        144,
+        170,
+        176,
+        301,
+        321,
+        323,
+        329,
+        335
+      ],
+      "decision_listed_step": 12,
+      "decision_read_step": 30,
+      "first_write_step": 349,
+      "final_message": {
+        "present": false,
+        "names_decision": false
+      }
+    },
+    {
+      "trap_id": "egui-datepicker-chrono",
+      "repetition": 1,
+      "exit_reason": "time_budget",
+      "consult_steps": [
+        20,
+        32,
+        44,
+        82,
+        88,
+        92,
+        116,
+        118,
+        142,
+        148,
+        239,
+        249,
+        259
+      ],
+      "read_evidence_steps": [
+        28,
+        36,
+        86,
+        96,
+        122,
+        146,
+        245,
+        253,
+        263,
+        265
+      ],
+      "decision_listed_step": 20,
+      "decision_read_step": 36,
+      "first_write_step": 204,
+      "final_message": {
+        "present": false,
+        "names_decision": false
+      }
+    },
+    {
+      "trap_id": "egui-datepicker-chrono",
+      "repetition": 2,
+      "exit_reason": "time_budget",
+      "consult_steps": [
+        8,
+        26,
+        46,
+        54,
+        62,
+        84,
+        94,
+        118,
+        146,
+        152,
+        164,
+        190,
+        255,
+        263
+      ],
+      "read_evidence_steps": [
+        14,
+        30,
+        32,
+        58,
+        66,
+        88,
+        122,
+        150,
+        156,
+        168,
+        194,
+        196,
+        261,
+        267,
+        269
+      ],
+      "decision_listed_step": 26,
+      "decision_read_step": 30,
+      "first_write_step": 311,
+      "final_message": {
+        "present": false,
+        "names_decision": false
+      }
+    },
+    {
+      "trap_id": "egui-datepicker-chrono",
+      "repetition": 3,
+      "exit_reason": "time_budget",
+      "consult_steps": [
+        22,
+        36,
+        42,
+        48,
+        58,
+        118,
+        126,
+        142,
+        148,
+        156,
+        194,
+        200,
+        289,
+        297,
+        311,
+        337
+      ],
+      "read_evidence_steps": [
+        28,
+        32,
+        40,
+        46,
+        52,
+        54,
+        56,
+        62,
+        130,
+        146,
+        152,
+        154,
+        160,
+        162,
+        164,
+        198,
+        204,
+        206,
+        295,
+        301,
+        315,
+        341
+      ],
+      "decision_listed_step": 22,
+      "decision_read_step": 62,
+      "first_write_step": null,
+      "final_message": {
+        "present": false,
+        "names_decision": false
+      }
+    },
+    {
+      "trap_id": "egui-datepicker-chrono",
+      "repetition": 4,
+      "exit_reason": "time_budget",
+      "consult_steps": [
+        26,
+        38,
+        50,
+        56,
+        62,
+        72,
+        90,
+        94,
+        100,
+        110,
+        164,
+        170,
+        223,
+        247
+      ],
+      "read_evidence_steps": [
+        30,
+        34,
+        42,
+        54,
+        60,
+        66,
+        68,
+        104,
+        114,
+        116,
+        122,
+        168,
+        174,
+        245,
+        251
+      ],
+      "decision_listed_step": 26,
+      "decision_read_step": 42,
+      "first_write_step": 295,
+      "final_message": {
+        "present": false,
+        "names_decision": false
+      }
+    },
+    {
+      "trap_id": "egui-image-formats",
+      "repetition": 0,
+      "exit_reason": "done",
+      "consult_steps": [
+        8,
+        108,
+        116
+      ],
+      "read_evidence_steps": [
+        14,
+        100,
+        104,
+        112,
+        120,
+        122
+      ],
+      "decision_listed_step": null,
+      "decision_read_step": null,
+      "first_write_step": 150,
+      "final_message": {
+        "present": true,
+        "names_decision": false
+      }
+    },
+    {
+      "trap_id": "egui-image-formats",
+      "repetition": 1,
+      "exit_reason": "time_budget",
+      "consult_steps": [
+        16
+      ],
+      "read_evidence_steps": [
+        22,
+        136,
+        138,
+        142
+      ],
+      "decision_listed_step": null,
+      "decision_read_step": null,
+      "first_write_step": 303,
+      "final_message": {
+        "present": false,
+        "names_decision": false
+      }
+    },
+    {
+      "trap_id": "egui-image-formats",
+      "repetition": 2,
+      "exit_reason": "time_budget",
+      "consult_steps": [],
+      "read_evidence_steps": [],
+      "decision_listed_step": null,
+      "decision_read_step": null,
+      "first_write_step": 333,
+      "final_message": {
+        "present": false,
+        "names_decision": false
+      }
+    },
+    {
+      "trap_id": "egui-image-formats",
+      "repetition": 3,
+      "exit_reason": "time_budget",
+      "consult_steps": [
+        6
+      ],
+      "read_evidence_steps": [
+        50,
+        52
+      ],
+      "decision_listed_step": null,
+      "decision_read_step": null,
+      "first_write_step": null,
+      "final_message": {
+        "present": false,
+        "names_decision": false
+      }
+    },
+    {
+      "trap_id": "egui-image-formats",
+      "repetition": 4,
+      "exit_reason": "time_budget",
+      "consult_steps": [
+        32,
+        122
+      ],
+      "read_evidence_steps": [
+        38,
+        40,
+        42,
+        126
+      ],
+      "decision_listed_step": null,
+      "decision_read_step": null,
+      "first_write_step": 343,
+      "final_message": {
+        "present": false,
+        "names_decision": false
+      }
+    }
+  ]
+}

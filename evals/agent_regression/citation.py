@@ -42,9 +42,10 @@ def _assistant_text(event: dict) -> str | None:
 
 
 def final_message(transcript: Path) -> str | None:
-    """The agent's final message in a Claude Code stream-json transcript: the last `result`
-    event's `result`, else the text blocks of the last assistant event that has any text, else
-    `None`. A line that is not a JSON object is skipped."""
+    """The agent's final message in a stream-json transcript. Claude Code: the last `result`
+    event's `result`, else the text blocks of the last assistant event that has any text.
+    Antigravity CLI: the last `result` event's `response`. Else `None`. A line that is not a JSON
+    object is skipped."""
     result: str | None = None
     assistant: str | None = None
     for line in transcript.read_text(encoding="utf-8", errors="replace").splitlines():
@@ -57,6 +58,10 @@ def final_message(transcript: Path) -> str | None:
         kind = event.get("type")
         if kind == "result" and isinstance(event.get("result"), str):
             result = event["result"]
+        elif event.get("event") == "result" and isinstance(event.get("result"), dict):
+            response = event["result"].get("response")
+            if isinstance(response, str):
+                result = response
         elif kind == "assistant":
             assistant = _assistant_text(event) or assistant
     return result if result is not None else assistant

@@ -47,6 +47,56 @@ cues are specified in [`traps/README.md`](traps/README.md).
 - **Record.** Every run records the model id, the client version, the Bruriah version and commit,
   and the trap set digest.
 
+### The second client: Antigravity CLI
+
+`antigravity.py` runs Antigravity CLI (`agy`) with `run.py --client antigravity`. It needs the
+same clean clone and the same real `bruriah serve`. The differences were measured on `agy` 1.3.5
+(`odd/tasks/antigravity-adapter.md`) and are stated here because they change what a run means:
+
+- **Isolation.** `agy` reads its configuration, MCP servers, rules, skills, hooks and memory from
+  under `HOME`, so each run gets a fresh owner-only `HOME` in the system temp dir, outside the clone
+  and outside the operator's home.
+  - That `HOME` holds a copy of the operator's sign-in token and the run's own permissions, and it
+    is deleted when the run ends.
+  - Each `HOME` carries a marker with its process id. A `HOME` left by a run that was killed
+    outright is removed at the next run.
+  - Before the agent starts, `agy mcp list` must show exactly the condition's servers. A clone
+    carrying `.agents/` or `.gemini/` is refused.
+  - SIGTERM stops a set like Ctrl+C, so the client is stopped and the `HOME` removed.
+  - The client runs with `AGY_CLI_DISABLE_AUTO_UPDATE=1`: `agy` updated itself between runs once,
+    and the runner refuses a set that mixes client versions.
+- **Tools.** Permissions deny the shell (`command(*)`) and URL access (`read_url(*)`,
+  `execute_url(*)`). They allow reads and writes in the clone, and reads of the MCP files the client
+  writes for Bruriah. Measured on `agy` 1.3.5:
+  - a path no rule matches ends the whole run, and a deny wins over any allow;
+  - a broad allow with denied carve-outs is read through by another spelling of the same file (a
+    macOS firmlink under `/System/Volumes/Data`, or another letter case).
+
+  So nothing broad is allowed. Every path around the allowed ones, from `/` down, is denied by
+  name for reads and writes: the operator's home, `/System`, the other temp files, and the run's
+  token copy. A denied read fails and the agent carries on. Two kinds of read match no rule and
+  end the run: another spelling of a path, and a read of a directory above the clone. Either way
+  it is an error run, counted and kept out of every rate, and nothing is read. Claude Code's
+  `Read` has no such limit.
+  - **Web search cannot be turned off** with any mechanism found, so it stays on and every
+    `search_web` call is in the record. Claude Code runs have no web search.
+- **MCP delivery.** `agy` reaches MCP tools through one generic `call_mcp_tool`, recorded as
+  `mcp__<server>__<tool>`. It writes the server instructions and each tool's schema to files the
+  agent reads before calling, so Bruriah's `anthropic/alwaysLoad` meta has no effect on this client.
+- **Conditions.** `baseline` and `unprompted` only. `agy` has no flag to append to the system
+  prompt, and its pre-tool hook does not run in print mode, so `prompted` and `gated` are refused.
+- **Subagents.** The agent can start a subagent (`invoke_subagent`), and what the subagent does is
+  not streamed. The invocation is recorded as a call; the subagent's own tool calls are not. The
+  detector still reads the final tree, so a regression made by a subagent is still scored.
+- **Budgets and cost.** `agy` has no turn limit, so only the time budget is enforced.
+  `--agy-time-budget-seconds` replaces every trap's budget for this client: each tool call passes
+  through the client's own server-side safety checks, which make it slower than Claude Code, and a
+  pilot on the trap budget (900 s) ran out of time before writing anything. A report states the
+  budget it ran with. `agy` reports no cost, so `--max-budget-usd-per-run` is refused. A run
+  stopped by the time budget prints no final event; its token counts are then the sum of the
+  steps' own usage. In print mode, an action that needs a
+  permission prompt ends the turn with no final message; such a run is an error run.
+
 ### Definitions
 
 - **Regression Rate (RR):** the share of runs whose resulting tree reintroduces the rejected
@@ -125,6 +175,23 @@ It does not support any claim that Bruriah prevents reversals (RR is 15/15 in bo
 claim about other clients or models, or any claim about the installed 2.2.0 wheel, which was not
 itself behaviorally measured.
 
+## Result: Antigravity CLI (2026-10-15)
+
+30 runs on `agy` 1.3.6 with `gemini-3.8-flash-high`, at Bruriah `08a81db`: the three egui traps,
+`baseline` (no Bruriah registered) and `unprompted`, five repetitions each. Records, report and
+audit: [`results/antigravity-2026-10-15/`](results/antigravity-2026-10-15/README.md).
+
+- Unprompted agents consulted Bruriah in 14/15 runs.
+- On the two documented traps, silent regressions were 9/10 in both conditions (pooled Fisher exact
+  p = 1.00). Bruriah had no measurable effect on this client and model.
+- A replay of every Bruriah call shows it returned the decision document, with its rationale, in
+  all 10 documented-trap `unprompted` runs, before the agent's first write. The agent read it and
+  went ahead without saying so: a heed failure, not a retrieval failure.
+
+It differs from the Claude Code runs in ways the results README lists: web search on in both
+conditions, an 1800 s time budget, and a baseline without Bruriah instead of one with the
+activation off. It supports no claim about other Gemini models or other clients.
+
 ## Threats to validity
 
 - **One client, one model, three traps.** N = 15 runs per arm. Every trap is in `emilk/egui`.
@@ -172,6 +239,8 @@ uv run python evals/agent_regression/run.py --dry-run \
 ```
 
 A real run adds `--model`, `--claude`, `--bruriah`, `--cache-dir`, `--max-budget-usd-per-run`
-and `--out`. Launch each arm from its own clean worktree at the commit under test; the runner
+and `--out`. For Antigravity CLI, pass `--client antigravity --conditions baseline unprompted`
+with `--agy` and, if the token is not in the default place, `--agy-token`, instead of `--claude`
+and the spend cap. Launch each arm from its own clean worktree at the commit under test; the runner
 records that commit and refuses a dirty tree. To render any run directory, use
 `uv run python evals/agent_regression/report.py <run-dir> --out <dir>`.

@@ -2,8 +2,9 @@
 
 The server sends the same activation to every client: MCP `instructions` in its initialize result
 and `_meta` `anthropic/alwaysLoad` on both tools. Whether a client puts that in front of its model,
-and whether unprompted agents then consult Bruriah, has been measured for Claude Code only. The
-matrix states those three facts per client, and these tests keep it from claiming more.
+and whether unprompted agents then consult Bruriah, has been measured for Claude Code and
+Antigravity only. The matrix states those three facts per client, and these tests keep it from
+claiming more.
 """
 
 from __future__ import annotations
@@ -20,6 +21,8 @@ README = ROOT / "README.md"
 MATRIX_HEADING = "## Activation matrix"
 COLUMNS = ["client", "emitted", "delivered", "consult measured"]
 MEASURED_CLIENT = CLIENT_CAPABILITIES[ClientId.CLAUDE_CODE].display_name
+ANTIGRAVITY = CLIENT_CAPABILITIES[ClientId.ANTIGRAVITY].display_name
+ANTIGRAVITY_RESULTS = "evals/agent_regression/results/antigravity-2026-10-15/README.md"
 
 
 def _matrix() -> list[dict[str, str]]:
@@ -55,15 +58,28 @@ def test_every_client_is_sent_the_activation() -> None:
 def test_only_claude_code_is_claimed_to_deliver_the_activation() -> None:
     delivered = {row["client"]: row["delivered"] for row in _matrix()}
     assert delivered.pop(MEASURED_CLIENT).startswith("yes")
+    # Probed on agy 1.3.6 (odd/tasks/antigravity-adapter.md, L6 and L8): the instructions and the
+    # tool schemas are files the agent opens on demand, so nothing is in front of the model up front.
+    antigravity = delivered.pop(ANTIGRAVITY)
+    assert antigravity.startswith("no")
+    assert "agy 1.3.6" in antigravity
+    assert "on demand" in antigravity
     assert set(delivered.values()) == {"unknown"}
 
 
-def test_only_claude_code_has_a_measured_consult_rate() -> None:
+def test_only_claude_code_and_antigravity_have_a_measured_consult_rate() -> None:
     measured = {row["client"]: row["consult measured"] for row in _matrix()}
     claude_code = measured.pop(MEASURED_CLIENT)
     assert "15/15" in claude_code
     assert "0/15" in claude_code
     assert "evals/agent_regression/README.md" in claude_code
+    antigravity = measured.pop(ANTIGRAVITY)
+    # 14 of the 15 unprompted runs called investigate_work; the baseline had no Bruriah registered,
+    # so it has no "without the activation" count, and the cell must say regressions did not drop.
+    assert "14/15" in antigravity
+    assert "gemini-3.8-flash-high" in antigravity
+    assert "9/10" in antigravity
+    assert ANTIGRAVITY_RESULTS.removeprefix("evals/agent_regression/") in antigravity
     assert set(measured.values()) == {"not measured"}
 
 
