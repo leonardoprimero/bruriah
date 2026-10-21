@@ -196,3 +196,54 @@ client, and measures both. Every run that spends model quota needs the owner's O
   - Resume: rerun `agy-launch/run-rule-ab.sh` and `codex-launch/run-codex-arms.sh` unchanged.
     The runner skips recorded runs and the arms realign by round. Check `agy --version` first:
     the A/B is pinned to 1.4.0 by its first records, so a newer agy is refused.
+- L13 (owner, 2026-10-20): "si lanza todo dale", on the plan to resume Codex unchanged and restart
+  the `agy` A/B on 1.4.3.
+  - `agy` had updated to 1.4.3. The 2 records on 1.4.0 (`out-ab-norule-2026-10-16`) are kept but
+    not mixed in. The A/B restarts from zero with `agy-launch/run-rule-ab-1.4.3.sh`, which is the
+    same launcher with `--date 2026-10-20`, outputs `out-ab-{norule,rule}-2026-10-20`, and log
+    `run-rule-ab-1.4.3.log`.
+  - Codex is still on 0.157.1 and resumes with `codex-launch/run-codex-arms.sh` unchanged
+    (`--date` is provenance only and is not pinned). The owner's Codex sign-in refreshed on
+    2026-10-19, so the `auth.json` hash is now `96b94e7aa495bdaa`, with about 213 h of access
+    token left. The launcher records the new hash at its start.
+- L14 T5 Codex arms complete (2026-10-20, 22:06Z to 22:53Z): 15 runs per arm, 0 errors, 0 failures,
+  `auth.json` hash unchanged (`96b94e7aa495bdaa`) from start to end.
+  - `baseline`: 14/15 regressed (android 5, datepicker 4, image-formats 5).
+  - `unprompted` without the rule: 12/15 regressed (android 5, datepicker 2, image-formats 5).
+  - `unprompted` with the rule: 14/15 regressed (android 5, datepicker 4, image-formats 5).
+  - In all 30 `unprompted` runs `gpt-6-luna` never called a Bruriah tool. Its only tools were
+    `shell` and `file_change`, and 0 of 45 runs cited the decision. Because the rule lives in the
+    `investigate_work` description, Codex cannot measure it. The norule/rule difference (all of
+    it on datepicker) comes from runs that never touched Bruriah, so it is noise. What these runs
+    measure is that this small model does not consult an MCP tool unprompted.
+  - Input tokens per arm were about 1.46M, 1.64M and 1.65M.
+- L15 T4 `agy` 1.4.3 A/B stopped by its launcher after `norule` round 1 (23:30Z). Of its 3 runs:
+  - android: `error` at 1539 s. `result.status` was ERROR: "The stream was interrupted. Please
+    continue the task you were working on."
+  - image-formats: `error` at 1648 s. ERROR: "API error (attempt 1): request failed: Post
+    "https://daily-cloudcode-pa.googleapis.com/v1internal:streamGenerateContent?...".
+  - datepicker: `time_budget` at 1800 s.
+  - Both error runs had already made the regressing change and written a final response. The
+    failure came from Google's model backend. Per the Antigravity adapter rules (L8 there), an
+    error run is excluded from every rate and counted. On 1.3.6 and 1.4.0, `unprompted` runs mostly
+    ran into the 1800 s budget, so 30 runs take about 14 h.
+  - The launcher counts errors across the whole output dir, so relaunching it unchanged would stop
+    again at once. Continuing needs a launcher change and the owner's decision.
+- L16 (owner choice, 2026-10-20): "Seguir tolerando errores de Google (recomendado)".
+  - New `agy-launch/count_hard_errors.py`. It classifies an error run as `api` only when its
+    transcript's final `result` has status ERROR, no denied actions, and an error message from the
+    model backend ("The stream was interrupted", "API error (attempt", "googleapis.com"). Every
+    other error run is `hard`, including one with no result event or no transcript.
+  - Checked on the real dir: 0 hard, 2 api. A synthetic dir with api, other message, denied, no
+    result and missing transcript gave 4 hard, 1 api.
+  - `run-rule-ab-1.4.3.sh` now stops only on a hard error, a failure or a non-zero exit, and logs
+    `hard_errors` and `api_errors` per round. API error runs stay excluded from every rate and are
+    reported. Relaunched under `caffeinate -i`, resuming after the 3 recorded `norule` runs.
+- L17 (owner, 2026-10-21 ~00:58Z): "che no sirve para nada esto no? mejor cerremos sesion". Job-3
+  was stopped. Recorded on 1.4.3: `norule` 4 runs (2 api errors), `rule` 3 runs.
+  - After the stop, the `agy --print` process was still alive, reparented to PID 1, and its run
+    clone and `agy-home-*` were left in the system temp dir. The process was sent SIGTERM and both
+    dirs were removed by hand, leaving 0 client processes and 0 run dirs. Follow-up for the
+    adapter: a hard kill of `run.py` orphans the client and its token home.
+  - Resume: `caffeinate -i bash ~/bruriah-worktrees/agy-launch/run-rule-ab-1.4.3.sh`, after
+    checking that `agy --version` is still 1.4.3.
