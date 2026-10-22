@@ -72,3 +72,8 @@ ADRs, and a Spanish question loses its exact-word leg on an English corpus full 
   still reported it (RED reproduced on macOS). `a309b6d` builds `corpus/adr` in a staging folder and
   swaps it in. Approved and acknowledged. Non-blocking follow-ups: case-colliding ADR paths, one
   `git cat-file` per blob, an OSError while writing an ADR aborts init.
+- L8 CI on PR #56: the escape test failed on all three Windows cells. Its full output showed that on
+  the windows-latest runners git lists nothing under a tree that carries a `..` entry, so no ADR is
+  read and nothing is written. The code is safe there. The test now asserts "nothing outside the
+  corpus" everywhere, and the counts only where git lists the entries. The audit failure was 11 new
+  pillow advisories, fixed separately in #57 (merged as 5fcbc75).
