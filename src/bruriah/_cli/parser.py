@@ -52,8 +52,10 @@ def build_cli_parser(
         "--repo",
         type=Path,
         default=None,
-        help="bootstrap this git repository in one command: default policy, corpus, "
-        "index and client configs, ending with a first question the index can answer",
+        help="bootstrap this git repository in one command: default policy, a corpus of its "
+        "commits and of the committed ADRs under docs/adr, docs/adrs, docs/decisions, "
+        "docs/architecture/decisions, doc/adr, adr, adrs or decisions, index and client configs, "
+        "ending with a first question the index can answer",
     )
     init_parser.add_argument("--limit", type=int, default=None, help="most recent N commits only")
     init_parser.add_argument(
