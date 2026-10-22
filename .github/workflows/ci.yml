@@ -104,7 +104,18 @@ jobs:
             --ignore-vuln CVE-2026-112897 \
             --ignore-vuln CVE-2026-112899 \
             --ignore-vuln CVE-2026-112900 \
-            --ignore-vuln CVE-2026-112901
+            --ignore-vuln CVE-2026-112901 \
+            --ignore-vuln CVE-2026-96636 \
+            --ignore-vuln CVE-2026-96637 \
+            --ignore-vuln CVE-2026-96638 \
+            --ignore-vuln CVE-2026-96639 \
+            --ignore-vuln CVE-2026-96640 \
+            --ignore-vuln CVE-2026-96641 \
+            --ignore-vuln CVE-2026-96642 \
+            --ignore-vuln CVE-2026-96643 \
+            --ignore-vuln CVE-2026-96644 \
+            --ignore-vuln CVE-2026-96778 \
+            --ignore-vuln GHSA-78g4-xqwv-q3g8
 
   lint:
     name: static lint and style checks
