@@ -32,6 +32,12 @@ B=~/.bruriah/myproject       # one directory per project, outside the repo
 bruriah init --repo . --data-dir "$B/data" --config-dir "$B/config"
 ```
 
+`init --repo` indexes the commits that explain why (`--limit N` keeps the newest N) and the
+repository's committed decision records: every `*.md` at `HEAD` under `docs/adr`, `docs/adrs`,
+`docs/decisions`, `docs/architecture/decisions`, `doc/adr`, `adr`, `adrs` or `decisions`.
+Uncommitted edits are not read, nothing is written into the repository, and a re-run drops ADRs
+that `HEAD` no longer has.
+
 The default embedding model (`jinaai/jina-embeddings-v2-base-es`, see section 4) downloads once,
 about 614 MB on disk; after that, `init` on a 677-commit repository took 18.2–18.4s wall clock with
 the model cached, and one `bruriah ask` query took 1.35s -- see
@@ -218,7 +224,7 @@ We evaluate Bruriah against real codebases and publish negative results alongsid
 | **Agent decision reversals (30 runs)** | Unprompted consult **15/15** with Bruriah vs 0/15 without · silent reversals **5/15** vs 15/15 · reversals 15/15 in both arms: Bruriah makes a reversal visible, it does not prevent it | One client and one model only: Claude Code 2.1.292, `claude-fable-5-1`, three `emilk/egui` traps, N = 5 per trap, pre-registered, measured 2026-10-07; see [Agent regression benchmark](evals/agent_regression/README.md) |
 | **Query Latency** | **≈46µs per passage** (linear) | 1,000 passages in 45ms, 16,000 in 734ms on M4 Pro |
 | **Index Size** | **≈5 KB per passage** | 16k passages ≈ 79 MB SQLite database |
-| **Test Suite** | **2,618 tests** · 0 failures · skips only when an environment prerequisite is absent | Full matrix on Python 3.12, 3.13, 3.14 across Linux, macOS, and Windows |
+| **Test Suite** | **2,627 tests** · 0 failures · skips only when an environment prerequisite is absent | Full matrix on Python 3.12, 3.13, 3.14 across Linux, macOS, and Windows |
 
 > **Want the full methodology and ablations?**  
 > Read our in-depth evaluation report: [**Evaluation Methodology & Benchmarks (`evals/project-memory/README.md`)**](evals/project-memory/README.md).

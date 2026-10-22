@@ -18,7 +18,7 @@ import mcp.server.stdio
 import yaml
 from fastembed import TextEmbedding
 
-from . import __version__, agent_surface, clients, gitcorpus, github_corpus, pdfcorpus
+from . import __version__, adrcorpus, agent_surface, clients, gitcorpus, github_corpus, pdfcorpus
 from .github_read import ResponseCache as _GitHubResponseCache
 from ._cli.common import (
     DEFAULT_EMBEDDING_MODEL,
@@ -279,13 +279,15 @@ def _run_init_repo_bootstrap(
     reading documentation first -- the machine was never the bottleneck, the ceremony was. This
     composes the exact steps the front page spells out (default policy, `corpus`, `index`) with
     no retrieval behaviour of its own: every step below is the documented command's own function,
-    so the one-shot cannot drift from the spelled-out path.
+    so the one-shot cannot drift from the spelled-out path. The one addition is `adrcorpus`, which
+    copies the repository's committed ADRs into their own corpus subfolder; `--limit` never
+    reaches it, because it limits commits and an ADR is not one.
 
     The corpus lands in `data_dir/corpus` and the policy in `config_dir/policy.yaml` -- inside
     directories this tool already owns and `ensure_private_dirs` already protects, so the
     bootstrap invents no new location. `index` is skipped when the history yielded nothing:
     an index of zero documents can only return nothing, and building it would dress that up as
-    a completed setup."""
+    a completed setup -- so it is skipped only when neither the commits nor the ADRs yielded one."""
     if not (repo / ".git").exists():
         raise CliError("not_a_git_repository")
     ensure_private_dirs(paths)
@@ -294,7 +296,8 @@ def _run_init_repo_bootstrap(
         policy_path.write_text(_DEFAULT_BOOTSTRAP_POLICY, encoding="utf-8", newline="\n")
     corpus_root = paths.data_dir / "corpus"
     corpus_result = gitcorpus.build(repo, corpus_root, limit)
-    if corpus_result.written:
+    adr_result = adrcorpus.build(repo, corpus_root)
+    if corpus_result.written or adr_result.written:
         if is_symmetric_model(model_name):
             print(
                 f"Note: {model_name!r} is a symmetric-similarity model trained for paraphrase "
@@ -320,6 +323,7 @@ def _run_init_repo_bootstrap(
         "policy": policy_path,
         "corpus_root": corpus_root,
         "corpus": corpus_result,
+        "adr": adr_result,
         "index": index_result,
         "question": _suggested_question(corpus_root),
     }
@@ -478,7 +482,26 @@ def _cmd_init(
             f"{corpus_result.examined} non-merge commits -> {bootstrap['corpus_root']}",
             file=sys.stderr,
         )
-        _report_corpus_coverage(corpus_result)
+        adr_result = bootstrap["adr"]
+        if corpus_result.written or not adr_result.written:
+            # With no commit document but some ADRs, "no reasoning to retrieve" would be false.
+            _report_corpus_coverage(corpus_result)
+        if adr_result.written:
+            print(
+                f"Corpus: {adr_result.written} decision document(s) from "
+                f"{', '.join(adr_result.folders)} -> {bootstrap['corpus_root'] / adrcorpus.SUBDIR}",
+                file=sys.stderr,
+            )
+        if adr_result.skipped:
+            print(
+                f"Skipped {adr_result.skipped} committed ADR file(s) that are not UTF-8 or have invalid frontmatter.",
+                file=sys.stderr,
+            )
+        if adr_result.unsafe:
+            print(
+                f"Skipped {adr_result.unsafe} committed ADR path(s) with a '.' or '..' component.",
+                file=sys.stderr,
+            )
         if bootstrap["index"] is None:
             # The coverage explanation above already said why; the typed code makes the stop
             # scriptable. Config and client snippets are NOT written on this path: they would

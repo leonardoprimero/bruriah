@@ -1395,6 +1395,265 @@ def test_init_repo_never_touches_an_existing_policy(tmp_path: Path) -> None:
     assert (config_dir / "policy.yaml").read_text(encoding="utf-8") == theirs
 
 
+# --- `init --repo` also indexes the repository's committed decision documents (ADRs) ---------
+
+_ADR_ONE = "# ADR 001: Keep the ledger offline\n\nWe chose the zanzibar quokka ledger so audits never need a network.\n"
+_ADR_TWO = "# Decision: Retire the nightly batch\n\nThe nightly batch is replaced by streaming exports.\n"
+
+
+def _git_in(repo: Path, *args: str) -> None:
+    subprocess.run(["git", *args], cwd=repo, check=True, capture_output=True)
+
+
+def _adr_repo(tmp_path: Path, files: "dict[str, str]") -> Path:
+    """`_decision_repo` plus one subject-only commit adding `files`, so the commit corpus is
+    exactly the one `_decision_repo` yields and every ADR document comes from the folders."""
+    repo = _decision_repo(tmp_path)
+    for relative, text in files.items():
+        (repo / relative).parent.mkdir(parents=True, exist_ok=True)
+        (repo / relative).write_text(text, encoding="utf-8", newline="\n")
+    _git_in(repo, "add", "-A")
+    _git_in(repo, "commit", "-q", "-m", "docs: add decision records")
+    return repo
+
+
+def _stderr_lines(captured: "pytest.CaptureResult[str]") -> "list[str]":
+    return captured.err.splitlines()
+
+
+def _corpus_files(root: Path) -> "list[str]":
+    return sorted(path.relative_to(root).as_posix() for path in root.rglob("*.md"))
+
+
+def test_init_repo_indexes_committed_adrs_and_ask_finds_them(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    repo = _adr_repo(tmp_path, {"docs/adr/adr-001-x.md": _ADR_ONE})
+    args = cli._build_cli_parser().parse_args(_init_repo_args(tmp_path, repo))
+    assert cli._cmd_init(args, embedder_factory=_fake_embedder_factory) == 0
+    lines = _stderr_lines(capsys.readouterr())
+
+    corpus_root = tmp_path / "data" / "corpus"
+    assert f"Corpus: 1 decision document(s) from docs/adr -> {corpus_root / 'adr'}" in lines
+    assert (corpus_root / "adr" / "docs" / "adr" / "adr-001-x.md").read_text(encoding="utf-8") == _ADR_ONE
+    assert any(line.startswith("Index: ") and " from 2 document(s) " in line for line in lines)
+    # Nothing was written into the repository being read.
+    status = subprocess.run(["git", "status", "--porcelain"], cwd=repo, capture_output=True, text=True)
+    assert status.stdout == ""
+
+    ask = cli._build_cli_parser().parse_args(
+        [
+            "ask",
+            "zanzibar quokka ledger",
+            "--data-dir",
+            str(tmp_path / "data"),
+            "--config-dir",
+            str(tmp_path / "config"),
+            "--cache-dir",
+            str(tmp_path / "cache"),
+            "--log-dir",
+            str(tmp_path / "log"),
+        ]
+    )
+    assert cli._cmd_ask(ask, embedder_factory=_fake_embedder_factory) == 0
+    assert "[1] adr/docs/adr/adr-001-x.md" in capsys.readouterr().out
+
+
+def test_init_repo_reads_adrs_from_head_never_the_working_tree(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    repo = _adr_repo(tmp_path, {"docs/adr/adr-001-x.md": _ADR_ONE})
+    (repo / "docs" / "adr" / "adr-001-x.md").write_text("# Uncommitted edit\n", encoding="utf-8")
+    (repo / "docs" / "adr" / "adr-002-draft.md").write_text(_ADR_TWO, encoding="utf-8")
+    args = cli._build_cli_parser().parse_args(_init_repo_args(tmp_path, repo))
+    assert cli._cmd_init(args, embedder_factory=_fake_embedder_factory) == 0
+    lines = _stderr_lines(capsys.readouterr())
+
+    adr_root = tmp_path / "data" / "corpus" / "adr"
+    assert f"Corpus: 1 decision document(s) from docs/adr -> {adr_root}" in lines
+    assert _corpus_files(adr_root) == ["docs/adr/adr-001-x.md"]
+    assert (adr_root / "docs" / "adr" / "adr-001-x.md").read_text(encoding="utf-8") == _ADR_ONE
+
+
+def test_init_repo_without_adr_folders_prints_exactly_as_before(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Pinned on the output `init --repo` printed before ADR folders were read: a repository
+    without any of them must not see a single new or changed line."""
+    repo = _decision_repo(tmp_path)
+    args = cli._build_cli_parser().parse_args(_init_repo_args(tmp_path, repo))
+    assert cli._cmd_init(args, embedder_factory=_fake_embedder_factory) == 0
+    lines = _stderr_lines(capsys.readouterr())
+
+    corpus_root = tmp_path / "data" / "corpus"
+    assert lines[:3] == [
+        f"Reading the history of {repo}...",
+        f"Corpus: 1 decision document(s) from 2 non-merge commits -> {corpus_root}",
+        "1 of 2 non-merge commits carried an explanatory body; the other 1 record what changed but "
+        "not why and were skipped. That share is the ceiling on what any of this can retrieve.",
+    ]
+    assert lines[3].startswith("Index: 2 passage(s) from 1 document(s) (0 reused, 1 embedded), build ")
+    assert lines[4] == f"Wrote private configuration to {tmp_path / 'config' / 'config.json'}"
+    assert not (corpus_root / "adr").exists()
+
+
+def test_init_repo_rerun_keeps_adrs_once_and_drops_those_deleted_from_head(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    repo = _adr_repo(tmp_path, {"docs/adr/adr-001-x.md": _ADR_ONE, "decisions/retire-batch.md": _ADR_TWO})
+    args = cli._build_cli_parser().parse_args(_init_repo_args(tmp_path, repo))
+    assert cli._cmd_init(args, embedder_factory=_fake_embedder_factory) == 0
+    adr_root = tmp_path / "data" / "corpus" / "adr"
+    assert f"Corpus: 2 decision document(s) from docs/adr, decisions -> {adr_root}" in _stderr_lines(
+        capsys.readouterr()
+    )
+
+    _git_in(repo, "rm", "-q", "decisions/retire-batch.md")
+    _git_in(repo, "commit", "-q", "-m", "docs: drop the batch decision")
+    assert cli._cmd_init(args, embedder_factory=_fake_embedder_factory) == 0
+    lines = _stderr_lines(capsys.readouterr())
+
+    assert f"Corpus: 1 decision document(s) from docs/adr -> {adr_root}" in lines
+    assert _corpus_files(adr_root) == ["docs/adr/adr-001-x.md"]
+    assert not (adr_root / "decisions").exists()
+    assert any(line.startswith("Index: ") and " from 2 document(s) " in line for line in lines)
+
+
+def test_init_repo_limit_limits_commits_never_adrs(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """The newest commit is the subject-only one that added the ADRs, so `--limit 1` leaves no
+    commit document at all: the decision documents alone still make an index worth building."""
+    repo = _adr_repo(tmp_path, {"docs/adr/adr-001-x.md": _ADR_ONE, "docs/adr/adr-002-y.md": _ADR_TWO})
+    args = cli._build_cli_parser().parse_args([*_init_repo_args(tmp_path, repo), "--limit", "1"])
+    assert cli._cmd_init(args, embedder_factory=_fake_embedder_factory) == 0
+    lines = _stderr_lines(capsys.readouterr())
+
+    corpus_root = tmp_path / "data" / "corpus"
+    assert f"Corpus: 0 decision document(s) from 1 non-merge commits -> {corpus_root}" in lines
+    assert f"Corpus: 2 decision document(s) from docs/adr -> {corpus_root / 'adr'}" in lines
+    assert any(line.startswith("Index: ") and " from 2 document(s) " in line for line in lines)
+    assert (tmp_path / "data" / "active.json").is_file()
+
+
+def test_init_repo_skips_an_unparseable_adr_and_markdown_outside_adr_folders(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """One ADR the index cannot parse must not fail the whole build, and only the ADR folders
+    are read: a README or a guide elsewhere in the repository is not a decision record."""
+    repo = _adr_repo(
+        tmp_path,
+        {
+            "docs/adr/adr-001-x.md": _ADR_ONE,
+            "docs/adr/adr-002-broken.md": "---\nstatus: accepted\n# never closed\n",
+            "docs/adr/notes.txt": "not markdown\n",
+            "docs/guide.md": "# Guide\n",
+            "README.md": "# Readme\n",
+        },
+    )
+    args = cli._build_cli_parser().parse_args(_init_repo_args(tmp_path, repo))
+    assert cli._cmd_init(args, embedder_factory=_fake_embedder_factory) == 0
+    lines = _stderr_lines(capsys.readouterr())
+
+    adr_root = tmp_path / "data" / "corpus" / "adr"
+    assert f"Corpus: 1 decision document(s) from docs/adr -> {adr_root}" in lines
+    assert "Skipped 1 committed ADR file(s) that are not UTF-8 or have invalid frontmatter." in lines
+    assert _corpus_files(adr_root) == ["docs/adr/adr-001-x.md"]
+
+
+def test_init_repo_rerun_keeps_an_adr_whose_name_changed_only_in_case(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """On a case-insensitive filesystem (the macOS default) a case-only rename reuses the old file
+    on disk; a re-run must still end with exactly the ADR `HEAD` has, under its new name."""
+    repo = _adr_repo(tmp_path, {"docs/adr/ADR-0001.md": _ADR_ONE})
+    args = cli._build_cli_parser().parse_args(_init_repo_args(tmp_path, repo))
+    assert cli._cmd_init(args, embedder_factory=_fake_embedder_factory) == 0
+    _git_in(repo, "mv", "-f", "docs/adr/ADR-0001.md", "docs/adr/adr-0001.md")
+    _git_in(repo, "commit", "-q", "-m", "docs: lowercase the decision records")
+    capsys.readouterr()
+
+    assert cli._cmd_init(args, embedder_factory=_fake_embedder_factory) == 0
+    lines = _stderr_lines(capsys.readouterr())
+
+    adr_root = tmp_path / "data" / "corpus" / "adr"
+    assert f"Corpus: 1 decision document(s) from docs/adr -> {adr_root}" in lines
+    assert _corpus_files(adr_root) == ["docs/adr/adr-0001.md"]
+    assert (adr_root / "docs" / "adr" / "adr-0001.md").read_text(encoding="utf-8") == _ADR_ONE
+
+
+def _git_out(repo: Path, *args: str, stdin: str = "") -> str:
+    return subprocess.run(
+        ["git", *args], cwd=repo, input=stdin, check=True, capture_output=True, text=True
+    ).stdout.strip()
+
+
+def test_init_repo_never_writes_an_adr_path_that_climbs_out_of_the_corpus(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """A repository is untrusted input, and git's own plumbing accepts a tree entry named `..`.
+    A committed `docs/adr/../../../../../escaped.md` must never be written outside `corpus/adr`."""
+    repo = _adr_repo(tmp_path, {"docs/adr/adr-001-x.md": _ADR_ONE})
+    blob = _git_out(repo, "hash-object", "-w", "--stdin", stdin="# Escaped\n\nOutside the corpus.\n")
+    tree = _git_out(repo, "mktree", stdin=f"100644 blob {blob}\tescaped.md\n")
+    for _ in range(5):
+        tree = _git_out(repo, "mktree", stdin=f"040000 tree {tree}\t..\n")
+    adr_tree = _git_out(repo, "rev-parse", "HEAD:docs/adr")
+    entries = _git_out(repo, "ls-tree", adr_tree)
+    adr_tree = _git_out(repo, "mktree", stdin=f"{entries}\n040000 tree {tree}\t..\n")
+    docs_tree = _git_out(repo, "mktree", stdin=f"040000 tree {adr_tree}\tadr\n")
+    root_entries = _git_out(repo, "ls-tree", "HEAD").splitlines()
+    root_entries = [line for line in root_entries if not line.endswith("\tdocs")]
+    root_tree = _git_out(repo, "mktree", stdin="\n".join([*root_entries, f"040000 tree {docs_tree}\tdocs"]) + "\n")
+    commit = _git_out(repo, "commit-tree", root_tree, "-p", "HEAD", "-m", "docs: climb")
+    _git_in(repo, "update-ref", "HEAD", commit)
+
+    args = cli._build_cli_parser().parse_args(_init_repo_args(tmp_path, repo))
+    assert cli._cmd_init(args, embedder_factory=_fake_embedder_factory) == 0
+    lines = _stderr_lines(capsys.readouterr())
+
+    adr_root = tmp_path / "data" / "corpus" / "adr"
+    # On the GitHub windows-latest runners git lists nothing under a tree that carries a `..`
+    # entry, so neither ADR is read there. What must hold everywhere is the check below it.
+    if sys.platform != "win32":
+        assert f"Corpus: 1 decision document(s) from docs/adr -> {adr_root}" in lines, "\n".join(lines)
+        assert "Skipped 1 committed ADR path(s) with a '.' or '..' component." in lines, "\n".join(lines)
+        assert _corpus_files(adr_root) == ["docs/adr/adr-001-x.md"]
+    assert [path for path in tmp_path.parent.rglob("escaped.md") if ".git" not in path.parts] == []
+
+
+def test_corpus_command_never_reads_adr_folders(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """`bruriah corpus` shares `gitcorpus.build` with `init --repo`; it stays commits only."""
+    repo = _adr_repo(tmp_path, {"docs/adr/adr-001-x.md": _ADR_ONE})
+    out = tmp_path / "out"
+    assert cli.bruriah_main(["corpus", "--repo", str(repo), "--out", str(out)]) == 0
+    captured = capsys.readouterr()
+
+    assert json.loads(captured.out) == {
+        "commits_examined": 3,
+        "documents": 1,
+        "out": str(out),
+        "revision": "HEAD",
+    }
+    assert len(_corpus_files(out)) == 1
+    assert not (out / "adr").exists()
+    assert _stderr_lines(captured) == [
+        "1 of 3 non-merge commits carried an explanatory body; the other 2 record what changed but "
+        "not why and were skipped. That share is the ceiling on what any of this can retrieve.",
+    ]
+
+
 def test_the_model_cache_is_pinned_under_the_private_cache_dir(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
