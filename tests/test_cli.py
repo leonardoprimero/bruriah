@@ -1567,6 +1567,28 @@ def test_init_repo_skips_an_unparseable_adr_and_markdown_outside_adr_folders(
     assert _corpus_files(adr_root) == ["docs/adr/adr-001-x.md"]
 
 
+def test_init_repo_rerun_keeps_an_adr_whose_name_changed_only_in_case(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """On a case-insensitive filesystem (the macOS default) a case-only rename reuses the old file
+    on disk; a re-run must still end with exactly the ADR `HEAD` has, under its new name."""
+    repo = _adr_repo(tmp_path, {"docs/adr/ADR-0001.md": _ADR_ONE})
+    args = cli._build_cli_parser().parse_args(_init_repo_args(tmp_path, repo))
+    assert cli._cmd_init(args, embedder_factory=_fake_embedder_factory) == 0
+    _git_in(repo, "mv", "-f", "docs/adr/ADR-0001.md", "docs/adr/adr-0001.md")
+    _git_in(repo, "commit", "-q", "-m", "docs: lowercase the decision records")
+    capsys.readouterr()
+
+    assert cli._cmd_init(args, embedder_factory=_fake_embedder_factory) == 0
+    lines = _stderr_lines(capsys.readouterr())
+
+    adr_root = tmp_path / "data" / "corpus" / "adr"
+    assert f"Corpus: 1 decision document(s) from docs/adr -> {adr_root}" in lines
+    assert _corpus_files(adr_root) == ["docs/adr/adr-0001.md"]
+    assert (adr_root / "docs" / "adr" / "adr-0001.md").read_text(encoding="utf-8") == _ADR_ONE
+
+
 def _git_out(repo: Path, *args: str, stdin: str = "") -> str:
     return subprocess.run(
         ["git", *args], cwd=repo, input=stdin, check=True, capture_output=True, text=True

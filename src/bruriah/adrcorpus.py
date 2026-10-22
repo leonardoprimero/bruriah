@@ -13,15 +13,19 @@ The folders, relative to the repository root:
 Only `*.md` blobs are read; symlinks and submodules are skipped. Each document is written byte for
 byte under `<out>/adr/<its path in the repository>`, a subfolder `gitcorpus` never writes (its
 documents are flat files at the top of the corpus), so the two can never collide. That subfolder is
-this module's alone: every run rewrites it from the revision and removes what the revision no longer
-has, so re-running neither duplicates a decision nor keeps one the repository deleted.
+this module's alone: every run builds it afresh in a sibling staging folder and then replaces the
+old one, so re-running neither duplicates a decision nor keeps one the repository deleted. Nothing
+is pruned file by file: on a case-insensitive filesystem a case-only rename would make a pruner
+delete the file it had just written.
 
 Nothing is written to the repository being read.
 """
 
 from __future__ import annotations
 
+import shutil
 import subprocess
+import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -83,11 +87,30 @@ def build(repo: Path, out: Path, *, revision: str = "HEAD") -> AdrResult:
     _require_commit(repo, revision)
     listing = _git_bytes(repo, "ls-tree", "-r", "-z", revision, "--", *ADR_FOLDERS)
     target_root = out / SUBDIR
-    kept: set[Path] = set()
+    out.mkdir(parents=True, exist_ok=True)
+    staging = Path(tempfile.mkdtemp(prefix=f".{SUBDIR}-", dir=out))
+    try:
+        written, folders, skipped, unsafe = _write_tree(repo, listing, staging)
+        if target_root.is_symlink():
+            target_root.unlink()
+        elif target_root.is_dir():
+            shutil.rmtree(target_root)
+        if written:
+            staging.rename(target_root)
+    finally:
+        if staging.exists():
+            shutil.rmtree(staging)
+    ordered = tuple(name for name in ADR_FOLDERS if name in folders)
+    return AdrResult(written=written, folders=ordered, skipped=skipped, unsafe=unsafe)
+
+
+def _write_tree(repo: Path, listing: bytes, root: Path) -> tuple[int, list[str], int, int]:
+    """Write every safe, parseable `*.md` blob in `listing` under `root`; return the counts."""
+    resolved_root = root.resolve()
+    written = 0
     folders: list[str] = []
     skipped = 0
     unsafe = 0
-    resolved_root = target_root.resolve()
     for entry in listing.decode("utf-8", "surrogateescape").split("\0"):
         if not entry:
             continue
@@ -96,7 +119,7 @@ def build(repo: Path, out: Path, *, revision: str = "HEAD") -> AdrResult:
         if kind != "blob" or mode not in ("100644", "100755") or not path.endswith(".md"):
             continue
         parts = path.split("/")
-        target = target_root.joinpath(*parts)
+        target = root.joinpath(*parts)
         if any(part in ("", ".", "..") for part in parts) or not target.resolve().is_relative_to(resolved_root):
             unsafe += 1
             continue
@@ -106,18 +129,8 @@ def build(repo: Path, out: Path, *, revision: str = "HEAD") -> AdrResult:
             continue
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_bytes(raw)
-        kept.add(target)
+        written += 1
         folder = next(name for name in ADR_FOLDERS if path.startswith(f"{name}/"))
         if folder not in folders:
             folders.append(folder)
-    if target_root.is_dir():
-        for stale in target_root.rglob("*.md"):
-            if stale not in kept:
-                stale.unlink()
-        for directory in sorted(target_root.rglob("*"), key=lambda item: len(item.parts), reverse=True):
-            if directory.is_dir() and not any(directory.iterdir()):
-                directory.rmdir()
-        if not any(target_root.iterdir()):
-            target_root.rmdir()
-    ordered = tuple(name for name in ADR_FOLDERS if name in folders)
-    return AdrResult(written=len(kept), folders=ordered, skipped=skipped, unsafe=unsafe)
+    return written, folders, skipped, unsafe
