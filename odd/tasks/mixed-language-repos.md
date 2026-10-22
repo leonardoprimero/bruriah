@@ -27,7 +27,7 @@ ADRs, and a Spanish question loses its exact-word leg on an English corpus full 
 | T1 | S2 | worker, test-first: ADR folders in `init --repo`, help and README | feature commit (L6) |
 | T2 | S3, S4 | worker spike: gate variants measured on the public eval and the private trial set | failed the S4 gate (L5) |
 | T3 | S3 | the measured gate, test-first, with its disclosure and docs (only if T2 passes) | dropped (L5) |
-| T4 | S2, S3 | re-index the trial repository, re-run the trial questions, PR | |
+| T4 | S2, S3 | re-index the trial repository, re-run the trial questions, PR | trial in L6, PR opened |
 
 ## Log
 
@@ -67,3 +67,8 @@ ADRs, and a Spanish question loses its exact-word leg on an English corpus full 
     ADRs added in 117 s. A Spanish question about the outbox now returns the outbox ADR at rank 1,
     and an English one about Redis Streams returns that ADR at rank 1. The repository had 0 changes.
   - Full suite 2603 passed, 23 skipped. ruff, ruff format and mypy are clean.
+- L7 Native review (risk, resilience, reliability) required one correction: on a case-insensitive
+  filesystem a case-only ADR rename made the pruner delete the file it had just written while init
+  still reported it (RED reproduced on macOS). `a309b6d` builds `corpus/adr` in a staging folder and
+  swaps it in. Approved and acknowledged. Non-blocking follow-ups: case-colliding ADR paths, one
+  `git cat-file` per blob, an OSError while writing an ADR aborts init.
