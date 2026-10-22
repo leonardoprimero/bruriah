@@ -1621,8 +1621,8 @@ def test_init_repo_never_writes_an_adr_path_that_climbs_out_of_the_corpus(
     lines = _stderr_lines(capsys.readouterr())
 
     adr_root = tmp_path / "data" / "corpus" / "adr"
-    assert f"Corpus: 1 decision document(s) from docs/adr -> {adr_root}" in lines
-    assert "Skipped 1 committed ADR path(s) with a '.' or '..' component." in lines
+    assert f"Corpus: 1 decision document(s) from docs/adr -> {adr_root}" in lines, "\n".join(lines)
+    assert "Skipped 1 committed ADR path(s) with a '.' or '..' component." in lines, "\n".join(lines)
     assert _corpus_files(adr_root) == ["docs/adr/adr-001-x.md"]
     assert [path for path in tmp_path.parent.rglob("escaped.md") if ".git" not in path.parts] == []
 
