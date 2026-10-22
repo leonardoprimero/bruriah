@@ -65,6 +65,13 @@ The server tells an agent when to consult Bruriah in two ways. Its initialize re
 loads their full descriptions at session start. The server sends both to every client. What a
 client does with them is up to the client.
 
+The rule for a change that departs from a recorded decision is in both places. The instructions
+say to open a decision with `read_evidence` before contradicting it, and to say so when a change
+departs from it. The `investigate_work` description says the same and asks for the decision's
+commit in the final message. It is repeated there because a client can show the model the
+description and not the instructions: Antigravity writes the instructions to a file, which Gemini
+opened in 2 of 15 measured runs.
+
 - **emitted**: the server sends the activation to this client. CI checks it against the built
   wheel over stdio (`scripts/verify_activation.py`).
 - **delivered**: the client puts the instructions in front of its model and loads both tool
