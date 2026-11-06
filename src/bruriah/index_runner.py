@@ -72,6 +72,21 @@ def _embedding_fingerprint(model: TextEmbedding) -> str:
     )
 
 
+def load_cached_first(construct: Callable[..., Any], model_name: str) -> Any:
+    """Build a fastembed model from the local cache, reaching the Hub only on a cache miss.
+
+    Without `local_files_only`, fastembed calls `model_info()` on the Hugging Face Hub on every
+    construction to learn the newest revision: every `ask` and every `serve` start touched the
+    network even with `network_enabled: false`, and a new upstream revision would be pulled in
+    silently and then refused by the index's `embedding_fingerprint`. fastembed raises
+    `ValueError` when no source can provide the model, which with `local_files_only` means the
+    model is not cached -- the first `init` -- and only then is the download allowed."""
+    try:
+        return construct(model_name=model_name, local_files_only=True)
+    except ValueError:
+        return construct(model_name=model_name)
+
+
 def _default_embedder_factory(model_name: str) -> tuple[Embedder, str, int]:
     """Real fastembed model; tests inject a fake factory so the suite never loads real ONNX."""
     with warnings.catch_warnings():
@@ -88,7 +103,7 @@ def _default_embedder_factory(model_name: str) -> tuple[Embedder, str, int]:
         # Matched by message, never by category: any OTHER warning fastembed raises has no such
         # backstop and must still reach the user.
         warnings.filterwarnings("ignore", message=".*mean pooling instead of CLS.*", category=UserWarning)
-        model = TextEmbedding(model_name=model_name)
+        model = load_cached_first(TextEmbedding, model_name)
     fingerprint = _embedding_fingerprint(model)
 
     def embed(texts: list[str]) -> list[bytes]:

@@ -167,6 +167,13 @@ CREATE TABLE passages (
     search_text TEXT NOT NULL,
     vector BLOB NOT NULL, FOREIGN KEY(document_ref) REFERENCES documents(document_ref)
 ) WITHOUT ROWID;
+-- `_stored_document` looks passages up by document once per document on every open and every
+-- rebuild; without this index each lookup scans the whole table, O(documents x passages).
+CREATE INDEX idx_passages_document ON passages(document_ref, ref);
+-- `passages` keeps every vector inline, so its primary-key b-tree is mostly overflow pages. The
+-- validation's `PRAGMA foreign_key_check` probes it once per `term_postings` row (1.5M on an
+-- 8,883-document corpus); this narrow index answers those probes, 22.5s -> 1.5s measured.
+CREATE UNIQUE INDEX idx_passages_ref ON passages(ref);
 CREATE TABLE lineage (
     successor_ref TEXT NOT NULL,
     predecessor_target TEXT NOT NULL,
@@ -259,6 +266,13 @@ def _compatible(previous: sqlite3.Connection, config: BuildConfig) -> bool:
     )
 
 
+PASSAGES_BY_DOCUMENT = (
+    "SELECT ref, document_ref, relative_path, heading_path, start_line, end_line, "
+    "text, source_hash, metadata, search_text, vector FROM passages "
+    "WHERE document_ref = ? ORDER BY ref"
+)
+
+
 def _stored_document(
     source: sqlite3.Connection, document: Document, dimensions: int
 ) -> tuple[tuple[object, ...], list[tuple[object, ...]]] | None:
@@ -273,12 +287,7 @@ def _stored_document(
         "SELECT document_ref, relative_path, source_hash, metadata FROM documents WHERE relative_path = ?",
         (document.relative_path,),
     ).fetchone()
-    passages = source.execute(
-        "SELECT ref, document_ref, relative_path, heading_path, start_line, end_line, "
-        "text, source_hash, metadata, search_text, vector FROM passages "
-        "WHERE document_ref = ? ORDER BY ref",
-        (document.document_ref,),
-    ).fetchall()
+    passages = source.execute(PASSAGES_BY_DOCUMENT, (document.document_ref,)).fetchall()
     expected_passages = sorted(
         (
             passage.ref,

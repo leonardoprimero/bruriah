@@ -627,7 +627,7 @@ def test_only_the_pooling_notice_is_swallowed_on_model_construction(tmp_path: Pa
         model_file="model.onnx", sources=SimpleNamespace(hf="qdrant/model", url=None)
     )
 
-    def _noisy(model_name: str):
+    def _noisy(model_name: str, **_kwargs: object):
         warnings.warn(f"The model {model_name} now uses mean pooling instead of CLS embedding.", UserWarning)
         warnings.warn("a different fastembed problem, with no backstop", UserWarning)
         return SimpleNamespace(model=backend, embed=lambda texts: [], embedding_size=3)
@@ -640,6 +640,103 @@ def test_only_the_pooling_notice_is_swallowed_on_model_construction(tmp_path: Pa
     raised = [str(item.message) for item in recwarn]
     assert not any("mean pooling" in message for message in raised), "filtered too little"
     assert any("no backstop" in message for message in raised), "filtered too much"
+
+
+def _fastembed_double(tmp_path: Path) -> SimpleNamespace:
+    artifact = tmp_path / "model.onnx"
+    artifact.write_bytes(b"model-weights")
+    backend = type("PooledEmbedding", (), {})()
+    backend._model_dir = tmp_path
+    backend.model_description = SimpleNamespace(
+        model_file="model.onnx", sources=SimpleNamespace(hf="qdrant/model", url=None)
+    )
+    return SimpleNamespace(model=backend, embed=lambda texts: [], embedding_size=3)
+
+
+def test_a_cached_model_loads_without_asking_the_hub(tmp_path: Path, monkeypatch) -> None:
+    """Without `local_files_only`, fastembed calls `model_info()` on the Hugging Face Hub on every
+    construction to learn the newest revision -- so every `ask` and every `serve` start reached the
+    network even with `network_enabled: false`, and a new upstream revision would be pulled in
+    silently and break the index's `embedding_fingerprint`. A cached model must load from disk."""
+    calls: list[dict[str, object]] = []
+    model = _fastembed_double(tmp_path)
+
+    def _text_embedding(model_name: str, **kwargs: object) -> SimpleNamespace:
+        calls.append({"model_name": model_name, **kwargs})
+        return model
+
+    monkeypatch.setattr(index_runner_module, "TextEmbedding", _text_embedding)
+    _, _, dimensions = cli_module._default_embedder_factory("qdrant/model")
+
+    assert calls == [{"model_name": "qdrant/model", "local_files_only": True}]
+    assert dimensions == 3
+
+
+def test_a_model_missing_from_the_cache_is_downloaded_once(tmp_path: Path, monkeypatch) -> None:
+    """The first `init` still has to download the model: only a cache miss may reach the Hub."""
+    calls: list[dict[str, object]] = []
+    model = _fastembed_double(tmp_path)
+
+    def _text_embedding(model_name: str, **kwargs: object) -> SimpleNamespace:
+        calls.append({"model_name": model_name, **kwargs})
+        if kwargs.get("local_files_only"):
+            raise ValueError(f"Could not load model {model_name} from any source.")
+        return model
+
+    monkeypatch.setattr(index_runner_module, "TextEmbedding", _text_embedding)
+    cli_module._default_embedder_factory("qdrant/model")
+
+    assert calls == [
+        {"model_name": "qdrant/model", "local_files_only": True},
+        {"model_name": "qdrant/model"},
+    ]
+
+
+def test_a_cached_reranker_loads_without_asking_the_hub(monkeypatch) -> None:
+    import fastembed.rerank.cross_encoder as cross_encoder_module
+
+    calls: list[dict[str, object]] = []
+
+    def _cross_encoder(model_name: str, **kwargs: object) -> SimpleNamespace:
+        calls.append({"model_name": model_name, **kwargs})
+        return SimpleNamespace(rerank=lambda query, documents: [0.5 for _ in documents])
+
+    monkeypatch.setattr(cross_encoder_module, "TextCrossEncoder", _cross_encoder)
+    rerank = cli_module._default_reranker_factory("example/reranker")
+
+    assert calls == [{"model_name": "example/reranker", "local_files_only": True}]
+    assert rerank("query", ["a", "b"]) == [0.5, 0.5]
+
+
+def test_passages_are_looked_up_by_document_through_an_index(tmp_path: Path) -> None:
+    """`_stored_document` runs once per document on every snapshot open and every rebuild. Without
+    an index on `passages.document_ref` each run scanned the whole table, O(documents x passages):
+    49 of the 77 seconds of one `ask` on an 8,883-document corpus."""
+    root, policy = write_corpus(tmp_path)
+    candidate = tmp_path / "candidate.sqlite3"
+    build_candidate(config(root, tmp_path / "policy.yaml"), candidate, policy, fake_embeddings)
+
+    with closing(open_candidate(candidate)) as database:
+        plan = database.execute(f"EXPLAIN QUERY PLAN {index_module.PASSAGES_BY_DOCUMENT}", ("x",)).fetchall()
+
+    details = [row[3] for row in plan]
+    assert details == ["SEARCH passages USING INDEX idx_passages_document (document_ref=?)"]
+
+
+def test_passage_refs_have_a_narrow_unique_index_for_the_foreign_key_check(tmp_path: Path) -> None:
+    """Every open runs `PRAGMA foreign_key_check`, which probes `passages` once per
+    `term_postings` row. Through the primary key -- whose rows carry the inline vectors -- that took
+    22.5s on an 8,883-document corpus; a narrow unique index on `ref` answers it in 1.5s."""
+    root, policy = write_corpus(tmp_path)
+    candidate = tmp_path / "candidate.sqlite3"
+    build_candidate(config(root, tmp_path / "policy.yaml"), candidate, policy, fake_embeddings)
+
+    with closing(open_candidate(candidate)) as database:
+        unique = {row[1] for row in database.execute("PRAGMA index_list(passages)") if row[2] == 1}
+        columns = [row[2] for row in database.execute("PRAGMA index_info(idx_passages_ref)")]
+
+    assert "idx_passages_ref" in unique
+    assert columns == ["ref"]
 
 
 @requires_vault
