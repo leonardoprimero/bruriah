@@ -57,7 +57,13 @@ from .index import (
     build_candidate,
     prune_generations,
 )
-from .index_runner import EmbedderFactory, _default_embedder_factory, _embedding_fingerprint, run_index
+from .index_runner import (
+    EmbedderFactory,
+    _default_embedder_factory,
+    _embedding_fingerprint,
+    load_cached_first,
+    run_index,
+)
 from .mcp_server import build_server
 from .repository import SnapshotRepository, resolve_counterfactual_refs_for_humans
 from .platform import (
@@ -195,7 +201,7 @@ def _default_reranker_factory(model_name: str) -> Rerank:
     """
     from fastembed.rerank.cross_encoder import TextCrossEncoder
 
-    model = TextCrossEncoder(model_name=model_name)
+    model = load_cached_first(TextCrossEncoder, model_name)
 
     def rerank(query: str, documents: list[str]) -> list[float]:
         return [float(score) for score in model.rerank(query, documents)]
