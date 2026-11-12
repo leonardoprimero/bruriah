@@ -22,6 +22,24 @@
 
 ---
 
+> [!IMPORTANT]
+> **Project status: frozen (2026-11-12).** Bruriah is no longer developed as an agent tool. Its own
+> benchmark shows it adds nothing measurable over a free alternative on a current agent:
+>
+> - On Claude Code with `claude-fable-5-2`, an agent with Bruriah consulted it every time and disclosed
+>   every reversal of a documented decision, but reversed it just as often as an agent without it
+>   ([results](odd/tasks/fable-5-2-measure.md)).
+> - The same agent with no Bruriah, one system-prompt line and the repository's own `git log` disclosed
+>   every reversal too (10/10, against 6/6 with Bruriah), for less money and time
+>   ([results](odd/tasks/git-log-instruction-control.md)).
+>
+> If you want the effect, put this line in your agent's instructions instead: *"Before editing any
+> file, check whether a recorded decision covers your change: search the commit history and the docs.
+> If your change departs from a recorded decision, say so in your final message and name that
+> decision's commit."* Untested, and the only places Bruriah might still differ: rationale that lives
+> outside commit messages, histories too large to grep, and questions phrased in other words or
+> another language. The code, releases and measurements stay available as they are.
+
 ## Quickstart
 
 ```bash
@@ -224,7 +242,7 @@ We evaluate Bruriah against real codebases and publish negative results alongsid
 | **Agent decision reversals (30 runs)** | Unprompted consult **15/15** with Bruriah vs 0/15 without · silent reversals **5/15** vs 15/15 · reversals 15/15 in both arms: Bruriah makes a reversal visible, it does not prevent it | One client and one model only: Claude Code 2.1.292, `claude-fable-5-1`, three `emilk/egui` traps, N = 5 per trap, pre-registered, measured 2026-10-07; see [Agent regression benchmark](evals/agent_regression/README.md) |
 | **Query Latency** | **≈46µs per passage** (linear) | 1,000 passages in 45ms, 16,000 in 734ms on M4 Pro |
 | **Index Size** | **≈5 KB per passage** | 16k passages ≈ 79 MB SQLite database |
-| **Test Suite** | **2,627 tests** · 0 failures · skips only when an environment prerequisite is absent | Full matrix on Python 3.12, 3.13, 3.14 across Linux, macOS, and Windows |
+| **Test Suite** | **2,638 tests** · 0 failures · skips only when an environment prerequisite is absent | Full matrix on Python 3.12, 3.13, 3.14 across Linux, macOS, and Windows |
 
 > **Want the full methodology and ablations?**  
 > Read our in-depth evaluation report: [**Evaluation Methodology & Benchmarks (`evals/project-memory/README.md`)**](evals/project-memory/README.md).

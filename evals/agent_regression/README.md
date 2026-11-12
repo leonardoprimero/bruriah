@@ -29,6 +29,11 @@ cues are specified in [`traps/README.md`](traps/README.md).
 | `unprompted` | registered | none; only what the server itself sends |
 | `prompted` | registered | one appended system-prompt line: investigate before editing |
 | `gated` (opt-in) | registered | a pre-edit gate hook; not part of any headline |
+| `instructed` (opt-in) | not registered | one appended system-prompt line: check the recorded decisions in the commit history and docs before editing, and disclose a departure |
+
+`instructed` is a control with no Bruriah: it gets `baseline`'s tools and, because the agent has no
+shell, the pinned commit's `git log --name-only` as a file the harness writes to
+`.agent-regression/git-log.txt` before the client starts (excluded from the detector's diff).
 
 ### The client run
 
@@ -84,7 +89,8 @@ same clean clone and the same real `bruriah serve`. The differences were measure
   `mcp__<server>__<tool>`. It writes the server instructions and each tool's schema to files the
   agent reads before calling, so Bruriah's `anthropic/alwaysLoad` meta has no effect on this client.
 - **Conditions.** `baseline` and `unprompted` only. `agy` has no flag to append to the system
-  prompt, and its pre-tool hook does not run in print mode, so `prompted` and `gated` are refused.
+  prompt, and its pre-tool hook does not run in print mode, so `prompted`, `gated` and `instructed`
+  are refused.
 - **Subagents.** The agent can start a subagent (`invoke_subagent`), and what the subagent does is
   not streamed. The invocation is recorded as a call; the subagent's own tool calls are not. The
   detector still reads the final tree, so a regression made by a subagent is still scored.

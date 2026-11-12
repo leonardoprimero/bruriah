@@ -154,7 +154,7 @@ def _parser() -> argparse.ArgumentParser:
         nargs="+",
         choices=CONDITIONS,
         default=list(DEFAULT_CONDITIONS),
-        help=f"conditions to run (default: {' '.join(DEFAULT_CONDITIONS)}; gated is opt-in)",
+        help=f"conditions to run (default: {' '.join(DEFAULT_CONDITIONS)}; gated and instructed are opt-in)",
     )
     parser.add_argument("--out", type=Path, default=_HERE, help="directory the reports are written to")
     parser.add_argument(

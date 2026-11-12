@@ -48,6 +48,8 @@ from agent_regression.claude_code import (  # noqa: E402
     DISALLOWED_TOOLS,
     GATE_DENIAL_MARKER,
     GATE_ERROR_MARKER,
+    GIT_LOG_FILE,
+    INSTRUCTED_INSTRUCTION,
     MCP_TOOLS,
     PROMPTED_INSTRUCTION,
     AdapterError,
@@ -75,6 +77,7 @@ from agent_regression.runs import (  # noqa: E402
     CONDITIONS,
     DEFAULT_CONDITIONS,
     GATED,
+    INSTRUCTED,
     PROMPTED,
     UNPROMPTED,
     AgentRun,
@@ -140,6 +143,7 @@ if argv == ["--version"]:
 cwd = Path.cwd()
 key = os.environ.get(behavior.get("key_env", "ANTHROPIC_API_KEY"))
 claude_md = cwd / "CLAUDE.md"
+git_log = cwd / ".agent-regression" / "git-log.txt"
 record(
     {
         "argv": argv,
@@ -148,6 +152,7 @@ record(
         "env_names": sorted(os.environ),
         "key_sha256": hashlib.sha256(key.encode("utf-8")).hexdigest() if key else None,
         "claude_md": claude_md.read_text(encoding="utf-8") if claude_md.is_file() else None,
+        "git_log": git_log.read_text(encoding="utf-8") if git_log.is_file() else None,
     }
 )
 
@@ -541,6 +546,10 @@ def test_mcp_conditions_allow_exactly_the_two_read_only_bruriah_tools(condition:
     assert allowed_tools(condition) == ALLOWED_TOOLS + MCP_TOOLS
 
 
+def test_instructed_allows_exactly_the_baseline_tools() -> None:
+    assert allowed_tools(INSTRUCTED) == ALLOWED_TOOLS
+
+
 def test_allowed_tools_rejects_an_unknown_condition() -> None:
     with pytest.raises(ValueError, match="hooked"):
         allowed_tools("hooked")
@@ -854,6 +863,28 @@ def test_only_the_prompted_command_line_carries_an_instruction(tmp_path: Path, c
 
     assert "--append-system-prompt" not in argv
     assert PROMPTED_INSTRUCTION not in argv
+
+
+def test_the_instructed_instruction_points_at_the_history_file_and_not_the_product() -> None:
+    assert GIT_LOG_FILE == ".agent-regression/git-log.txt"
+    assert f"`{GIT_LOG_FILE}`" in INSTRUCTED_INSTRUCTION
+    assert "before editing any file" in INSTRUCTED_INSTRUCTION.lower()
+    assert "final message" in INSTRUCTED_INSTRUCTION
+    assert "bruriah" not in INSTRUCTED_INSTRUCTION.lower()
+    assert "investigate_work" not in INSTRUCTED_INSTRUCTION
+    assert "\n" not in INSTRUCTED_INSTRUCTION
+
+
+def test_instructed_command_line_appends_its_instruction_and_registers_no_server(tmp_path: Path) -> None:
+    config = _config(tmp_path, Path("/opt/claude"), Path("/opt/bruriah"))
+    trap = _pure_trap(tmp_path)
+
+    argv = command_line(config, trap, INSTRUCTED, trap.prompt, None)
+
+    assert _flag_values(argv, "--append-system-prompt") == [INSTRUCTED_INSTRUCTION]
+    assert PROMPTED_INSTRUCTION not in argv
+    assert "--mcp-config" not in argv
+    assert _flag_values(argv, "--allowedTools") == list(ALLOWED_TOOLS)
 
 
 _BASE_ARGV = [
@@ -1556,6 +1587,33 @@ def test_a_prompted_run_passes_the_instruction_as_system_prompt_and_leaves_claud
     assert _flag_values(call["argv"], "--append-system-prompt") == [PROMPTED_INSTRUCTION]
     assert call["claude_md"] == "# Project rules\n"
     assert "--strict-mcp-config" in call["argv"]
+
+
+def test_an_instructed_run_hands_over_the_pinned_history_and_no_server(rig: _Rig) -> None:
+    rig.behave(write=_REGRESSING_EDIT, tool_calls=["Grep", "Read", "Edit"])
+
+    run = rig.run(rig.adapter(), INSTRUCTED)
+
+    (call,) = rig.claude_calls()
+    argv = call["argv"]
+    assert "--mcp-config" not in argv
+    assert _flag_values(argv, "--append-system-prompt") == [INSTRUCTED_INSTRUCTION]
+    assert _flag_values(argv, "--allowedTools") == list(ALLOWED_TOOLS)
+    assert call["git_log"] is not None
+    assert f"commit {rig.commit}" in call["git_log"]
+    assert "Initial commit" in call["git_log"]
+    assert _init_calls(rig) == []
+    assert GIT_LOG_FILE not in workdir_diff(rig.root / "work" / "trap-a-instructed-0")
+    assert run.condition == INSTRUCTED
+    assert run.exit_reason == "done"
+
+
+@pytest.mark.parametrize("condition", [BASELINE, UNPROMPTED, PROMPTED])
+def test_only_the_instructed_run_gets_the_history_file(rig: _Rig, condition: str) -> None:
+    rig.run(rig.adapter(), condition)
+
+    (call,) = rig.claude_calls()
+    assert call["git_log"] is None
 
 
 def test_a_prompted_run_writes_no_claude_md_when_the_repository_has_none(rig: _Rig) -> None:

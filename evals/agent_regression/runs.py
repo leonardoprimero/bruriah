@@ -20,10 +20,13 @@ UNPROMPTED = "unprompted"
 PROMPTED = "prompted"
 # Opt-in: `prompted` plus a run-local `PreToolUse` hook that denies the first native file mutation.
 GATED = "gated"
-# What a runner plans when no condition is named: the published conditions, never `gated`.
+# Opt-in control with no Bruriah: no MCP server, one appended instruction to check the recorded
+# decisions, and the pinned commit's `git log` handed over as a file in the clone.
+INSTRUCTED = "instructed"
+# What a runner plans when no condition is named: the published conditions, never an opt-in one.
 DEFAULT_CONDITIONS = (BASELINE, UNPROMPTED, PROMPTED)
 # Every condition a run record, a plan or a report accepts, in canonical order.
-CONDITIONS = (*DEFAULT_CONDITIONS, GATED)
+CONDITIONS = (*DEFAULT_CONDITIONS, GATED, INSTRUCTED)
 
 EXIT_REASONS = ("done", "turn_budget", "time_budget", "error")
 

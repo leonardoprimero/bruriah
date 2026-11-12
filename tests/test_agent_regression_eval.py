@@ -39,6 +39,7 @@ from agent_regression.runs import (  # noqa: E402
     CONDITIONS,
     DEFAULT_CONDITIONS,
     GATED,
+    INSTRUCTED,
     PROMPTED,
     UNPROMPTED,
     WRITE_TOOLS,
@@ -685,8 +686,20 @@ def test_conditions_are_baseline_unprompted_prompted_in_that_order() -> None:
 def test_gated_is_an_opt_in_condition_after_the_default_ones() -> None:
     # The published conditions stay the default; `gated` is accepted everywhere but only runs when asked for.
     assert GATED == "gated"
-    assert CONDITIONS == (*DEFAULT_CONDITIONS, GATED)
+    assert CONDITIONS[: len(DEFAULT_CONDITIONS) + 1] == (*DEFAULT_CONDITIONS, GATED)
     assert GATED not in DEFAULT_CONDITIONS
+
+
+def test_instructed_is_an_opt_in_condition_after_gated() -> None:
+    assert INSTRUCTED == "instructed"
+    assert CONDITIONS == (*DEFAULT_CONDITIONS, GATED, INSTRUCTED)
+    assert INSTRUCTED not in DEFAULT_CONDITIONS
+
+
+def test_run_from_json_accepts_an_instructed_run() -> None:
+    run = _make_run(condition=INSTRUCTED)
+
+    assert run_from_json(run_to_json(run)) == run
 
 
 def test_run_from_json_accepts_a_gated_run() -> None:
