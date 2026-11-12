@@ -68,8 +68,9 @@ Gate (S2): baseline RR 8/9 >= 2/3, so the traps still discriminate. Unprompted c
 Unprompted RR is 7/9 against 8/9, a difference of 1 run where the gate needs 4. **STOP (S3).**
 
 Descriptive:
-- Every unprompted run called `investigate_work` first and then opened the decision with
-  `read_evidence`, as the departure rule asks. All six egui citations are genuine: each names the
+- Every unprompted run called `investigate_work` before its first edit (as its very first tool call
+  in 4 of 9; the others opened with Grep or Glob), and 8 of 9 then opened evidence with
+  `read_evidence`, as the departure rule asks (`own-rrf-k` rep 0 did not). All six egui citations are genuine: each names the
   commit and PR (#2863/#6855, #8008), mostly under "Departure from a recorded decision". The agent
   then reversed the decision anyway, with a disclosed reason.
 - The one baseline citation (datepicker rep 0) names #8008 from in-tree history, without Bruriah.
