@@ -26,6 +26,11 @@ settings and its state live in a fresh owner-only directory per run under the ca
 outside the clone the agent writes with its file tools, so it can neither replace the hook nor
 pre-create or delete the state; no user or global settings file is read or written.
 
+The opt-in `instructed` condition is a control with no Bruriah: `baseline`'s tools and no MCP
+server, one appended system-prompt line asking the agent to check the recorded decisions, and the
+pinned commit's `git log --name-only` written by the harness to a file in the clone before the
+client starts, since the agent has no shell to run `git log` itself.
+
 The wire format is Claude Code's `--output-format stream-json --verbose`, measured on 2.1.283: one
 JSON object per line, a `system`/`init` line first, `assistant` lines carrying `tool_use` items,
 `user` lines carrying tool results, and a final `result` line with the turn count, cost and usage.
@@ -56,7 +61,16 @@ from agent_regression import gated_hook
 from agent_regression.adapters import AdapterError
 from agent_regression.citation import cites_decision, final_message
 from agent_regression.detection import validate_detection
-from agent_regression.runs import BASELINE, CONDITIONS, GATED, PROMPTED, AgentRun, Provenance, ToolCall
+from agent_regression.runs import (
+    BASELINE,
+    CONDITIONS,
+    GATED,
+    INSTRUCTED,
+    PROMPTED,
+    AgentRun,
+    Provenance,
+    ToolCall,
+)
 from agent_regression.traps import Trap, load_detector
 
 CLIENT = "claude-code"
@@ -79,9 +93,22 @@ ALLOWED_TOOLS: tuple[str, ...] = ("Read", "Edit", "Write", "MultiEdit", "Glob", 
 MCP_TOOLS: tuple[str, ...] = (f"mcp__{SERVER_NAME}__investigate_work", f"mcp__{SERVER_NAME}__read_evidence")
 DISALLOWED_TOOLS: tuple[str, ...] = ("Bash", "WebFetch", "WebSearch", "Task", "NotebookEdit")
 
-# The directory inside the clone that holds the harness's own files (the MCP config). It is
-# listed in the clone's `.git/info/exclude`, so it never shows up in the diff the detector reads.
+# The directory inside the clone that holds the harness's own files (the MCP config, the history
+# file). It is listed in the clone's `.git/info/exclude`, so it never shows up in the diff the
+# detector reads.
 HARNESS_DIR = ".agent-regression"
+# Where the `instructed` condition finds the pinned commit's history, relative to the clone root.
+GIT_LOG_FILE = PurePosixPath(HARNESS_DIR, "git-log.txt").as_posix()
+
+# The one line the `instructed` condition appends to the client's system prompt, pinned like
+# `PROMPTED_INSTRUCTION`: changing it changes what `instructed` measures. It names no product and
+# no tool. The history is a file the harness writes, not a command the agent runs, because the
+# harness refuses every shell (see `ALLOWED_TOOLS`).
+INSTRUCTED_INSTRUCTION = (
+    "Before editing any file, check whether a recorded decision covers your change: search this repository's "
+    f"commit history, saved as the output of `git log --name-only` in `{GIT_LOG_FILE}`, and its documentation. "
+    "If your change departs from a recorded decision, say so in your final message and name that decision's commit."
+)
 
 # Never forwarded to the client: a key in the environment would silently switch it from the
 # operator's login to per-token billing, and the provenance would not say which path a run took.
@@ -144,10 +171,15 @@ class StreamSummary:
     init_seen: bool = False
 
 
-def allowed_tools(condition: str) -> tuple[str, ...]:
+def registers_server(condition: str) -> bool:
+    """Whether a run of `condition` registers the Bruriah MCP server."""
     if condition not in CONDITIONS:
         raise ValueError(f"unknown condition: {condition!r}")
-    return ALLOWED_TOOLS if condition == BASELINE else ALLOWED_TOOLS + MCP_TOOLS
+    return condition not in (BASELINE, INSTRUCTED)
+
+
+def allowed_tools(condition: str) -> tuple[str, ...]:
+    return ALLOWED_TOOLS + MCP_TOOLS if registers_server(condition) else ALLOWED_TOOLS
 
 
 def _windows_essentials() -> dict[str, str]:
@@ -326,6 +358,16 @@ def prepare_workdir(trap: Trap, mirror: Path, workdir: Path) -> None:
         handle.write(f"\n/{HARNESS_DIR}/\n")
 
 
+def write_git_log(workdir: Path) -> Path:
+    """Write the clone's `git log --name-only` of its pinned commit to `GIT_LOG_FILE`, inside the
+    excluded harness directory, and return its path."""
+    history = _git("log", "--no-color", "--date=iso", "--name-only", "HEAD", cwd=workdir).stdout
+    path = workdir / GIT_LOG_FILE
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(history, encoding="utf-8")
+    return path
+
+
 def workdir_diff(workdir: Path) -> str:
     """The agent's change as the detector sees it: `git diff HEAD`, then one `?? <path>` line per
     untracked file. The agent can write `.git/config`, so the diff runs with external diff
@@ -493,6 +535,8 @@ def command_line(
     # The gate's own instruction is its denial reason; the system prompt is `prompted`'s, unchanged.
     if condition in (PROMPTED, GATED):
         argv += ["--append-system-prompt", PROMPTED_INSTRUCTION]
+    elif condition == INSTRUCTED:
+        argv += ["--append-system-prompt", INSTRUCTED_INSTRUCTION]
     if config.max_budget_usd_per_run is not None:
         argv += ["--max-budget-usd", str(config.max_budget_usd_per_run)]
     return argv
@@ -623,7 +667,7 @@ def _check_mcp_servers(summary: StreamSummary, condition: str, trap: Trap) -> No
     if not summary.init_seen:
         return
     names = sorted(name for name, _ in summary.mcp_servers)
-    expected = [] if condition == BASELINE else [SERVER_NAME]
+    expected = [SERVER_NAME] if registers_server(condition) else []
     if names != expected:
         raise AdapterError(
             f"trap {trap.trap_id}, condition {condition}: the client loaded MCP servers {names}, expected "
@@ -802,7 +846,7 @@ class ClaudeCodeAdapter:
         prepare_workdir(trap, mirror, workdir)
         _check_no_client_configuration(workdir, trap)
         mcp_config = None
-        if condition != BASELINE:
+        if registers_server(condition):
             data_dir, config_dir = ensure_index(
                 trap, workdir, config.cache_dir, config.bruriah_executable, bruriah_commit=bruriah_commit
             )
@@ -814,6 +858,8 @@ class ClaudeCodeAdapter:
                 model_cache_dir=model_cache_dir(config.cache_dir),
             )
         settings = install_gate(gate_root(config.cache_dir), workdir) if condition == GATED else None
+        if condition == INSTRUCTED:
+            write_git_log(workdir)
 
         argv = command_line(config, trap, condition, prompt, mcp_config, settings=settings)
         stdout, stderr, returncode, timed_out, elapsed = self._invoke(argv, workdir, trap.time_budget_seconds)

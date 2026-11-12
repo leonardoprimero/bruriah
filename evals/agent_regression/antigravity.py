@@ -20,7 +20,7 @@ Measured on `agy` 1.3.5 before writing this (`odd/tasks/antigravity-adapter.md`,
   `anthropic/alwaysLoad` meta has no effect here. A `call_mcp_tool` step is recorded as
   `mcp__<server>__<tool>`, the name the consult metric recognizes.
 - The client has no flag to append to the system prompt, and its `PreToolUse` hook did not run in
-  print mode, so only `baseline` and `unprompted` are run; `prompted` and `gated` are refused.
+  print mode, so only `baseline` and `unprompted` are run; `prompted`, `gated` and `instructed` are refused.
 - The client has no turn limit flag: only the time budget is enforced.
 
 The wire format is `--output-format stream-json`: one JSON object per line, an `init` event

@@ -51,7 +51,7 @@ from agent_regression.antigravity import (  # noqa: E402
     settings_for,
 )
 from agent_regression.citation import final_message  # noqa: E402
-from agent_regression.runs import BASELINE, GATED, PROMPTED, UNPROMPTED, AgentRun, ToolCall  # noqa: E402
+from agent_regression.runs import BASELINE, GATED, INSTRUCTED, PROMPTED, UNPROMPTED, AgentRun, ToolCall  # noqa: E402
 from agent_regression.runs import consulted_before_first_write  # noqa: E402
 from agent_regression.traps import Trap, load_trap  # noqa: E402
 
@@ -614,7 +614,7 @@ def test_settings_allow_nothing_broad_and_deny_the_token_copy(tmp_path: Path, co
         assert "mcp(*)" in permissions["deny"]
 
 
-@pytest.mark.parametrize("condition", [PROMPTED, GATED])
+@pytest.mark.parametrize("condition", [PROMPTED, GATED, INSTRUCTED])
 def test_conditions_the_client_cannot_express_are_refused(tmp_path: Path, condition: str) -> None:
     with pytest.raises(AdapterError, match=condition):
         settings_for(condition, tmp_path / "work", tmp_path / "home")
