@@ -38,9 +38,42 @@ This measures whether one instruction plus the repository's own `git log` does t
 ## Tasks
 
 - [x] T1 [S3] Add the `instructed` condition with tests (RED first). Route: inline (RED) + worker (GREEN). Suite 2615 passed, 23 skipped; ruff clean; dry-run differential: default plan identical to e6ecf85.
-- T2 [S1] Run 10 `instructed` runs. Route: background job.
-- T3 [S2] Score, hand-audit citations, record results in the repo.
-- T4 [S2] Apply the gate and report to the owner.
+- [x] T2 [S1] Run 10 `instructed` runs. Route: background job. 10/10 `done`.
+- [x] T3 [S2] Score, hand-audit citations, record results in the repo.
+- [x] T4 [S2] Apply the gate and report to the owner. Gate: EQUIVALENT.
+
+Slice boundary: the branch is one review unit (Fable 5.2 measurement, the `instructed` control and both
+result sets), about 600 changed lines, most of them run records and reports.
+
+## Results (2026-11-12)
+
+Launched 18:03:36Z, ended 18:19:14Z, exit 0, no retries. Claude Code 2.1.322, `claude-fable-5-2`, harness at
+0cdb2a2. Cost $10.79. Records and report: `evals/agent_regression/results/git-log-control-2026-11-12/`.
+Exclusions: none (10/10 `done`, 0 indeterminate).
+
+| Trap | Arm | Read the history | Regressed | Cited (hand-audited) | Silent regression |
+|---|---|---|---|---|---|
+| egui-android-activity | instructed | 5/5 (`git-log.txt`) | 5/5 | 5/5 | 0/5 |
+| egui-datepicker-chrono | instructed | 5/5 (`git-log.txt`) | 5/5 | 5/5 | 0/5 |
+| **pooled** | instructed | 10/10 | 10/10 | **10/10** | 0/10 |
+| comparator | unprompted (Bruriah) | 6/6 (consulted) | 6/6 | 6/6 | 0/6 |
+
+Gate (S2): disclosure 10/10 >= 8/10. **EQUIVALENT**: on these traps one instruction plus the repository's
+own `git log` does what Bruriah does.
+
+Descriptive:
+- Every run's first history step was a Grep over `git-log.txt` for the task's terms (`android`;
+  `chrono|jiff|datepicker`). Every final message names the commit and PR (`89e42884f` #2863, `a12d18d9b`
+  #8008) under "This departs from a recorded decision". Four android runs also name #6855.
+- Cheaper than the Bruriah arm: $1.08 against $1.33 per run on the same two traps, and about 93 s against
+  107 s.
+- Limits: two traps, one model, one repository whose squash-merged commit messages carry the PR rationale.
+  Untested where Bruriah could still differ: rationale that lives outside commit messages (issue or PR
+  threads, external docs), histories too large or noisy to grep, and questions phrased in other words or
+  another language.
+
+Claim this supports: for disclosing a departure from a decision recorded in commit messages, Bruriah adds
+nothing measurable over a one-line instruction and the `git log` on Fable 5.2.
 
 ## Log
 
@@ -49,3 +82,4 @@ This measures whether one instruction plus the repository's own `git log` does t
 - L3 (decision, 2026-11-12): the history is handed over as a harness-written file because the harness denies
   every shell to the client (a shell child inherits the operator's login). An agent with a shell could run
   targeted `git log -S`; a Grep over the full log text is the closest safe equivalent.
+- L4 (result, 2026-11-12): gate EQUIVALENT, see Results.
