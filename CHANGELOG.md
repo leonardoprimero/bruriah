@@ -3,6 +3,16 @@
 Notable changes, newest first. This project follows [semantic versioning](https://semver.org/),
 and the entries here name what changed for *you* rather than which files moved.
 
+## [Unreleased]
+
+### Project frozen
+- Development stops. Two pre-registered measurements on Claude Code with `claude-fable-5-2` found that
+  Bruriah turns silent reversals of recorded decisions into disclosed ones, but that one system-prompt
+  line plus the repository's `git log` does the same (10/10 disclosed, against 6/6 with Bruriah), at
+  lower cost. See the status note at the top of the README.
+- The agent-regression benchmark gains an opt-in `instructed` condition: no MCP server, one appended
+  instruction, and the pinned commit's `git log --name-only` handed to the agent as a file.
+
 ## [2.2.1] — 2026-10-16
 
 ### Fixed: the `mcp` dependency no longer allows a version with a known vulnerability

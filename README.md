@@ -22,6 +22,24 @@
 
 ---
 
+> [!IMPORTANT]
+> **Project status: frozen (2026-11-12).** Bruriah is no longer developed as an agent tool. Its own
+> benchmark shows it adds nothing measurable over a free alternative on a current agent:
+>
+> - On Claude Code with `claude-fable-5-2`, an agent with Bruriah consulted it every time and disclosed
+>   every reversal of a documented decision, but reversed it just as often as an agent without it
+>   ([results](odd/tasks/fable-5-2-measure.md)).
+> - The same agent with no Bruriah, one system-prompt line and the repository's own `git log` disclosed
+>   every reversal too (10/10, against 6/6 with Bruriah), for less money and time
+>   ([results](odd/tasks/git-log-instruction-control.md)).
+>
+> If you want the effect, put this line in your agent's instructions instead: *"Before editing any
+> file, check whether a recorded decision covers your change: search the commit history and the docs.
+> If your change departs from a recorded decision, say so in your final message and name that
+> decision's commit."* Untested, and the only places Bruriah might still differ: rationale that lives
+> outside commit messages, histories too large to grep, and questions phrased in other words or
+> another language. The code, releases and measurements stay available as they are.
+
 ## Quickstart
 
 ```bash
