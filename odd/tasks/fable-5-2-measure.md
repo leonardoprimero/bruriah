@@ -41,7 +41,7 @@ Bruriah `main` at e6ecf85 (server instructions + the departure rule from #54). P
 
 - [x] T1 [S1, S2] Pre-register this document and the launcher. Route: inline. Commit: 360bfd5
 - [x] T2 [S1] Launch Phase 0 (18 runs, two arms in parallel, own cache each). Route: background job. 18/18 `done`.
-- [x] T3 [S2] Score: detector RR, consult rate, code-rule SRR plus hand audit of every citation; write Results. Route: inline. Commit: (results commit)
+- [x] T3 [S2] Score: detector RR, consult rate, code-rule SRR plus hand audit of every citation; write Results. Route: inline. Commit: 6704666
 - [x] T4 [S2, S3, S4] Apply the gate; report to the owner. Gate: STOP. No Phase 1.
 
 ## Results (2026-11-12)
